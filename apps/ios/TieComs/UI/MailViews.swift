@@ -229,6 +229,9 @@ struct MailCard: View {
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("mailCard.subject")
+            if !e.chagguAttachments.isEmpty {
+                AttachmentsBlock(attachments: e.chagguAttachments, mine: mine, messageId: e.messageId, conversationId: e.conversationId)
+            } else if let status = e.mediaStatus, status != "ready" { Text(L("wa.media.\(status)")).font(.caption).foregroundStyle(Theme.textSecondary) }
             MailCardComments(email: e, canPost: canPost)
             HStack(spacing: 6) {
                 Spacer()

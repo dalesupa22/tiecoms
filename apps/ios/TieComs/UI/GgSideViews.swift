@@ -35,11 +35,9 @@ struct GgHeaderButton: View {
     let source: String
     let action: () -> Void
     var body: some View {
-        let n = store.ggSide.pending[source] ?? 0
-        Button(action: action) { GgMarkButton(count: n, size: 28) }
+        Button(action: action) { GgMarkButton(size: 28) }
             .buttonStyle(.plain)
             .accessibilityLabel(L("ggs.title"))
-            .accessibilityValue(n > 0 ? L("ggs.pendingA11y", ["n": n]) : "")
             .accessibilityIdentifier("chat.gg")
     }
 }
@@ -160,6 +158,7 @@ struct GgSideSheet: View {
     @State private var retry: (() async throws -> Void)?
     @State private var askConsent = false
     @State private var loading = true
+    @State private var calendar = false
     @FocusState private var focused: Bool
 
     private var thread: GgSideThread? { store.ggSide.threads[source] }
@@ -219,6 +218,7 @@ struct GgSideSheet: View {
                 }
                 ToolbarItem(placement: .primaryAction) {
                     Menu {
+                        Button { calendar = true } label: { Label(L("gg.calendar.title"), systemImage: "calendar") }
                         Button { run { try await store.ggSideNew(source) } } label: { Label(L("ggs.new"), systemImage: "plus.bubble") }
                             .accessibilityIdentifier("gg.new")
                         Button {
@@ -233,6 +233,8 @@ struct GgSideSheet: View {
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
+        .sheet(isPresented: $calendar) { GgCalendarSheet(source: source, messageIds: quotes.map(\.id), suggestedTitle: quotes.first?.text ?? chatTitle) }
+        .onDisappear { focused = false; UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil) }
         .task(id: source) { await open() }
         .alert(L("ai.consentTitle"), isPresented: $askConsent) {
             Button(L("common.cancel"), role: .cancel) { retry = nil }
@@ -614,7 +616,7 @@ struct GgChatSheets: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .sheet(isPresented: $gg.open, onDismiss: { gg.ask = nil; runQueue() }) {
+            .sheet(isPresented: $gg.open, onDismiss: { gg.ask = nil; gg.quotes = []; gg.selecting = false; gg.selected = []; runQueue() }) {
                 GgSideSheet(source: source, chatTitle: chatTitle, quotes: $gg.quotes, initialAsk: gg.ask) { gg.queue = [$0] }
                     .environment(store)
             }

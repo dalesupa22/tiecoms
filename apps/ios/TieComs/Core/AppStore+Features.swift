@@ -79,17 +79,52 @@ extension AppStore {
         return r.items
     }
 
-    struct LastRead: Decodable { var lastReadSeq: Int; init(from d: Decoder) throws { lastReadSeq = (try container(d)).int("lastReadSeq") } }
+    struct LastRead: Decodable {
+        var lastReadSeq: Int?
+        var readRevision: Int?
+        init(from d: Decoder) throws { let c = try container(d); lastReadSeq = c.intOpt("lastReadSeq"); readRevision = c.intOpt("readRevision") }
+    }
+
+    func readRevision(_ id: String) -> Int { max(readRevisions[id] ?? -1, meta(id)?.readRevision ?? -1) }
+
+    /// HTTP and socket share the same monotonic revision gate. Legacy ACKs cannot undo a newer revision.
+    @discardableResult func applyConfirmedRead(_ id: String, seq: Int, revision: Int?, legacyRevision: Int, allowLegacyLower: Bool = false) -> Bool {
+        guard let current = meta(id) else { return false }
+        if let revision {
+            guard revision >= readRevision(id) else { return false }
+            readRevisions[id] = revision
+            patchMeta(id) {
+                $0.readRevision = revision; $0.lastReadSeq = seq
+                $0.unread = max(0, $0.lastMessageSeq - max(seq, $0.historyFromSeq))
+                if seq >= $0.lastMessageSeq { $0.unreadMentions = 0 }
+            }
+        } else {
+            guard readRevision(id) == legacyRevision else { scheduleBootstrap(); return false }
+            if allowLegacyLower {
+                patchMeta(id) { $0.lastReadSeq = seq; $0.unread = max(0, $0.lastMessageSeq - max(seq, $0.historyFromSeq)) }
+            } else {
+                guard seq >= current.lastReadSeq else { return false }
+                patchMeta(id) { ReadTree.applyRead(&$0, seq: seq) }
+            }
+        }
+        return true
+    }
 
     func markUnread(_ conversationId: String, seq: Int) async throws {
+        let stamp = sessionStamp, priorRevision = readRevision(conversationId)
+        cancelPendingRead(conversationId)
         let r: LastRead = try await api.request("/conversations/\(conversationId)/unread", method: "POST", json: ["seq": seq])
-        patchMeta(conversationId) { $0.lastReadSeq = r.lastReadSeq; $0.unread = max(0, $0.lastMessageSeq - max(r.lastReadSeq, $0.historyFromSeq)) }
+        try requireSession(stamp)
+        if let confirmed = r.lastReadSeq { applyConfirmedRead(conversationId, seq: confirmed, revision: r.readRevision, legacyRevision: priorRevision, allowLegacyLower: true) }
+        else { scheduleBootstrap() }
     }
 
     func markConversationRead(_ conversationId: String) async throws {
         guard let c = meta(conversationId) else { return }
-        patchMeta(conversationId) { $0.lastReadSeq = c.lastMessageSeq; $0.unread = 0; $0.unreadMentions = 0 }
-        try await api.requestData("/conversations/\(conversationId)/read", method: "POST", json: ["seq": c.lastMessageSeq])
+        let stamp = sessionStamp, priorRevision = readRevision(conversationId)
+        let r: LastRead = try await api.request("/conversations/\(conversationId)/read", method: "POST", json: ["seq": c.lastMessageSeq])
+        try requireSession(stamp)
+        applyConfirmedRead(conversationId, seq: r.lastReadSeq ?? c.lastMessageSeq, revision: r.readRevision, legacyRevision: priorRevision)
     }
 
     // MARK: Preferencias
@@ -172,9 +207,10 @@ extension AppStore {
     }
 
     @discardableResult
-    func createIssue(conversationId: String, title: String, ownerId: String?, dueDate: String?, originMessageId: String?, topicId: String? = nil) async throws -> IssueDTO {
+    func createIssue(conversationId: String, title: String, ownerId: String?, dueDate: String?, originMessageId: String?, topicId: String? = nil, assigneeIds: [String]? = nil) async throws -> IssueDTO {
         let stamp = sessionStamp
         var body: [String: Any] = ["title": title, "ownerId": ownerId ?? NSNull(), "dueDate": dueDate ?? NSNull(), "originMessageId": originMessageId ?? NSNull()]
+        if let assigneeIds { body["assigneeIds"] = Array(Set(assigneeIds)).sorted() }
         // Con una banderita elegida la tarea nace en ese tema; desde un mensaje con tema, el servidor lo hereda.
         if let topicId { body["topicId"] = topicId }
         let i: IssueDTO = try await api.request("/conversations/\(conversationId)/issues", method: "POST", json: body)
@@ -725,8 +761,9 @@ extension AppStore {
         try await api.requestData("/whatsapp/accounts/\(id)", method: "DELETE")
     }
 
-    func waChats(accountId: String?, category: WaCategory?, onlyGroups: Bool, showHidden: Bool, query: String, limit: Int? = nil) async throws -> WaChatsPage {
+    func waChats(accountId: String?, category: WaCategory?, onlyGroups: Bool, showHidden: Bool, query: String, limit: Int? = nil, cursor: String? = nil) async throws -> WaChatsPage {
         var q: [String] = []
+        if let cursor { q.append("cursor=\(enc(cursor))") }
         if let limit { q.append("limit=\(limit)") }
         if let accountId { q.append("accountId=\(accountId)") }
         if let category { q.append("category=\(category.rawValue)") }
@@ -807,10 +844,11 @@ extension AppStore {
     /// `conversationId` = un sidechat del chat del asunto (la tarea vive ahí y la ve solo el sidechat).
     @discardableResult
     func createChildIssue(_ parentId: String, title: String, ownerId: String?, dueDate: String? = nil, visibility: IssueVisibility,
-                          viewerIds: [String] = [], conversationId: String? = nil) async throws -> IssueDTO {
+                          viewerIds: [String] = [], conversationId: String? = nil, assigneeIds: [String]? = nil) async throws -> IssueDTO {
         let stamp = sessionStamp
         var body: [String: Any] = ["title": title, "ownerId": ownerId ?? NSNull(), "dueDate": dueDate ?? NSNull(), "visibility": visibility.rawValue]
         if !viewerIds.isEmpty { body["viewerIds"] = viewerIds }
+        if let assigneeIds { body["assigneeIds"] = Array(Set(assigneeIds)).sorted() }
         if let conversationId { body["conversationId"] = conversationId }
         let i: IssueDTO = try await api.request("/issues/\(parentId)/children", method: "POST", json: body)
         try requireSession(stamp)

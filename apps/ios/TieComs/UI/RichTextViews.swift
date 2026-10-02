@@ -20,15 +20,18 @@ enum RichText {
     static func bubble(_ raw: String, mentions: [Mention], mine: Bool, linkify: Bool, highlight: String? = nil) -> NSAttributedString {
         // Viñetas «- » → «• » (misma longitud: las menciones no se corren).
         let text = MessageFormat.bullets(raw)
+        let literals = MessageFormat.literalRanges(text)
         let out = NSMutableAttributedString(string: text, attributes: [.font: baseFont(), .foregroundColor: mine ? UIColor.white : UIColor(Theme.textPrimary)])
         if linkify {
             for (r, url) in Linkify.links(in: text) {
                 let nr = NSRange(r, in: text)
+                guard !literals.contains(where: { NSIntersectionRange($0, nr).length > 0 }) else { continue }
                 out.addAttributes([.link: url, .foregroundColor: mine ? UIColor.white : UIColor(Theme.accentText), .underlineStyle: NSUnderlineStyle.single.rawValue], range: nr)
             }
         }
         for m in MentionText.valid(mentions, in: text) {
             let nr = NSRange(location: m.start, length: m.length)
+            guard !literals.contains(where: { NSIntersectionRange($0, nr).length > 0 }) else { continue }
             out.addAttributes([.font: boldFont(), .foregroundColor: mentionColor(m, mine: mine)], range: nr)
             out.removeAttribute(.underlineStyle, range: nr)
             if let conv = m.refConversationId {
@@ -41,6 +44,10 @@ enum RichText {
         }
         // @gg multicolor (web 63e6b0f): la mención a gg o «@gg» escrito a mano.
         GGMention.apply(to: out, text: text, mentions: mentions, mine: mine, font: boldFont())
+        for r in literals where NSMaxRange(r) <= out.length {
+            out.removeAttribute(.link, range: r); out.removeAttribute(.underlineStyle, range: r)
+            out.addAttributes([.font: codeFont(), .foregroundColor: mine ? UIColor.white : UIColor(Theme.textPrimary)], range: r)
+        }
         // Formato (*negrilla*, _cursiva_, ~tachado~, `código`) solo en el texto suelto, como la web.
         let spans = formatSpans(text, mentions: mentions)
         for sp in spans where NSMaxRange(sp.range) <= out.length { applyFormat(sp, to: out, mine: mine) }
@@ -63,7 +70,9 @@ enum RichText {
         guard MessageFormat.mightHaveFormat(text) else { return [] }
         var blocked = MentionText.valid(mentions, in: text).map { NSRange(location: $0.start, length: $0.length) }
         blocked += GGMention.ranges(in: text, mentions: mentions)
-        blocked += Linkify.links(in: text).map { NSRange($0.range, in: text) }
+        let literal = MessageFormat.literalRanges(text)
+        blocked = blocked.filter { r in !literal.contains { NSIntersectionRange($0, r).length > 0 } }
+        blocked += Linkify.links(in: text).map { NSRange($0.range, in: text) }.filter { r in !literal.contains { NSIntersectionRange($0, r).length > 0 } }
         return MessageFormat.spans(in: text, excluding: blocked)
     }
 
@@ -180,7 +189,7 @@ struct RichMessageText: UIViewRepresentable {
         if context.coordinator.key != key {
             context.coordinator.key = key
             v.attributedText = RichText.cachedBubble(key)
-            context.coordinator.ggRanges = RichText.displayRanges(GGMention.ranges(in: text, mentions: mentions), text: text, mentions: mentions)
+            context.coordinator.ggRanges = RichText.displayRanges(GGMention.ranges(in: text, mentions: mentions).filter { r in !MessageFormat.literalRanges(text).contains { NSIntersectionRange($0, r).length > 0 } }, text: text, mentions: mentions)
         }
         // Brillo de @gg: después de maquetar (las posiciones dependen del ancho).
         let gg = context.coordinator.ggRanges
@@ -242,6 +251,21 @@ struct ComposerTextView: UIViewRepresentable {
             guard let coord, let v else { return }
             coord.wrap(v, mark: mark)
         }
+        let toolbar = UIToolbar(frame: CGRect(x: 0, y: 0, width: 320, height: 40))
+        toolbar.items = [
+            UIBarButtonItem(title: "B", style: .plain, target: v, action: #selector(PastingTextView.toggleBoldface(_:))),
+            UIBarButtonItem(barButtonSystemItem: .flexibleSpace, target: nil, action: nil),
+            UIBarButtonItem(title: "•", style: .plain, target: v, action: #selector(PastingTextView.bulletSelection(_:))),
+            UIBarButtonItem(title: "1.", style: .plain, target: v, action: #selector(PastingTextView.numberSelection(_:))),
+            UIBarButtonItem(title: "`…`", style: .plain, target: v, action: #selector(PastingTextView.codeSelection(_:))),
+            UIBarButtonItem(title: "{ }", style: .plain, target: v, action: #selector(PastingTextView.blockSelection(_:)))
+        ]
+        toolbar.items?[0].accessibilityLabel = L("composer.bold")
+        toolbar.items?[2].accessibilityLabel = L("format.bullets")
+        toolbar.items?[3].accessibilityLabel = L("format.numbered")
+        toolbar.items?[4].accessibilityLabel = L("format.inlineCode")
+        toolbar.items?[5].accessibilityLabel = L("format.code")
+        v.inputAccessoryView = toolbar
         v.font = RichText.baseFont()
         v.adjustsFontForContentSizeCategory = true
         v.backgroundColor = .clear
@@ -288,7 +312,7 @@ struct ComposerTextView: UIViewRepresentable {
         // abrir el teclado y no había forma de cerrarlo.
         if focused != c.lastFocused {
             c.lastFocused = focused
-            if focused && !v.isFirstResponder { DispatchQueue.main.async { v.becomeFirstResponder() } }
+            if focused && !v.isFirstResponder { DispatchQueue.main.async { [weak v, weak c] in guard let v, let c, !c.tornDown, c.parent.focused, v.window != nil else { return }; v.becomeFirstResponder() } }
             if !focused && v.isFirstResponder { DispatchQueue.main.async { v.resignFirstResponder() } }
         }
         let lineH = (v.font ?? RichText.baseFont()).lineHeight
@@ -305,9 +329,15 @@ struct ComposerTextView: UIViewRepresentable {
         return CGSize(width: w, height: min(maxH, max(lineH + uiView.textContainerInset.top + uiView.textContainerInset.bottom, ceil(fit))))
     }
 
+    static func dismantleUIView(_ view: UITextView, coordinator: Coordinator) {
+        coordinator.tornDown = true; coordinator.lastFocused = false
+        view.resignFirstResponder(); view.delegate = nil
+    }
+
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
     final class Coordinator: NSObject, UITextViewDelegate {
+        var tornDown = false
         var parent: ComposerTextView
         var applying = false
         var styledMentions: [Mention] = []
@@ -374,7 +404,7 @@ struct ComposerTextView: UIViewRepresentable {
         /// ⌘B / ⌘I / ⌘⇧X (o Formato en el menú): envuelve la selección en *, _ o ~ sin partir menciones.
         func wrap(_ textView: UITextView, mark: String) {
             guard textView.markedTextRange == nil,
-                  let r = MessageFormat.wrap(textView.text ?? "", selection: textView.selectedRange, mark: mark, mentions: parent.mentions) else { return }
+                  let r = MessageFormat.compose(textView.text ?? "", selection: textView.selectedRange, command: mark, mentions: parent.mentions) else { return }
             applying = true
             textView.text = r.text
             RichText.applyComposerStyle(textView.textStorage, mentions: r.mentions)
@@ -415,8 +445,12 @@ final class PastingTextView: UITextView {
     }
 
     // El texto es plano (allowsEditingTextAttributes = false): ⌘B / ⌘I ponen las marcas de la web.
-    override func toggleBoldface(_ sender: Any?) { if canWrap { onWrap?("*") } }
+    override func toggleBoldface(_ sender: Any?) { if canWrap { onWrap?("**") } }
     override func toggleItalics(_ sender: Any?) { if canWrap { onWrap?("_") } }
+    @objc func bulletSelection(_ sender: Any?) { if markedTextRange == nil { onWrap?("bullets") } }
+    @objc func numberSelection(_ sender: Any?) { if markedTextRange == nil { onWrap?("numbered") } }
+    @objc func codeSelection(_ sender: Any?) { if canWrap { onWrap?("`") } }
+    @objc func blockSelection(_ sender: Any?) { if markedTextRange == nil { onWrap?("block") } }
     @objc func strikeSelection(_ sender: Any?) { if canWrap { onWrap?("~") } }
 
     override var keyCommands: [UIKeyCommand]? {

@@ -62,6 +62,7 @@ struct TaskQuickAdd: View {
     var conversationId: String?
     @State private var title = ""
     @State private var ownerId = ""
+    @State private var assigneeIds: Set<String> = []
     @State private var vis: IssueVisibility?
     @State private var busy = false
     @FocusState private var focused: Bool
@@ -72,7 +73,9 @@ struct TaskQuickAdd: View {
             let inSide = whereId != parent.conversationId
             let members = issueMembers(store, d, whereId)
             let owner = ownerId.isEmpty ? d.me.id : ownerId
-            let outsider = !members.contains { $0.id == owner }
+            let selected = assigneeIds.isEmpty ? Set([owner]) : assigneeIds
+            let outsiders = selected.subtracting(members.map(\.id))
+            let outsider = !outsiders.isEmpty
             let chosen = vis ?? (inSide ? .all : IssueTasks.defaultVisibility(members: issueMembers(store, d, parent.conversationId), myOrg: d.me.primaryOrgId))
             let effective = IssueTasks.effective(chosen, outsider: outsider)
             let myOrg = Naming.org(d, d.me.primaryOrgId)
@@ -103,26 +106,28 @@ struct TaskQuickAdd: View {
                     Text(L("issue.qWho")).font(.footnote.weight(.semibold)).foregroundStyle(Theme.textSecondary)
                     ChipFlow(spacing: 8) {
                         ForEach(members) { p in
-                            TaskChip(on: owner == p.id, id: "task.who.\(p.id)", action: { ownerId = p.id }) {
+                            TaskChip(on: selected.contains(p.id), id: "task.who.\(p.id)", action: { if assigneeIds.isEmpty { assigneeIds = [owner] }; if assigneeIds.contains(p.id) { assigneeIds.remove(p.id) } else { assigneeIds.insert(p.id) }; ownerId = assigneeIds.sorted().first ?? "" }) {
                                 HStack(spacing: 6) {
                                     Avatar(name: p.name, org: Naming.org(d, p.orgId), size: 20, photo: p.avatarUrl).accessibilityHidden(true)
                                     Text(p.id == d.me.id ? L("issue.me") : firstName(p.name))
                                 }
                             }
                         }
-                        if outsider, let o = Naming.person(d, owner) {
-                            TaskChip(on: true, id: "task.who.\(o.id)", action: {}) {
+                        ForEach(outsiders.sorted(), id: \.self) { id in
+                        if let o = Naming.person(d, id) {
+                            TaskChip(on: true, id: "task.who.\(o.id)", action: { assigneeIds.remove(o.id); ownerId = assigneeIds.sorted().first ?? "" }) {
                                 HStack(spacing: 6) {
                                     Avatar(name: o.name, org: Naming.org(d, o.orgId), size: 20, photo: o.avatarUrl).accessibilityHidden(true)
                                     Text(firstName(o.name))
                                 }
                             }
                         }
+                        }
                         if !contacts.isEmpty {
                             Menu {
                                 Section(L("task.pickPerson")) {
                                     ForEach(contacts) { p in
-                                        Button("\(p.name) · \(Naming.org(d, p.orgId)?.name ?? L("common.guest"))") { ownerId = p.id }
+                                        Button("\(p.name) · \(Naming.org(d, p.orgId)?.name ?? L("common.guest"))") { if assigneeIds.isEmpty { assigneeIds = [owner] }; assigneeIds.insert(p.id); ownerId = assigneeIds.sorted().first ?? p.id }
                                     }
                                 }
                             } label: {
@@ -143,7 +148,7 @@ struct TaskQuickAdd: View {
                             .opacity(outsider && v == .all ? 0.45 : 1)
                         }
                     }
-                    if outsider, let o = Naming.person(d, owner) {
+                    if outsider, let id = outsiders.sorted().first, let o = Naming.person(d, id) {
                         Text(L("task.outsiderHint", ["name": firstName(o.name)])).font(.footnote).foregroundStyle(Theme.textSecondary)
                             .accessibilityIdentifier("task.outsiderHint")
                     }
@@ -160,7 +165,8 @@ struct TaskQuickAdd: View {
         busy = true
         Task {
             do {
-                try await store.createChildIssue(parent.id, title: text, ownerId: owner, visibility: visibility, conversationId: inSide ? whereId : nil)
+                let assigned = assigneeIds.isEmpty ? [owner] : assigneeIds.sorted()
+                try await store.createChildIssue(parent.id, title: text, ownerId: assigned.first, visibility: visibility, viewerIds: visibility == .private ? assigned : [], conversationId: inSide ? whereId : nil, assigneeIds: assigned)
                 title = ""
                 Haptics.tap()
             } catch { store.show(L10n.errorText(error)) }

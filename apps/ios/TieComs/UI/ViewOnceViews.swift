@@ -60,12 +60,7 @@ extension AppStore {
 
     /// Bytes de un adjunto de una sola vista: URL firmada (absoluta) o ruta del API. Sin caché.
     func viewOnceData(_ path: String) async throws -> Data {
-        if path.hasPrefix("http://") || path.hasPrefix("https://"), let u = URL(string: path) {
-            let (d, r) = try await URLSession.shared.data(from: u)
-            guard (r as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) ?? false else { throw ApiRequestError(status: 403, code: "forbidden", message: "") }
-            return d
-        }
-        return try await api.download(path)
+        try await api.uncachedDownload(path)
     }
 }
 
@@ -120,6 +115,7 @@ struct ViewOnceViewer: View {
     let message: MessageDTO
     @State private var content: ViewOnceContent?
     @State private var image: UIImage?
+    @State private var animation: GifAnimation?
     @State private var error: String?
     @State private var captured = UIScreen.main.isCaptured
     @State private var player: AVAudioPlayer?
@@ -136,7 +132,8 @@ struct ViewOnceViewer: View {
                 Text(error).foregroundStyle(.white).multilineTextAlignment(.center).padding()
             } else if let content {
                 VStack(spacing: 16) {
-                    if let image { Image(uiImage: image).resizable().scaledToFit() }
+                    if let animation { AnimatedGifImage(animation: animation).frame(maxHeight: 420) }
+                    else if let image { Image(uiImage: image).resizable().scaledToFit() }
                     if content.attachments.contains(where: \.isVoice) {
                         Button { toggleVoice() } label: {
                             Image(systemName: playing ? "pause.circle.fill" : "play.circle.fill").font(.system(size: 72)).foregroundStyle(.white)
@@ -172,7 +169,7 @@ struct ViewOnceViewer: View {
         .task { await load() }
         .onReceive(NotificationCenter.default.publisher(for: UIScreen.capturedDidChangeNotification)) { _ in captured = UIScreen.main.isCaptured }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.userDidTakeScreenshotNotification)) { _ in store.show(L("vo.screenshot")) }
-        .onDisappear { player?.stop() }
+        .onDisappear { player?.stop(); image = nil; animation = nil; content = nil }
     }
 
     private func load() async {
@@ -181,7 +178,10 @@ struct ViewOnceViewer: View {
             let c = try await store.openViewOnce(message)
             content = c
             if let img = c.attachments.first(where: \.isImage) {
-                if let d = try? await store.viewOnceData(img.url) { image = UIImage(data: d) }
+                if let d = try? await store.viewOnceData(img.url) {
+                    let decoded = img.contentType == "image/gif" ? await Task.detached { GifAnimation.decode(d, maxSide: 1280) }.value : nil
+                    guard !Task.isCancelled else { return }; image = decoded?.frames.first ?? UIImage(data: d); animation = decoded
+                }
             }
         } catch let e as ApiRequestError where e.status == 410 {
             store.markViewOnceOpened(message)

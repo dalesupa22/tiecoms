@@ -27,7 +27,8 @@ final class SoundsTests: XCTestCase {
         XCTAssertEqual(ChatSounds.ringFile(nil), "ring_clasico")
         XCTAssertEqual(ChatSounds.ringFile("marimba"), "ring_marimba")
         XCTAssertEqual(ChatSounds.ringFile("otro"), "ring_clasico")
-        XCTAssertEqual(ChatSounds.message.count, 10); XCTAssertEqual(ChatSounds.ringtones.count, 3)
+        XCTAssertEqual(ChatSounds.message.count, 14);
+        XCTAssertEqual(Array(ChatSounds.message.suffix(4)), ["energy", "spark", "portal", "victory"]); XCTAssertEqual(ChatSounds.ringtones.count, 3)
     }
 
     func testAllSoundFilesAndLabelsShip() {

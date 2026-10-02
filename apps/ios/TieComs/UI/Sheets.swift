@@ -214,6 +214,7 @@ struct NewIssueSheet: View {
     @State private var conv = ""
     @State private var title = ""
     @State private var ownerId: String = ""
+    @State private var assigneeIds: Set<String> = []
     @State private var hasDue = false
     @State private var due = Date().addingTimeInterval(3 * 86400)
     @State private var busy = false
@@ -231,18 +232,15 @@ struct NewIssueSheet: View {
                             Text("🔒 " + L("issue.personal")).tag(IssueTasks.personalKey)
                             ForEach(Self.destinations(d)) { c in Text(Self.label(d, c)).tag(c.id) }
                         }
-                        .onChange(of: conv) { _, _ in ownerId = d.me.id }
+                        .onChange(of: conv) { _, _ in ownerId = d.me.id; assigneeIds = [d.me.id] }
                         .accessibilityIdentifier("issue.where")
                     }
                     if conv == IssueTasks.personalKey {
                         Text(L("issue.personalHint")).font(.footnote).foregroundStyle(Theme.textSecondary)
                             .accessibilityIdentifier("issue.personalHint")
                     } else {
-                        Picker(L("issue.owner"), selection: $ownerId) {
-                            ForEach(humans(d, conv)) { p in
-                                Text("\(p.name)\(p.id == d.me.id ? " " + L("common.you") : "") · \(Naming.org(d, p.orgId)?.name ?? L("common.guest"))").tag(p.id)
-                            }
-                        }
+                        AssigneeSelector(people: humans(d, conv), selected: $assigneeIds, me: d.me.id)
+
                     }
                 }
                 Toggle(L("issue.due"), isOn: $hasDue)
@@ -251,11 +249,11 @@ struct NewIssueSheet: View {
         }
         .onAppear {
             if conv.isEmpty { conv = conversationId ?? IssueTasks.personalKey }
-            if ownerId.isEmpty { ownerId = d?.me.id ?? "" }
+            if ownerId.isEmpty { ownerId = d?.me.id ?? ""; assigneeIds = ownerId.isEmpty ? [] : [ownerId] }
             if title.isEmpty, let p = prefill {
                 title = String(p.title.prefix(200))
                 if let due = p.dueDate { hasDue = true; self.due = due }
-                if let d, let who = GgPeople.find(d, name: p.assigneeName, among: humans(d, conv).map(\.id)) { ownerId = who.id }
+                if let d, let who = GgPeople.find(d, name: p.assigneeName, among: humans(d, conv).map(\.id)) { ownerId = who.id; assigneeIds = [who.id] }
             }
             if title.isEmpty, let o = origin { title = excerpt(o.body, 200) }
         }
@@ -280,9 +278,9 @@ struct NewIssueSheet: View {
             do {
                 let i = conv == IssueTasks.personalKey
                     ? try await store.createPersonalIssue(title: title, dueDate: hasDue ? IssueDates.iso(due) : nil)
-                    : try await store.createIssue(conversationId: conv, title: title, ownerId: ownerId.isEmpty ? nil : ownerId,
+                    : try await store.createIssue(conversationId: conv, title: title, ownerId: assigneeIds.sorted().first,
                                                   dueDate: hasDue ? IssueDates.iso(due) : nil, originMessageId: origin?.id,
-                                                  topicId: conv == conversationId ? topicId : nil)
+                                                  topicId: conv == conversationId ? topicId : nil, assigneeIds: assigneeIds.sorted())
                 dismiss()
                 store.show(i.title)
             } catch { self.error = L10n.errorText(error) }

@@ -50,6 +50,15 @@ func container(_ d: Decoder) throws -> KeyedDecodingContainer<AnyKey> {
 
 // MARK: - Entidades
 
+struct AvailabilityDTO: Codable, Equatable, Sendable {
+    var mode: String?
+    var until: String?
+    var silent: Bool
+    var revision: Int
+    var active: Bool { until.flatMap(ISODate.parse).map { $0 > Date() } ?? (mode != nil && !silent) }
+    var effectiveSilent: Bool { active && silent }
+}
+
 struct UserDTO: Codable, Equatable, Sendable {
     var id: String
     var name: String
@@ -69,6 +78,7 @@ struct UserDTO: Codable, Equatable, Sendable {
     var ringtone: String?
     /// Permiso de IA guardado (users.ai_consent_at; gg en el chat lo exige). Ausente = servidor anterior.
     var aiConsent: Bool?
+    var availability: AvailabilityDTO?
 
     init(from decoder: Decoder) throws {
         let c = try container(decoder)
@@ -85,6 +95,7 @@ struct UserDTO: Codable, Equatable, Sendable {
         avatarUrl = c.o("avatarUrl")
         dndUntil = c.o("dndUntil")
         aiConsent = c.o("aiConsent")
+        availability = c.o("availability")
     }
 }
 
@@ -160,6 +171,7 @@ struct PersonDTO: Codable, Equatable, Identifiable, Sendable {
     var avatarUrl: String?
     /// Su horario de descanso (`people[].sleep`), o nil si lo tiene apagado.
     var sleep: SleepWindow?
+    var availability: AvailabilityDTO?
 
     init(id: String, name: String, kind: String = "human", orgId: String? = nil, avatarUrl: String? = nil) {
         self.id = id; self.name = name; self.kind = kind; self.orgId = orgId; self.avatarUrl = avatarUrl; self.guest = false
@@ -169,6 +181,7 @@ struct PersonDTO: Codable, Equatable, Identifiable, Sendable {
         let c = try container(decoder)
         id = try c.decode(String.self, forKey: AnyKey("id"))
         sleep = c.o("sleep")
+        availability = c.o("availability")
         name = c.v("name", "")
         kind = c.v("kind", "human")
         orgId = c.o("orgId")
@@ -257,6 +270,7 @@ struct ConversationDTO: Codable, Equatable, Identifiable, Sendable {
     /// Sonido de este chat (docs/SONIDOS.md): uno de MESSAGE_SOUNDS, "none" o nil = el predeterminado.
     var sound: String?
     /// Menciones a mí (o @todos) sin leer (SPEC-v4 H).
+    var readRevision: Int?
     var unreadMentions: Int = 0
     /// Admins explícitos del grupo (orden de ingreso). Solo en group/internal/multi; nil = servidor anterior
     /// (docs/ADMINS-INTEGRACIONES.md §1).
@@ -281,6 +295,7 @@ struct ConversationDTO: Codable, Equatable, Identifiable, Sendable {
         lastMessageAt = c.o("lastMessageAt")
         lastMessagePreview = c.o("lastMessagePreview")
         lastReadSeq = c.int("lastReadSeq")
+        readRevision = c.intOpt("readRevision")
         unread = c.int("unread")
         canPost = c.v("canPost", true)
         canManage = c.v("canManage", false)
@@ -312,6 +327,8 @@ struct MessageDTO: Codable, Equatable, Identifiable, Sendable {
     var clientMessageId: String?
     var kind: String
     var body: String
+    var displayBody: String?
+    var visibleBody: String { displayBody ?? body }
     var replyTo: String?
     var mergedFrom: String?
     /// 'side' | 'same' | 'internal' | 'directive' (qué tipo de conversación se llevó al hilo).
@@ -357,6 +374,7 @@ struct MessageDTO: Codable, Equatable, Identifiable, Sendable {
         clientMessageId = c.o("clientMessageId")
         kind = c.v("kind", "text")
         body = c.v("body", "")
+        displayBody = c.o("displayBody")
         replyTo = c.o("replyTo")
         mergedFrom = c.o("mergedFrom")
         mergedKind = c.o("mergedKind")
@@ -827,7 +845,8 @@ enum ConversationEvent: Decodable, Equatable, Sendable {
 
 enum AccountEvent: Decodable, Equatable, Sendable {
     case scopeChanged(reason: String)
-    case readUpdated(conversationId: String, seq: Int)
+    case readUpdated(conversationId: String, seq: Int, revision: Int? = nil)
+    case availabilityChanged(userId: String, availability: AvailabilityDTO)
     case reminderDue(ReminderDTO)
     /// Aviso de reunión (10 min antes). SPEC-v4 E.
     case eventSoon(CalendarEventDTO, minutes: Int)
@@ -870,7 +889,9 @@ enum AccountEvent: Decodable, Equatable, Sendable {
         let type: String = c.v("type", "")
         switch type {
         case "scope.changed": self = .scopeChanged(reason: c.v("reason", ""))
-        case "read.updated": self = .readUpdated(conversationId: c.v("conversationId", ""), seq: c.int("seq"))
+        case "read.updated", "me.read": self = .readUpdated(conversationId: c.v("conversationId", ""), seq: c.intOpt("lastReadSeq") ?? c.int("seq"), revision: c.intOpt("readRevision"))
+        case "person.availability":
+            if let a: AvailabilityDTO = c.o("availability") { self = .availabilityChanged(userId: c.v("userId", ""), availability: a) } else { self = .other(type: type) }
         case "reminder.due":
             if let r: ReminderDTO = c.o("reminder") { self = .reminderDue(r) } else { self = .other(type: type) }
         case "event.soon":

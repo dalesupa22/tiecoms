@@ -35,6 +35,8 @@ struct TieComsApp: App {
         // Solo pruebas de interfaz: empezar con el idioma del sistema.
         if AppConfig.launchFlag("TCResetLanguage") { L10n.choice = .system }
         let s = AppStore(baseURL: base, secrets: secrets, feedback: AppFeedback.shared)
+        VoicePlayer.shared.canUseAudio = { [weak s] in s?.callCenter.inCall != true }
+        ChoiceSoundPlayer.shared.canUseAudio = { [weak s] in s?.callCenter.inCall != true }
         _store = State(initialValue: s)
         _updates = State(initialValue: AppUpdateChecker(baseURL: base))
         // «Abierta» exige mensajes cargados: un chat vacío por un 502 no calla sus avisos.
@@ -56,7 +58,7 @@ struct TieComsApp: App {
         AppFeedback.shared.onReply = { [weak s] conv, text in await s?.replyFromNotification(conv, text: text) }
         AppFeedback.shared.onMarkRead = { [weak s] conv in await s?.markReadFromNotification(conv) }
         AppFeedback.shared.socketOnline = { [weak s] in s?.connection == .online && s?.appActive == true }
-        AppFeedback.shared.dndActive = { [weak s] in s?.dndActive == true }
+        AppFeedback.shared.dndActive = { [weak s] in s?.foregroundSilenced == true }
         PushRegistration.onToken = { [weak s] hex in Task { await s?.registerPushToken(hex) } }
         // Tras entrar: si nunca se pidió el permiso, primero una pantalla que explica por qué; si ya hay permiso, registrar APNs.
         s.onReady = { [weak s] in
@@ -76,20 +78,38 @@ struct TieComsApp: App {
         if Date().timeIntervalSince(launchedAt) < 1.5 { store.launchedByLink = true }
     }
 
+    private var isNightProof: Bool {
+        #if DEBUG
+        return AppConfig.launchFlag("TCNightProof")
+        #else
+        return false
+        #endif
+    }
+    @ViewBuilder private var appRoot: some View {
+        #if DEBUG
+        if isNightProof { NightProofView() } else { RootView() }
+        #else
+        RootView()
+        #endif
+    }
+
     var body: some Scene {
         WindowGroup {
-            RootView()
+            appRoot
                 .appTextSize()
                 .environment(store)
                 .environment(updates)
                 .keyboardDismissable()
+                .onChange(of: store.callCenter.inCall) { _, active in
+                    if active { VoicePlayer.shared.stop() }
+                }
                 .task {
-                    guard !AppConfig.isRunningUnitTests else { return }
+                    guard !AppConfig.isRunningUnitTests, !isNightProof else { return }
                     await updates.check()
                 }
                 .task {
                     // Las pruebas unitarias se alojan en la app: no se arranca la sesión real.
-                    guard !AppConfig.isRunningUnitTests else { return }
+                    guard !AppConfig.isRunningUnitTests, !isNightProof else { return }
                     await store.start()
                 }
                 .onOpenURL { markLinkLaunch(); store.handle(url: $0) }

@@ -138,7 +138,7 @@ final class AppStore {
     var tab: AppTab = .home
     /// La app se abrió en frío por un enlace (splash corto).
     var launchedByLink = false
-    var myOpenIssues: Int { guard let me = me?.id else { return 0 }; return issues.values.filter { $0.ownerId == me && !$0.status.closed }.count }
+    var myOpenIssues: Int { guard let me = me?.id else { return 0 }; return issues.values.filter { $0.assignedIds.contains(me) && !$0.status.closed }.count }
     /// Sube con cada aviso: el mismo texto dos veces seguidas vuelve a contar su tiempo.
     var toastSeq = 0
     func show(_ message: String) { toastUndo = nil; toast = message; toastSeq += 1 }
@@ -222,11 +222,14 @@ final class AppStore {
     private var sessionGeneration = UUID()
     var sessionStamp: SessionStamp { SessionStamp(generation: sessionGeneration, userId: me?.id) }
     var foregroundOwner: String { "\(sessionGeneration.uuidString)|\(me?.id ?? "")" }
-    var foregroundSilenced: Bool { dndActive || sleepActive }
+    var foregroundSilenced: Bool { dndActive || sleepActive || me?.availability?.effectiveSilent == true }
+    @ObservationIgnored var readRevisions: [String: Int] = [:]
     func requireSession(_ stamp: SessionStamp) throws {
         guard stamp == sessionStamp, !Task.isCancelled else { throw CancellationError() }
     }
     private func invalidateSessionWork() {
+        readRevisions = [:]
+        VoicePlayer.shared.resetScope()
         sessionGeneration = UUID()
         feedback?.cancelPendingMessages()
         api.invalidateRequests()
@@ -283,6 +286,7 @@ final class AppStore {
         var d = s.bootstrap
         d.conversations.sort { ($0.lastMessageAt ?? "") > ($1.lastMessageAt ?? "") }
         data = d
+        VoicePlayer.shared.setScope(server: api.baseURL.absoluteString, account: d.me.id)
         blockedUserIds = Set(s.blocked)
         var convs: [String: ConversationState] = [:]
         for (id, c) in s.conversations {
@@ -621,7 +625,18 @@ final class AppStore {
         try requireSession(stamp)
         d.conversations.sort { ($0.lastMessageAt ?? "") > ($1.lastMessageAt ?? "") }
         defer { scheduleBadge() }
+        // A bootstrap begun before a newer read/unread event must not lower its revision.
+        for index in d.conversations.indices {
+            let id = d.conversations[index].id
+            if let current = meta(id), readRevision(id) > (d.conversations[index].readRevision ?? -1) {
+                d.conversations[index].lastReadSeq = current.lastReadSeq
+                d.conversations[index].readRevision = current.readRevision
+                d.conversations[index].unread = max(0, d.conversations[index].lastMessageSeq - max(current.lastReadSeq, d.conversations[index].historyFromSeq))
+                d.conversations[index].unreadMentions = current.unreadMentions
+            }
+        }
         data = d
+        VoicePlayer.shared.setScope(server: api.baseURL.absoluteString, account: d.me.id)
         restoreMeetingAttempts()
         loadLocalDnd()
         // Conversaciones que ya no están en mi alcance se purgan de la caché local.
@@ -741,20 +756,20 @@ final class AppStore {
             scheduleBootstrap()
             // Grupos nuevos o invitaciones aceptadas: sus asuntos abiertos van bajo cada grupo.
             Task { await loadOpenIssues() }
-        case .readUpdated(let id, let seq):
-            guard let c = meta(id), seq > c.lastReadSeq else { return }
-            patchMeta(id) { $0.lastReadSeq = seq; $0.unread = max(0, $0.lastMessageSeq - max(seq, $0.historyFromSeq)) }
+        case .readUpdated(let id, let seq, let revision):
+            if revision == nil, readRevision(id) >= 0 { scheduleBootstrap(); return }
+            _ = applyConfirmedRead(id, seq: seq, revision: revision, legacyRevision: readRevision(id))
         case .reminderDue(let r):
             reminders = (reminders.filter { $0.id != r.id } + [r]).sorted { $0.remindAt < $1.remindAt }
             remindersDue += 1
-            if NotifyRule.accountAlert(dnd: dndActive), let d = data {
+            if NotifyRule.accountAlert(dnd: foregroundSilenced), let d = data {
                 let conv = meta(r.conversationId)
                 feedback?.notifyIncoming(conversationId: r.conversationId, title: L("rem.alert"),
                                          author: conv.map { Naming.notificationTitle(d, $0) } ?? "", body: r.note ?? "")
             }
         case .eventSoon(let e, let minutes):
             events[e.id] = e
-            guard !e.isCancelled, NotifyRule.accountAlert(dnd: dndActive), let d = data else { return }
+            guard !e.isCancelled, NotifyRule.accountAlert(dnd: foregroundSilenced), let d = data else { return }
             let conv = meta(e.conversationId)
             // Ignora el silencio de la conversación: es un aviso de reunión, como en el push.
             feedback?.notifyEventSoon(conversationId: e.conversationId, eventId: e.id,
@@ -765,6 +780,9 @@ final class AppStore {
         case .whatsappUpdated: waRevision += 1
         case .driveUpdated: driveRevision += 1
         case .remindersChanged: Task { try? await loadReminders() }
+        case .availabilityChanged(let id, let availability):
+            if id == me?.id, availability.revision >= (me?.availability?.revision ?? -1) { patchMe { $0.availability = availability } }
+            if let index = data?.people.firstIndex(where: { $0.id == id }), availability.revision >= (data?.people[index].availability?.revision ?? -1) { data?.people[index].availability = availability }
         case .dndChanged(let until): applyServerDnd(until)
         case .scheduledUpdated(let x): putScheduled(x)
         case .sleepChanged(let s): patchMe { $0.sleep = s }
@@ -783,7 +801,7 @@ final class AppStore {
         case .callRinging(let call, let title, let caller):
             guard data?.callsEnabled == true else { return }
             putCall(call)
-            if NotifyRule.accountAlert(dnd: dndActive) { callCenter.showIncoming(call, callerName: caller, title: title) }
+            if NotifyRule.accountAlert(dnd: foregroundSilenced) { callCenter.showIncoming(call, callerName: caller, title: title) }
         case .callUpdated(let call):
             guard data?.callsEnabled == true else { return }
             putCall(call)
@@ -836,7 +854,7 @@ final class AppStore {
             events[ev.id] = ev
             // Reunión nueva de otra persona en vivo → aviso con tc_notify (salvo silenciada).
             if live, isNewEvent, ev.organizerId != me?.id, !ev.isCancelled, let d = data, let c = meta(cid),
-               NotifyRule.accountAlert(dnd: dndActive, muted: c.isMuted, respectsMute: true) {
+               NotifyRule.accountAlert(dnd: foregroundSilenced, muted: c.isMuted, respectsMute: true) {
                 feedback?.notifyIncoming(conversationId: cid, title: ev.title, author: Naming.notificationTitle(d, c), body: L10n.eventWhen(ev))
             }
         case .callUpdated(_, _, let call):
@@ -1250,6 +1268,10 @@ final class AppStore {
         }
     }
 
+    func cancelPendingRead(_ id: String) {
+        readTasks[id]?.cancel(); readTasks[id] = nil; readTargets[id] = nil
+    }
+
     /// Debounce candidates without moving the local cursor until the server confirms this exact sequence.
     func markRead(_ id: String, upTo: Int? = nil) {
         guard let c = meta(id) else { return }
@@ -1266,18 +1288,20 @@ final class AppStore {
             do {
                 try await Task.sleep(nanoseconds: 400_000_000)
                 try self.requireSession(stamp)
-                try await self.api.requestData("/conversations/\(id)/read", method: "POST", json: ["seq": target])
+                let priorRevision = self.readRevision(id)
+                let result: LastRead = try await self.api.request("/conversations/\(id)/read", method: "POST", json: ["seq": target])
                 try self.requireSession(stamp)
-                let previous = self.meta(id)?.lastReadSeq ?? target
+                let confirmed = result.lastReadSeq ?? target
+                let previous = self.meta(id)?.lastReadSeq ?? confirmed
+                guard self.applyConfirmedRead(id, seq: confirmed, revision: result.readRevision, legacyRevision: priorRevision) else { return }
                 let newlySeenMentions = (self.conversations[id]?.messages ?? []).filter {
-                    $0.seq > previous && $0.seq <= target && $0.deletedAt == nil && MentionText.mentionsMe($0.mentions, me: stamp.userId ?? "", authorId: $0.authorId)
+                    $0.seq > previous && $0.seq <= confirmed && $0.deletedAt == nil && MentionText.mentionsMe($0.mentions, me: stamp.userId ?? "", authorId: $0.authorId)
                 }.count
                 self.patchMeta(id) {
-                    ReadTree.applyRead(&$0, seq: target)
-                    if target < $0.lastMessageSeq { $0.unreadMentions = max(0, $0.unreadMentions - newlySeenMentions) }
+                    if confirmed < $0.lastMessageSeq { $0.unreadMentions = max(0, $0.unreadMentions - newlySeenMentions) }
                 }
                 self.readFailures.remove(id)
-                if target >= (self.meta(id)?.lastMessageSeq ?? Int.max) { AppFeedback.shared.clearNotifications(conversationId: id) }
+                if confirmed >= (self.meta(id)?.lastMessageSeq ?? Int.max) { AppFeedback.shared.clearNotifications(conversationId: id) }
             } catch {
                 if stamp == self.sessionStamp, !Task.isCancelled { self.readFailures.insert(id) }
             }
@@ -1304,15 +1328,16 @@ final class AppStore {
     func send(_ conversationId: String, body: String, replyTo: String? = nil, forwarded: ForwardedInfo? = nil,
               attachments: [AttachmentDTO] = [], forwardAttachments: [AttachmentDTO] = [], mentions: [Mention] = [],
               topicId: String? = nil, viewOnce: Bool = false, clientMessageId: String = UUID().uuidString.lowercased()) -> PendingMessage? {
-        // El servidor recorta el texto: se recorta aquí y se corren las menciones.
+        guard body.utf16.count <= 8000 else { show(L("long.toFileHint")); return nil }
+        // Validate before adding a pending message; never truncate the original text.
         let (text, mentionsTrimmed) = MentionText.trimmed(body, mentions: mentions)
         // Con adjuntos el texto puede ir vacío.
         guard !text.isEmpty || !attachments.isEmpty || !forwardAttachments.isEmpty else { return nil }
-        let p = PendingMessage(clientMessageId: clientMessageId, conversationId: conversationId, body: String(text.prefix(8000)), replyTo: replyTo,
+        let p = PendingMessage(clientMessageId: clientMessageId, conversationId: conversationId, body: text, replyTo: replyTo,
                                forwarded: forwarded, attachmentIds: attachments.isEmpty ? nil : attachments.map(\.id),
                                forwardAttachmentIds: forwardAttachments.isEmpty ? nil : forwardAttachments.map(\.id),
                                attachments: (attachments + forwardAttachments).isEmpty ? nil : attachments + forwardAttachments,
-                               mentions: mentionsTrimmed.isEmpty ? nil : MentionText.valid(mentionsTrimmed, in: String(text.prefix(8000))),
+                               mentions: mentionsTrimmed.isEmpty ? nil : MentionText.valid(mentionsTrimmed, in: text),
                                topicId: topicId, viewOnce: viewOnce ? true : nil, createdAt: ISODate.string(), attempts: 0, status: .pending, error: nil, nextAttemptAt: 0)
         Donations.donate(self, conversationId: conversationId)
         // Primero se guarda localmente: si la app se cierra, el mensaje sigue en la cola.
@@ -1629,6 +1654,7 @@ extension AppStore {
     func seedForTesting(_ d: BootstrapDTO, conversations: [String: ConversationState] = [:]) {
         if me?.id != d.me.id { invalidateSessionWork() }
         data = d
+        VoicePlayer.shared.setScope(server: api.baseURL.absoluteString, account: d.me.id)
         restoreMeetingAttempts()
         self.conversations = conversations
         status = .ready

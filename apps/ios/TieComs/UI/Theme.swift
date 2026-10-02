@@ -124,9 +124,11 @@ struct Avatar: View {
     var fill: Color? = nil
     /// gg (docs/GG-CHAT.md): su marca en vez de ◇.
     var isGG = false
+    var availability: AvailabilityDTO? = nil
 
     /// Avatar de una persona del snapshot (foto, iniciales o ◇ si es agente).
     init(person: PersonDTO?, org: OrganizationDTO?, size: CGFloat = 40, badge: Bool = false) {
+        self.availability = person?.availability
         self.name = person?.name ?? "?"
         self.org = org
         self.isAgent = person?.kind == "agent"
@@ -143,7 +145,16 @@ struct Avatar: View {
     }
 
     var body: some View {
-        if isGG { ggFace } else { face }
+        Group { if isGG { ggFace } else { face } }
+            .overlay(alignment: .bottomTrailing) {
+                if let availability, let mode = availability.mode {
+                    TimelineView(.periodic(from: .now, by: 30)) { _ in
+                        if availability.active {
+                            Circle().fill(mode == "available" ? Color.green : Color.orange).frame(width: max(7, size * 0.22), height: max(7, size * 0.22)).overlay(Circle().stroke(Theme.background, lineWidth: 1.5)).accessibilityLabel(L("availability.\(mode)"))
+                        }
+                    }
+                }
+            }
     }
 
     private var ggFace: some View {

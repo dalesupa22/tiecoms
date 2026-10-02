@@ -120,7 +120,13 @@ struct WhatsAppScreen: View {
     @State private var chats: [WaChatDTO] = []
     @State private var counts: [String: WaChatsPage.Count] = [:]
     @State private var category: WaCategory?
-    @State private var onlyGroups = true
+    @State private var onlyGroups = false
+    @State private var nextPage: String?
+    @State private var hasMore = false
+    @State private var syncPartial = false
+    @State private var loadingMore = false
+    @State private var loadGeneration = UUID()
+    @Environment(\.scenePhase) private var scenePhase
     @State private var showHidden = false
     @State private var query = ""
     @State private var connecting = false
@@ -163,7 +169,7 @@ struct WhatsAppScreen: View {
                 }
                 Section {
                     if chats.isEmpty { Text(connected.isEmpty ? L("wa.syncing") : L("wa.noChats")).foregroundStyle(Theme.textSecondary) }
-                    ForEach(chats) { c in
+                    ForEach(chats.sorted(by: WaRecency.before)) { c in
                         Button { open = c } label: { WaChatRow(chat: c, multi: (accounts?.count ?? 0) > 1) }
                             .contextMenu {
                                 ForEach(WaCategory.allCases, id: \.self) { k in
@@ -176,8 +182,12 @@ struct WhatsAppScreen: View {
                     }
                 }
             }
+            if syncPartial { Text(L("wa.partial")).font(.caption).foregroundStyle(Theme.textSecondary) }
+            if hasMore { Button(L("wa.loadMore")) { Task { await loadMoreChats() } }.disabled(loadingMore) }
             if let error { Text(error).foregroundStyle(.red).font(.footnote) }
         }
+        .refreshable { await loadAccounts(); await loadChats() }
+        .onChange(of: scenePhase) { _, p in if p == .active { Task { await loadAccounts(); await loadChats() } } }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
         .background(Theme.background.ignoresSafeArea())
@@ -218,8 +228,25 @@ struct WhatsAppScreen: View {
     }
 
     private func loadChats() async {
-        guard let r = try? await store.waChats(accountId: nil, category: category, onlyGroups: onlyGroups, showHidden: showHidden, query: query) else { return }
-        chats = r.chats; counts = r.categories
+        let generation = UUID(); loadGeneration = generation
+        let stamp = store.sessionStamp
+        do {
+            let r = try await store.waChats(accountId: nil, category: category, onlyGroups: onlyGroups, showHidden: showHidden, query: query)
+            guard !Task.isCancelled, stamp == store.sessionStamp, generation == loadGeneration else { return }
+            chats = r.chats; counts = r.categories; nextPage = r.next; hasMore = r.hasMore; syncPartial = r.syncPartial; error = nil
+        } catch { if generation == loadGeneration, stamp == store.sessionStamp, !Task.isCancelled { self.error = L10n.errorText(error) } }
+    }
+
+    private func loadMoreChats() async {
+        guard !loadingMore, hasMore, let cursor = nextPage else { return }
+        loadingMore = true; defer { loadingMore = false }
+        let generation = loadGeneration, stamp = store.sessionStamp
+        do {
+            let page = try await store.waChats(accountId: nil, category: category, onlyGroups: onlyGroups, showHidden: showHidden, query: query, cursor: cursor)
+            guard !Task.isCancelled, generation == loadGeneration, stamp == store.sessionStamp else { return }
+            let old = Set(chats.map(\.id)); chats += page.chats.filter { !old.contains($0.id) }
+            nextPage = page.next; hasMore = page.hasMore && page.next != cursor; syncPartial = page.syncPartial
+        } catch { if generation == loadGeneration, stamp == store.sessionStamp { self.error = L10n.errorText(error) } }
     }
 
     private func patch(_ c: WaChatDTO, _ p: [String: Any]) {
@@ -434,6 +461,7 @@ struct WaChatSheet: View {
                         VStack(alignment: m.fromMe ? .trailing : .leading, spacing: 2) {
                             if !m.fromMe, chat.isGroup, let a = m.author { Text(a).font(.caption.weight(.semibold)) }
                             Text(m.body)
+                            if let media = m.media { WaNativeMedia(accountId: chat.accountId, jid: chat.jid, messageId: m.id, media: media, mine: m.fromMe) }
                             Text(L10n.dateTime(ISODate.parse(m.sentAt) ?? Date())).font(.caption2).foregroundStyle(Theme.textSecondary)
                         }
                         .frame(maxWidth: .infinity, alignment: m.fromMe ? .trailing : .leading)
@@ -486,7 +514,6 @@ struct WaChatSheet: View {
                 }
             }
             .task(id: store.waRevision) { messages = (try? await store.waMessages(chat)) ?? [] }
-            .task(id: source) { await store.ggSidePending([source]) }
             .sheet(item: $sharing) { m in WaShareSheet(chat: chat, message: m) }
             .sheet(isPresented: $ggOpen, onDismiss: { ggAsk = nil; runQueue() }) {
                 GgSideSheet(source: source, chatTitle: chat.name, quotes: $ggQuotes, initialAsk: ggAsk) { ggQueue = [$0] }

@@ -75,6 +75,7 @@ final class VoiceRecorder: NSObject, AVAudioRecorderDelegate {
     private(set) var paused = false
     /// Se puede continuar (no si el sistema detuvo el grabador: grabar de nuevo sobrescribiría el archivo).
     private(set) var canResume = false
+    var canUseAudio: () -> Bool = { true }
     var onAutoStop: (() -> Void)?
     private var recorder: AVAudioRecorder?
     private var timer: Timer?
@@ -99,6 +100,7 @@ final class VoiceRecorder: NSObject, AVAudioRecorderDelegate {
     }
 
     func start() throws {
+        guard state == .idle, canUseAudio() else { throw ApiRequestError(status: 409, code: "audio_busy", message: L("voice.callBusy")) }
         let session = AVAudioSession.sharedInstance()
         try session.setCategory(.playAndRecord, mode: .spokenAudio, options: [.defaultToSpeaker, .allowBluetoothHFP])
         try session.setActive(true)
@@ -141,7 +143,7 @@ final class VoiceRecorder: NSObject, AVAudioRecorderDelegate {
 
     /// Continúa una grabación en pausa.
     func resume() {
-        guard paused, canResume, let r = recorder else { return }
+        guard paused, canResume, canUseAudio(), let r = recorder else { return }
         try? AVAudioSession.sharedInstance().setActive(true)
         if r.record() { paused = false; startedAt = Date() }
     }
@@ -182,7 +184,7 @@ final class VoiceRecorder: NSObject, AVAudioRecorderDelegate {
         NotificationCenter.default.removeObserver(self, name: AVAudioSession.interruptionNotification, object: nil)
         NotificationCenter.default.removeObserver(self, name: UIApplication.willResignActiveNotification, object: nil)
         startedAt = nil; accumulatedMs = 0; paused = false; canResume = false
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        if canUseAudio() { try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation) }
         state = .idle
     }
 
@@ -234,6 +236,8 @@ extension APIClient {
 @MainActor @Observable
 final class VoicePlayer: NSObject, AVAudioPlayerDelegate {
     static let shared = VoicePlayer()
+    var canUseAudio: () -> Bool = { true }
+    private(set) var lastError: String?
     private(set) var currentId: String?
     private(set) var playing = false
     private(set) var progress: Double = 0
@@ -241,40 +245,61 @@ final class VoicePlayer: NSObject, AVAudioPlayerDelegate {
     private var player: AVAudioPlayer?
     private var timer: Timer?
     private var api: APIClient?
+    private var playAttempt = UUID()
+    private var heardKey: String?
     /// Reproducción continua: la nota que sigue a esta (en el mensaje siguiente), si la hay.
     var nextProvider: ((String) -> AttachmentDTO?)?
     /// Notas ya escuchadas (para el punto «Sin escuchar»).
-    private(set) var heard: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "tc.voice.heard") ?? [])
+    private(set) var heard: Set<String> = []
+
+    func setScope(server: String, account: String) {
+        let key = ScopedPreference.key(server: server, account: account, purpose: "voice.heard")
+        guard heardKey != key else { return }
+        resetScope()
+        heardKey = key
+        heard = Set(UserDefaults.standard.stringArray(forKey: key) ?? [])
+    }
+
+    func resetScope() {
+        stop(); api = nil; nextProvider = nil; heard = []; heardKey = nil; lastError = nil
+    }
 
     func toggle(_ att: AttachmentDTO, api: APIClient) async {
+        lastError = nil
+        guard canUseAudio() else { lastError = L("voice.callBusy"); return }
         if currentId == att.id, let p = player {
-            if p.isPlaying { p.pause(); playing = false } else { p.play(); playing = true }
+            if p.isPlaying { p.pause(); playing = false } else { playing = p.play(); if !playing { lastError = L("voice.playFailed") } }
             return
         }
         stop()
         currentId = att.id
+        let attempt = playAttempt
         self.api = api
         do {
             let data = try await AttachmentCache.shared.data(att.url, api: api)
+            // Downloads may finish after a call, account switch, cancellation or another playback.
+            guard playAttempt == attempt, currentId == att.id, !Task.isCancelled else { return }
+            guard canUseAudio() else { stop(); lastError = L("voice.callBusy"); return }
             try AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio)
             try AVAudioSession.sharedInstance().setActive(true)
-            let p = try AVAudioPlayer(data: data, fileTypeHint: AVFileType.m4a.rawValue)
+            let p = try AVAudioPlayer(data: data)
             p.enableRate = true
             p.rate = rate
             p.delegate = self
             guard currentId == att.id else { return }
             player = p
-            p.play()
+            guard p.play() else { throw CocoaError(.fileReadCorruptFile) }
             playing = true
-            markHeard(att.id)
             timer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
                 MainActor.assumeIsolated {
                     guard let self, let p = self.player, p.duration > 0 else { return }
                     self.progress = p.currentTime / p.duration
+                    if p.currentTime > 0.05, let id = self.currentId { self.markHeard(id) }
                 }
             }
         } catch {
-            currentId = nil
+            guard playAttempt == attempt, !Task.isCancelled else { return }
+            stop(); lastError = L("voice.playFailed")
         }
     }
 
@@ -287,18 +312,20 @@ final class VoicePlayer: NSObject, AVAudioPlayerDelegate {
     func cycleRate() { rate = rate == 1 ? 1.5 : rate == 1.5 ? 2 : 1 }
 
     func stop() {
+        playAttempt = UUID()
         timer?.invalidate(); timer = nil
         player?.stop(); player = nil
         playing = false; progress = 0; currentId = nil
     }
 
     func markHeard(_ id: String) {
-        guard heard.insert(id).inserted else { return }
-        UserDefaults.standard.set(Array(heard.suffix(2000)), forKey: "tc.voice.heard")
+        guard let heardKey, heard.insert(id).inserted else { return }
+        UserDefaults.standard.set(Array(heard.suffix(2000)), forKey: heardKey)
     }
 
     nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
         Task { @MainActor in
+            guard self.player === player else { return }
             let finished = self.currentId
             let api = self.api
             self.stop()

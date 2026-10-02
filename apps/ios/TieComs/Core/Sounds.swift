@@ -9,7 +9,7 @@ import SwiftUI
 
 enum ChatSounds {
     /// MESSAGE_SOUNDS del contrato.
-    static let message = ["pop", "gota", "campana", "marimba", "burbuja", "cristal", "acorde", "silbido", "tambor", "brisa"]
+    static let message = ["pop", "gota", "campana", "marimba", "burbuja", "cristal", "acorde", "silbido", "tambor", "brisa", "energy", "spark", "portal", "victory"]
     /// RINGTONES del contrato.
     static let ringtones = ["clasico", "suave", "marimba"]
     static let none = "none"
@@ -46,11 +46,12 @@ enum ChatSounds {
 @MainActor
 final class ChoiceSoundPlayer {
     static let shared = ChoiceSoundPlayer()
+    var canUseAudio: () -> Bool = { true }
     private var players: [String: AVAudioPlayer] = [:]
 
     /// `force`: ignora «Sonido de mensajes» (vista previa y tono de llamada).
     func play(_ file: String?, force: Bool = false) {
-        guard let file, force || Prefs.soundsEnabled, !AppConfig.isRunningUnitTests else { return }
+        guard let file, force || Prefs.soundsEnabled, !AppConfig.isRunningUnitTests, canUseAudio() else { return }
         AppFeedback.shared.sounds.configure()
         if players[file] == nil, let url = Bundle.main.url(forResource: file, withExtension: "caf") {
             players[file] = try? AVAudioPlayer(contentsOf: url)

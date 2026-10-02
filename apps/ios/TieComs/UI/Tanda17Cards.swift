@@ -224,33 +224,42 @@ struct OverdueActions: View {
     }
 }
 
-/// Reasignar: personas del chat de la tarea (PATCH {ownerId}).
+/// Reasignar permite varios responsables de la audiencia autorizada; confirma un único PATCH real.
 struct ReassignSheet: View {
     @Environment(AppStore.self) private var store
     @Environment(\.dismiss) private var dismiss
     let issue: IssueDTO
+    @State private var selected: Set<String> = []
+    @State private var saving = false
     var body: some View {
         NavigationStack {
             if let d = store.data {
-                let ids = issue.conversationId.flatMap { store.meta($0)?.memberIds } ?? d.people.map(\.id)
+                let ids = issue.isPersonal ? [d.me.id] : (issue.conversationId.flatMap { store.meta($0)?.memberIds } ?? issue.assignedIds)
                 List(ids.compactMap { Naming.person(d, $0) }.filter { $0.kind != "agent" }) { p in
-                    Button {
-                        Task {
-                            do { _ = try await store.updateIssue(issue.id, ["ownerId": p.id]); dismiss() } catch { store.show(L10n.errorText(error)) }
-                        }
-                    } label: {
+                    Toggle(isOn: Binding(get: { selected.contains(p.id) }, set: { on in if on { selected.insert(p.id) } else { selected.remove(p.id) } })) {
                         HStack(spacing: 12) {
                             Avatar(person: p, org: Naming.org(d, p.orgId), size: 34)
                             Text(p.name).foregroundStyle(Theme.textPrimary)
-                            Spacer()
-                            if p.id == issue.ownerId { Image(systemName: "checkmark").foregroundStyle(Theme.accentText) }
                         }
-                    }
-                    .accessibilityIdentifier("reassign.\(p.id)")
+                    }.accessibilityIdentifier("reassign.\(p.id)")
                 }
                 .navigationTitle(L("card.reassign"))
                 .navigationBarTitleDisplayMode(.inline)
-                .toolbar { ToolbarItem(placement: .cancellationAction) { Button(L("common.cancel")) { dismiss() } } }
+                .onAppear { selected = Set(issue.assignedIds) }
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) { Button(L("common.cancel")) { dismiss() } }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button(L("common.save")) {
+                            saving = true
+                            let ids = selected.sorted()
+                            Task {
+                                defer { saving = false }
+                                do { _ = try await store.updateIssue(issue.id, ["ownerId": ids.first ?? NSNull(), "assigneeIds": ids]); dismiss() }
+                                catch { store.show(L10n.errorText(error)) }
+                            }
+                        }.disabled(saving || (issue.isPersonal && selected.isEmpty))
+                    }
+                }
             }
         }
     }

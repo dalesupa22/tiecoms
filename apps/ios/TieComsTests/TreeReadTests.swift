@@ -261,3 +261,107 @@ extension TreeReadTests {
         XCTAssertEqual(s.meta("side")?.unread, 3, "sidechats are outside the explicit group action")
     }
 }
+
+
+extension TreeReadTests {
+    func testUnreadTargetSkipsBlockedAndOtherTopicWithoutAcknowledging() async throws {
+        let store = try ControlledURLProtocol.store(user: "me")
+        var d = try boot(); d.conversations[0].lastReadSeq = 0; d.conversations[0].lastMessageSeq = 4; d.conversations[0].unread = 4
+        let messages = try [
+            #"{"id":"m1","seq":1,"authorId":"blocked","kind":"text","topicId":"wanted"}"#,
+            #"{"id":"m2","seq":2,"authorId":"bo","kind":"text","topicId":"other"}"#,
+            #"{"id":"m3","seq":3,"authorId":"me","kind":"text","topicId":"wanted"}"#,
+            #"{"id":"m4","seq":4,"authorId":"bo","kind":"text","topicId":"wanted"}"#
+        ].map { try dec(MessageDTO.self, $0) }
+        store.seedForTesting(d, conversations: ["gen": ConversationState(messages: messages, lastEventSeq: 4, hasMore: false, loaded: true)])
+        store.blockedUserIds = ["blocked"]
+        let target = try await store.firstUnreadMessage("gen", snapshot: .init(lastReadSeq: 0, unread: 4), eligible: { $0.topicId == "wanted" })
+        XCTAssertEqual(target?.id, "m4")
+        XCTAssertEqual(store.meta("gen")?.lastReadSeq, 0)
+        let missing = try await store.firstUnreadMessage("gen", snapshot: .init(lastReadSeq: 0, unread: 4), eligible: { $0.topicId == "absent" })
+        XCTAssertNil(missing)
+        XCTAssertEqual(store.meta("gen")?.unread, 4)
+    }
+}
+
+
+extension TreeReadTests {
+    func testDelayedHTTPReadAndTreeACKCannotUndoNewerUnreadRevision() async throws {
+        for mode in ["visible", "explicit", "tree"] {
+            let store = try ControlledURLProtocol.store(user: "me")
+            var d = try boot(); d.conversations[0].lastReadSeq = 0; d.conversations[0].lastMessageSeq = 70; d.conversations[0].unread = 70; d.conversations[0].readRevision = 1
+            store.seedForTesting(d)
+            let started = expectation(description: mode)
+            var held: ControlledURLProtocol?
+            ControlledURLProtocol.handler = { request in Task { @MainActor in held = request; started.fulfill() } }
+            let work = Task { @MainActor in
+                if mode == "visible" { store.markRead("gen", upTo: 38); await store.waitForReadForTesting("gen") }
+                else if mode == "explicit" { try await store.markConversationRead("gen") }
+                else { try await store.markTreeRead("gen") }
+            }
+            await fulfillment(of: [started], timeout: 3)
+            XCTAssertTrue(store.applyConfirmedRead("gen", seq: 4, revision: 3, legacyRevision: 1))
+            if mode == "tree" { held?.respond(#"{"marked":[{"conversationId":"gen","lastReadSeq":70,"readRevision":2}]}"#) }
+            else { held?.respond(#"{"lastReadSeq":38,"readRevision":2}"#) }
+            try await work.value
+            XCTAssertEqual(store.meta("gen")?.lastReadSeq, 4, mode)
+            XCTAssertEqual(store.meta("gen")?.readRevision, 3, mode)
+            XCTAssertEqual(store.meta("gen")?.unread, 66, mode)
+        }
+        ControlledURLProtocol.handler = nil
+    }
+
+    func testDelayedUnreadACKCannotUndoNewerReadRevision() async throws {
+        let store = try ControlledURLProtocol.store(user: "me")
+        var d = try boot(); d.conversations[0].lastReadSeq = 70; d.conversations[0].lastMessageSeq = 70; d.conversations[0].unread = 0; d.conversations[0].readRevision = 1
+        store.seedForTesting(d)
+        let started = expectation(description: "unread retained")
+        var held: ControlledURLProtocol?
+        ControlledURLProtocol.handler = { request in Task { @MainActor in held = request; started.fulfill() } }
+        defer { ControlledURLProtocol.handler = nil }
+        let work = Task { try await store.markUnread("gen", seq: 5) }
+        await fulfillment(of: [started], timeout: 3)
+        XCTAssertTrue(store.applyConfirmedRead("gen", seq: 70, revision: 3, legacyRevision: 1))
+        held?.respond(#"{"lastReadSeq":4,"readRevision":2}"#)
+        try await work.value
+        XCTAssertEqual(store.meta("gen")?.lastReadSeq, 70)
+        XCTAssertEqual(store.meta("gen")?.unread, 0)
+        XCTAssertEqual(store.meta("gen")?.readRevision, 3)
+    }
+
+    func testRevisionedReadCanLowerAndLegacyStillAdvancesMonotonically() throws {
+        let store = try ControlledURLProtocol.store(user: "me")
+        var d = try boot(); d.conversations[0].lastReadSeq = 50; d.conversations[0].lastMessageSeq = 70; d.conversations[0].unread = 20
+        store.seedForTesting(d)
+        XCTAssertFalse(store.applyConfirmedRead("gen", seq: 4, revision: nil, legacyRevision: -1))
+        XCTAssertEqual(store.meta("gen")?.lastReadSeq, 50)
+        XCTAssertTrue(store.applyConfirmedRead("gen", seq: 60, revision: nil, legacyRevision: -1))
+        XCTAssertTrue(store.applyConfirmedRead("gen", seq: 4, revision: 2, legacyRevision: -1))
+        XCTAssertEqual(store.meta("gen")?.lastReadSeq, 4)
+        XCTAssertFalse(store.applyConfirmedRead("gen", seq: 70, revision: 1, legacyRevision: 2))
+        XCTAssertEqual(store.meta("gen")?.lastReadSeq, 4)
+    }
+}
+
+
+extension TreeReadTests {
+    func testOwnMessageAccountRevisionBeforeMessageEventRejectsDelayedReadACK() async throws {
+        let store = try ControlledURLProtocol.store(user: "me")
+        var d = try boot(); d.conversations[0].lastReadSeq = 50; d.conversations[0].lastMessageSeq = 70; d.conversations[0].unread = 20; d.conversations[0].readRevision = 10
+        store.seedForTesting(d)
+        let started = expectation(description: "older read retained")
+        var held: ControlledURLProtocol?
+        ControlledURLProtocol.handler = { request in Task { @MainActor in held = request; started.fulfill() } }
+        defer { ControlledURLProtocol.handler = nil }
+        store.markRead("gen", upTo: 60)
+        await fulfillment(of: [started], timeout: 3)
+        // The account event can arrive before message.created updates the last-message summary.
+        store.socketEventForTesting("account.event", #"{"type":"read.updated","conversationId":"gen","seq":71,"readRevision":12}"#)
+        XCTAssertEqual(store.meta("gen")?.lastReadSeq, 71)
+        held?.respond(#"{"lastReadSeq":60,"readRevision":11}"#)
+        await store.waitForReadForTesting("gen")
+        XCTAssertEqual(store.meta("gen")?.lastReadSeq, 71)
+        XCTAssertEqual(store.meta("gen")?.readRevision, 12)
+        XCTAssertEqual(store.meta("gen")?.unread, 0)
+    }
+}

@@ -39,11 +39,12 @@ private struct ChatDividerYKey: PreferenceKey {
     static func reduce(value: inout CGFloat?, nextValue: () -> CGFloat?) { value = nextValue() ?? value }
 }
 
-private struct PendingVoiceSend {
+private struct PendingVoiceSend: Codable {
     let data: Data
     let durationMs: Int
     let waveform: [Double]
     let replyTo: String?
+    var topicId: String? = nil
     /// Una sola vista (el ① estaba prendido al grabar).
     var viewOnce = false
     /// Permiso de IA elegido para esta nota (se conserva al reintentar la subida).
@@ -110,6 +111,8 @@ struct ConversationView: View {
     @State private var sideForPerson: String?
     @State private var highlighted: String?
     @State private var staged: [LocalAttachment] = []
+    @State private var stagedGifs: [GifMediaItem] = []
+    @State private var pickingGifs = false
     @State private var uploadProgress: [UUID: Double] = [:]
     @State private var uploading = false
     @State private var askSide: MessageDTO?
@@ -146,8 +149,14 @@ struct ConversationView: View {
         var visibleSeqs: Set<Int> = []
         var seenSeqs: Set<Int> = []
     }
+    @State private var unreadJumpTask: Task<Void, Never>?
+    @State private var jumpingUnread = false
     @State private var gapFix: Task<Void, Never>?
     @State private var blockUserId: String?
+    @State private var draftFileURL: URL?
+    @State private var draftSave: Task<Void, Never>?
+    @State private var uploadedFiles: [UUID: AttachmentDTO] = [:]
+    @State private var uploadedGifs: [String: GifImport] = [:]
     @State private var recorder = VoiceRecorder()
     @State private var pendingVoice: PendingVoiceSend?
     /// Nota cuya subida falló (413, red…): se conserva para reintentar, no se pierde en silencio.
@@ -186,7 +195,7 @@ struct ConversationView: View {
     // gg dentro del chat (contrato 1-oct-2026, parte B).
     @State private var gg = GgChatState()
 
-    var body: some View {
+    @ViewBuilder private var chatPresentation: some View {
         let _ = PerfCounters.bump("chat.body")
         Group {
             if let d = store.data, let c = store.meta(conversationId) {
@@ -204,7 +213,6 @@ struct ConversationView: View {
         .onAppear {
             snapshotUnread()
             // Un hilo o sidechat abierto al lado recibe el cursor.
-            if embedded { DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { composerFocused = true } }
             store.openConversationId = conversationId
             // A los 15 min la grabación se detiene sola: se envía lo grabado (pasa por el permiso de IA).
             recorder.onAutoStop = { if let r = recorder.finish() { sendVoice(r.data, r.durationMs, r.waveform) } }
@@ -238,12 +246,34 @@ struct ConversationView: View {
         .sheet(item: $sheet) { s in sheetView(s) }
         .modifier(GgChatSheets(gg: $gg, source: ggSource, conversationId: conversationId, chatTitle: store.data.flatMap { d in store.meta(conversationId).map { Naming.title(d, $0) } } ?? "",
                                messages: store.conversations[conversationId]?.messages ?? [], onDraft: putGgDraft))
-        .task(id: conversationId) {
-            await store.ggSidePending([ggSource])
-            // Mensajes nuevos de otra persona: el API recalcula el número (con tope por fuente).
-            if let d = store.data, lastIsFromOther(d) { await store.ggSideRefreshPending(ggSource) }
+    }
+
+    private var composerLifecycle: some View {
+        chatPresentation
+        .task(id: "\(conversationId)|\(store.foregroundOwner)") { await restoreComposerDraft() }
+        .onChange(of: draft) { _, v in if v.isEmpty && gg.draftActive { gg.draftActive = false }; saveComposerDraft() }
+        .onChange(of: staged) { _, _ in saveComposerDraft() }
+        .onChange(of: stagedGifs) { _, _ in saveComposerDraft() }
+        .onChange(of: pendingVoice?.durationMs) { _, _ in saveComposerDraft() }
+        .onDisappear {
+            composerFocused = false; searchFocused = false
+            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+            if recorder.isActive, let r = recorder.finish() { sendVoice(r.data, r.durationMs, r.waveform) }
+            saveComposerDraft(immediate: true)
+            unreadJumpTask?.cancel(); unreadJumpTask = nil
+            gg.selecting = false; gg.selected = []; gg.quotes = []
         }
-        .onChange(of: draft) { _, v in if v.isEmpty && gg.draftActive { gg.draftActive = false } }
+        .onChange(of: store.callCenter.inCall) { _, active in
+            if active, recorder.isActive, let r = recorder.finish() { sendVoice(r.data, r.durationMs, r.waveform) }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
+            if recorder.isActive, let r = recorder.finish() { sendVoice(r.data, r.durationMs, r.waveform) }
+            saveComposerDraft(immediate: true)
+        }
+    }
+
+    var body: some View {
+        composerLifecycle
         .sheet(item: Binding(get: { askSide }, set: { askSide = $0 })) { m in
             NewSideSheet(conversationId: conversationId, message: m, preselect: sideForPerson.map { [$0] } ?? []) { id in sidePanel = id; sideForPerson = nil }
         }
@@ -289,7 +319,7 @@ struct ConversationView: View {
         .alert(L("ai.voice.title"), isPresented: $showingVoiceAIConsent, presenting: pendingVoice) { voice in
             Button(L("ai.voice.allow")) { uploadVoice(voice, aiConsent: true) }
             Button(L("ai.voice.without")) { uploadVoice(voice, aiConsent: false) }
-            Button(L("common.cancel"), role: .cancel) { pendingVoice = nil }
+            Button(L("common.cancel"), role: .cancel) {}
         } message: { _ in Text(L("ai.voice.message")) }
     }
 
@@ -651,10 +681,10 @@ struct ConversationView: View {
                 track.contentBottom = maxY
                 // La LazyVStack re-estima el alto de filas que aún no ha dibujado (tarjetas de tarea): tras ubicar el chat
                 // podía quedar pasada del final, con la pantalla en blanco. Si el hueco sigue un momento después, al final.
-                if positioned, viewportHeight > 0, maxY < viewportHeight - 80, gapFix == nil {
+                if positioned, readPauseID == nil, viewportHeight > 0, maxY < viewportHeight - 80, gapFix == nil {
                     gapFix = Task { @MainActor in
                         try? await Task.sleep(nanoseconds: 350_000_000)
-                        if !Task.isCancelled, track.contentBottom < viewportHeight - 80 { proxy.scrollTo(ChatNavIds.bottom, anchor: .bottom) }
+                        if !Task.isCancelled, readPauseID == nil, track.contentBottom < viewportHeight - 80 { proxy.scrollTo(ChatNavIds.bottom, anchor: .bottom) }
                         gapFix = nil
                     }
                 }
@@ -669,8 +699,7 @@ struct ConversationView: View {
                 }
             }
             .onPreferenceChange(ChatDividerYKey.self) { y in
-                guard let y else { return }
-                let above = y < 0
+                let above = y.map { $0 < 0 } ?? false
                 if above != dividerAbove { dividerAbove = above }
             }
             .overlay(alignment: .bottomTrailing) { jumpButtons(d, proxy) }
@@ -686,14 +715,14 @@ struct ConversationView: View {
                             .background(Theme.surface, in: RoundedRectangle(cornerRadius: 10))
                     }.accessibilityIdentifier("chat.retryRead")
                 } else if positioning { ProgressView().padding(10).background(Theme.surface) }
-                else if let n = unreadSnap?.unread, n > 0, dividerId != nil, dividerAbove {
-                    Button { jump(proxy, to: ChatNavIds.divider, anchor: .top) } label: {
-                        Text(L("chat.newAbove", ["n": n])).font(.footnote.weight(.semibold)).foregroundStyle(.white)
+                else if let n = store.meta(conversationId)?.unread, n > 0, dividerAbove || farFromBottom {
+                    Button { jumpToCurrentUnread(proxy) } label: {
+                        Text(activeTopic != nil ? L("chat.jumpNew") : L("chat.newAbove", ["n": n])).font(.footnote.weight(.semibold)).foregroundStyle(.white)
                             .padding(.horizontal, 12).padding(.vertical, 6)
                             .background(Capsule().fill(Theme.accentText))
                             .shadow(color: .black.opacity(0.15), radius: 4, y: 2)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.plain).disabled(jumpingUnread)
                     .padding(.top, 8)
                     .transition(.move(edge: .top).combined(with: .opacity))
                     .accessibilityLabel(L("chat.jumpNew"))
@@ -753,6 +782,7 @@ struct ConversationView: View {
             // Tocar el área de mensajes cierra el teclado (simultáneo: no quita el toque a mensajes, menciones ni menús).
             .simultaneousGesture(TapGesture().onEnded { if composerFocused { composerFocused = false } })
             .onChange(of: items.last?.id) { _, _ in
+                guard readPauseID == nil else { return }
                 // Lo mío siempre baja al final; lo de otros no arrastra a quien está leyendo más arriba (sale en el ⌄).
                 let mine: Bool = {
                     if case .pending = items.last { return true }
@@ -765,13 +795,18 @@ struct ConversationView: View {
             }
             // Cambiar de banderita lleva al final del chat filtrado.
             .onChange(of: topicFilter) { _, _ in
-                if autoFiltered { return }
+                if autoFiltered || readPauseID != nil { return }
                 DispatchQueue.main.async { proxy.scrollTo(ChatNavIds.bottom, anchor: .bottom) }
             }
             .onChange(of: composerFocused) { _, focused in
-                if focused { DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { proxy.scrollTo("bottom", anchor: .bottom) } }
+                if focused && atBottom && readPauseID == nil { DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { if readPauseID == nil && atBottom { proxy.scrollTo("bottom", anchor: .bottom) } } }
             }
             .onAppear { markReadIfVisible() }
+            .onChange(of: store.meta(conversationId)?.lastReadSeq) { old, new in
+                if let old, let new, new < old {
+                    track.seenSeqs = []; unreadSnap = .init(lastReadSeq: new, unread: store.meta(conversationId)?.unread ?? 0)
+                }
+            }
             .onChange(of: atBottom) { _, v in if v { markReadIfVisible() } }
             .onChange(of: scenePhase) { _, p in if p == .active { markReadIfVisible() } }
         }
@@ -961,7 +996,7 @@ struct ConversationView: View {
 
     /// Pide la página anterior (una a la vez) y deja a la vista el mensaje que estaba arriba.
     private func loadOlder(_ proxy: ScrollViewProxy, _ state: ConversationState) {
-        guard positioned, !positioning, !loadingOlder, state.hasMore else { return }
+        guard positioned, readPauseID == nil, !positioning, !loadingOlder, state.hasMore else { return }
         loadingOlder = true
         let anchor = state.messages.first?.id
         Task {
@@ -1048,8 +1083,46 @@ struct ConversationView: View {
         .padding(.bottom, 12)
     }
 
+    private func jumpToCurrentUnread(_ proxy: ScrollViewProxy) {
+        unreadJumpTask?.cancel()
+        let token = UUID(), stamp = store.sessionStamp
+        readPauseID = token; jumpingUnread = true; gapFix?.cancel(); gapFix = nil
+        unreadJumpTask = Task { @MainActor in
+            defer {
+                if readPauseID == token { readPauseID = nil; jumpingUnread = false; markReadIfVisible() }
+            }
+            do {
+                guard let meta = store.meta(conversationId) else { return }
+                let snapshot = ChatNav.Snapshot(lastReadSeq: meta.lastReadSeq, unread: meta.unread)
+                let target = try await store.firstUnreadMessage(conversationId, snapshot: snapshot, eligible: { m in
+                    let filter = activeTopic?.id
+                    return (filter == nil || TaskCard.matches(m, filter: filter, issues: store.issues)) && !TopicRules.hiddenInGeneral(m, filter: filter, showAll: showAll, active: activeTopicIds, revealed: revealed)
+                })
+                try store.requireSession(stamp)
+                guard readPauseID == token else { return }
+                guard let target else { store.show(activeTopic != nil || !showAll ? L("chat.unreadOtherView") : L("chat.unreadNone")); return }
+                // Wait for layout after history loading and keyboard insets, then check an actual message row.
+                highlighted = target.id
+                for _ in 0..<5 {
+                    try await Task.sleep(nanoseconds: 180_000_000)
+                    guard readPauseID == token, !Task.isCancelled else { return }
+                    proxy.scrollTo(target.id, anchor: .center)
+                    try await Task.sleep(nanoseconds: 140_000_000)
+                    if track.visibleSeqs.contains(target.seq) {
+                        try await Task.sleep(nanoseconds: 200_000_000)
+                        return
+                    }
+                }
+                store.show(L("chat.unreadJumpFailed"))
+            } catch {
+                if !Task.isCancelled, stamp == store.sessionStamp { store.show(L("chat.unreadJumpFailed")) }
+            }
+        }
+    }
+
     /// Salto animado; en una LazyVStack larga la animación se queda corta (alturas estimadas): se remata sin animar.
     private func jump(_ proxy: ScrollViewProxy, to id: String, anchor: UnitPoint) {
+        unreadJumpTask?.cancel(); unreadJumpTask = nil; jumpingUnread = false
         let pause = UUID()
         readPauseID = pause
         withAnimation(.easeInOut(duration: 0.3)) { proxy.scrollTo(id, anchor: anchor) }
@@ -1059,7 +1132,7 @@ struct ConversationView: View {
                 proxy.scrollTo(id, anchor: anchor)
             }
             try? await Task.sleep(nanoseconds: 150_000_000)
-            if readPauseID == pause { readPauseID = nil; markReadIfVisible() }
+            if readPauseID == pause, !Task.isCancelled { readPauseID = nil; markReadIfVisible() }
         }
     }
 
@@ -1135,7 +1208,7 @@ struct ConversationView: View {
             let quoted = m.replyTo.flatMap { byId[$0] }
             let author = Naming.person(d, m.authorId)
             let bubble = MessageBubble(
-                text: m.deletedAt != nil ? L("chat.deleted") : m.body,
+                text: m.deletedAt != nil ? L("chat.deleted") : MessageCopy.body(m.visibleBody, attachments: m.attachments),
                 leading: mine || !ChatGrouping.showsAvatars(c.kind) ? .none
                     : showAuthor ? .person(name: author?.name ?? "?", photo: author?.avatarUrl, id: m.authorId, agent: author?.kind == "agent") : .spacer,
                 authorColor: PersonColor.text(m.authorId),
@@ -1149,7 +1222,7 @@ struct ConversationView: View {
                     : m.mergedFrom.map { id in store.meta(id).map { L("lin.resultOf", ["name": Naming.title(d, $0)]) } ?? L("lin.resultHidden") },
                 pinned: store.pins[conversationId]?.contains(m.id) == true,
                 linkify: m.deletedAt == nil && m.kind == "text",
-                linkPreview: m.deletedAt == nil ? m.linkPreview : nil,
+                linkPreview: m.deletedAt == nil && !MessageCopy.body(m.visibleBody, attachments: m.attachments).isEmpty ? m.linkPreview : nil,
                 attachments: m.deletedAt == nil ? m.attachments : [],
                 messageId: m.id, conversationId: conversationId,
                 mentions: m.deletedAt == nil ? m.mentions + RefText.tokens(m.refs) : [],
@@ -1321,7 +1394,10 @@ struct ConversationView: View {
             }
         }
         Divider()
-        Button { UIPasteboard.general.string = m.body; store.show(L("toast.copied")) } label: { Label(L("menu.copyText"), systemImage: "doc.on.doc") }
+        if m.kind == "text", !m.viewOnce, m.deletedAt == nil {
+            Button { MessageCopy.write(MessageCopy.body(m.visibleBody, attachments: m.attachments), store: store) } label: { Label(L("copy.message"), systemImage: "doc.on.doc") }
+                .disabled(MessageCopy.body(m.visibleBody, attachments: m.attachments).isEmpty)
+        }
         Button { UIPasteboard.general.string = "\(conversationLink(conversationId))?m=\(m.seq)"; store.show(L("toast.linkCopied")) } label: {
             Label(L("menu.copyLink"), systemImage: "link")
         }
@@ -1375,7 +1451,7 @@ struct ConversationView: View {
         }
         if mine {
             Divider()
-            Button { editing = m; replyTo = nil; draftMentions = m.mentions; draftCursor = (m.body as NSString).length; draft = m.body; composerFocused = true } label: { Label(L("menu.edit"), systemImage: "pencil") }
+            Button { editing = m; replyTo = nil; draftMentions = m.mentions; draftCursor = (m.visibleBody as NSString).length; draft = m.visibleBody; composerFocused = true } label: { Label(L("menu.edit"), systemImage: "pencil") }
             Button(role: .destructive) { confirmDelete = m } label: { Label(L("menu.delete"), systemImage: "trash") }
         }
     }
@@ -1432,6 +1508,26 @@ struct ConversationView: View {
                                   askSide = store.conversations[conversationId]?.messages.last { !$0.isSystem && $0.deletedAt == nil && $0.kind == "text" }
                               })
             }
+            if let voice = pendingVoice {
+                LocalVoicePreview(data: voice.data, durationMs: voice.durationMs, waveform: voice.waveform, onDiscard: { pendingVoice = nil; saveComposerDraft() }, onSend: { showingVoiceAIConsent = true }).disabled(uploading)
+            }
+            if draft.utf16.count > LongMessageRules.maxUTF16 {
+                HStack {
+                    Text(L("long.toFileHint")).font(.caption)
+                    Spacer()
+                    Button(L("long.toFile")) { convertLongDraft() }.disabled(uploading || editing != nil || commenting || viewOnceNext)
+                }.padding(.horizontal, 12)
+            }
+            ForEach(staged.filter { $0.sourceText != nil }) { file in
+                HStack {
+                    Text(file.name).font(.caption).lineLimit(1)
+                    Spacer()
+                    Button(L("long.backEdit")) {
+                        guard draft.isEmpty, let original = file.sourceText else { store.show(L("long.keepDraft")); return }
+                        staged.removeAll { $0.id == file.id }; draft = original; draftCursor = original.utf16.count
+                    }
+                }.padding(.horizontal, 12)
+            }
             if gg.draftActive { GgDraftBar { gg.draftActive = false } }
             if let b = gg.bubbles, !b.isEmpty {
                 GgReplyBubbles(drafts: b, onPick: { putGgDraft($0.text); gg.bubbles = nil }, onClose: { gg.bubbles = nil })
@@ -1445,6 +1541,7 @@ struct ConversationView: View {
             ScheduledStrip(conversationId: conversationId) { showScheduled = true }
             SleepNoticeBar(conversation: c, typing: !trimmed.isEmpty && editing == nil, onSchedule: scheduleDraft)
             StagedAttachments(staged: $staged, progress: uploadProgress)
+            StagedGifs(items: $stagedGifs).disabled(uploading)
             if let v = failedVoice {
                 // La nota no se subió: queda aquí para reintentar o descartar.
                 HStack(spacing: 10) {
@@ -1467,12 +1564,14 @@ struct ConversationView: View {
                 } else {
                 // «＋»: fotos, archivos y, aparte, evento o asunto del chat.
                 if editing == nil && !commenting {
-                    AttachButton(staged: $staged, onEvent: embedded ? nil : { sheet = .newEvent(nil) },
+                    AttachButton(staged: $staged, otherStagedCount: stagedGifs.count, onEvent: embedded ? nil : { sheet = .newEvent(nil) },
                                  onIssue: embedded || !canOpenIssues ? nil : { sheet = .newIssue(nil) },
                                  onMeeting: embedded ? nil : { now in sheet = .meeting(now: now) },
                                  // Correo en el chat (docs/CORREO.md): ＋ › Correo con este chat como destino; WhatsApp va a su pantalla.
                                  onMail: embedded || !store.mailEnabled || Naming.isGuest(d, c) ? nil : { store.push(.mailBox(conversationId: conversationId)) },
-                                 onWhatsApp: embedded || !store.mailEnabled || Naming.isGuest(d, c) ? nil : { store.push(.whatsapp) }) { store.show($0) }
+                                 onWhatsApp: embedded || !store.mailEnabled || Naming.isGuest(d, c) ? nil : { store.push(.whatsapp) },
+                                 onGifs: { pickingGifs = true }) { store.show($0) }
+                        .disabled(uploading)
                 }
                 if editing == nil && !commenting && !embedded { ViewOnceToggle(on: $viewOnceNext) }
                 // ✨: si el último mensaje es de la otra persona, 3 respuestas de gg sobre la caja (solo al tocarlo, no solas).
@@ -1491,7 +1590,7 @@ struct ConversationView: View {
                 ComposerTextView(text: $draft, mentions: $draftMentions, cursor: $draftCursor, focused: $composerFocused,
                                  placeholder: composerPlaceholder(d, c), accessibilityLabel: L("chat.composerLabel"),
                                  onChange: { new in if !new.isEmpty && editing == nil { store.userIsTyping(conversationId) } },
-                                 onPasteAttachments: editing == nil && !commenting && !recorder.isActive ? { stagePasted($0) } : nil)
+                                 onPasteAttachments: editing == nil && !commenting && !recorder.isActive && !uploading ? { stagePasted($0) } : nil)
                     .overlay(alignment: .topLeading) {
                         if draft.isEmpty {
                             Text(composerPlaceholder(d, c)).font(.body).foregroundStyle(Theme.textSecondary.opacity(0.8))
@@ -1502,7 +1601,7 @@ struct ConversationView: View {
                     .overlay(RoundedRectangle(cornerRadius: 20).stroke(Theme.textSecondary.opacity(0.25)))
                 }
                 // Compositor vacío: micrófono (mantener pulsado para grabar). Con texto o adjuntos: enviar.
-                if editing == nil && !commenting && trimmed.isEmpty && staged.isEmpty && !uploading && recorder.state != .locked {
+                if editing == nil && !commenting && trimmed.isEmpty && staged.isEmpty && stagedGifs.isEmpty && !uploading && pendingVoice == nil && failedVoice == nil && recorder.state != .locked {
                     VoiceRecordButton(recorder: recorder, onSend: sendVoice)
                 } else if !recorder.isActive {
                 // Con texto (sin adjuntos): 🕒 para programar el envío.
@@ -1514,9 +1613,9 @@ struct ConversationView: View {
                         .font(.system(size: 17, weight: .bold))
                         .foregroundStyle(.white)
                         .frame(width: 40, height: 40)
-                        .background(Circle().fill(trimmed.isEmpty && staged.isEmpty ? Theme.textSecondary.opacity(0.35) : Theme.bubbleMine))
+                        .background(Circle().fill(trimmed.isEmpty && staged.isEmpty && stagedGifs.isEmpty ? Theme.textSecondary.opacity(0.35) : Theme.bubbleMine))
                 }
-                .disabled((trimmed.isEmpty && staged.isEmpty) || uploading)
+                .disabled((trimmed.isEmpty && staged.isEmpty && stagedGifs.isEmpty) || uploading)
                 .accessibilityLabel(editing != nil ? L("edit.save") : L("chat.send"))
                 .accessibilityIdentifier("composer.send")
                 // Mantener presionado ➤: el mismo menú de programar.
@@ -1530,12 +1629,18 @@ struct ConversationView: View {
         .background(Theme.surface.ignoresSafeArea(edges: .bottom))
         .sheet(isPresented: $pickingSchedule) { PickWhenSheet(onPick: scheduleDraft) }
         .sheet(isPresented: $showScheduled) { ScheduledSheet(conversationId: conversationId) }
+        .sheet(isPresented: $pickingGifs) {
+            GifMemePicker(onGif: { item in
+                guard staged.count + stagedGifs.count < AttachmentRules.maxPerMessage else { store.show(L("att.max", ["n": AttachmentRules.maxPerMessage])); return }
+                if !stagedGifs.contains(where: { $0.id == item.id }) { stagedGifs.append(item) }
+            }, onMeme: { stagePasted([$0]) })
+        }
     }
 
     /// Imágenes pegadas: a la misma bandeja de adjuntos que Fotos (con sus límites de cantidad y tamaño).
     private func stagePasted(_ list: [LocalAttachment]) {
         for a in list {
-            guard staged.count < AttachmentRules.maxPerMessage else { store.show(L("att.max", ["n": AttachmentRules.maxPerMessage])); return }
+            guard staged.count + stagedGifs.count < AttachmentRules.maxPerMessage else { store.show(L("att.max", ["n": AttachmentRules.maxPerMessage])); return }
             if a.tooBig { store.show(L("att.tooBig", ["name": a.name])); continue }
             staged.append(a)
         }
@@ -1544,7 +1649,7 @@ struct ConversationView: View {
 
     /// Solo se programa texto (con menciones y respuesta); adjuntos, notas de voz y respuestas privadas salen al momento.
     private func canSchedule(_ trimmed: String) -> Bool {
-        editing == nil && !commenting && !viewOnceNext && !trimmed.isEmpty && staged.isEmpty && !uploading && store.privateReplies[conversationId] == nil
+        editing == nil && !commenting && !viewOnceNext && !trimmed.isEmpty && staged.isEmpty && stagedGifs.isEmpty && !uploading && store.privateReplies[conversationId] == nil
     }
 
     /// Programa el borrador: el compositor se vacía y el aviso trae «Deshacer» (devuelve el texto).
@@ -1565,24 +1670,28 @@ struct ConversationView: View {
     /// Keep the recording on-device until the person chooses whether to use third-party AI.
     private func sendVoice(_ data: Data, _ durationMs: Int, _ waveform: [Double]) {
         guard !uploading, pendingVoice == nil else { return }
-        pendingVoice = PendingVoiceSend(data: data, durationMs: durationMs, waveform: waveform, replyTo: replyTo?.id, viewOnce: viewOnceNext)
+        pendingVoice = PendingVoiceSend(data: data, durationMs: durationMs, waveform: waveform, replyTo: replyTo?.id, topicId: activeTopic?.id, viewOnce: viewOnceNext)
         viewOnceNext = false
-        showingVoiceAIConsent = true
+        saveComposerDraft()
     }
 
     private func uploadVoice(_ voice: PendingVoiceSend, aiConsent: Bool) {
-        pendingVoice = nil
+        guard !uploading else { return }
         uploading = true
         var voice = voice
         voice.aiConsent = aiConsent
+        let session = store.sessionStamp
         Task {
             defer { uploading = false }
             do {
                 let a = try await store.api.uploadVoiceNote(conversationId, data: voice.data, durationMs: voice.durationMs, waveform: voice.waveform, aiConsent: aiConsent)
-                store.send(conversationId, body: "", replyTo: voice.replyTo, attachments: [a], topicId: activeTopic?.id, viewOnce: voice.viewOnce)
+                guard session == store.sessionStamp, !Task.isCancelled else { return }
+                store.send(conversationId, body: "", replyTo: voice.replyTo, attachments: [a], topicId: voice.topicId, viewOnce: voice.viewOnce)
+                pendingVoice = nil; failedVoice = nil; saveComposerDraft()
                 replyTo = nil
             } catch {
-                failedVoice = voice
+                guard session == store.sessionStamp else { return }
+                pendingVoice = nil; failedVoice = voice; saveComposerDraft()
                 store.show(VoiceRules.uploadErrorText(error))
             }
         }
@@ -1626,9 +1735,49 @@ struct ConversationView: View {
         }
     }
 
+    private func restoreComposerDraft() async {
+        let stamp = store.sessionStamp
+        let desired = (store.me?.id).flatMap { DraftStorage.url(server: store.api.baseURL.absoluteString, account: $0, conversation: conversationId) }
+        if let current = draftFileURL, current != desired {
+            saveComposerDraft(immediate: true)
+            draft = ""; draftMentions = []; staged = []; stagedGifs = []; pendingVoice = nil; failedVoice = nil
+            uploadedFiles = [:]; uploadedGifs = [:]; recorder.cancel(); composerFocused = false
+            draftFileURL = nil
+        }
+        guard let desired, draftFileURL == nil else { return }
+        draftFileURL = desired
+        recorder.canUseAudio = { !store.callCenter.inCall }
+        let saved = await Task.detached { DraftStorage.load(desired) }.value
+        guard stamp == store.sessionStamp, !Task.isCancelled, let saved else { return }
+        if draft.isEmpty && staged.isEmpty && stagedGifs.isEmpty {
+            draft = saved.text; draftMentions = saved.mentions; staged = saved.files; stagedGifs = saved.gifs
+            if let v = saved.voice { pendingVoice = PendingVoiceSend(data: v.data, durationMs: v.durationMs, waveform: v.waveform, replyTo: v.replyTo, topicId: v.topicId, viewOnce: v.viewOnce, aiConsent: v.aiConsent) }
+        }
+    }
+    private func saveComposerDraft(immediate: Bool = false) {
+        guard !embedded, editing == nil, !commenting, let url = draftFileURL else { return }
+        let voice = pendingVoice ?? failedVoice
+        let saved = ComposerDraft(text: draft, mentions: draftMentions, files: staged, gifs: stagedGifs, voice: voice.map { VoiceDraft(data: $0.data, durationMs: $0.durationMs, waveform: $0.waveform, replyTo: $0.replyTo, topicId: $0.topicId, viewOnce: $0.viewOnce, aiConsent: $0.aiConsent) })
+        draftSave?.cancel()
+        let generation = DraftStorage.reserve(url)
+        draftSave = Task {
+            if !immediate { try? await Task.sleep(nanoseconds: 350_000_000) }
+            guard !Task.isCancelled else { return }
+            do { try await Task.detached { try DraftStorage.save(saved, to: url, generation: generation) }.value } catch { store.show(L("draft.saveFailed")) }
+        }
+    }
+    private func convertLongDraft() {
+        guard !viewOnceNext, staged.count + stagedGifs.count < AttachmentRules.maxPerMessage else { store.show(L("vo.onlyMedia")); return }
+        guard let file = LongMessageRules.attachment(draft) else { store.show(L("long.tooLarge")); return }
+        staged.append(file); draft = ""; draftMentions = []; draftCursor = 0
+        saveComposerDraft()
+    }
+
     private func submit() {
         let body = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !body.isEmpty || !staged.isEmpty, !uploading else { return }
+        guard draft.utf16.count <= LongMessageRules.maxUTF16 else { store.show(L("long.toFileHint")); return }
+        guard !body.isEmpty || !staged.isEmpty || !stagedGifs.isEmpty, !uploading else { return }
+        guard staged.count + stagedGifs.count <= AttachmentRules.maxPerMessage else { store.show(L("att.max", ["n": AttachmentRules.maxPerMessage])); return }
         if let ce = commentingEvent {
             guard !body.isEmpty else { return }
             commentingEvent = nil
@@ -1649,34 +1798,62 @@ struct ConversationView: View {
             return
         }
         if let e = editing {
-            editing = nil
-            draft = ""
-            let ms = draftMentions
-            draftMentions = []
-            if body != e.body || ms != e.mentions { act { try await store.editMessage(e.id, body: body, mentions: ms) } }
+            let originalDraft = draft, ms = draftMentions, session = store.sessionStamp
+            uploading = true
+            Task {
+                defer { uploading = false }
+                do {
+                    if body != e.visibleBody || ms != e.mentions { try await store.editMessage(e.id, body: body, mentions: ms) }
+                    guard session == store.sessionStamp else { return }
+                    editing = nil
+                    if draft == originalDraft { draft = ""; draftMentions = [] }
+                } catch { if session == store.sessionStamp { store.show(L10n.errorText(error)) } }
+            }
             return
         }
-        if !staged.isEmpty {
+        if !staged.isEmpty || !stagedGifs.isEmpty {
             // Adjuntos: se suben (con progreso) y luego se envía el mensaje con sus ids.
-            let files = staged, text = draft, reply = replyTo?.id, ms = draftMentions, topic = activeTopic?.id, vo = viewOnceNext
+            let files = staged, gifs = stagedGifs, text = draft, reply = replyTo?.id, ms = draftMentions, topic = activeTopic?.id, vo = viewOnceNext
             viewOnceNext = false
             uploading = true
+            let session = store.sessionStamp
             Task {
                 defer { uploading = false; uploadProgress = [:] }
                 var done: [AttachmentDTO] = []
+                var attributions = files.compactMap(\.attribution)
                 for f in files {
+                    guard store.sessionStamp == session else { return }
                     uploadProgress[f.id] = 0
                     do {
-                        let a = try await store.api.uploadAttachment(conversationId, f) { p in Task { @MainActor in uploadProgress[f.id] = p } }
+                        let a: AttachmentDTO
+                        if let saved = uploadedFiles[f.id] { a = saved }
+                        else { a = try await store.api.uploadAttachment(conversationId, f) { p in Task { @MainActor in uploadProgress[f.id] = p } }; uploadedFiles[f.id] = a }
+                        guard store.sessionStamp == session else { return }
                         done.append(a)
                     } catch {
                         // Los adjuntos siguen en el compositor para reintentar; el aviso dice por qué.
+                        viewOnceNext = vo
                         store.show(AttachmentRules.uploadErrorText(error, name: f.name))
                         return
                     }
                 }
-                store.send(conversationId, body: text, replyTo: reply, attachments: done, mentions: ms, topicId: topic, viewOnce: vo)
-                staged = []
+                for gif in gifs {
+                    guard store.sessionStamp == session else { return }
+                    do {
+                        let imported: GifImport
+                        if let saved = uploadedGifs[gif.id] { imported = saved }
+                        else { imported = try await store.api.importGif(conversationId, item: gif); uploadedGifs[gif.id] = imported }
+                        guard store.sessionStamp == session else { return }
+                        done.append(imported.attachment)
+                        if imported.attachment.provenance == nil, let attribution = imported.attribution { attributions.append(attribution) }
+                    } catch {
+                        viewOnceNext = vo
+                        store.show(L10n.errorText(error)); return
+                    }
+                }
+                guard store.sessionStamp == session else { return }
+                guard store.send(conversationId, body: GifMediaRules.body(text, attributions: attributions), replyTo: reply, attachments: done, mentions: ms, topicId: topic, viewOnce: vo) != nil else { viewOnceNext = vo; return }
+                staged = []; stagedGifs = []; uploadedFiles = [:]; uploadedGifs = [:]
                 draftMentions = []
                 draft = ""
                 replyTo = nil
@@ -1866,6 +2043,13 @@ struct MessageBubble: View {
                     if !attachments.isEmpty { AttachmentsBlock(attachments: attachments, mine: mine, messageId: messageId, conversationId: conversationId) }
                     if !text.isEmpty || attachments.isEmpty {
                     Group {
+                        if collapsed {
+                            Text(String(text.prefix(1800))).font(.body)
+                        } else if !CodeMessages.blocks(text).isEmpty {
+                            CodeMessageBody(text: text, mentions: mentions, mine: mine, linkify: linkify, highlight: highlight) { id in
+                                if let u = URL(string: "chaggu-mention://\(id)") { openURL(u) }
+                            }
+                        } else
                         if !mentions.isEmpty || highlight != nil || !GGMention.typedRanges(in: text).isEmpty || (!italic && MessageFormat.hasFormat(text)) {
                             // Cada mención con el color de SU persona (y tocable); los enlaces http con el color de enlace.
                             RichMessageText(text: text, mentions: mentions, mine: mine, linkify: linkify, highlight: highlight,
@@ -1884,14 +2068,15 @@ struct MessageBubble: View {
                     // Con fotos la burbuja se ciñe a ellas; el texto conserva su margen.
                     .padding(.horizontal, attachments.isEmpty ? 0 : 9).padding(.bottom, attachments.isEmpty ? 0 : 4)
                     if long {
-                        Button { if inLazyStack { reading = true } else { withAnimation(.easeInOut(duration: 0.2)) { expanded.toggle() } } } label: {
-                            Text(expanded ? L("chat.readLess") : L("chat.readMore")).font(.subheadline.weight(.semibold))
+                        Button { reading = true } label: {
+                            Text(L("chat.readMore")).font(.subheadline.weight(.semibold))
                                 .foregroundStyle(mine ? Color.white : Theme.accentText)
                                 .padding(.vertical, 2).contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                         .accessibilityIdentifier("msg.readMore.\(messageId ?? "")")
                         .sheet(isPresented: $reading) { LongTextSheet(text: text, author: author?.name) }
+                        .onChange(of: reading) { _, open in if open { UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil) } }
                     }
                     }
                     if let linkPreview { LinkPreviewCard(preview: linkPreview, mine: mine) }
@@ -1948,8 +2133,8 @@ struct MessageBubble: View {
     }
 
     /// Muy largo y sin búsqueda activa (con búsqueda se ve entero para que se vea lo resaltado).
-    private var long: Bool { highlight == nil && !italic && LongText.isLong(text) }
-    private var collapsed: Bool { long && (!expanded || inLazyStack) }
+    private var long: Bool { !italic && LongText.isLong(text) }
+    private var collapsed: Bool { long }
     /// En la pila perezosa, plegado por alto: las líneas que caben en el tope de la fila (≈ 60 % de lo visible) con la
     /// letra actual; una fila más alta que la pantalla dejaba la LazyVStack re-estimando sin fin.
     private var collapsedLines: Int { inLazyStack ? ChatRowCapRule.lines(cap: rowCap > 0 ? rowCap : ChatRowCapRule.cap(viewport: 0)) : LongText.collapsedLines }
@@ -2026,11 +2211,11 @@ struct LineageBar: View {
 /// largos (se cargaron muchas páginas) vuelve a la perezosa para no dibujar cientos de filas en cada tecla.
 /// Mensajes muy largos: más de 40 líneas o 3000 caracteres se muestran plegados a 30 líneas con «Ver más».
 enum LongText {
-    static let collapsedLines = 30
+    static let collapsedLines = 8
     static func isLong(_ s: String) -> Bool {
-        if s.utf16.count > 3000 { return true }
+        if s.utf16.count > 1600 { return true }
         var lines = 1
-        for c in s.utf16 where c == 10 { lines += 1; if lines > 40 { return true } }
+        for c in s.utf16 where c == 10 { lines += 1; if lines > 18 { return true } }
         return false
     }
 }
@@ -2112,20 +2297,21 @@ struct LazyRowCap: ViewModifier {
 
 /// El texto completo de un mensaje muy largo (desde la pila perezosa).
 struct LongTextSheet: View {
+    @Environment(AppStore.self) private var store
     @Environment(\.dismiss) private var dismiss
     let text: String
     let author: String?
+    var monospaced = false
     var body: some View {
         NavigationStack {
-            ScrollView {
-                Text(text).font(.body).textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(16)
-                    .accessibilityIdentifier("longText.body")
-            }
+            ReaderTextView(text: text, identifier: "longText.body", monospaced: monospaced)
+                .padding(.horizontal, 10)
             .navigationTitle(author ?? L("chat.readMore"))
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button(L("common.close")) { dismiss() }.accessibilityIdentifier("longText.close") } }
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button(L("copy.message")) { MessageCopy.write(text, store: store) }.accessibilityIdentifier("longText.copy") }
+                ToolbarItem(placement: .confirmationAction) { Button(L("common.close")) { dismiss() }.accessibilityIdentifier("longText.close") }
+            }
         }
     }
 }

@@ -84,8 +84,7 @@ final class ChatScrollUITests: XCTestCase {
         sleep(2)
         shot(tag + "171-01-abierto")
         let screen = app.windows.firstMatch.frame
-        func covers() -> Bool { long.frame.minY < screen.midY - 100 && long.frame.maxY > screen.midY + 100 }
-        // Más de 40 líneas: llega plegado a 30 con «Ver más». Se despliega (120 líneas, mucho más alto que la pantalla).
+        // Mensajes largos llegan plegados a 8 líneas y abren un lector con el cuerpo completo.
         let more = app.buttons["msg.readMore.\(f.longMessageId)"].firstMatch
         XCTAssertTrue(more.waitForExistence(timeout: 5), "el mensaje muy largo trae «Ver más»")
         XCTAssertEqual(more.label, "Ver más")
@@ -93,70 +92,22 @@ final class ChatScrollUITests: XCTestCase {
             if more.frame.midY < screen.height * 0.5 { drag(app, from: 0.38, to: 0.62) } else { drag(app, from: 0.62, to: 0.38) }
         }
         let collapsedH = long.frame.height
-        if lazy {
-            // Pila perezosa: «Ver más» abre el texto completo en una hoja (la fila no se despliega: la LazyVStack entraba en
-            // un bucle re-estimando una fila más alta que la pantalla). Luego el chat se recorre hasta el primero y el último.
-            more.tap()
-            let body = app.descendants(matching: .any)["longText.body"].firstMatch
-            XCTAssertTrue(body.waitForExistence(timeout: 5), "la hoja con el texto completo")
-            XCTAssertTrue(body.label.contains("Línea 120"), "trae las 120 líneas")
-            shot("lazy-171-02-hoja")
-            app.buttons["longText.close"].tap()
-            XCTAssertTrue(more.waitForExistence(timeout: 5))
-            XCTAssertEqual(long.frame.height, collapsedH, accuracy: 4, "la fila sigue plegada")
-            let first = text(app, "corto antes 1")
-            for _ in 0..<25 where !(first.exists && first.isHittable) { drag(app, from: 0.35, to: 0.70) }
-            XCTAssertTrue(first.exists && first.isHittable, "llega al primero de antes del largo")
-            let last = text(app, "ÚLTIMO MENSAJE CORTO")
-            for _ in 0..<25 where !(last.exists && last.isHittable) { drag(app, from: 0.70, to: 0.30) }
-            XCTAssertTrue(last.exists && last.isHittable, "llega al último mensaje")
-            shot("lazy-171-04-final")
-            return
-        }
+        // Both stacks keep the row bounded and open the full, independently scrolling text.
         more.tap()
-        let expanded = app.buttons["msg.readMore.\(f.longMessageId)"].firstMatch
-        XCTAssertTrue(NSPredicate(format: "label == 'Ver menos'").evaluate(with: expanded) || { sleep(1); return expanded.label == "Ver menos" }(),
-                      "«Ver más» cambia a «Ver menos»")
-        XCTAssertGreaterThan(long.frame.height, collapsedH * 2.5, "desplegado muestra las 120 líneas (\(collapsedH) → \(long.frame.height))")
-        XCTAssertGreaterThan(long.frame.height, screen.height * 1.5, "más alto que la pantalla")
-        // Llevar su final a la parte baja de la pantalla, para cruzarlo entero hacia arriba.
-        for _ in 0..<16 where long.frame.maxY > screen.height * 0.8 { drag(app, from: 0.72, to: 0.38) }
-        // Llevar el mensaje largo a cubrir el centro, venga de arriba o de abajo.
-        for _ in 0..<16 where !covers() {
-            if long.frame.maxY < screen.midY { drag(app, from: 0.38, to: 0.72) } else { drag(app, from: 0.72, to: 0.38) }
-        }
-        XCTAssertTrue(covers(), "el mensaje largo cubre la pantalla: \(long.frame)")
-        shot(tag + "171-02-largo-en-pantalla")
-        // Cruzar el largo en ambos sentidos, cada arrastre EMPEZANDO sobre la burbuja: tiene que moverse.
-        func cross(forward: Bool) -> Int {
-            var moved = 0
-            let y: CGFloat = forward ? 0.62 : 0.34
-            for _ in 0..<16 {
-                let start = CGPoint(x: screen.width * 0.55, y: screen.height * y)
-                guard long.frame.contains(start) else { break }
-                let before = long.frame.minY
-                drag(app, from: y, to: forward ? 0.30 : 0.66)
-                let delta = abs(long.frame.minY - before)
-                XCTAssertGreaterThan(delta, 80, "un arrastre que empieza sobre la burbuja larga desplaza el chat (\(before) → \(long.frame.minY))")
-                if delta > 80 { moved += 1 }
-            }
-            return moved
-        }
-        // Hacia arriba del chat, cruzando todo el largo (empezando por su final), hasta el primero de antes.
-        XCTAssertGreaterThan(cross(forward: false), 3, "hacia arriba del chat, sobre la burbuja larga")
+        let body = app.textViews["longText.body"].firstMatch
+        XCTAssertTrue(body.waitForExistence(timeout: 5), "lector con el texto completo")
+        XCTAssertTrue((body.value as? String)?.contains("Línea 120") == true, "trae las 120 líneas")
+        shot(tag + "171-02-lector")
+        body.swipeUp()
+        app.buttons["longText.close"].tap()
+        XCTAssertTrue(more.waitForExistence(timeout: 5))
+        XCTAssertEqual(long.frame.height, collapsedH, accuracy: 4, "la fila sigue plegada")
         let first = text(app, "corto antes 1")
-        for _ in 0..<20 where !(first.exists && first.isHittable) { drag(app, from: 0.35, to: 0.70) }
+        for _ in 0..<25 where !(first.exists && first.isHittable) { drag(app, from: 0.35, to: 0.70) }
         XCTAssertTrue(first.exists && first.isHittable, "llega al primero de antes del largo")
-        shot(tag + "171-03-arriba")
-        // Y de vuelta hacia abajo, cruzando todo el largo desde su inicio: nada se pierde, hasta el último.
-        for _ in 0..<16 where !covers() { drag(app, from: 0.72, to: 0.38) }
-        XCTAssertTrue(covers(), "de vuelta sobre el largo")
-        XCTAssertGreaterThan(cross(forward: true), 3, "hacia abajo del chat, sobre la burbuja larga")
         let last = text(app, "ÚLTIMO MENSAJE CORTO")
-        for _ in 0..<10 where !(last.exists && last.isHittable) { drag(app, from: 0.62, to: 0.30) }
+        for _ in 0..<25 where !(last.exists && last.isHittable) { drag(app, from: 0.70, to: 0.30) }
         XCTAssertTrue(last.exists && last.isHittable, "llega al último mensaje")
-        XCTAssertTrue(text(app, "corto después 1").exists, "el primero después del largo sigue ahí")
-        XCTAssertFalse(app.descendants(matching: .any)["composer.replyBar"].exists, "arrastrar en vertical no abre la respuesta")
         shot(tag + "171-04-final")
     }
 

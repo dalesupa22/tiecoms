@@ -42,11 +42,14 @@ enum AttachmentRules {
 }
 
 /// Archivo local listo para subir.
-struct LocalAttachment: Identifiable, Equatable {
+struct LocalAttachment: Identifiable, Equatable, Codable {
     var id = UUID()
     var name: String
     var contentType: String
     var data: Data
+    var attribution: String? = nil
+    var provenance: AttachmentProvenance? = nil
+    var sourceText: String? = nil
     var sizeBytes: Int { data.count }
     var isImage: Bool { contentType.hasPrefix("image/") }
     var isVideo: Bool { contentType.hasPrefix("video/") }

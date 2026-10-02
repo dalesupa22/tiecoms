@@ -304,6 +304,7 @@ struct QuickAddIssue: View {
     @State private var conv = ""
     @State private var title = ""
     @State private var ownerId = ""
+    @State private var assigneeIds: Set<String> = []
     @State private var due: String?
     @State private var pickDate = false
     @State private var busy = false
@@ -340,7 +341,7 @@ struct QuickAddIssue: View {
                     ChipFlow(spacing: 8) {
                         if conversationId == nil {
                             Menu {
-                                Picker(L("issue.where"), selection: Binding(get: { target }, set: { conv = $0; ownerId = d.me.id })) {
+                                Picker(L("issue.where"), selection: Binding(get: { target }, set: { conv = $0; ownerId = d.me.id; assigneeIds = [d.me.id] })) {
                                     Text("🔒 " + L("issue.personal")).tag(IssueTasks.personalKey)
                                     ForEach(destinations) { c in Text(NewIssueSheet.label(d, c)).tag(c.id) }
                                 }
@@ -354,12 +355,11 @@ struct QuickAddIssue: View {
                         }
                         if !personal {
                         Menu {
-                            Picker(L("issue.owner"), selection: $ownerId) {
-                                ForEach(members) { p in Text(p.id == d.me.id ? L("issue.me") : p.name).tag(p.id) }
+                            ForEach(members) { person in
+                                Button { if assigneeIds.contains(person.id) { assigneeIds.remove(person.id) } else { assigneeIds.insert(person.id) } } label: { Label(person.name, systemImage: assigneeIds.contains(person.id) ? "checkmark.circle.fill" : "circle") }
                             }
                         } label: {
-                            let o = members.first { $0.id == ownerId } ?? members.first { $0.id == d.me.id }
-                            optLabel("person", o.map { $0.id == d.me.id ? L("issue.me") : $0.name } ?? L("issue.me"))
+                            optLabel("person.2", assigneeIds.isEmpty ? L("issue.noOwner") : "\(assigneeIds.count) " + L("issue.owner"))
                         }
                         .accessibilityLabel(L("issue.owner"))
                         .accessibilityIdentifier("issue.quickOwner")
@@ -382,7 +382,7 @@ struct QuickAddIssue: View {
                     }
                 }
             }
-            .onAppear { if ownerId.isEmpty { ownerId = d.me.id } }
+            .onAppear { if ownerId.isEmpty { ownerId = d.me.id; assigneeIds = [d.me.id] } }
         }
     }
 
@@ -404,11 +404,10 @@ struct QuickAddIssue: View {
         let text = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard text.count >= 2, !busy, !target.isEmpty else { focused = true; return }
         busy = true
-        let owner = members.contains { $0.id == ownerId } ? ownerId : d.me.id
         Task {
             do {
                 if target == IssueTasks.personalKey { _ = try await store.createPersonalIssue(title: text, dueDate: due) }
-                else { _ = try await store.createIssue(conversationId: target, title: text, ownerId: owner, dueDate: due, originMessageId: nil) }
+                else { _ = try await store.createIssue(conversationId: target, title: text, ownerId: assigneeIds.sorted().first, dueDate: due, originMessageId: nil, assigneeIds: assigneeIds.sorted()) }
                 title = ""; due = nil; pickDate = false
                 Haptics.tap()
             } catch { store.show(L10n.errorText(error)) }
@@ -484,7 +483,7 @@ enum IssueTree {
 
     static func filter(_ list: [IssueDTO], _ f: Filter, me: String) -> [IssueDTO] {
         switch f {
-        case .mine: return list.filter { !$0.status.closed && $0.ownerId == me }
+        case .mine: return list.filter { !$0.status.closed && $0.assignedIds.contains(me) }
         case .open: return list.filter { !$0.status.closed }
         case .closed: return list.filter { $0.status.closed }
         case .all: return list
@@ -501,9 +500,11 @@ enum IssueTree {
         var order: [String] = []
         var map: [String: [IssueDTO]] = [:]
         for i in list {
-            let k = by == .person ? (i.ownerId ?? noOwner) : (groupKey?(i) ?? i.conversationId ?? IssueTasks.personalKey)
-            if map[k] == nil { order.append(k) }
-            map[k, default: []].append(i)
+            let keys = by == .person ? (i.assignedIds.isEmpty ? [noOwner] : i.assignedIds) : [groupKey?(i) ?? i.conversationId ?? IssueTasks.personalKey]
+            for k in keys {
+                if map[k] == nil { order.append(k) }
+                map[k, default: []].append(i)
+            }
         }
         let buckets = order.map { Bucket(id: $0, issues: map[$0] ?? []) }
         return buckets.sorted { a, b in
@@ -561,7 +562,9 @@ struct IssuesScreen: View {
     /// debajo, Tareas igual que siempre.
     var hub = false
     @State private var filter = IssueTree.Filter.mine
-    @AppStorage(IssueTree.groupByKey) private var groupByRaw = IssueTree.GroupBy.group.rawValue
+    @State private var preferenceScope: String?
+    @State private var restoringPreferences = false
+    @State private var groupByRaw = IssueTree.GroupBy.group.rawValue
     @State private var error: String?
 
     var body: some View {
@@ -636,7 +639,23 @@ struct IssuesScreen: View {
         .background(Theme.background.ignoresSafeArea())
         .navigationTitle(L(hub ? "tab.hub" : "nav.issues"))
         .quickActions()
-        .task { await load() }
+        .task(id: store.sessionStamp) {
+            restoringPreferences = true
+            preferenceScope = store.me.map { ScopedPreference.key(server: store.api.baseURL.absoluteString, account: $0.id, purpose: "issues") }
+            if let key = preferenceScope {
+                groupByRaw = UserDefaults.standard.string(forKey: key + ".groupBy") ?? IssueTree.GroupBy.group.rawValue
+                filter = IssueTree.Filter(rawValue: UserDefaults.standard.string(forKey: key + ".filter") ?? "") ?? .mine
+            }
+            restoringPreferences = false
+            await load()
+        }
+        .onChange(of: groupByRaw) { _, _ in savePreferences() }
+        .onChange(of: filter) { _, _ in savePreferences() }
+    }
+    private func savePreferences() {
+        guard !restoringPreferences, let key = preferenceScope else { return }
+        UserDefaults.standard.set(groupByRaw, forKey: key + ".groupBy")
+        UserDefaults.standard.set(filter.rawValue, forKey: key + ".filter")
     }
 
     private func label(_ f: IssueTree.Filter) -> String {
@@ -822,7 +841,10 @@ struct IssueDetailView: View {
                 question(L("issue.qWho")) {
                     ChipFlow(spacing: 8) {
                         ForEach(members) { p in
-                            chip(on: i.ownerId == p.id, id: "issue.who.\(p.id)", action: { update(["ownerId": p.id]) }) {
+                            chip(on: i.assignedIds.contains(p.id), id: "issue.who.\(p.id)", action: {
+                                var ids = Set(i.assignedIds); if ids.contains(p.id) { ids.remove(p.id) } else { ids.insert(p.id) }
+                                update(["assigneeIds": ids.sorted()])
+                            }) {
                                 HStack(spacing: 6) {
                                     Avatar(name: p.name, org: Naming.org(d, p.orgId), size: 22, photo: p.avatarUrl).accessibilityHidden(true)
                                     Text(p.id == d.me.id ? L("issue.me") : String(p.name.split(separator: " ").first ?? Substring(p.name)))
@@ -830,7 +852,7 @@ struct IssueDetailView: View {
                             }
                         }
                         if i.ownerId != nil {
-                            chip(on: false, ghost: true, id: "issue.who.none", action: { update(["ownerId": NSNull()]) }) { Text(L("issue.noOwner")) }
+                            chip(on: false, ghost: true, id: "issue.who.none", action: { update(["assigneeIds": [String](), "ownerId": NSNull()]) }) { Text(L("issue.noOwner")) }
                         }
                     }
                 }

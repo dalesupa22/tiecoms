@@ -190,6 +190,8 @@ struct IssueDTO: Codable, Equatable, Identifiable, Sendable {
     var status: IssueStatus
     var waitingOnOrgId: String?
     var ownerId: String?
+    var assigneeIds: [String] = []
+    var assignedIds: [String] { assigneeIds.isEmpty ? ownerId.map { [$0] } ?? [] : assigneeIds }
     var requestedBy: String?
     var dueDate: String?
     var createdBy: String
@@ -218,6 +220,7 @@ struct IssueDTO: Codable, Equatable, Identifiable, Sendable {
         status = IssueStatus(rawValue: c.v("status", "open")) ?? .open
         waitingOnOrgId = c.o("waitingOnOrgId")
         ownerId = c.o("ownerId")
+        assigneeIds = c.v("assigneeIds", [])
         requestedBy = c.o("requestedBy")
         dueDate = c.o("dueDate")
         createdBy = c.v("createdBy", "")
@@ -398,6 +401,11 @@ struct WaChatDTO: Codable, Equatable, Identifiable, Sendable {
     }
 }
 
+struct WaMessageMedia: Codable, Equatable, Sendable {
+    var status: String
+    var attachment: AttachmentDTO?
+    var error: String?
+}
 struct WaMessageDTO: Codable, Equatable, Identifiable, Sendable {
     var id: String
     var fromMe: Bool
@@ -405,9 +413,11 @@ struct WaMessageDTO: Codable, Equatable, Identifiable, Sendable {
     var kind: String
     var body: String
     var sentAt: String
+    var media: WaMessageMedia?
     init(from decoder: Decoder) throws {
         let c = try container(decoder)
         id = try c.decode(String.self, forKey: AnyKey("id"))
+        media = c.o("media")
         fromMe = c.v("fromMe", false)
         author = c.o("author")
         kind = c.v("kind", "text")
@@ -423,10 +433,14 @@ struct WaChatsPage: Decodable, Sendable {
     }
     var chats: [WaChatDTO]
     var categories: [String: Count]
+    var next: String?
+    var hasMore: Bool
+    var syncPartial: Bool
     init(from decoder: Decoder) throws {
         let c = try container(decoder)
         chats = c.lossyArray("chats")
         categories = c.v("categories", [:])
+        next = c.o("next"); hasMore = c.v("hasMore", false); syncPartial = c.v("syncPartial", false)
     }
 }
 
@@ -547,6 +561,17 @@ struct AttachmentSigningDTO: Codable, Equatable, Sendable, Identifiable {
     static func ref(_ id: String) -> String { String(id.replacingOccurrences(of: "-", with: "").prefix(8)).uppercased() }
 }
 
+struct AttachmentProvenance: Codable, Equatable, Sendable {
+    var version = 1
+    var provider: String
+    var title: String
+    var attribution: String
+    var sourceUrl: String?
+    var author: String?
+    var license: String?
+    var licenseUrl: String?
+}
+
 struct AttachmentDTO: Codable, Equatable, Identifiable, Sendable {
     var id: String
     var name: String
@@ -565,18 +590,22 @@ struct AttachmentDTO: Codable, Equatable, Identifiable, Sendable {
     var transcript: VoiceTranscript?
     /// Solo en PDFs firmados con Chaggu: quién firmó, cuándo y la huella del resultado.
     var signing: AttachmentSigningDTO?
+    var provenance: AttachmentProvenance?
 
     var isVoice: Bool { kind == "voice" }
-    var isImage: Bool { !isVoice && contentType.hasPrefix("image/") }
-    var isVideo: Bool { !isVoice && contentType.hasPrefix("video/") }
+    var normalizedMIME: String { contentType.split(separator: ";", maxSplits: 1).first.map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() } ?? "" }
+    var isGif: Bool { normalizedMIME == "image/gif" }
+    var isImage: Bool { !isVoice && normalizedMIME.hasPrefix("image/") }
+    var isVideo: Bool { !isVoice && normalizedMIME.hasPrefix("video/") }
+    var isUTF8Text: Bool { normalizedMIME == "text/plain" && sizeBytes <= 1024 * 1024 }
     var isMedia: Bool { isImage || isVideo }
 
     init(id: String, name: String, contentType: String, sizeBytes: Int, width: Int? = nil, height: Int? = nil, url: String, thumbUrl: String? = nil,
-         kind: String? = nil, durationMs: Int? = nil, waveform: [Double]? = nil, transcript: VoiceTranscript? = nil, signing: AttachmentSigningDTO? = nil) {
+         kind: String? = nil, durationMs: Int? = nil, waveform: [Double]? = nil, transcript: VoiceTranscript? = nil, signing: AttachmentSigningDTO? = nil, provenance: AttachmentProvenance? = nil) {
         self.id = id; self.name = name; self.contentType = contentType; self.sizeBytes = sizeBytes
         self.width = width; self.height = height; self.url = url; self.thumbUrl = thumbUrl
         self.kind = kind; self.durationMs = durationMs; self.waveform = waveform; self.transcript = transcript
-        self.signing = signing
+        self.signing = signing; self.provenance = provenance
     }
 
     init(from decoder: Decoder) throws {
@@ -594,6 +623,7 @@ struct AttachmentDTO: Codable, Equatable, Identifiable, Sendable {
         waveform = (c.o("waveform") as [Double]?).map { $0.prefix(64).map { min(1, max(0, $0)) } }
         transcript = c.o("transcript")
         signing = c.o("signing")
+        provenance = c.o("provenance")
     }
 }
 

@@ -99,6 +99,7 @@ struct EditProfileView: View {
                 } footer: {
                     Text([d.me.email, org?.name].compactMap { $0 }.joined(separator: " · "))
                 }
+                Section { AvailabilityPicker() }
                 if let error { Section { Text(error).foregroundStyle(.red).font(.footnote) } }
             }
         }

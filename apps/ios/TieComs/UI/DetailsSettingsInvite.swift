@@ -301,6 +301,7 @@ private struct PersonRow: View {
                 }
                 let line = [p.title, p.area, org?.name ?? (p.guest ? L("common.guest") : L("common.noCompany"))].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
                 Text(line).font(.subheadline).foregroundStyle(Theme.textSecondary)
+                AvailabilityLabel(availability: p.availability)
                 if p.guest {
                     Text(p.guestUntil != nil ? L("chat.guestUntil", ["date": L10n.shortDate(p.guestUntil)]) : L("common.guest"))
                         .font(.caption.weight(.semibold))
@@ -420,6 +421,7 @@ struct SettingsView: View {
             // Conexiones para crear reuniones reales de Meet, Teams o Zoom (1.6.6).
             if store.data != nil { MeetingsSettingsSection() }
             Section {
+                AvailabilityPicker()
                 DndRow()
                 SleepRow()
             } footer: {

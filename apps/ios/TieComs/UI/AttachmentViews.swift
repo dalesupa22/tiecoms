@@ -1,4 +1,5 @@
 import AVKit
+import CryptoKit
 import PhotosUI
 import QuickLook
 import SwiftUI
@@ -9,7 +10,7 @@ import UniformTypeIdentifiers
 @MainActor
 final class AttachmentCache {
     static let shared = AttachmentCache()
-    private let memory = NSCache<NSString, NSData>()
+    private let memory: NSCache<NSString, NSData> = { let c = NSCache<NSString, NSData>(); c.totalCostLimit = 32 * 1024 * 1024; c.countLimit = 64; return c }()
     private var inflight: [String: Task<Data, Error>] = [:]
     private let dir: URL = {
         let d = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("TieComsAttachments", isDirectory: true)
@@ -17,19 +18,22 @@ final class AttachmentCache {
         return d
     }()
 
-    private func key(_ path: String) -> String { path.replacingOccurrences(of: "/", with: "_") }
+    private func key(_ path: String, api: APIClient) -> String {
+        let scope = api.baseURL.absoluteString + "|" + (api.accessToken ?? "anonymous") + "|" + path
+        return SHA256.hash(data: Data(scope.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
 
     func data(_ path: String, api: APIClient) async throws -> Data {
-        let k = key(path)
+        let k = key(path, api: api)
         if let d = memory.object(forKey: k as NSString) { return d as Data }
         let file = dir.appendingPathComponent(k)
-        if let d = try? Data(contentsOf: file) { memory.setObject(d as NSData, forKey: k as NSString); return d }
+        if let d = try? Data(contentsOf: file) { memory.setObject(d as NSData, forKey: k as NSString, cost: d.count); return d }
         if let t = inflight[k] { return try await t.value }
         let t = Task { try await api.download(path) }
         inflight[k] = t
         defer { inflight[k] = nil }
         let d = try await t.value
-        memory.setObject(d as NSData, forKey: k as NSString)
+        memory.setObject(d as NSData, forKey: k as NSString, cost: d.count)
         try? d.write(to: file, options: .atomic)
         return d
     }
@@ -53,11 +57,13 @@ struct AttachmentImage: View {
     var useThumb = true
     @State private var image: UIImage?
     @State private var failed = false
+    @State private var animation: GifAnimation?
 
     var body: some View {
         ZStack {
             Rectangle().fill(Theme.bubbleOther)
-            if let image {
+            if let animation { AnimatedGifImage(animation: animation, fill: true) }
+            else if let image {
                 Image(uiImage: image).resizable().scaledToFill()
             } else if failed {
                 Image(systemName: "photo").foregroundStyle(Theme.textSecondary)
@@ -67,8 +73,12 @@ struct AttachmentImage: View {
         }
         .clipped()
         .task(id: att.id) {
-            let path = (useThumb ? att.thumbUrl : nil) ?? att.url
-            if let d = try? await AttachmentCache.shared.data(path, api: store.api), let img = UIImage(data: d) { image = img } else { failed = true }
+            image = nil; animation = nil; failed = false
+            let path = (useThumb && !att.isGif ? att.thumbUrl : nil) ?? att.url
+            if let d = try? await AttachmentCache.shared.data(path, api: store.api), let img = UIImage(data: d) {
+                let decoded = att.isGif ? await Task.detached { GifAnimation.decode(d) }.value : nil
+                guard !Task.isCancelled else { return }; image = decoded?.frames.first ?? img; animation = decoded
+            } else { failed = true }
         }
     }
 }
@@ -84,6 +94,7 @@ struct AttachmentsBlock: View {
     @State private var preview: URL?
     @State private var loadingFile: String?
     @State private var pdf: PdfOpen?
+    @State private var textFile: AttachmentDTO?
 
     /// PDF abierto en el visor (ver) o directo en modo firma.
     struct PdfOpen: Identifiable { let att: AttachmentDTO; let sign: Bool; var id: String { att.id + (sign ? "-s" : "") } }
@@ -98,10 +109,12 @@ struct AttachmentsBlock: View {
                 VoiceNoteView(att: v, mine: mine, conversationId: conversationId, messageId: messageId, authorIsMe: mine)
             }
             if !media.isEmpty { grid(media) }
+            ForEach(attachments.filter { $0.provenance != nil }) { a in if let p = a.provenance { ProvenanceCredits(provenance: p, mine: mine) } }
             ForEach(files) { f in
                 if f.isPdf { pdfChip(f) } else { fileChip(f) }
             }
         }
+        .sheet(item: $textFile) { UTF8FileSheet(attachment: $0) }
         .fullScreenCover(item: $pdf) { p in PdfSignScreen(att: p.att, startSigning: p.sign) }
         .fullScreenCover(item: $viewer) { v in MediaViewer(items: media, start: v.index) }
         .sheet(item: Binding(get: { preview.map(URLBox.init) }, set: { preview = $0?.url })) { box in QuickLookView(url: box.url).ignoresSafeArea() }
@@ -130,6 +143,7 @@ struct AttachmentsBlock: View {
                 .accessibilityLabel(a.isVideo ? L("att.video") : L("att.photo"))
                 .accessibilityHint(L("att.openViewer"))
                 .accessibilityIdentifier("att.media.\(a.id)")
+                .contextMenu { if a.isImage { Button { Task { await ImageClipboard.copy(a, store: store) } } label: { Label(L("copy.image"), systemImage: "doc.on.doc") } } }
             }
         }
         // LazyVGrid ocupa todo el ancho disponible: se fija al de las fotos para que la burbuja se ciña.
@@ -169,6 +183,7 @@ struct AttachmentsBlock: View {
     private func fileChip(_ f: AttachmentDTO, open: (() -> Void)? = nil) -> some View {
         Button {
             if let open { open(); return }
+            if f.isUTF8Text { textFile = f; return }
             loadingFile = f.id
             Task {
                 defer { loadingFile = nil }
@@ -203,6 +218,8 @@ private struct URLBox: Identifiable { let url: URL; var id: String { url.absolut
 
 /// Visor a pantalla completa: fotos con zoom (pellizco y doble toque) y videos con el reproductor nativo.
 struct MediaViewer: View {
+    @Environment(AppStore.self) private var store
+    @State private var sharing: URL?
     @Environment(\.dismiss) private var dismiss
     let items: [AttachmentDTO]
     @State var start: Int
@@ -221,10 +238,19 @@ struct MediaViewer: View {
             .background(Color.black.ignoresSafeArea())
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button(L("common.close")) { dismiss() }.accessibilityIdentifier("viewer.close") }
+                ToolbarItem(placement: .primaryAction) {
+                    if items.indices.contains(start) {
+                        Menu {
+                            if items[start].isImage { Button { Task { await ImageClipboard.copy(items[start], store: store) } } label: { Label(L("copy.image"), systemImage: "doc.on.doc") } }
+                            Button { let selected = items[start]; Task { do { sharing = try await AttachmentCache.shared.fileURL(selected, api: store.api) } catch { store.show(L10n.errorText(error)) } } } label: { Label(L("copy.shareOriginal"), systemImage: "square.and.arrow.up") }
+                        } label: { Image(systemName: "ellipsis.circle") }
+                    }
+                }
                 ToolbarItem(placement: .principal) {
                     Text(items.indices.contains(start) ? items[start].name : "").font(.subheadline).foregroundStyle(.white).lineLimit(1)
                 }
             }
+            .sheet(item: Binding(get: { sharing.map(URLBox.init) }, set: { sharing = $0?.url })) { ActivityView(items: [$0.url]) }
             .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
         }
@@ -233,15 +259,33 @@ struct MediaViewer: View {
 
 private struct ZoomablePhoto: View {
     @Environment(AppStore.self) private var store
+    @Environment(\.accessibilityReduceMotion) private var reducedMotion
     let att: AttachmentDTO
     @State private var image: UIImage?
+    @State private var animation: GifAnimation?
+    @State private var manual = false
+    @State private var failed = false
     var body: some View {
         Group {
-            if let image { ZoomableImage(image: image) } else { ProgressView().tint(.white) }
+            if let image {
+                ZoomableImage(image: image, animation: animation, manualPlayback: manual)
+                    .overlay(alignment: .bottomTrailing) {
+                        if reducedMotion, animation != nil {
+                            Button { manual.toggle() } label: { Image(systemName: manual ? "pause.circle.fill" : "play.circle.fill").font(.largeTitle).foregroundStyle(.white).padding() }
+                                .accessibilityLabel(L(manual ? "gifs.pause" : "gifs.play"))
+                        }
+                    }
+            } else if failed { Label(L("att.loadFailed"), systemImage: "exclamationmark.triangle").foregroundStyle(.white) }
+            else { ProgressView().tint(.white) }
         }
         .accessibilityIdentifier("viewer.photo")
         .task(id: att.id) {
-            if let d = try? await AttachmentCache.shared.data(att.url, api: store.api) { image = UIImage(data: d) }
+            let stamp = store.sessionStamp
+            do {
+                let d = try await AttachmentCache.shared.data(att.url, api: store.api)
+                let decoded = att.isGif ? await Task.detached { GifAnimation.decode(d, maxSide: 1280) }.value : nil
+                guard !Task.isCancelled, stamp == store.sessionStamp else { return }; image = decoded?.frames.first ?? UIImage(data: d); animation = decoded; failed = image == nil
+            } catch { if !Task.isCancelled, stamp == store.sessionStamp { failed = true } }
         }
     }
 }
@@ -249,6 +293,8 @@ private struct ZoomablePhoto: View {
 /// UIScrollView para zoom nativo.
 struct ZoomableImage: UIViewRepresentable {
     let image: UIImage
+    var animation: GifAnimation? = nil
+    var manualPlayback = false
     func makeUIView(context: Context) -> UIScrollView {
         let s = UIScrollView()
         s.minimumZoomScale = 1
@@ -256,7 +302,9 @@ struct ZoomableImage: UIViewRepresentable {
         s.delegate = context.coordinator
         s.showsHorizontalScrollIndicator = false
         s.showsVerticalScrollIndicator = false
-        let iv = UIImageView(image: image)
+        let iv = GifImageView(image: image)
+        iv.allowReducedMotion = manualPlayback
+        iv.configure(animation)
         iv.contentMode = .scaleAspectFit
         iv.frame = s.bounds
         iv.autoresizingMask = [.flexibleWidth, .flexibleHeight]
@@ -264,15 +312,24 @@ struct ZoomableImage: UIViewRepresentable {
         iv.accessibilityTraits = .image
         s.addSubview(iv)
         context.coordinator.imageView = iv
+        context.coordinator.configuredImage = image
         let dbl = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.doubleTap(_:)))
         dbl.numberOfTapsRequired = 2
         s.addGestureRecognizer(dbl)
         return s
     }
-    func updateUIView(_ s: UIScrollView, context: Context) { context.coordinator.imageView?.image = image }
+    func updateUIView(_ s: UIScrollView, context: Context) {
+        let gif = context.coordinator.imageView as? GifImageView
+        if context.coordinator.configuredImage !== image || gif?.animationID != animation?.identity || gif?.allowReducedMotion != manualPlayback {
+            context.coordinator.configuredImage = image; context.coordinator.imageView?.image = image
+            gif?.allowReducedMotion = manualPlayback; gif?.configure(animation)
+        }
+    }
+    static func dismantleUIView(_ s: UIScrollView, coordinator: Coordinator) { (coordinator.imageView as? GifImageView)?.stop() }
     func makeCoordinator() -> Coordinator { Coordinator() }
     final class Coordinator: NSObject, UIScrollViewDelegate {
         weak var imageView: UIImageView?
+        var configuredImage: UIImage?
         func viewForZooming(in scrollView: UIScrollView) -> UIView? { imageView }
         @objc func doubleTap(_ g: UITapGestureRecognizer) {
             guard let s = g.view as? UIScrollView else { return }
@@ -322,6 +379,7 @@ struct QuickLookView: UIViewControllerRepresentable {
 /// Botón clip del compositor: Fotos (varias), Cámara o Archivos.
 struct AttachButton: View {
     @Binding var staged: [LocalAttachment]
+    var otherStagedCount = 0
     @State private var photos: [PhotosPickerItem] = []
     @State private var showPhotos = false
     @State private var showCamera = false
@@ -334,6 +392,7 @@ struct AttachButton: View {
     /// «✉ Correo» y «Mensaje de WhatsApp» (docs/CORREO.md), solo con features.mail.
     var onMail: (() -> Void)? = nil
     var onWhatsApp: (() -> Void)? = nil
+    var onGifs: (() -> Void)? = nil
     var onError: (String) -> Void
 
     var body: some View {
@@ -343,6 +402,7 @@ struct AttachButton: View {
                 Button { showCamera = true } label: { Label(L("att.fromCamera"), systemImage: "camera") }
             }
             Button { showFiles = true } label: { Label(L("att.fromFiles"), systemImage: "folder") }
+            if let onGifs { Button(action: onGifs) { Label(L("gifs.title"), systemImage: "face.smiling") }.accessibilityIdentifier("composer.plus.gifs") }
             if onEvent != nil || onIssue != nil { Divider() }
             if let onEvent { Button(action: onEvent) { Label(L("bar.newEvent"), systemImage: "calendar.badge.plus") }.accessibilityIdentifier("composer.plus.event") }
             if let onIssue { Button(action: onIssue) { Label(L("bar.newIssue"), systemImage: "diamond") }.accessibilityIdentifier("composer.plus.issue") }
@@ -360,7 +420,7 @@ struct AttachButton: View {
         }
         .accessibilityLabel(onEvent != nil || onIssue != nil || onMeeting != nil ? L("bar.plus") : L("att.attach"))
         .accessibilityIdentifier("composer.attach")
-        .photosPicker(isPresented: $showPhotos, selection: $photos, maxSelectionCount: AttachmentRules.maxPerMessage,
+        .photosPicker(isPresented: $showPhotos, selection: $photos, maxSelectionCount: max(1, AttachmentRules.maxPerMessage - staged.count - otherStagedCount),
                       matching: .any(of: [.images, .videos]), photoLibrary: .shared())
         .onChange(of: photos) { _, items in
             guard !items.isEmpty else { return }
@@ -409,7 +469,7 @@ struct AttachButton: View {
     }
 
     private func add(_ a: LocalAttachment) {
-        guard staged.count < AttachmentRules.maxPerMessage else { onError(L("att.max", ["n": AttachmentRules.maxPerMessage])); return }
+        guard staged.count + otherStagedCount < AttachmentRules.maxPerMessage else { onError(L("att.max", ["n": AttachmentRules.maxPerMessage])); return }
         if a.tooBig { onError(L("att.tooBig", ["name": a.name])); return }
         staged.append(a)
     }
@@ -426,8 +486,8 @@ struct StagedAttachments: View {
                     ForEach(staged) { a in
                         ZStack(alignment: .topTrailing) {
                             Group {
-                                if a.isImage, let img = UIImage(data: a.data) {
-                                    Image(uiImage: img).resizable().scaledToFill()
+                                if a.isImage {
+                                    LocalAttachmentImage(file: a)
                                 } else {
                                     VStack(spacing: 4) {
                                         Image(systemName: a.isVideo ? "film" : AttachmentRules.icon(a.contentType, a.name)).font(.title2)

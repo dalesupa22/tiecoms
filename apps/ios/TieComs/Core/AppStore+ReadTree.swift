@@ -2,7 +2,7 @@ import Foundation
 
 extension AppStore {
     /// Loads until the unread boundary is present. Repeated/empty pages and network failures fail closed.
-    func firstUnreadMessage(_ id: String, snapshot: ChatNav.Snapshot) async throws -> MessageDTO? {
+    func firstUnreadMessage(_ id: String, snapshot: ChatNav.Snapshot, eligible: ((MessageDTO) -> Bool)? = nil) async throws -> MessageDTO? {
         let stamp = sessionStamp
         guard snapshot.unread > 0 else { return nil }
         while true {
@@ -15,7 +15,7 @@ extension AppStore {
                 for message in after {
                     guard message.seq == cursor + 1 else { throw ChatNav.PositionError.historyGap }
                     cursor = message.seq
-                    if !message.isSystem && message.deletedAt == nil && message.authorId != me?.id { return message }
+                    if !message.isSystem && message.deletedAt == nil && message.authorId != me?.id && !blockedUserIds.contains(message.authorId) && (eligible?(message) ?? true) { return message }
                 }
                 if cursor >= (meta(id)?.lastMessageSeq ?? Int.max) { return nil }
                 throw ChatNav.PositionError.historyGap
@@ -29,21 +29,22 @@ extension AppStore {
         guard let d = data, let root = meta(rootId) else { return }
         let stamp = sessionStamp
         let items = ReadTree.Index(d).items(for: root)
-        func applyConfirmed(_ id: String, _ seq: Int) {
-            patchMeta(id) { ReadTree.applyRead(&$0, seq: seq) }
+        let revisions = Dictionary(uniqueKeysWithValues: items.map { ($0.conversationId, readRevision($0.conversationId)) })
+        func applyConfirmed(_ id: String, _ seq: Int, _ revision: Int?) {
+            guard applyConfirmedRead(id, seq: seq, revision: revision, legacyRevision: revisions[id] ?? -1) else { return }
             if seq >= (meta(id)?.lastMessageSeq ?? Int.max) { AppFeedback.shared.clearNotifications(conversationId: id) }
         }
         do {
             let r: ReadTreeResult = try await api.request("/conversations/\(rootId)/read-tree", method: "POST", json: ["items": items.map(\.json)])
             try requireSession(stamp)
-            for m in r.marked { applyConfirmed(m.conversationId, m.lastReadSeq) }
+            for m in r.marked { applyConfirmed(m.conversationId, m.lastReadSeq, m.readRevision) }
         } catch let e as ApiRequestError where e.status == 404 && !items.isEmpty {
             try requireSession(stamp)
             // An older server confirms each row separately. A failed row and all remaining rows stay unread.
             for it in items {
-                try await api.requestData("/conversations/\(it.conversationId)/read", method: "POST", json: ["seq": it.seq])
+                let ack: LastRead = try await api.request("/conversations/\(it.conversationId)/read", method: "POST", json: ["seq": it.seq])
                 try requireSession(stamp)
-                applyConfirmed(it.conversationId, it.seq)
+                applyConfirmed(it.conversationId, ack.lastReadSeq ?? it.seq, ack.readRevision)
             }
         }
     }

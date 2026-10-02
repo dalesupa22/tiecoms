@@ -49,7 +49,7 @@ struct VoiceNoteView: View {
         let tint: Color = mine ? .white : Theme.accentText
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 10) {
-                Button { Task { await player.toggle(att, api: store.api) } } label: {
+                Button { Task { guard !store.callCenter.inCall else { store.show(L("voice.callBusy")); return }; await player.toggle(att, api: store.api); if let error = player.lastError { store.show(error) } } } label: {
                     Image(systemName: isCurrent && player.playing ? "pause.fill" : "play.fill")
                         .font(.system(size: 16, weight: .bold))
                         .foregroundStyle(mine ? Theme.bubbleMine : .white)
@@ -61,7 +61,7 @@ struct VoiceNoteView: View {
                 .accessibilityIdentifier("voice.play.\(att.id)")
                 Waveform(values: att.waveform ?? [], progress: isCurrent ? player.progress : 0, tint: tint) { f in
                     // Tocar la onda de una nota que no suena la empieza en ese punto.
-                    if player.currentId == att.id { player.seek(att, to: f) } else { Task { await player.toggle(att, api: store.api); player.seek(att, to: f) } }
+                    if player.currentId == att.id { player.seek(att, to: f) } else { Task { guard !store.callCenter.inCall else { store.show(L("voice.callBusy")); return }; await player.toggle(att, api: store.api); player.seek(att, to: f); if let error = player.lastError { store.show(error) } } }
                 }
                     .frame(width: 150, height: 30)
                     .accessibilityHidden(true)
@@ -165,101 +165,106 @@ struct VoiceNoteView: View {
     }
 }
 
-/// Botón de micrófono del compositor (cuando está vacío): mantener pulsado graba, soltar envía,
-/// deslizar a la izquierda cancela y deslizar arriba bloquea (manos libres con enviar/borrar).
-/// Un toque (soltar enseguida sin arrastrar) no descarta: deja la grabación en manos libres, como WhatsApp.
+/// One touch owns one attempt. Release finishes a local preview; sending is always explicit.
 struct VoiceRecordButton: View {
     @Environment(AppStore.self) private var store
     let recorder: VoiceRecorder
     var onSend: (Data, Int, [Double]) -> Void
     @State private var drag: CGSize = .zero
-    @State private var pressing = false
+    @State private var touchOpen = false
+    @State private var attempt: UUID?
+    @State private var terminal = false
     @State private var denied = false
-    @State private var pressedAt: Date?
-    /// Soltó (toque) antes de que arrancara la grabación: al arrancar queda en manos libres.
-    @State private var lockWhenStarted = false
-
     static let cancelDistance: CGFloat = 110
     static let lockDistance: CGFloat = 80
-
     var body: some View {
         Image(systemName: "mic.fill")
-            .font(.system(size: 18, weight: .semibold))
-            .foregroundStyle(.white)
-            .frame(width: 40, height: 40)
-            .background(Circle().fill(pressing ? Theme.orange : Theme.bubbleMine))
-            .scaleEffect(pressing ? 1.35 : 1)
-            .offset(x: pressing ? min(0, drag.width) : 0, y: pressing ? min(0, drag.height) : 0)
-            .animation(.spring(response: 0.25), value: pressing)
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { v in
-                        if !pressing { begin() }
-                        drag = v.translation
-                        guard recorder.state == .recording else { return }
-                        if v.translation.width < -Self.cancelDistance { cancel() }
-                        else if v.translation.height < -Self.lockDistance { recorder.lock(); pressing = false; Haptics.tap() }
+            .font(.system(size: 18, weight: .semibold)).foregroundStyle(.white)
+            .frame(width: 44, height: 44).background(Circle().fill(touchOpen ? Theme.orange : Theme.bubbleMine))
+            .scaleEffect(touchOpen && !terminal ? 1.2 : 1)
+            .gesture(DragGesture(minimumDistance: 0)
+                .onChanged { value in
+                    if !touchOpen { touchOpen = true; terminal = false; begin() }
+                    guard !terminal else { return }
+                    drag = value.translation
+                    if value.translation.width < -Self.cancelDistance {
+                        terminal = true; attempt = nil; recorder.cancel(); store.show(L("voice.cancelled")); Haptics.tap()
+                    } else if value.translation.height < -Self.lockDistance, recorder.state == .recording {
+                        terminal = true; recorder.lock(); Haptics.tap()
                     }
-                    .onEnded { v in
-                        let heldMs = pressedAt.map { Int(Date().timeIntervalSince($0) * 1000) } ?? 0
-                        let still = abs(v.translation.width) < 20 && abs(v.translation.height) < 20
-                        let tap = still && heldMs < VoiceRules.tapMs
-                        if recorder.state == .recording {
-                            if tap { recorder.lock(); Haptics.tap() } else { send() }
-                        } else if recorder.state == .idle && pressing && tap {
-                            lockWhenStarted = true
-                        }
-                        pressing = false; drag = .zero; pressedAt = nil
-                    }
-            )
+                }
+                .onEnded { _ in
+                    attempt = nil; touchOpen = false; drag = .zero
+                    if !terminal, recorder.state == .recording { finishPreview() }
+                    terminal = false
+                })
             .accessibilityLabel(L("voice.hold"))
-            .accessibilityHint(L("voice.slideLock"))
+            .accessibilityHint(L("voice.previewHint"))
             .accessibilityAddTraits(.isButton)
-            // VoiceOver: un toque inicia la grabación bloqueada (enviar/borrar en la barra).
-            .accessibilityAction { begin(locked: true) }
+            .accessibilityAction { begin(accessible: true) }
             .accessibilityIdentifier("composer.mic")
+            .onDisappear { attempt = nil; touchOpen = false }
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
+                // The first permission prompt or an interrupted gesture must never start recording after release.
+                if recorder.state == .idle { attempt = nil; touchOpen = false; terminal = true }
+            }
             .alert(L("voice.micDenied"), isPresented: $denied) {
                 Button(L("common.close"), role: .cancel) {}
                 Button(L("settings.nav")) { if let u = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(u) } }
             }
     }
-
-    private func begin(locked: Bool = false) {
-        pressing = !locked
-        pressedAt = Date()
-        lockWhenStarted = false
-        // Con permiso ya dado, la sesión se activa al tocar (antes del contador) y la ruta Bluetooth tiene tiempo de cambiar.
-        if AVAudioApplication.shared.recordPermission == .granted { VoiceRecorder.prewarm() }
+    private func begin(accessible: Bool = false) {
+        guard recorder.state == .idle, !store.callCenter.inCall else { terminal = true; store.show(L("voice.callBusy")); return }
+        let id = UUID(), stamp = store.sessionStamp; attempt = id
         Task {
-            guard await VoiceRecorder.requestPermission() else { pressing = false; lockWhenStarted = false; denied = true; return }
-            // Si soltó arrastrando mientras se pedía permiso, no se graba; si fue un toque, graba en manos libres.
-            guard pressing || locked || lockWhenStarted else {
-                try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
-                return
-            }
+            let allowed = await VoiceRecorder.requestPermission()
+            guard stamp == store.sessionStamp, attempt == id, accessible || (touchOpen && !terminal) else { return }
+            guard allowed else { attempt = nil; terminal = true; denied = true; return }
+            guard !store.callCenter.inCall else { attempt = nil; terminal = true; store.show(L("voice.callBusy")); return }
+            VoicePlayer.shared.stop()
             do {
                 try recorder.start()
-                if locked || lockWhenStarted { recorder.lock(); lockWhenStarted = false }
+                if accessible { recorder.lock(); attempt = nil }
                 UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-            } catch { pressing = false; store.show(L("voice.micUnavailable")) }
+            } catch { attempt = nil; terminal = true; store.show(L("voice.micUnavailable")) }
         }
     }
-
-    private func cancel() {
-        recorder.cancel()
-        pressing = false
-        UINotificationFeedbackGenerator().notificationOccurred(.warning)
-        store.show(L("voice.cancelled"))
-    }
-
-    private func send() {
+    private func finishPreview() {
         switch recorder.finishOutcome() {
-        case .success(let r):
-            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-            onSend(r.data, r.durationMs, r.waveform)
-        case .failure(let e):
-            store.show(e == .tooShort ? L("voice.tooShort") : L("voice.unreadable"))
+        case .success(let clip): Haptics.tap(); onSend(clip.data, clip.durationMs, clip.waveform)
+        case .failure(let error): store.show(error == .tooShort ? L("voice.tooShort") : L("voice.unreadable"))
         }
+    }
+}
+
+struct LocalVoicePreview: View {
+    @Environment(AppStore.self) private var store
+    let data: Data
+    let durationMs: Int
+    let waveform: [Double]
+    var onDiscard: () -> Void
+    var onSend: () -> Void
+    @State private var player: AVAudioPlayer?
+    var body: some View {
+        HStack(spacing: 10) {
+            Button {
+                guard !store.callCenter.inCall else { store.show(L("voice.callBusy")); return }
+                do {
+                    if player?.isPlaying == true { player?.pause(); return }
+                    if player == nil { player = try AVAudioPlayer(data: data) }
+                    try AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio)
+                    try AVAudioSession.sharedInstance().setActive(true)
+                    guard player?.play() == true else { throw CocoaError(.fileReadCorruptFile) }
+                } catch { store.show(L("voice.unreadable")) }
+            } label: { Image(systemName: "play.fill").frame(width: 44, height: 44) }
+                .accessibilityLabel(L("voice.preview"))
+            Waveform(values: waveform, progress: 0, tint: Theme.orange).frame(height: 28)
+            Text(L10n.duration(durationMs)).font(.caption.monospacedDigit())
+            Button(role: .destructive) { player?.stop(); onDiscard() } label: { Image(systemName: "trash").frame(width: 44, height: 44) }.accessibilityLabel(L("voice.discard"))
+            Button { player?.stop(); onSend() } label: { Image(systemName: "arrow.up.circle.fill").font(.title).frame(width: 44, height: 44) }.accessibilityLabel(L("chat.send"))
+        }.padding(.horizontal, 12).accessibilityIdentifier("voice.preview")
+        .onDisappear { player?.stop(); player = nil }
+        .onChange(of: store.callCenter.inCall) { _, active in if active { player?.stop() } }
     }
 }
 
@@ -301,10 +306,10 @@ struct VoiceRecordingBar: View {
                     case .failure(let e): onError(e == .tooShort ? L("voice.tooShort") : L("voice.unreadable"))
                     }
                 } label: {
-                    Image(systemName: "arrow.up").font(.system(size: 17, weight: .bold)).foregroundStyle(.white)
+                    Image(systemName: "stop.fill").font(.system(size: 17, weight: .bold)).foregroundStyle(.white)
                         .frame(width: 40, height: 40).background(Circle().fill(Theme.bubbleMine))
                 }
-                .accessibilityLabel(L("voice.send"))
+                .accessibilityLabel(L("voice.preview"))
                 .accessibilityIdentifier("voice.send")
             } else {
                 VStack(alignment: .trailing, spacing: 1) {

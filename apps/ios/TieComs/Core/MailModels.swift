@@ -216,6 +216,8 @@ struct SharedMailDTO: Codable, Equatable, Identifiable, Sendable {
     var webLink: String?
     /// Solo con provider `whatsapp`.
     var wa: SharedWaInfo?
+    var chagguAttachments: [AttachmentDTO] = []
+    var mediaStatus: String?
 
     var isOut: Bool { direction == "out" }
     /// La otra persona de la tarjeta: el primer destinatario si lo envié, el remitente si lo recibí.
@@ -263,6 +265,8 @@ struct SharedMailDTO: Codable, Equatable, Identifiable, Sendable {
         createdAt = c.v("createdAt", "")
         webLink = c.o("webLink")
         wa = c.o("wa")
+        chagguAttachments = c.lossyArray("chagguAttachments")
+        mediaStatus = c.o("mediaStatus")
     }
 
     /// Une lo que llega (tarjeta, evento en vivo o respuesta de una acción) con lo que ya había:

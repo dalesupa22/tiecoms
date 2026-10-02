@@ -100,7 +100,8 @@ struct ReadTreeResult: Decodable, Sendable {
     struct Marked: Decodable, Sendable {
         var conversationId: String
         var lastReadSeq: Int
-        init(from d: Decoder) throws { let c = try container(d); conversationId = c.v("conversationId", ""); lastReadSeq = c.int("lastReadSeq") }
+        var readRevision: Int?
+        init(from d: Decoder) throws { let c = try container(d); conversationId = c.v("conversationId", ""); lastReadSeq = c.int("lastReadSeq"); readRevision = c.intOpt("readRevision") }
     }
     var marked: [Marked]
     init(from d: Decoder) throws { marked = (try container(d)).lossyArray("marked") }

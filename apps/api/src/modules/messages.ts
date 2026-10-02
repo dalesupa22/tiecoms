@@ -40,6 +40,7 @@ export function toMessageDTO(r: any): MessageDTO {
     clientMessageId: r.client_message_id,
     kind: r.kind,
     body: deleted ? '' : r.body,
+    ...(!r.view_once && !deleted && r.display_body!==null && r.display_body!==undefined ? { displayBody:r.display_body } : {}),
     replyTo: r.reply_to,
     mergedFrom: r.merged_from_conversation_id ?? null,
     ...(r.merged_kind ? { mergedKind: r.merged_kind } : {}),
@@ -69,7 +70,7 @@ export function forViewer(m: MessageDTO, userId: string): MessageDTO {
 
 /** Adjunto de una sola vista tal como lo ven todos: sin URL, nombre, onda ni transcripción. */
 export const sealAttachment = (a: import('@tiecoms/contracts').AttachmentDTO): import('@tiecoms/contracts').AttachmentDTO => ({
-  ...a, name: '', url: '', thumbUrl: null, ...(a.kind === 'voice' ? { waveform: null, transcript: null } : {}),
+  ...a, name: '', url: '', thumbUrl: null, provenance: null, ...(a.kind === 'voice' ? { waveform: null, transcript: null } : {}),
 });
 
 /** Reserva el siguiente event_seq. La fila de la conversación queda bloqueada hasta el commit. */
@@ -98,13 +99,13 @@ export async function appendMessage(c: Tx, p: {
   attachments?: import('@tiecoms/contracts').AttachmentDTO[] | null; hash?: Buffer | null; mentions?: import('@tiecoms/contracts').MentionDTO[] | null;
   topicId?: string | null; refs?: import('@tiecoms/contracts').MessageRefDTO[] | null;
   /** Una sola vista: el contenido real (body queda ''). */
-  viewOnceBody?: string | null;
+  viewOnceBody?: string | null; displayBody?: string | null;
 }): Promise<MessageDTO> {
-  const { rows } = await c.query('SELECT tiecoms_append_message($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) AS m', [
+  const { rows } = await c.query('SELECT tiecoms_append_message($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) AS m', [
     p.conversationId, p.authorId, p.clientMessageId ?? null, p.kind ?? 'text', p.body, p.replyTo ?? null, p.mergedFrom ?? null,
     p.forwarded ? JSON.stringify(p.forwarded) : null, p.attachments?.length ? JSON.stringify(p.attachments) : null, p.hash ?? null,
     p.mentions?.length ? JSON.stringify(p.mentions) : null, p.topicId ?? null,
-    p.refs?.length ? JSON.stringify(p.refs) : null, p.viewOnceBody ?? null,
+    p.refs?.length ? JSON.stringify(p.refs) : null, p.viewOnceBody ?? null, p.displayBody ?? null,
   ]);
   const m = rows[0].m as MessageDTO;
   if ((p.kind ?? 'text') === 'text') await queuePush(c, m.id, p.conversationId, p.authorId);
@@ -193,16 +194,19 @@ export async function sendMessage(userId: string, conversationId: string, input:
       const mentions = once ? { mentions: [], dropped: (input.mentions ?? []).map((x) => x.userId), userIds: [], all: false } : await normalizeMentions(c, conversationId, userId, input.body, input.mentions, access);
       dropped = mentions.dropped;
       const refs = once ? [] : await normalizeRefs(c, userId, input.body, input.refs);
+      const credits=[...new Set(claimed.map((x)=>x.dto.provenance?.attribution).filter((x):x is string=>!!x))];
+      const displayBody=credits.length ? (credits.includes(input.body) ? '' : input.body) : null;
+      const fullBody=credits.length ? [displayBody,...credits].filter(Boolean).join('\n\n') : input.body;
       const m = await appendMessage(c, {
-        conversationId, authorId: userId, body: once ? '' : input.body, clientMessageId: input.clientMessageId, replyTo: input.replyTo ?? null, forwarded,
+        displayBody, conversationId, authorId: userId, body: once ? '' : fullBody, clientMessageId: input.clientMessageId, replyTo: input.replyTo ?? null, forwarded,
         attachments: claimed.map((x) => (once ? sealAttachment(x.dto) : x.dto)), hash: contentHash(input.body, input.attachmentIds, input.forwardAttachmentIds), mentions: mentions.mentions,
-        topicId: input.topicId ?? null, refs, viewOnceBody: once ? input.body : null,
+        topicId: input.topicId ?? null, refs, viewOnceBody: once ? fullBody : null,
       });
       if (claimed.length) await linkToMessage(c, m.id, claimed.map((x) => x.id));
       if (mentions.userIds.length) await saveMentions(c, m.id, conversationId, m.seq, mentions as any);
       if (!once) {
-        await indexLinks(c, { id: m.id, conversation_id: conversationId, seq: m.seq, author_id: userId, body: input.body, created_at: m.createdAt });
-        await queuePreview(c, m.id, input.body);
+        await indexLinks(c, { id: m.id, conversation_id: conversationId, seq: m.seq, author_id: userId, body: input.body, display_body:displayBody, attachments:claimed.map(x=>x.dto), created_at: m.createdAt });
+        await queuePreview(c, m.id, displayBody ?? input.body);
       }
       // Datos asociados que deben quedar confirmados junto al mensaje (sin I/O externo).
       if (afterCreate) await afterCreate(c, m);
@@ -264,18 +268,18 @@ export async function listEvents(userId: string, conversationId: string, after: 
 export async function markRead(userId: string, conversationId: string, seq: number) {
   return tx(async (c) => {
     const a = await conversationAccess(c, userId, conversationId, 'read');
-    const target = Math.min(seq, a.lastMessageSeq);
+    const target = Math.max(a.historyFromSeq, Math.min(seq, a.lastMessageSeq));
     const { rows } = await c.query(
-      `INSERT INTO read_cursors (conversation_id, user_id, last_read_seq) VALUES ($1,$2,$3)
-       ON CONFLICT (conversation_id, user_id) DO UPDATE SET last_read_seq = GREATEST(read_cursors.last_read_seq, EXCLUDED.last_read_seq), updated_at = now()
-       RETURNING last_read_seq`,
+      `INSERT INTO read_cursors (conversation_id, user_id, last_read_seq, revision) VALUES ($1,$2,$3,1)
+       ON CONFLICT (conversation_id, user_id) DO UPDATE SET last_read_seq = GREATEST(read_cursors.last_read_seq, EXCLUDED.last_read_seq), updated_at = now(), revision=read_cursors.revision+1
+       RETURNING last_read_seq, revision`,
       [conversationId, userId, target],
     );
     const lastRead: number = rows[0].last_read_seq;
     await markMentionsRead(c, userId, conversationId, lastRead);
     // Sincroniza los no leídos entre los dispositivos de la misma cuenta.
-    await enqueueOutbox(c, 'account.event', { userIds: [userId], event: { type: 'read.updated', conversationId, seq: lastRead } });
-    return { lastReadSeq: lastRead };
+    await enqueueOutbox(c, 'account.event', { userIds: [userId], event: { type: 'read.updated', conversationId, seq: lastRead, readRevision: Number(rows[0].revision) } });
+    return { lastReadSeq: lastRead, readRevision: Number(rows[0].revision) };
   });
 }
 
@@ -293,11 +297,11 @@ export async function markTreeRead(userId: string, rootId: string, items: { conv
     [userId, ids, rootId],
   );
   const allowed = new Set(rows.map((r) => r.id as string));
-  const out: { conversationId: string; lastReadSeq: number }[] = [];
+  const out: { conversationId: string; lastReadSeq: number;readRevision:number }[] = [];
   for (const it of items) {
     if (!allowed.has(it.conversationId)) continue;
     const r = await markRead(userId, it.conversationId, it.seq);
-    out.push({ conversationId: it.conversationId, lastReadSeq: r.lastReadSeq });
+    out.push({ conversationId: it.conversationId, lastReadSeq: r.lastReadSeq,readRevision:r.readRevision });
   }
   return { marked: out };
 }
@@ -329,10 +333,13 @@ export async function editMessage(userId: string, messageId: string, body: strin
     // Otro texto, otra vista previa: se quita la anterior y el worker lee el enlace nuevo.
     // #grupos: igual que las menciones (las nuevas si llegan; si el texto cambió sin refs, se quitan).
     const refs = await normalizeRefs(c, userId, body, refsInput ?? (body === m.body ? m.refs ?? [] : []));
-    const { rows } = await c.query('UPDATE messages SET body = $2, body_sha256 = $3, edited_at = now(), link_preview = NULL, link_previews = NULL, mentions = $4, refs = $5 WHERE id = $1 RETURNING *',
-      [messageId, body, sha256(body), mentions.mentions.length ? JSON.stringify(mentions.mentions) : null, refs.length ? JSON.stringify(refs) : null]);
+    const credits=[...new Set((m.attachments ?? []).map((x:any)=>x.provenance?.attribution).filter((x:any)=>!!x))] as string[];
+    const displayBody=credits.length ? (credits.includes(body) ? '' : body) : null;
+    const fullBody=credits.length ? [displayBody,...credits].filter(Boolean).join('\n\n') : body;
+    const { rows } = await c.query('UPDATE messages SET body = $2, display_body=$6, body_sha256 = $3, edited_at = now(), link_preview = NULL, link_previews = NULL, mentions = $4, refs = $5 WHERE id = $1 RETURNING *',
+      [messageId, fullBody, sha256(body), mentions.mentions.length ? JSON.stringify(mentions.mentions) : null, refs.length ? JSON.stringify(refs) : null, displayBody]);
     await indexLinks(c, rows[0]);
-    await queuePreview(c, messageId, body);
+    await queuePreview(c, messageId, displayBody ?? body);
     const message = toMessageDTO(rows[0]);
     await appendEvent(c, m.conversation_id, { type: 'message.updated', conversationId: m.conversation_id, message }, messageId);
     return message;
@@ -360,14 +367,14 @@ export async function markUnread(userId: string, conversationId: string, seq: nu
   return tx(async (c) => {
     const a = await conversationAccess(c, userId, conversationId, 'read');
     const target = Math.max(a.historyFromSeq, Math.min(seq, a.lastMessageSeq) - 1);
-    await c.query(
-      `INSERT INTO read_cursors (conversation_id, user_id, last_read_seq) VALUES ($1,$2,$3)
-       ON CONFLICT (conversation_id, user_id) DO UPDATE SET last_read_seq = EXCLUDED.last_read_seq, updated_at = now()`,
+    const read = await c.query(
+      `INSERT INTO read_cursors (conversation_id, user_id, last_read_seq, revision) VALUES ($1,$2,$3,1)
+       ON CONFLICT (conversation_id, user_id) DO UPDATE SET last_read_seq = EXCLUDED.last_read_seq, updated_at = now(), revision=read_cursors.revision+1 RETURNING revision`,
       [conversationId, userId, target],
     );
     await c.query('UPDATE message_mentions SET read_at = NULL WHERE user_id = $1 AND conversation_id = $2 AND seq > $3', [userId, conversationId, target]);
-    await enqueueOutbox(c, 'account.event', { userIds: [userId], event: { type: 'read.updated', conversationId, seq: target } });
-    return { lastReadSeq: target };
+    await enqueueOutbox(c, 'account.event', { userIds: [userId], event: { type: 'read.updated', conversationId, seq: target, readRevision: Number(read.rows[0].revision) } });
+    return { lastReadSeq: target, readRevision: Number(read.rows[0].revision) };
   });
 }
 
@@ -401,4 +408,18 @@ export async function listPins(userId: string, conversationId: string) {
     [conversationId, a.historyFromSeq],
   );
   return rows.map((r) => forViewer(toMessageDTO(r), userId));
+}
+
+/** Only exact server-verified credit text is technical metadata. Arbitrary GIF prefixes/comments stay text. */
+export function creditFreeBody(body: string, attachments?: any[] | null) { return attachments?.some((a) => a.provenance?.version === 1 && a.provenance.attribution === body) ? '' : body; }
+
+/** Directed load is bounded and applies the same membership/history and one-view sealing as normal pages. */
+export async function messagesAround(userId: string, conversationId: string, target: { messageId?: string; seq?: number }, limit = 50) {
+  const a = await conversationAccess(pool,userId,conversationId,'read');
+  const found = await pool.query('SELECT seq FROM messages WHERE conversation_id=$1 AND seq>$2 AND (($3::uuid IS NOT NULL AND id=$3) OR ($4::bigint IS NOT NULL AND seq=$4))',[conversationId,a.historyFromSeq,target.messageId ?? null,target.seq ?? null]);
+  if (!found.rows[0]) throw notFound('Mensaje');
+  const seq = Number(found.rows[0].seq), half = Math.floor(limit / 2);
+  const rows = await pool.query(`(SELECT * FROM messages WHERE conversation_id=$1 AND seq>$2 AND seq<$3 ORDER BY seq DESC LIMIT $4)
+    UNION ALL (SELECT * FROM messages WHERE conversation_id=$1 AND seq>=$3 ORDER BY seq ASC LIMIT $5) ORDER BY seq`, [conversationId,a.historyFromSeq,seq,half,limit-half]);
+  return { messages: rows.rows.map((r)=>forViewer(toMessageDTO(r),userId)), hasMore: Number(rows.rows[0]?.seq ?? 0)>a.historyFromSeq+1, lastEventSeq:a.lastEventSeq };
 }

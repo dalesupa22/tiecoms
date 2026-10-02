@@ -1,4 +1,4 @@
-import type { NoteDTO, NoteInput, PersonalPreferencesDTO } from '@tiecoms/contracts';
+import { PersonalPreferencesInput, type NoteDTO, type NoteInput, type PersonalPreferencesDTO } from '@tiecoms/contracts';
 import { conversationAccess } from '../access.ts';
 import { pool, tx, type Db } from '../db.ts';
 import { badRequest, notFound } from '../errors.ts';
@@ -56,13 +56,20 @@ export async function getPersonalPreferences(userId: string): Promise<PersonalPr
   return { sections: [], conversations: {}, ...rows[0]?.preferences };
 }
 
-export async function setPersonalPreferences(userId: string, input: PersonalPreferencesDTO) {
+export async function setPersonalPreferences(userId: string, input: Partial<Omit<PersonalPreferencesDTO,'appearance'>> & { appearance?: Partial<NonNullable<PersonalPreferencesDTO['appearance']>> }, merge = false, presentKeys = Object.keys(input)) {
   return tx(async (db) => {
-    // Entries for chats that left the account can remain as personal history, but new references require read access.
-    const old = await db.query('SELECT preferences FROM user_personal_preferences WHERE user_id=$1 FOR UPDATE', [userId]);
-    const previous = old.rows[0]?.preferences?.conversations ?? {};
-    for (const id of Object.keys(input.conversations)) if (!Object.hasOwn(previous, id)) await conversationAccess(db, userId, id, 'read');
-    await db.query('INSERT INTO user_personal_preferences (user_id,preferences) VALUES ($1,$2) ON CONFLICT (user_id) DO UPDATE SET preferences=EXCLUDED.preferences, updated_at=now()', [userId, JSON.stringify(input)]);
-    return input;
+    // Lock the owner even before a preferences row exists, preventing first-write races.
+    await db.query('SELECT id FROM users WHERE id=$1 FOR UPDATE', [userId]);
+    const old = await db.query('SELECT preferences FROM user_personal_preferences WHERE user_id=$1', [userId]);
+    const previous = { sections: [], conversations: {}, ...old.rows[0]?.preferences };
+    const chosen = Object.fromEntries(Object.entries(input).filter(([key]) => presentKeys.includes(key)));
+    const combined = { ...previous, ...chosen,
+      ...(chosen.issues ? { issues: { ...previous.issues, ...input.issues } } : {}),
+      ...(merge && chosen.appearance ? { appearance: { mode: 'system', accent: null, ...previous.appearance, ...input.appearance } } : {}),
+    };
+    const value = PersonalPreferencesInput.parse(combined);
+    for (const id of Object.keys(value.conversations)) if (!Object.hasOwn(previous.conversations, id)) await conversationAccess(db, userId, id, 'read');
+    await db.query('INSERT INTO user_personal_preferences (user_id,preferences) VALUES ($1,$2) ON CONFLICT (user_id) DO UPDATE SET preferences=EXCLUDED.preferences, updated_at=now()', [userId, JSON.stringify(value)]);
+    return value;
   });
 }

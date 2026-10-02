@@ -35,6 +35,7 @@ export const toDTO = (r: any): AttachmentDTO => ({
   // Si hay variante reproducible (AAC), url la sirve y contentType la describe; ?original=1 da el archivo subido.
   contentType: r.play_type ?? r.content_type, sizeBytes: Number(r.size_bytes), width: r.width ?? null, height: r.height ?? null,
   url: `/api/v1/attachments/${r.id}`, thumbUrl: r.thumb_key ? `/api/v1/attachments/${r.id}/thumb` : null,
+  ...(r.provenance ? { provenance: r.provenance } : {}),
   ...(r.signing ? { signing: r.signing } : {}),
   // Videos: kind queda 'file' (las apps viejas solo conocen 'file' | 'voice'); durationMs y playUrl son aditivos.
   ...(r.kind !== 'voice' && String(r.content_type).startsWith('video/') ? { durationMs: r.duration_ms ?? null, playUrl: `/api/v1/attachments/${r.id}/play` } : {}),
@@ -362,11 +363,11 @@ export async function claimForMessage(c: Tx, userId: string, conversationId: str
       if (r.message_seq <= acc.historyFromSeq) throw badRequest('Algún adjunto reenviado no existe');
       const copy = await c.query(
         `INSERT INTO attachments (conversation_id, owner_id, name, content_type, size_bytes, width, height, s3_key, thumb_key, thumb_type,
-                                  kind, duration_ms, waveform, transcript, play_key, play_type, signing)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING *`,
+                                  kind, duration_ms, waveform, transcript, play_key, play_type, signing, provenance)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING *`,
         [conversationId, userId, r.name, r.content_type, r.size_bytes, r.width, r.height, r.s3_key, r.thumb_key, r.thumb_type,
           r.kind, r.duration_ms, JSON.stringify(r.waveform), JSON.stringify(r.transcript ? { ...r.transcript, status: r.transcript.status === 'done' ? 'done' : 'disabled', aiConsent: false, aiConsentAt: null } : null), r.play_key, r.play_type,
-          r.signing ? JSON.stringify(r.signing) : null],
+          r.signing ? JSON.stringify(r.signing) : null, r.provenance ? JSON.stringify(r.provenance) : null],
       );
       out.push({ id: copy.rows[0].id, dto: toDTO(copy.rows[0]) });
     }

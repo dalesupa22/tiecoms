@@ -12,7 +12,7 @@
 import type { GifItemDTO, GifProvider } from '@tiecoms/contracts';
 
 export type MediaKind = 'p' | 'f'; // p = vista previa de la cuadrícula; f = archivo para enviar / plantilla
-export type Mint = (provider: GifProvider, url: string, kind: MediaKind, attribution: string | null, title: string) => string;
+export type Mint = (provider: GifProvider, url: string, kind: MediaKind, attribution: string | null, title: string, provenance?: import('@tiecoms/contracts').AttachmentProvenanceDTO) => string;
 
 export const KLIPY_API = 'https://api.klipy.com/v2';
 export const OPENVERSE_API = 'https://api.openverse.org/v1/images/';
@@ -71,7 +71,7 @@ export function normalizeKlipy(json: any, mint: Mint): { items: GifItemDTO[]; ne
     const attribution = 'GIF vía KLIPY';
     items.push({
       id: `klipy:${String(r.id ?? '').slice(0, 64)}`, provider: 'klipy', title,
-      previewUrl: mint('klipy', preview.url, 'p', null, title), url: mint('klipy', full.url, 'f', attribution, title),
+      previewUrl: mint('klipy', preview.url, 'p', null, title), url: mint('klipy', full.url, 'f', attribution, title, { version: 1, provider: 'klipy', title, attribution, sourceUrl: null }),
       width: w, height: h, attribution, sourceUrl: typeof r.itemurl === 'string' && isAllowedMediaUrl('klipy', r.itemurl) ? r.itemurl : null,
     });
   }
@@ -156,7 +156,7 @@ export function normalizeOpenverse(json: any, mint: Mint, page: number): { items
     items.push({
       id: `openverse:${String(r.id ?? '').slice(0, 64)}`, provider: 'openverse', title,
       previewUrl: mint('openverse', wikimediaThumb(url, OPENVERSE_PREVIEW_W, w), 'p', null, title),
-      url: mint('openverse', wikimediaThumb(url, OPENVERSE_SEND_W, w), 'f', attribution, title),
+      url: mint('openverse', wikimediaThumb(url, OPENVERSE_SEND_W, w), 'f', attribution, title, { version: 1, provider: 'openverse', title, attribution, sourceUrl, author: creator, license: licenseLabel(r.license, r.license_version), licenseUrl: licenseLink }),
       width: sendW, height: Math.round((h * sendW) / w), attribution,
       sourceUrl,
     });
@@ -188,7 +188,7 @@ export function normalizeMemegen(json: any, mint: Mint): GifItemDTO[] {
     // memegen redimensiona con ?width= (la vista previa pesa unos 10 KB; la plantilla para el editor, ≤ 800 px).
     out.push({
       id, provider: 'memegen', title,
-      previewUrl: mint('memegen', `${url}?width=300`, 'p', null, title), url: mint('memegen', `${url}?width=800`, 'f', attribution, title),
+      previewUrl: mint('memegen', `${url}?width=300`, 'p', null, title), url: mint('memegen', `${url}?width=800`, 'f', attribution, title, { version: 1, provider: 'memegen', title, attribution, sourceUrl }),
       width: MEMEGEN_BOX, height: MEMEGEN_BOX, attribution, sourceUrl, boxCount: lines,
     });
   }

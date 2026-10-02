@@ -12,7 +12,7 @@ import { ProviderError, accessToken, apiBase, meetUrl, request } from './meeting
 export type CalendarProvider = 'google' | 'microsoft';
 export type Interval = [number, number];
 export type BusyResult =
-  | { state: 'ok'; provider: CalendarProvider; intervals: Interval[] }
+  | { state: 'ok'; provider: CalendarProvider; intervals: Interval[]; generation:string }
   | { state: 'none'; intervals: [] }
   | { state: 'reconnect'; provider: CalendarProvider; intervals: [] }
   | { state: 'error'; intervals: [] };
@@ -30,7 +30,7 @@ const CACHE_MS = Number(process.env.BOOKING_CACHE_MS ?? 45_000);
 
 /** Ocupado entre `from` y `to` (ms). `tz` interpreta los eventos de todo el día. Se guarda 45 s en memoria por persona. */
 export async function busyIntervals(userId: string, from: number, to: number, tz: string, fresh = false, ignoreExternalId?: string): Promise<BusyResult> {
-  const key = `${userId}|${Math.floor(from / 3_600_000)}|${Math.ceil(to / 3_600_000)}`;
+  const key = `${userId}|${tz}|${Math.floor(from / 3_600_000)}|${Math.ceil(to / 3_600_000)}`;
   const hit = cache.get(key);
   if (!fresh && !ignoreExternalId && hit && Date.now() - hit.at < CACHE_MS) return hit.value;
   const value = await load(userId, from, to, tz, ignoreExternalId);
@@ -47,9 +47,9 @@ async function load(userId: string, from: number, to: number, tz: string, ignore
   const { provider, reconnect } = await connectedCalendar(userId);
   if (!provider) return reconnect ? { state: 'reconnect', provider: 'google', intervals: [] } : { state: 'none', intervals: [] };
   try {
-    const { access } = await accessToken(userId, provider);
+    const { access,generation } = await accessToken(userId, provider);
     const intervals = provider === 'google' ? await googleBusy(access, from, to, tz, ignore) : await microsoftBusy(access, from, to, ignore);
-    return { state: 'ok', provider, intervals };
+    return { state: 'ok', provider, intervals,generation };
   } catch (e: any) {
     if (e instanceof ApiError && e.code === 'reconnect_required') return { state: 'reconnect', provider, intervals: [] };
     if (e instanceof ApiError && e.code === 'not_connected') return { state: 'none', intervals: [] };

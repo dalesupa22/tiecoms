@@ -1,3 +1,4 @@
+import { downloadPendingWaMedia } from './modules/wa-media.ts';
 /**
  * Puente de WhatsApp: mantiene vivas las cuentas que cada persona conectó.
  *
@@ -12,7 +13,7 @@
 import { hostname } from 'node:os';
 import pino from 'pino';
 import makeWASocket, { Browsers, DisconnectReason, fetchLatestWaWebVersion, jidNormalizedUser, makeCacheableSignalKeyStore } from 'baileys';
-import { pool } from './db.ts';
+import { pool,tx } from './db.ts';
 import {
   bridgeToTieComs, chatFromWa, dbAuthState, groupRow, msgRow, notifyOwner, organizeAccount, setStatus, skipJid, storeMessages, tsOf,
   upsertChats, upsertContacts, type ChatRow, type MsgRow, type Session,
@@ -212,7 +213,11 @@ async function purgeRemoved() {
       try { await s.sock.logout('chaggu: cuenta desconectada'); } catch {}
     }
     if (s) stopLocal(s);
-    await pool.query('DELETE FROM wa_accounts WHERE id = $1', [r.id]);
+    await tx(async c=>{
+      const originals=await c.query("SELECT media_info->>'key' AS key FROM wa_messages WHERE account_id=$1 AND media_info->>'key' IS NOT NULL",[r.id]);
+      for(const original of originals.rows) await c.query("INSERT INTO jobs(kind,payload) VALUES('wa.delete_original',$1)",[JSON.stringify({key:original.key})]);
+      await c.query('DELETE FROM wa_accounts WHERE id=$1',[r.id]);
+    });
     console.log(`[wa] ${r.id} desconectada y borrada`);
   }
 }
@@ -236,7 +241,8 @@ async function processOutbox() {
       const s = sessions.get(r.account_id);
       try {
         if (!s?.sock) throw new Error('La sesión de WhatsApp no está lista');
-        await s.sock.sendMessage(r.jid, { text: r.body });
+        const sent=await s.sock.sendMessage(r.jid,{text:r.body});
+        if(sent) { const row=msgRow(s,sent); if(row) await storeMessages(s,[row],false); }
         await pool.query("UPDATE wa_outbox SET status = 'sent', sent_at = now(), body = '' WHERE id = $1", [r.id]);
         notifyOwner(s);
       } catch (e: any) {
@@ -249,8 +255,15 @@ async function processOutbox() {
   await pool.query("DELETE FROM wa_outbox WHERE status IN ('sent', 'failed') AND created_at < now() - interval '7 days'");
 }
 
+let mediaDownloading=false,mediaCursor=0;
 async function tick() {
   await purgeRemoved();
+  // One background account per tick: provider media I/O cannot delay account leases, sends, or reconnects.
+  const candidates=[...sessions.values()].filter(s=>s.sock && !s.stopping);
+  if(!mediaDownloading && candidates.length) {
+    const s=candidates[mediaCursor++ % candidates.length]!;mediaDownloading=true;
+    void downloadPendingWaMedia(s.id,s.sock!,()=>!s.stopping && sessions.get(s.id)===s).then(n=>{if(n && !s.stopping) notifyOwner(s);}).catch(()=>{}).finally(()=>{mediaDownloading=false;});
+  }
   await processOutbox().catch((e: any) => console.error('[wa] outbox', e?.message));
   const mine = [...sessions.keys()];
   if (mine.length) {

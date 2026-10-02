@@ -69,8 +69,9 @@ const FILTERS: Record<string, LinkKind[]> = {
  * Indexa (o reindexa tras editar) los enlaces de un mensaje dentro de la transacción del envío.
  * Un enlace que sigue en el texto conserva su id (y el «Ver después» de quien lo guardó).
  */
-export async function indexLinks(c: Tx, m: { id: string; conversation_id: string; seq: number; author_id: string | null; body: string; created_at: string | Date }) {
-  const urls = extractUrls(m.body);
+export async function indexLinks(c: Tx, m: { id: string; conversation_id: string; seq: number; author_id: string | null; body: string; attachments?: any[] | null; display_body?: string | null; created_at: string | Date }) {
+  const body = m.display_body ?? (m.attachments?.some((a) => a.provenance?.version === 1 && a.provenance.attribution === m.body) ? '' : m.body);
+  const urls = extractUrls(body);
   const { rows: existing } = await c.query('SELECT id, url FROM message_links WHERE message_id = $1', [m.id]);
   if (!urls.length && !existing.length) return;
   // Se liberan las posiciones antes de reordenar (UNIQUE message_id, position).

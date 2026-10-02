@@ -17,13 +17,13 @@ import { emitInbox, inboxChats } from './whatsapp.ts';
 // ---------- Cifrado de credenciales ----------
 const KEY = createHash('sha256').update(`tiecoms-wa-store:${process.env.WA_STORE_KEY ?? config.jwtSecret}`).digest();
 
-function seal(value: unknown): Buffer {
+export function sealWa(value: unknown): Buffer {
   const iv = randomBytes(12);
   const c = createCipheriv('aes-256-gcm', KEY, iv);
   const body = Buffer.concat([c.update(JSON.stringify(value, BufferJSON.replacer), 'utf8'), c.final()]);
   return Buffer.concat([iv, c.getAuthTag(), body]);
 }
-function open(buf: Buffer): any {
+export function openWa(buf: Buffer): any {
   const d = createDecipheriv('aes-256-gcm', KEY, buf.subarray(0, 12));
   d.setAuthTag(buf.subarray(12, 28));
   return JSON.parse(Buffer.concat([d.update(buf.subarray(28)), d.final()]).toString('utf8'), BufferJSON.reviver);
@@ -31,7 +31,7 @@ function open(buf: Buffer): any {
 
 export async function dbAuthState(accountId: string) {
   const { rows } = await pool.query("SELECT value FROM wa_auth WHERE account_id = $1 AND key = 'creds'", [accountId]);
-  const creds: AuthenticationCreds = rows[0] ? open(rows[0].value) : initAuthCreds();
+  const creds: AuthenticationCreds = rows[0] ? openWa(rows[0].value) : initAuthCreds();
   return {
     state: {
       creds,
@@ -41,7 +41,7 @@ export async function dbAuthState(accountId: string) {
           if (!ids.length) return out;
           const r = await pool.query('SELECT key, value FROM wa_auth WHERE account_id = $1 AND key = ANY($2)', [accountId, ids.map((id) => `${type}:${id}`)]);
           for (const row of r.rows) {
-            let v = open(row.value);
+            let v = openWa(row.value);
             if (type === 'app-state-sync-key' && v) v = proto.Message.AppStateSyncKeyData.fromObject(v);
             out[row.key.slice(type.length + 1)] = v;
           }
@@ -52,7 +52,7 @@ export async function dbAuthState(accountId: string) {
           const del: string[] = [];
           for (const type in data) {
             for (const [id, v] of Object.entries((data as any)[type] ?? {})) {
-              if (v) up.push([`${type}:${id}`, seal(v)]); else del.push(`${type}:${id}`);
+              if (v) up.push([`${type}:${id}`, sealWa(v)]); else del.push(`${type}:${id}`);
             }
           }
           if (up.length) {
@@ -70,7 +70,7 @@ export async function dbAuthState(accountId: string) {
       await pool.query(
         `INSERT INTO wa_auth (account_id, key, value) VALUES ($1, 'creds', $2)
          ON CONFLICT (account_id, key) DO UPDATE SET value = EXCLUDED.value`,
-        [accountId, seal(creds)],
+        [accountId, sealWa(creds)],
       );
     },
   };
@@ -262,7 +262,7 @@ export function groupRow(g: GroupMetadata): ChatRow {
   return { jid: g.id, name: g.subject || null, isGroup: true, participants: g.size ?? g.participants?.length ?? null, description: g.desc ?? null };
 }
 
-export interface MsgRow { chat: string; id: string; fromMe: boolean; authorJid: string | null; authorName: string | null; kind: string; body: string; sentAt: Date }
+export interface MsgRow { chat: string; id: string; fromMe: boolean; authorJid: string | null; authorName: string | null; kind: string; body: string; sentAt: Date; mediaEnvelope?: Buffer | null; mediaState?: 'pending' | 'restricted' | null }
 
 export function msgRow(s: Session, m: WAMessage): MsgRow | null {
   const chat = m.key.remoteJid ? jidNormalizedUser(m.key.remoteJid) || m.key.remoteJid : null;
@@ -273,6 +273,7 @@ export function msgRow(s: Session, m: WAMessage): MsgRow | null {
   const author = fromMe ? s.me : (isJidGroup(chat) ? (m.key.participant ?? (m.key as any).participantAlt ?? null) : chat);
   return {
     chat, id: m.key.id, fromMe, authorJid: author ? jidNormalizedUser(author) : null,
+    ...mediaEnvelope(m),
     authorName: fromMe ? null : (m.pushName ?? null), kind: d.kind, body: d.body.slice(0, 8000), sentAt: tsOf(m.messageTimestamp),
   };
 }
@@ -283,12 +284,17 @@ export async function storeMessages(s: Session, rows: MsgRow[], live: boolean) {
   for (let i = 0; i < rows.length; i += 500) {
     const part = rows.slice(i, i + 500);
     const r = await pool.query(
-      `INSERT INTO wa_messages (account_id, chat_jid, id, from_me, author_jid, author_name, kind, body, sent_at)
-       SELECT $1, * FROM unnest($2::text[], $3::text[], $4::boolean[], $5::text[], $6::text[], $7::text[], $8::text[], $9::timestamptz[])
+      `INSERT INTO wa_messages (account_id, chat_jid, id, from_me, author_jid, author_name, kind, body, sent_at, media_envelope, media_state)
+       SELECT $1, * FROM unnest($2::text[], $3::text[], $4::boolean[], $5::text[], $6::text[], $7::text[], $8::text[], $9::timestamptz[], $10::bytea[], $11::text[])
        ON CONFLICT DO NOTHING RETURNING chat_jid, id`,
       [s.id, part.map((m) => m.chat), part.map((m) => m.id), part.map((m) => m.fromMe), part.map((m) => m.authorJid),
-        part.map((m) => m.authorName), part.map((m) => m.kind), part.map((m) => m.body), part.map((m) => m.sentAt)],
+        part.map((m) => m.authorName), part.map((m) => m.kind), part.map((m) => m.body), part.map((m) => m.sentAt), part.map((m)=>m.mediaEnvelope ?? null), part.map((m)=>m.mediaState ?? null)],
     );
+    // A legitimate provider re-delivery can fill a legacy descriptor, without adding unread or moving recency.
+    await pool.query(`UPDATE wa_messages m SET media_envelope=v.envelope,media_state=v.state
+      FROM unnest($2::text[],$3::text[],$4::bytea[],$5::text[]) AS v(jid,id,envelope,state)
+      WHERE m.account_id=$1 AND m.chat_jid=v.jid AND m.id=v.id AND m.media_envelope IS NULL AND v.envelope IS NOT NULL`,
+      [s.id,part.map(m=>m.chat),part.map(m=>m.id),part.map(m=>m.mediaEnvelope ?? null),part.map(m=>m.mediaState ?? null)]);
     const got = new Set(r.rows.map((x) => `${x.chat_jid}|${x.id}`));
     inserted.push(...part.filter((m) => got.has(`${m.chat}|${m.id}`)));
   }
@@ -403,4 +409,21 @@ export async function storeReaction(s: Session, m: WAMessage) {
   if (up.rowCount) notifyOwner(s);
   const tc = await pool.query('SELECT id FROM messages WHERE author_id = $1 AND client_message_id = $2', [s.userId, bridgedClientId(s.id, chat, target.id)]);
   if (tc.rows[0]) await externalReaction(tc.rows[0].id, `wa:${reactor}`, emoji, name!);
+}
+
+/** Preserve the original wrappers for policy checks; normalization alone discards one-view/ephemeral flags. */
+function mediaEnvelope(m: WAMessage): Pick<MsgRow,'mediaEnvelope'|'mediaState'> {
+  const normalized=normalizeMessageContent(m.message), node=normalized?.imageMessage ?? normalized?.audioMessage ?? normalized?.videoMessage ?? normalized?.documentMessage ?? normalized?.stickerMessage;
+  if (!node) return {};
+  function restrictedNode(value:unknown, depth=0):boolean {
+    if(!value || typeof value!=='object' || depth>12 || Buffer.isBuffer(value) || value instanceof Uint8Array) return false;
+    for(const [key,child] of Object.entries(value)) {
+      if((/^viewOnceMessage(?:V2(?:Extension)?)?$/.test(key) || key==='ephemeralMessage') && child) return true;
+      if(key==='viewOnce' && child===true || key==='ephemeralExpiration' && Number(child)>0) return true;
+      if(restrictedNode(child,depth+1)) return true;
+    }
+    return false;
+  }
+  const restricted=restrictedNode(m.message);
+  return {mediaEnvelope:sealWa(m),mediaState:restricted ? 'restricted' : 'pending'};
 }

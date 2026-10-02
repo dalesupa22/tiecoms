@@ -5,7 +5,7 @@ import { pool } from '../db.ts';
 import { loadUser } from './auth.ts';
 import { orgVerification } from './domains.ts';
 import { summarize } from './attachments.ts';
-import { activeDnd, toSleep } from './prefs.ts';
+import { activeDnd, toSleep, effectiveAvailability, AVAILABILITY_SQL } from './prefs.ts';
 import { inboxChats } from './whatsapp.ts';
 
 const ACTIVE_WM = `wm.revoked_at IS NULL AND (wm.expires_at IS NULL OR wm.expires_at > now())`;
@@ -17,12 +17,13 @@ const ACTIVE_WM = `wm.revoked_at IS NULL AND (wm.expires_at IS NULL OR wm.expire
  */
 export async function bootstrap(userId: string): Promise<BootstrapDTO> {
   const me = await loadUser(pool, userId);
-  const digest = await pool.query('SELECT link_digest, dnd_until, sleep_on, sleep_start, sleep_end, sleep_tz, sleep_tz_auto, message_sound, ringtone, ai_consent_at FROM users WHERE id = $1', [userId]);
+  const digest = await pool.query(`SELECT ${AVAILABILITY_SQL}, link_digest, sleep_on, sleep_start, sleep_end, sleep_tz, sleep_tz_auto, message_sound, ringtone, ai_consent_at FROM users u WHERE id = $1`, [userId]);
   me.linkDigest = !!digest.rows[0]?.link_digest;
   me.dndUntil = activeDnd(digest.rows[0]?.dnd_until);
   me.sleep = toSleep(digest.rows[0]);
   me.messageSound = digest.rows[0]?.message_sound ?? null;
   me.ringtone = digest.rows[0]?.ringtone ?? null;
+  me.availability = effectiveAvailability(digest.rows[0]);
   me.aiConsent = !!digest.rows[0]?.ai_consent_at;
 
   const [ws, convs, people] = await Promise.all([
@@ -45,15 +46,15 @@ export async function bootstrap(userId: string): Promise<BootstrapDTO> {
                   AND mm.seq > GREATEST(COALESCE(rc.last_read_seq, 0), m.history_from_seq))::int AS unread_mentions,
               m.can_post, m.can_manage, m.history_from_seq, wm.role AS workspace_role, cp.pinned_at, cp.muted_until, cp.link_previews, cp.sound,
               (SELECT count(*) FROM message_links ml WHERE ml.conversation_id = c.id AND ml.seq > m.history_from_seq)::int AS link_count,
-              COALESCE(rc.last_read_seq, 0) AS last_read_seq,
+              COALESCE(rc.last_read_seq, 0) AS last_read_seq, COALESCE(rc.revision,0) AS read_revision,
               ARRAY(SELECT user_id FROM conversation_memberships x WHERE x.conversation_id = c.id AND x.removed_at IS NULL ORDER BY x.joined_at) AS member_ids,
               ARRAY(SELECT user_id FROM conversation_memberships x WHERE x.conversation_id = c.id AND x.removed_at IS NULL AND x.can_manage ORDER BY x.joined_at) AS admin_ids, c.created_by,
-              (SELECT CASE WHEN lm.deleted_at IS NOT NULL THEN '' WHEN lm.view_once THEN '①' ELSE left(lm.body, 140) END FROM messages lm
+              (SELECT CASE WHEN lm.deleted_at IS NOT NULL THEN '' WHEN lm.view_once THEN '①' ELSE left(COALESCE(lm.display_body,lm.body), 140) END FROM messages lm
                 WHERE lm.conversation_id = c.id AND lm.seq = c.last_message_seq AND lm.seq > m.history_from_seq) AS preview,
               (SELECT lm.attachments FROM messages lm
                 WHERE lm.conversation_id = c.id AND lm.seq = c.last_message_seq AND lm.seq > m.history_from_seq AND lm.deleted_at IS NULL) AS preview_attachments,
               -- Último mensaje de una persona (o agente) entre los últimos 20 visibles, aunque después haya avisos de sistema.
-              (SELECT json_build_object('id', hm.id, 'seq', hm.seq, 'authorId', hm.author_id, 'body', left(hm.body, 140), 'attachments', hm.attachments, 'createdAt', hm.created_at, 'viewOnce', hm.view_once)
+              (SELECT json_build_object('id', hm.id, 'seq', hm.seq, 'authorId', hm.author_id, 'body', left(COALESCE(hm.display_body,hm.body), 140), 'attachments', hm.attachments, 'createdAt', hm.created_at, 'viewOnce', hm.view_once)
                  FROM messages hm WHERE hm.conversation_id = c.id AND hm.kind = 'text' AND hm.deleted_at IS NULL
                   AND hm.seq > GREATEST(m.history_from_seq, c.last_message_seq - 20)
                 ORDER BY hm.seq DESC LIMIT 1) AS human
@@ -92,7 +93,7 @@ export async function bootstrap(userId: string): Promise<BootstrapDTO> {
          -- gg, el asistente (docs/GG-CHAT.md).
          UNION SELECT '0a9a9a9a-0000-4000-8000-000000000066'::uuid
        )
-       SELECT u.id, u.name, u.kind, u.primary_org_id, u.avatar_file_id, u.profile_phone, u.profile_company, u.profile_bio, om.title, om.area, u.sleep_on, u.sleep_start, u.sleep_end, u.sleep_tz,
+       SELECT ${AVAILABILITY_SQL}, u.id, u.name, u.kind, u.primary_org_id, u.avatar_file_id, u.profile_phone, u.profile_company, u.profile_bio, om.title, om.area, u.sleep_on, u.sleep_start, u.sleep_end, u.sleep_tz,
               (SELECT bool_and(g.role = 'guest') FROM workspace_memberships g WHERE g.user_id = u.id AND g.revoked_at IS NULL) AS guest,
               (SELECT max(g.expires_at) FROM workspace_memberships g WHERE g.user_id = u.id AND g.role = 'guest' AND g.revoked_at IS NULL) AS guest_until
          FROM visible v JOIN users u ON u.id = v.user_id AND u.disabled_at IS NULL
@@ -117,7 +118,7 @@ export async function bootstrap(userId: string): Promise<BootstrapDTO> {
       lastMessageAt: r.last_message_at ? new Date(r.last_message_at).toISOString() : null,
       // Clientes viejos: un mensaje solo con adjuntos muestra un ícono en vez de quedar vacío.
       lastMessagePreview: r.preview === '' && r.preview_attachments?.length ? legacyAttachmentPreview(r.preview_attachments) : r.preview,
-      lastReadSeq: r.last_read_seq,
+      lastReadSeq: r.last_read_seq, readRevision:Number(r.read_revision ?? 0),
       unread: Math.max(0, r.last_message_seq - readFrom),
       canPost: r.can_post, canManage: r.can_manage || ['lead', 'admin'].includes(r.workspace_role),
       historyFromSeq: r.history_from_seq,
@@ -141,7 +142,7 @@ export async function bootstrap(userId: string): Promise<BootstrapDTO> {
 
   const personList: PersonDTO[] = people.rows.map((r) => ({
     id: r.id, name: r.name, kind: r.kind, phone: r.profile_phone, company: r.profile_company, bio: r.profile_bio, orgId: r.guest ? null : r.primary_org_id, title: r.title, area: r.area,
-    guest: Boolean(r.guest), guestUntil: r.guest_until ? new Date(r.guest_until).toISOString() : null,
+    availability: effectiveAvailability(r), guest: Boolean(r.guest), guestUntil: r.guest_until ? new Date(r.guest_until).toISOString() : null,
     avatarUrl: r.avatar_file_id ? `/api/v1/avatars/${r.avatar_file_id}` : null,
     sleep: r.kind === 'human' && r.sleep_on && r.sleep_start ? { start: String(r.sleep_start).slice(0, 5), end: String(r.sleep_end).slice(0, 5), tz: r.sleep_tz } : null,
   }));

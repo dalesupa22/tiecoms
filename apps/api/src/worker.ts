@@ -4,6 +4,7 @@
  * los ejecuta fuera de ella; reintenta con backoff y deja el fallo inspeccionable.
  */
 import { reply as ggReply } from './modules/gg.ts';
+import { expireAvailability } from './modules/prefs.ts';
 import { hostname } from 'node:os';
 import { migrate } from './migrate.ts';
 import { enqueueOutbox, pool, tx } from './db.ts';
@@ -11,7 +12,7 @@ import { fireDueReminders } from './modules/reminders.ts';
 import { sendDueScheduled } from './modules/scheduled.ts';
 import { cleanupExpired as cleanupSso } from './modules/sso.ts';
 import { previewMessage } from './modules/link-preview.ts';
-import { deletePersonalObject } from './storage.ts';
+import { deleteObject,objectKey,deletePersonalObject } from './storage.ts';
 import { notifyReport } from './modules/safety.ts';
 import { pushCall, pushCallMissed, pushEvent, pushEventSoon, pushIssueAssigned, pushIssueOverdue, pushMessage, pushReaction, pushReminder } from './modules/push.ts';
 import { fireOverdueIssues, fireTodayEvents } from './modules/chat-notices.ts';
@@ -32,6 +33,8 @@ const LEASE_SECONDS = 120;
 type Handler = (payload: any) => Promise<void>;
 
 const handlers: Record<string, Handler> = {
+  async 'wa.delete_original'(p) { if(typeof p.key==='string' && p.key.startsWith(objectKey('wa-originals/'))) await deleteObject(p.key); },
+  async 'housekeeping.availability'() { await expireAvailability(); },
   /** gg responde en su chat o donde lo llamaron con @gg (docs/GG-CHAT.md). */
   async 'gg.reply'(p) { await ggReply(p.messageId); },
   async 'account.delete_file'(p) {
@@ -120,9 +123,9 @@ const handlers: Record<string, Handler> = {
 async function schedule() {
   const minute = Math.floor(Date.now() / 60_000);
   await pool.query(
-    `INSERT INTO jobs (kind, dedupe_key) VALUES ('housekeeping.expire_guests', $1), ('housekeeping.cleanup', $2)
+    `INSERT INTO jobs (kind, dedupe_key) VALUES ('housekeeping.expire_guests', $1), ('housekeeping.cleanup', $2), ('housekeeping.availability', $3)
      ON CONFLICT (dedupe_key) DO NOTHING`,
-    [`expire:${minute}`, `cleanup:${Math.floor(minute / 60)}`],
+    [`expire:${minute}`, `cleanup:${Math.floor(minute / 60)}`, `availability:${minute}`],
   );
   // Resumen de enlaces: los lunes desde las 13:00 UTC (8:00 en Colombia), una vez por semana.
   const now = new Date();

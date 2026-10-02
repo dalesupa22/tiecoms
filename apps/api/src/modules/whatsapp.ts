@@ -1,3 +1,6 @@
+import { waMediaDTO } from './wa-media.ts';
+import { createHmac, timingSafeEqual } from 'node:crypto';
+import { config } from '../config.ts';
 /**
  * Conectar WhatsApp (lado del API). El puente (src/wa-bridge.ts) mantiene las
  * sesiones vivas; aquí solo se crean, se listan y se organizan. Todo pertenece a
@@ -148,7 +151,20 @@ function toChatDTO(r: any): WaChatDTO {
   };
 }
 
-export async function listChats(userId: string, q: { accountId?: string; category?: WaCategory; groups?: boolean; search?: string; hidden?: boolean; limit: number }) {
+export async function listChats(userId: string, q: { accountId?: string; category?: WaCategory; groups?: boolean; search?: string; hidden?: boolean; limit: number; cursor?: string }) {
+  const scope = JSON.stringify([userId,q.accountId ?? null,q.category ?? null,q.groups ?? null,q.search?.trim() || null,q.hidden ?? false]);
+  let cursor: { p: boolean; t: string | null; a: string; j: string } | null = null;
+  if (q.cursor) {
+    try {
+      const [raw,sig] = q.cursor.split('.');
+      const expected=createHmac('sha256',config.jwtSecret).update(scope+':'+raw).digest();
+      const actual=Buffer.from(sig!, 'base64url');
+      if (expected.length!==actual.length || !timingSafeEqual(expected,actual)) throw new Error('scope');
+      cursor=JSON.parse(Buffer.from(raw!,'base64url').toString('utf8'));
+      if (typeof cursor?.p!=='boolean' || typeof cursor.a!=='string' || typeof cursor.j!=='string' || (cursor.t!==null && !Number.isFinite(Date.parse(cursor.t)))) throw new Error('cursor');
+    } catch { throw badRequest('Cursor de WhatsApp inválido para estos filtros'); }
+  }
+
   const { rows } = await pool.query(
     `SELECT c.*, COALESCE(c.name, ct.name) AS name, ct.pn, a.label AS account_label, a.kind AS account_kind, a.status AS account_status
        FROM wa_chats c JOIN wa_accounts a ON a.id = c.account_id
@@ -160,9 +176,12 @@ export async function listChats(userId: string, q: { accountId?: string; categor
         AND ($5::text IS NULL OR COALESCE(c.name, ct.name) ILIKE '%' || $5 || '%')
         AND c.hidden = $6
         AND c.jid NOT LIKE '%@broadcast' AND c.jid NOT LIKE '%@newsletter'
-      ORDER BY c.pinned DESC, c.last_message_at DESC NULLS LAST
+      AND ($8::boolean IS NULL OR c.pinned<$8 OR (c.pinned=$8 AND (
+          ($9::timestamptz IS NOT NULL AND (c.last_message_at<$9 OR c.last_message_at IS NULL)) OR
+          (c.last_message_at IS NOT DISTINCT FROM $9::timestamptz AND (c.account_id,c.jid)>($10::uuid,$11::text)))))
+      ORDER BY c.pinned DESC, c.last_message_at DESC NULLS LAST, c.account_id ASC, c.jid ASC
       LIMIT $7`,
-    [userId, q.accountId ?? null, q.category ?? null, q.groups ?? null, q.search?.trim() || null, q.hidden ?? false, q.limit],
+    [userId, q.accountId ?? null, q.category ?? null, q.groups ?? null, q.search?.trim() || null, q.hidden ?? false, q.limit+1, cursor?.p ?? null, cursor?.t ?? null, cursor?.a ?? null, cursor?.j ?? null],
   );
   const { rows: counts } = await pool.query(
     `SELECT c.category, count(*)::int AS n, sum(CASE WHEN c.unread > 0 THEN 1 ELSE 0 END)::int AS unread
@@ -173,7 +192,11 @@ export async function listChats(userId: string, q: { accountId?: string; categor
       GROUP BY c.category`,
     [userId, q.accountId ?? null, q.groups ?? null],
   );
-  return { chats: rows.map(toChatDTO), categories: Object.fromEntries(counts.map((r) => [r.category, { total: r.n, unread: r.unread }])) };
+  const hasMore=rows.length>q.limit;
+  const page=rows.slice(0,q.limit), last=page.at(-1);
+  const raw=last ? Buffer.from(JSON.stringify({p:last.pinned,t:last.last_message_at ? new Date(last.last_message_at).toISOString() : null,a:last.account_id,j:last.jid})).toString('base64url') : '';
+  const next=hasMore ? raw+'.'+createHmac('sha256',config.jwtSecret).update(scope+':'+raw).digest('base64url') : null;
+  return { chats: page.map(toChatDTO), hasMore, next, syncPartial:true, categories: Object.fromEntries(counts.map((r) => [r.category, { total: r.n, unread: r.unread }])) };
 }
 
 export async function ownChat(userId: string, accountId: string, jid: string) {
@@ -275,7 +298,7 @@ export async function listChatMessages(userId: string, accountId: string, jid: s
   );
   const messages: WaMessageDTO[] = rows.reverse().map((r) => ({
     id: r.id, fromMe: r.from_me, author: r.from_me ? null : (r.author_name ?? r.who_name ?? phoneLabel(r.who_pn)),
-    kind: r.kind, body: r.body, sentAt: new Date(r.sent_at).toISOString(),
+    kind: r.kind, body: r.body, media:waMediaDTO(r), sentAt: new Date(r.sent_at).toISOString(),
     ...(r.reactions ? { reactions: Object.values(r.reactions as Record<string, { emoji: string; name: string }>) } : {}),
   }));
   const read = await pool.query('UPDATE wa_chats SET unread = 0 WHERE account_id = $1 AND jid = $2 AND unread > 0 RETURNING inbox_place', [accountId, jid]);

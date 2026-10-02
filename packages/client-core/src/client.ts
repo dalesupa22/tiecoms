@@ -94,7 +94,13 @@ export interface ClientState {
 export const isMutedForever = (until: string | null | undefined) => !!until && Date.parse(until) > Date.now() + 366 * 86_400_000;
 export const isActiveUntil = (until: string | null | undefined) => !!until && Date.parse(until) > Date.now();
 /** «No molestar» activo en este momento. */
-export const dndActive = (s: Pick<ClientState, 'data'>) => isActiveUntil(s.data?.me.dndUntil);
+export const dndActive = (s: Pick<ClientState, 'data'>) => {
+  const me=s.data?.me, a=me?.availability;
+  if (isActiveUntil(me?.dndUntil) || (a?.silent && (!a.until || isActiveUntil(a.until)))) return true;
+  const sleep=me?.sleep;
+  if (!sleep?.on) return false;
+  try { const p=new Intl.DateTimeFormat('en-GB',{timeZone:sleep.tz,hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(new Date()); return sleep.start<sleep.end ? p>=sleep.start && p<sleep.end : sleep.start!==sleep.end && (p>=sleep.start || p<sleep.end); } catch { return false; }
+};
 /**
  * Estado de un mensaje de una sola vista para mí: los eventos en vivo llegan iguales para todos, así que se
  * calcula con el autor y openedBy (docs/TANDA-1.7.md §7). null si no es de una sola vista.
@@ -594,6 +600,7 @@ export class TieComsClient {
     }
     // Lo que se pidió hace nada (p. ej. el bootstrap de afterLogin y el «ready» del socket) no se repite.
     this.sharedGets.clear();
+    this.set({ waRevision:this.state.waRevision+1 });
     try {
       if (Date.now() - this.lastBootstrapAt > 5000) await this.loadBootstrap();
       for (const c of this.state.data?.conversations ?? []) {
@@ -608,6 +615,13 @@ export class TieComsClient {
     if (e.type === 'scope.changed') { this.scheduleBootstrap(); void this.loadIssues({ open: true }).catch(() => {}); }
     if (e.type === 'prefs.updated') this.scheduleBootstrap();
     if (e.type === 'me.dnd') this.patchMe({ dndUntil: e.dndUntil });
+    if (e.type === 'person.availability') {
+      const d=this.state.data;
+      if (d) {
+        const current=e.userId===d.me.id ? d.me.availability : d.people.find((p)=>p.id===e.userId)?.availability;
+        if (!current || e.availability.revision>=current.revision) this.set({data:{...d,me:e.userId===d.me.id ? {...d.me,availability:e.availability} : d.me,people:d.people.map((p)=>p.id===e.userId ? {...p,availability:e.availability} : p)}});
+      }
+    }
     // Asuntos restringidos ('org' o 'private') llegan por la cuenta, no por la conversación.
     if (e.type === 'issue.updated') { this.putIssues([e.issue]); this.recountIssues(e.issue.conversationId); }
     if (e.type === 'issue.personal') this.putIssues([e.issue]);
@@ -642,8 +656,8 @@ export class TieComsClient {
       this.opts.onNotice?.({ kind: 'eventSoon', event: e.event, minutes: e.minutes });
     }
     if (e.type === 'read.updated') {
-      const c = this.state.data?.conversations.find((x) => x.id === e.conversationId);
-      if (c && e.seq > c.lastReadSeq) this.patchConversationMeta(c.id, { lastReadSeq: e.seq, unread: Math.max(0, c.lastMessageSeq - Math.max(e.seq, c.historyFromSeq)), ...(e.seq >= c.lastMessageSeq ? { unreadMentions: 0 } : {}) });
+      if (e.readRevision === undefined) this.scheduleBootstrap();
+      else this.applyConfirmedRead(e.conversationId,e.seq,e.readRevision);
     }
   }
 
@@ -900,7 +914,9 @@ export class TieComsClient {
     this.setConv(id, { loading: true });
     try {
       const page = await this.request<{ messages: MessageDTO[]; hasMore: boolean }>(`/conversations/${id}/messages?before=${before}&limit=50`);
-      const cur = this.state.conversations[id]!;
+      this.assertSession(generation);
+      const cur = this.state.conversations[id];
+      if (!cur?.loaded) return false;
       const older = page.messages.filter((m) => m.seq < before);
       this.setConv(id, { messages: [...older, ...cur.messages], hasMore: page.hasMore, loading: false });
       return older.length > 0 || !page.hasMore;
@@ -917,8 +933,8 @@ export class TieComsClient {
     this.readTimers.set(id, setTimeout(() => {
       this.readTimers.delete(id);
       if (generation !== this.sessionGeneration) return;
-      void this.request<{ lastReadSeq: number }>(`/conversations/${id}/read`, { method: 'POST', json: { seq } })
-        .then((result) => this.applyConfirmedRead(id, result.lastReadSeq)).catch(() => {});
+      void this.request<{ lastReadSeq: number; readRevision?: number }>(`/conversations/${id}/read`, { method: 'POST', json: { seq } })
+        .then((result) => { if (generation===this.sessionGeneration) this.applyConfirmedRead(id,result.lastReadSeq,result.readRevision); }).catch(() => {});
     }, 400));
   }
 
@@ -1130,9 +1146,11 @@ export class TieComsClient {
     await this.request(`/workspaces/${id}/prefs`, { method: 'PUT', json: { pinned } });
   }
   async markUnread(conversationId: string, seq: number) {
-    const r = await this.request<{ lastReadSeq: number }>(`/conversations/${conversationId}/unread`, { method: 'POST', json: { seq } });
+    const generation=this.sessionGeneration;
+    const r = await this.request<{ lastReadSeq: number; readRevision?: number }>(`/conversations/${conversationId}/unread`, { method: 'POST', json: { seq } });
+    this.assertSession(generation);
     const c = this.state.data?.conversations.find((x) => x.id === conversationId);
-    if (c) this.patchConversationMeta(conversationId, { lastReadSeq: r.lastReadSeq, unread: Math.max(0, c.lastMessageSeq - Math.max(r.lastReadSeq, c.historyFromSeq)) });
+    if (c) { if (r.readRevision===undefined) this.scheduleBootstrap(); else this.applyConfirmedRead(conversationId,r.lastReadSeq,r.readRevision); }
   }
   /** Derivadas de un grupo que cuentan como sus pendientes (hilos, ramas, internas; no sidechats). */
   derivedOf(conversationId: string) {
@@ -1143,24 +1161,29 @@ export class TieComsClient {
    * este cliente conoce (lo que llegue después sigue sin leer). El servidor avisa a mis otros dispositivos.
    */
   async markTreeRead(conversationId: string) {
+    const generation=this.sessionGeneration;
     const all = [this.state.data?.conversations.find((x) => x.id === conversationId), ...this.derivedOf(conversationId)]
       .filter((c): c is NonNullable<typeof c> => !!c && (c.unread > 0 || (c.unreadMentions ?? 0) > 0 || c.lastReadSeq < c.lastMessageSeq));
     if (!all.length) return;
     const items = all.map((c) => ({ conversationId: c.id, seq: c.lastMessageSeq }));
-    const result = await this.request<{ marked: { conversationId: string; lastReadSeq: number }[] }>(`/conversations/${conversationId}/read-tree`, { method: 'POST', json: { items } });
-    for (const m of result.marked) this.applyConfirmedRead(m.conversationId, m.lastReadSeq);
+    const result = await this.request<{ marked: { conversationId: string; lastReadSeq: number; readRevision?:number }[] }>(`/conversations/${conversationId}/read-tree`, { method: 'POST', json: { items } });
+    this.assertSession(generation);
+    for (const m of result.marked) this.applyConfirmedRead(m.conversationId, m.lastReadSeq,m.readRevision);
   }
   async markConversationRead(conversationId: string) {
+    const generation=this.sessionGeneration;
     const c = this.state.data?.conversations.find((x) => x.id === conversationId);
     if (!c) return;
-    const result = await this.request<{ lastReadSeq: number }>(`/conversations/${conversationId}/read`, { method: 'POST', json: { seq: c.lastMessageSeq } });
-    this.applyConfirmedRead(conversationId, result.lastReadSeq);
+    const result = await this.request<{ lastReadSeq: number; readRevision?: number }>(`/conversations/${conversationId}/read`, { method: 'POST', json: { seq: c.lastMessageSeq } });
+    this.assertSession(generation);
+    this.applyConfirmedRead(conversationId,result.lastReadSeq,result.readRevision);
   }
-  private applyConfirmedRead(id: string, seq: number) {
+  private applyConfirmedRead(id: string, seq: number, readRevision?: number) {
     const c = this.state.data?.conversations.find((x) => x.id === id);
     if (!c) return;
-    const lastReadSeq = Math.max(c.lastReadSeq, seq);
-    this.patchConversationMeta(id, { lastReadSeq, unread: Math.max(0, c.lastMessageSeq - Math.max(lastReadSeq, c.historyFromSeq)), ...(lastReadSeq >= c.lastMessageSeq ? { unreadMentions: 0 } : {}) });
+    if (readRevision!==undefined && readRevision<(c.readRevision ?? 0)) return;
+    const lastReadSeq = readRevision!==undefined ? seq : Math.max(c.lastReadSeq,seq);
+    this.patchConversationMeta(id, { ...(readRevision!==undefined ? {readRevision} : {}), lastReadSeq, unread: Math.max(0, c.lastMessageSeq - Math.max(lastReadSeq, c.historyFromSeq)), ...(lastReadSeq >= c.lastMessageSeq ? { unreadMentions: 0 } : {}) });
   }
   private patchPreviewIfLast(m: MessageDTO) {
     const c = this.state.data?.conversations.find((x) => x.id === m.conversationId);
@@ -1709,15 +1732,37 @@ export class TieComsClient {
 
   /** Carga hacia atrás hasta tener el mensaje con ese seq (para saltar a un mensaje de origen). */
   async ensureMessage(conversationId: string, seq: number) {
+    const generation=this.sessionGeneration;
     await this.openConversation(conversationId);
-    for (let guard = 0; guard < 40; guard++) {
-      const c = this.state.conversations[conversationId];
-      if (!c?.loaded) return false;
-      if (c.messages.some((m) => m.seq === seq)) return true;
-      if (!c.hasMore || (c.messages[0]?.seq ?? 0) <= seq) return false;
-      await this.loadOlder(conversationId);
+    this.assertSession(generation);
+    if (this.state.conversations[conversationId]?.messages.some((m)=>m.seq===seq)) return true;
+    try {
+      const page=await this.request<{messages:MessageDTO[];hasMore:boolean;lastEventSeq:number}>(`/conversations/${conversationId}/messages/around?seq=${seq}&limit=50`);
+      this.assertSession(generation);
+      const cur=this.state.conversations[conversationId];
+      if (!cur?.loaded) return false;
+      const merged=new Map(cur.messages.map((m)=>[m.id,m])); for(const m of page.messages) merged.set(m.id,m);
+      this.setConv(conversationId,{messages:[...merged.values()].sort((a,b)=>a.seq-b.seq),hasMore:cur.hasMore || page.hasMore});
+      return page.messages.some((m)=>m.seq===seq);
+    } catch(e) {
+      if (!(e instanceof ApiRequestError) || e.status!==404) throw e;
+      // Older servers have no around endpoint. Keep the bounded legacy fallback explicit.
+      for(let guard=0;guard<40;guard++) {
+        this.assertSession(generation); const c=this.state.conversations[conversationId];
+        if(!c?.loaded) return false; if(c.messages.some((m)=>m.seq===seq)) return true;
+        if(!c.hasMore || (c.messages[0]?.seq ?? 0)<=seq) return false;
+        if(!await this.loadOlder(conversationId)) return false;
+      }
+      return false;
     }
-    return false;
+  }
+
+  patchPersonalPreferences(input: import('zod').z.infer<typeof import('@tiecoms/contracts').PersonalPreferencesPatchInput>) {
+    return this.request<import('@tiecoms/contracts').PersonalPreferencesDTO>('/me/personal-preferences',{method:'PATCH',json:input});
+  }
+  async setAvailability(input: {mode:import('@tiecoms/contracts').AvailabilityMode|null;until?:string|null}) {
+    const r=await this.request<{availability:import('@tiecoms/contracts').AvailabilityDTO}>('/me/availability',{method:'PUT',json:input});
+    this.patchMe({availability:r.availability}); return r.availability;
   }
 
   // ---------- Espacios, grupos, invitaciones ----------

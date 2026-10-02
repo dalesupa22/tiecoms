@@ -1,3 +1,4 @@
+import { AttachmentsView } from './Attachments.tsx';
 import { MailLiveReply } from './MailLiveReply.tsx';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { MailConnectionDTO, MailListItemDTO, MailMessageDTO, MailProvider, MessageDTO, SharedMailDTO, SharedMailCommentDTO } from '@tiecoms/contracts';
@@ -574,6 +575,8 @@ export function MailCard({ emailId, banner, onIssue }: { emailId: string; banner
           </div>
         </div>
         <button className="wa-quote link-quote" onClick={() => open('read')}>{email.snippet}</button>
+        {!!email.chagguAttachments?.length && <AttachmentsView list={email.chagguAttachments} />}
+        {email.mediaStatus && email.mediaStatus !== 'ready' && <div className="small muted" role="status">{email.mediaStatus === 'pending' ? (locale().startsWith('en') ? 'Preparing attachment…' : 'Preparando adjunto…') : (locale().startsWith('en') ? 'Original attachment unavailable' : 'Adjunto original no disponible')}</div>}
         <CardComments email={email} canPost={!!conv?.canPost} />
         <div className="mail-card-foot">
           <span className="grow" />

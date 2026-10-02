@@ -1,3 +1,4 @@
+import { RichText } from './RichText.tsx';
 import { useEffect, useMemo, useState, type KeyboardEvent, type RefObject } from 'react';
 import type { BootstrapDTO, ConversationDTO, MentionDTO, MentionItemDTO, MessageDTO, MessageRefDTO, PersonDTO } from '@tiecoms/contracts';
 import { ggRanges, segmentBody } from '../chat17.ts';
@@ -192,8 +193,8 @@ function TextWithGg({ text }: { text: string }) {
 /** «- » o «* » al inicio de línea se ve como viñeta; mide lo mismo, así las posiciones de las menciones no cambian. */
 const bullets = (s: string) => s.replace(/(^|\n)([ \t]*)[-*] (?=\S)/g, '$1$2• ');
 
-export function MessageText({ d, body: raw, mentions, refs }: { d: BootstrapDTO; body: string; mentions?: MentionDTO[]; refs?: MessageRefDTO[] }) {
-  const body = bullets(raw);
+function PlainMessageText({ d, body: raw, mentions, refs }: { d: BootstrapDTO; body: string; mentions?: MentionDTO[]; refs?: MessageRefDTO[] }) {
+  const body = raw;
   if (!mentions?.length && !refs?.length) return <TextWithGg text={body} />;
   const segs = segmentBody(body, mentions, refs);
   return <>{segs.map((sg, i) => {
@@ -213,6 +214,12 @@ export function MessageText({ d, body: raw, mentions, refs }: { d: BootstrapDTO;
       </button>
     );
   })}</>;
+}
+
+export function MessageText({ d, body, mentions, refs }: { d: BootstrapDTO; body: string; mentions?: MentionDTO[]; refs?: MessageRefDTO[] }) {
+  return <RichText text={body} plain={(start, end) => <PlainMessageText d={d} body={body.slice(start, end)}
+    mentions={mentions?.filter((m) => m.start >= start && m.start + m.length <= end).map((m) => ({ ...m, start: m.start - start }))}
+    refs={refs?.filter((r) => r.start >= start && r.start + r.length <= end).map((r) => ({ ...r, start: r.start - start }))} />} />;
 }
 
 export const mentionsMe = (d: BootstrapDTO, m: MessageDTO) => m.authorId !== d.me.id && (m.mentions ?? []).some((x) => x.userId === d.me.id || x.userId === 'all');

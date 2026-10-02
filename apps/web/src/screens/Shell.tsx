@@ -13,8 +13,9 @@ import { QuickSearchField, QuickSearchSections, isMac, openCreateMenu, openNewMe
 import { activityOf, isMuted, pendingOf } from '../home-order.ts';
 import { DndStrip, MeAvatar } from './Silence.tsx';
 import { AssistantBubble } from './Assistant.tsx';
-import { Rail, useSideMode } from './Rail.tsx';
+import { Rail, useSideMode, setSideMode } from './Rail.tsx';
 import { NotifyAsk } from '../bubbles.tsx';
+import { InboxPane, WaListPane, type PaneFrame } from './Panes.tsx';
 import { useSleepTzSync } from './Sleep.tsx';
 
 export function groupWorkspaces(d: BootstrapDTO) {
@@ -127,13 +128,14 @@ function Sidebar({ route }: { route: Route }) {
       if (!(e.metaKey || e.ctrlKey) || e.altKey || e.key.toLowerCase() !== 'f') return;
       if (document.querySelector('.modal')) return;
       e.preventDefault();
+      if (sideTab === 'whatsapp' || sideTab === 'mail') { const field = document.querySelector<HTMLInputElement>('.provider-sidebar:not([hidden]) input[type=search], .provider-sidebar:not([hidden]) .pane-search input'); field?.focus(); return; }
       const inChatSearch = !!(document.activeElement as HTMLElement | null)?.closest('.chat-search');
       if (!e.shiftKey && route.name === 'conversation' && !inChatSearch) { dispatchEvent(new Event('chaggu:chat-search')); return; }
       sideInput.current?.focus(); sideInput.current?.select();
     };
     addEventListener('keydown', k);
     return () => removeEventListener('keydown', k);
-  }, [route.name]);
+  }, [route.name, sideTab]);
   const setFilter = (v: HomeTab) => { setFilterState(v); try { localStorage.setItem(TAB_KEY, v); } catch {} };
   const dms = dmConversations(d, filter);
   const activeConv = route.name === 'conversation' ? route.id : route.name === 'waChat' ? `wa:${route.accountId}:${route.jid}` : null;
@@ -210,11 +212,31 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
   const inConv = route.name === 'conversation';
   // WhatsApp y Correo con la cuadrícula al lado (botón «Cuadrícula al lado»): arrastras directo a un cuadrito o a un chat.
   const wide = useWide();
+  const mode = useSideMode();
+  const provider = mode === 'whatsapp' || mode === 'mail' ? mode : null;
+  const [visited, setVisited] = useState<Set<string>>(() => new Set(provider ? [provider] : []));
+  const [expandedProvider, setExpandedProvider] = useState<string | null>(() => new URLSearchParams(location.search).get('provider'));
+  useEffect(() => { if (provider) setVisited((v) => v.has(provider) ? v : new Set([...v, provider])); }, [provider]);
+  useEffect(() => {
+    const sync = () => { const value = new URLSearchParams(location.search).get('provider'); setExpandedProvider(value); };
+    addEventListener('popstate', sync); addEventListener('chaggu:provider', sync); addEventListener('chaggu:navigate', sync);
+    return () => { removeEventListener('popstate', sync); removeEventListener('chaggu:provider', sync); removeEventListener('chaggu:navigate', sync); };
+  }, []);
+  const providerFrame = (name: 'whatsapp' | 'mail'): PaneFrame => ({
+    active: provider === name, count: 1, pinned: false, presentation: 'sidebar', expanded: expandedProvider === name,
+    onClose: () => setSideMode('all'), onPin: () => {}, onTint: () => {},
+    onOnly: () => { const url = new URL(location.href); if (expandedProvider === name) url.searchParams.delete('provider'); else url.searchParams.set('provider', name); history.pushState(null, '', url); setExpandedProvider(expandedProvider === name ? null : name); window.dispatchEvent(new Event('chaggu:provider')); },
+  });
   const sideGrid = useGridSide() && wide && (route.name === 'whatsapp' || route.name === 'mail');
   return (
-    <div className={`shell ${inConv ? 'in-conv' : ''}`}>
+    <div className={`shell ${inConv ? 'in-conv' : ''} ${provider ? 'has-provider' : ''}`}>
       <Rail route={route} />
-      <Sidebar route={route} />
+      <div className="sidebar-host">
+        <div className="sidebar-chats" hidden={!!provider}><Sidebar route={route} /></div>
+        {(['whatsapp', 'mail'] as const).filter((p) => visited.has(p) || p === provider).map((p) => <aside key={p} hidden={provider !== p} className={`provider-sidebar ${expandedProvider === p ? 'is-expanded' : ''}`} aria-label={p === 'mail' ? t('nav.mail') : 'WhatsApp'}>
+          {p === 'whatsapp' ? <WaListPane frame={providerFrame(p)} /> : <InboxPane frame={providerFrame(p)} />}
+        </aside>)}
+      </div>
       {/* Fuera de un chat, soltar una conversación arrastrada la abre (dentro, Split.tsx la pone al lado). */}
       <main className={`main ${sideGrid ? 'has-grid-side' : ''}`} onDragOver={inConv ? undefined : (e) => { if (Array.from(e.dataTransfer.types).includes(DRAG_TYPE)) e.preventDefault(); }}
         onDrop={inConv ? undefined : (e) => { const id = e.dataTransfer.getData(DRAG_TYPE); if (id) { e.preventDefault(); navigate(`/c/${id}`); } }}>

@@ -69,6 +69,34 @@ const listeners = new Set<() => void>();
 const emit = () => listeners.forEach((l) => l());
 const subscribe = (l: () => void) => { listeners.add(l); return () => { listeners.delete(l); }; };
 
+// Expansion changes presentation only. History and reload retain the canonical grid.
+const expandedFromUrl = () => new URLSearchParams(location.search).get('pane');
+let expandedKey = expandedFromUrl();
+window.addEventListener('popstate', () => { expandedKey = expandedFromUrl(); emit(); });
+window.addEventListener('chaggu:navigate', () => { expandedKey = expandedFromUrl(); emit(); });
+export const useExpandedPane = () => useSyncExternalStore(subscribe, () => expandedKey);
+export function collapsePane() {
+  const url = new URL(location.href); url.searchParams.delete('pane');
+  history.replaceState(history.state, '', url); expandedKey = null; emit();
+}
+export type GridLayout = 'classic' | 'tall-center' | 'tall-left' | 'tall-right';
+const LAYOUT_KEY = 'chaggu:grid-layout-v1';
+const savedLayout = read<{ version?: number; kind?: GridLayout; order?: string[] }>(LAYOUT_KEY, {});
+let layout: GridLayout = savedLayout.version === 1 && ['classic', 'tall-center', 'tall-left', 'tall-right'].includes(savedLayout.kind ?? '') ? savedLayout.kind! : 'classic';
+let layoutOrder: string[] = Array.isArray(savedLayout.order) ? savedLayout.order.filter((x): x is string => typeof x === 'string') : [];
+export const useGridLayout = () => useSyncExternalStore(subscribe, () => layout);
+export const useLayoutOrder = () => useSyncExternalStore(subscribe, () => layoutOrder);
+export function setGridLayout(next: GridLayout) {
+  layout = next; write(LAYOUT_KEY, { version: 1, kind: layout, order: layoutOrder }); emit();
+}
+export function moveLayoutPane(key: string, index: number) {
+  const order = [...layoutOrder.filter((k) => panes.includes(k)), ...panes.filter((k) => !layoutOrder.includes(k))];
+  const at = order.indexOf(key);
+  if (at < 0 || index < 0 || index >= order.length || at === index) return;
+  [order[at], order[index]] = [order[index]!, order[at]!];
+  layoutOrder = order; write(LAYOUT_KEY, { version: 1, kind: layout, order }); emit();
+}
+
 function set(next: string[]) {
   panes = next.slice(0, MAX_STORED);
   // Lo que ya no está en la cuadrícula deja de estar fijado y de guardar su nombre.
@@ -173,6 +201,7 @@ export function pinAt(key: string, index: number, meta?: PaneMeta): number {
 
 /** Cierra un panel; si era el activo, el activo pasa al vecino. Con uno solo y sin nada fijado, vuelve a la vista normal. */
 export function closePane(key: string, active: string | null) {
+  if (expandedKey === key) collapsePane();
   const at = panes.indexOf(key);
   const next = panes.filter((x) => x !== key);
   const keep = next.length > 1 || next.some((k) => !isChatKey(k) || pinned.has(k));
@@ -183,10 +212,11 @@ export function closePane(key: string, active: string | null) {
   }
 }
 
-/** Deja solo esta conversación (⤢). */
+/** Expande sin borrar paneles, fijados, metadatos o tamaños. */
 export function onlyPane(key: string) {
-  if (isChatKey(key)) { set([]); navigate(`/c/${key}`, true); return; }
-  set([key]); activeKey = key; emit();
+  if (expandedKey === key) { collapsePane(); return; }
+  const url = new URL(location.href); url.searchParams.set('pane', key);
+  history.pushState(history.state, '', url); expandedKey = key; activeKey = key; emit();
 }
 
 /** Enfocar un panel sin recargar. Un chat cambia el URL solo si ya estás en /c/:id; en la cuadrícula solo se marca. */
@@ -197,7 +227,8 @@ export function focusPane(key: string) {
 }
 
 /** ¿La conversación está a la vista en algún panel? (para no avisar de lo que ya se está leyendo). */
-export const isOpenInPanes = (id: string) => panes.includes(id);
+export const isOpenInPanes = (id: string) => panes.includes(id) && (!expandedKey || expandedKey === id)
+  && (layout === 'classic' || [...layoutOrder.filter((k) => panes.includes(k)), ...panes.filter((k) => !layoutOrder.includes(k))].slice(0, 4).includes(id));
 
 // ---------- Cuadrícula al lado de WhatsApp y Correo ----------
 export const useGridSide = () => useSyncExternalStore(subscribe, () => gridSide);

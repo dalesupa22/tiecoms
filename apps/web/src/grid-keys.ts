@@ -7,8 +7,8 @@
 export const MAX_PANES_DEFAULT = 4;
 export type MailProviderKey = 'google' | 'microsoft';
 /** Las secciones enteras que también caben en un cuadrito: la lista de tareas, la bandeja de correo y todas las conversaciones de WhatsApp. */
-export type Section = 'tasks' | 'inbox' | 'wachats';
-export const SECTIONS: Section[] = ['tasks', 'inbox', 'wachats'];
+export type Section = 'tasks' | 'inbox' | 'wachats' | 'agenda' | 'trazo' | 'calls';
+export const SECTIONS: Section[] = ['tasks', 'inbox', 'wachats', 'agenda', 'trazo', 'calls'];
 export type PaneRef =
   | { kind: 'chat'; id: string }
   | { kind: 'mail'; provider: MailProviderKey; id: string }

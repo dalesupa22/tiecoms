@@ -1,3 +1,6 @@
+import { GgCalendarDialog } from './GgCalendar.tsx';
+import { locale } from '../i18n.ts';
+import { RichText } from './RichText.tsx';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
 import type { GgSideDraft, GgSideMessageDTO, GgSideSuggestion } from '@tiecoms/contracts';
 import { client, useClient } from '../app-client.ts';
@@ -22,8 +25,8 @@ const isConsent = (e: unknown) => (e as { code?: string })?.code === 'ai_consent
 export interface GgHost {
   /** Pone el texto en la caja como «Borrador de gg». Nunca envía. */
   useDraft: (text: string) => void;
-  task: (p: { title: string; assigneeName?: string | null; due?: string | null; messageId?: string | null }) => void;
-  reminder: (p: { title: string; due?: string | null; messageId?: string | null }) => void;
+  task: (p: { title: string; assigneeName?: string | null; due?: string | null; messageId?: string | null }) => void | Promise<void>;
+  reminder: (p: { title: string; due?: string | null; messageId?: string | null }) => void | Promise<void>;
   /** Abre el directo con esa persona y le deja el borrador escrito (sin enviar). */
   messagePerson?: (name: string, draft: string) => void;
 }
@@ -51,13 +54,11 @@ export const GgMark = ({ size = 22 }: { size?: number }) => (
 );
 
 /** Botón del encabezado del chat: entre el nombre y la píldora de llamadas; con número si algo espera de ti. */
-export function GgButton({ source, on, onClick }: { source: string; on: boolean; onClick: () => void }) {
-  const n = useGgPending(source);
-  const label = n > 0 ? t('ggs.buttonN', { n }) : t('ggs.button');
+export function GgButton({ on, onClick }: { source: string; on: boolean; onClick: () => void }) {
+  const label = t('ggs.button');
   return (
     <button className={`gg-head-btn ${on ? 'is-on' : ''}`} onClick={onClick} title={label} aria-label={label} aria-pressed={on}>
       <GgMark size={24} />
-      {n > 0 && <span className="gg-head-count">{n > 9 ? '9+' : n}</span>}
     </button>
   );
 }
@@ -72,6 +73,7 @@ export function GgSidePanel({ source, chatName, quoted, onClearQuote, host, onCl
   const consent = useClient((s) => s.data?.me.aiConsent === true);
   const [messages, setMessages] = useState<GgSideMessageDTO[] | null>(null);
   const [busy, setBusy] = useState(false);
+  const [calendar, setCalendar] = useState(false);
   const [needConsent, setNeedConsent] = useState(false);
   const [text, setText] = useState('');
   const box = useRef<HTMLDivElement>(null);
@@ -156,7 +158,9 @@ export function GgSidePanel({ source, chatName, quoted, onClearQuote, host, onCl
         {messages?.map((m) => <GgSideBubble key={m.id} m={m} last={m === lastGg} host={host} onJump={onJump} onTone={(x) => void reply(x)} onAsk={(q, ids) => void ask(q, ids)} />)}
         {busy && <div className="gg-side-thinking small muted">✨ {t('ggs.thinking')}</div>}
       </div>
+      {calendar && <GgCalendarDialog source={source} messageIds={quoted.map((q) => q.id)} onClose={() => setCalendar(false)} />}
       <div className="gg-side-foot">
+        <button className="link-btn" onClick={() => setCalendar(true)}>▦ {locale().startsWith('en') ? 'Check availability / schedule' : 'Ver disponibilidad / agendar'}</button>
         <div className="gg-chips">
           {(starters ? [t('ggs.chipReply'), t('ggs.chipSummary'), t('ggs.chipMissing'), t('ggs.chipAgreed')] : chips).map((c) => (
             <button key={c} className="gg-chip" disabled={busy || needConsent} onClick={() => chip(c)}>{c}</button>
@@ -186,14 +190,14 @@ function GgSideBubble({ m, last, host, onJump, onTone, onAsk }: { m: GgSideMessa
     return (
       <div className="gg-b me">
         {!!m.quoted?.length && <div className="gg-b-quoted small">{m.quoted.map((q) => <div key={q.id} className="ellipsis">❝ <b>{q.author}</b> {q.text}</div>)}</div>}
-        <div>{m.body}</div>
+        <div><RichText text={m.body} /></div>
       </div>
     );
   }
   return (
     <div className="gg-b">
       {!!m.quoted?.length && <div className="gg-b-quoted small">{m.quoted.map((q) => <div key={q.id} className="ellipsis">❝ <b>{q.author}</b> {q.text}</div>)}</div>}
-      <div style={{ whiteSpace: 'pre-wrap' }}>{m.body}</div>
+      <div><RichText text={m.body} /></div>
       {!!x.pending?.length && (
         <div className="gg-pending">
           <span className="eyebrow">{t('ggs.pending')}</span>
@@ -245,8 +249,8 @@ export function runSuggestion(s: GgSideSuggestion, host: GgHost, onAsk: (q: stri
   const p = s.params ?? {};
   const first = s.forMessageIds[0] ?? null;
   if (s.kind === 'reply') { if (s.draft) host.useDraft(s.draft); else onAsk(t('ggs.chipReply'), s.forMessageIds); }
-  else if (s.kind === 'task') host.task({ title: s.title.replace(/^(crear tarea|create task)\s*:\s*/i, ''), assigneeName: p.assigneeName, due: p.due, messageId: first });
-  else if (s.kind === 'reminder') host.reminder({ title: s.title.replace(/^(recordatorio|reminder)\s*:\s*/i, ''), due: p.due, messageId: first });
+  else if (s.kind === 'task') return host.task({ title: s.title.replace(/^(crear tarea|create task)\s*:\s*/i, ''), assigneeName: p.assigneeName, due: p.due, messageId: first });
+  else if (s.kind === 'reminder') return host.reminder({ title: s.title.replace(/^(recordatorio|reminder)\s*:\s*/i, ''), due: p.due, messageId: first });
   else if (s.kind === 'message_person') {
     if (host.messagePerson && p.personName) host.messagePerson(p.personName, s.draft ?? '');
     else if (s.draft) host.useDraft(s.draft);
@@ -267,7 +271,7 @@ function SuggestionList({ list, host, onAsk, onDone }: { list: GgSideSuggestion[
           </span>
         </label>
       ))}
-      <button className="btn small primary" disabled={!picked.length} onClick={() => { picked.forEach((s) => runSuggestion(s, host, onAsk)); onDone?.(); }}>
+      <button className="btn small primary" disabled={!picked.length} onClick={() => { onDone?.(); void (async () => { for (const s of picked) await runSuggestion(s, host, onAsk); })(); }}>
         {picked.length > 1 ? t('ggs.doN', { n: picked.length }) : t('ggs.doOne')}
       </button>
     </div>
@@ -321,6 +325,7 @@ export function SuggestDialog({ source, messageIds, host, onAsk, onClose }: { so
   const [list, setList] = useState<GgSideSuggestion[] | null>(null);
   const [needConsent, setNeedConsent] = useState(false);
   const [free, setFree] = useState('');
+  const [calendar, setCalendar] = useState(false);
   const consent = useClient((s) => s.data?.me.aiConsent === true);
   const load = useCallback(() => {
     setList(null);
@@ -332,6 +337,8 @@ export function SuggestDialog({ source, messageIds, host, onAsk, onClose }: { so
   const ask = (q: string, ids?: string[]) => { onAsk(q, ids ?? messageIds); onClose(); };
   return (
     <Modal title={t('ggs.suggestTitle', { n: messageIds.length })} onClose={onClose}>
+      {calendar && <GgCalendarDialog source={source} messageIds={messageIds} onClose={() => setCalendar(false)} />}
+      <button className="btn small" onClick={() => setCalendar(true)}>▦ {locale().startsWith('en') ? 'Find available times and schedule' : 'Buscar horarios libres y agendar'}</button>
       {needConsent && <GgConsentBanner />}
       {list === null && <div className="small muted">✨ {t('ggs.thinking')}</div>}
       {list?.length === 0 && !needConsent && <div className="small muted">{t('ggs.noSuggestions')}</div>}

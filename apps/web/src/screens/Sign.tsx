@@ -17,7 +17,7 @@ import { errorText, getLang, t } from '../i18n.ts';
 import { toast } from '../menu.tsx';
 import { Modal } from '../ui.tsx';
 import { INK_COLORS, SCRIPT_FONTS, loadScriptFonts, photoCanvas, trimmedPng, typedCanvas, type InkColor } from '../sign-image.ts';
-import { blobUrl, downloadAttachment } from './Attachments.tsx';
+import { useBlobUrl, downloadAttachment } from './Attachments.tsx';
 
 GlobalWorkerOptions.workerSrc = workerSrc;
 const assetBase = `${import.meta.env.BASE_URL}pdfjs/`;
@@ -50,11 +50,7 @@ export function useSignatures() {
   const remove = (id: string) => { savedCache = (savedCache ?? []).filter((s) => s.id !== id); setList(savedCache); };
   return { list, add, remove };
 }
-function useBlob(path: string | undefined) {
-  const [url, setUrl] = useState<string | null>(null);
-  useEffect(() => { let alive = true; if (path) blobUrl(path).then((u) => alive && setUrl(u)).catch(() => {}); return () => { alive = false; }; }, [path]);
-  return url;
-}
+function useBlob(path: string | undefined) { return useBlobUrl(path ?? null).url; }
 
 // ---------- Pantalla ----------
 export default function PdfSheet({ a, startSigning = false, onClose }: { a: AttachmentDTO; startSigning?: boolean; onClose: () => void }) {

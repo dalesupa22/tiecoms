@@ -62,7 +62,7 @@ export function WhatsAppScreen() {
   const [counts, setCounts] = useState<Counts>({});
   const [accountId, setAccountId] = useState<string | 'all'>('all');
   const [category, setCategory] = useState<WaCategory | 'all'>('all');
-  const [onlyGroups, setOnlyGroups] = useState(true);
+  const [onlyGroups, setOnlyGroups] = useState(false);
   const [showHidden, setShowHidden] = useState(false);
   const [q, setQ] = useState('');
   const [open, setOpen] = useState<WaChatDTO | null>(null);

@@ -124,6 +124,13 @@ export function openAccountMenu(anchor: HTMLElement) {
     { divider: true },
     // «No molestar» (silenciar todo) y el sonido de mensajes (docs/GRUPOS.md, 28-sep-2026).
     dndMenu(client.getState().data?.me.dndUntil),
+    { label: getLang() === 'en' ? 'Availability' : 'Disponibilidad', icon: '◉', items: [
+      ...(['available', 'busy', 'focus', 'dnd', 'rest'] as const).map((mode) => ({
+        label: (getLang() === 'en' ? { available: '🟢 Available', busy: '🔴 Busy', focus: '🎯 Focus', dnd: '🌙 Do not disturb', rest: '🛌 Rest' } : { available: '🟢 Disponible', busy: '🔴 Ocupado', focus: '🎯 Concentración', dnd: '🌙 No molestar', rest: '🛌 Descanso' })[mode],
+        items: [30, 60, 120, 480].map((minutes) => ({ label: `${minutes < 60 ? minutes + ' min' : minutes / 60 + ' h'}`, onSelect: () => void client.request('/me/availability', { method: 'PUT', json: { mode, until: new Date(Date.now() + minutes * 60_000).toISOString() } }).then(() => client.loadBootstrap()).catch((e) => toast(errorText(e))) })),
+      })),
+      { label: getLang() === 'en' ? 'Clear status' : 'Quitar estado', onSelect: () => void client.request('/me/availability', { method: 'PUT', json: { mode: null, until: null } }).then(() => client.loadBootstrap()).catch((e) => toast(errorText(e))) },
+    ] },
     { label: t('sound.title'), icon: soundEnabled() ? '🔊' : '🔈', hint: soundEnabled() ? '✓' : '—', onSelect: () => setSoundEnabled(!soundEnabled()) },
     { divider: true },
     { label: t('nav.signed'), icon: '✍️', onSelect: () => navigate('/firmas') },

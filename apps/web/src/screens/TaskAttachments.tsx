@@ -1,10 +1,8 @@
-import { useEffect, useState } from 'react';
 import type { AttachmentDTO } from '@tiecoms/contracts';
-import { blobUrl, downloadAttachment, fileSize, isImage } from './Attachments.tsx';
+import { useBlobUrl, downloadAttachment, fileSize, isImage } from './Attachments.tsx';
 import { taskText } from './TaskReports.tsx';
 function TaskImage({ file }: { file: AttachmentDTO }) {
-  const [src, setSrc] = useState<string | null>(null);
-  useEffect(() => { let active = true; blobUrl(file.thumbUrl ?? file.url).then((u) => active && setSrc(u)).catch(() => {}); return () => { active = false; }; }, [file.url, file.thumbUrl]);
+  const { url: src } = useBlobUrl(file.thumbUrl ?? file.url);
   return src ? <img src={src} alt={file.name} style={{ width: 96, maxHeight: 96, objectFit: 'cover', borderRadius: 8 }} /> : <span>🖼</span>;
 }
 export function TaskAttachments({ files, onRemove, disabled }: { files: AttachmentDTO[]; onRemove: (id: string) => void; disabled?: boolean }) {

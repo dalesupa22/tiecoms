@@ -7,7 +7,7 @@
  */
 import { useEffect, useState, type DragEvent } from 'react';
 import { useClient } from '../app-client.ts';
-import { t } from '../i18n.ts';
+import { locale, t } from '../i18n.ts';
 import { navigate } from '../router.ts';
 import { conversationTitle } from '../ui.tsx';
 import { TASKS_KEY, parseKey } from '../grid-keys.ts';
@@ -15,10 +15,13 @@ import { openInGrid, readDrag, shareToChat } from '../grid-actions.ts';
 import {
   MAX_PANES, closePane, dragKindOf, fitsChat, fitsSlot, focusPane, onlyPane, rememberBack, setSplitSize, syncActive, togglePin,
   useActiveKey, useBack, usePanes, usePinned, useSplitSizes, useWide, type DragKind,
+  useExpandedPane, collapsePane, useGridLayout, useLayoutOrder, setGridLayout, moveLayoutPane, type GridLayout,
 } from '../split.ts';
 import { ConversationScreen } from './Conversation.tsx';
 import { ensureAssigned, openTintMenu, usePaneTints } from '../tints.ts';
-import { InboxPane, MailPane, TasksPane, WaListPane, WaPane } from './Panes.tsx';
+import { InboxPane, MailPane, SectionPane, TasksPane, WaListPane, WaPane } from './Panes.tsx';
+
+const sectionLabel = (key: string) => ({ tasks: t('nav.issues'), inbox: t('nav.mail'), wachats: 'WhatsApp', agenda: t('nav.agenda'), trazo: t('nav.trazo'), calls: t('nav.calls') } as Record<string,string>)[parseKey(key).kind] ?? parseKey(key).kind;
 
 /** /c/:id: el chat del URL es el panel activo. */
 export function ConversationArea({ id, search }: { id: string; search: string }) {
@@ -41,6 +44,9 @@ export function GridArea({ id, search = '', side }: { id: string | null; search?
   const panes = usePanes();
   const pinned = usePinned();
   const activeStore = useActiveKey();
+  const expandedKey = useExpandedPane();
+  const layout = useGridLayout();
+  const order = useLayoutOrder();
   const wide = useWide();
   const d = useClient((s) => s.data);
   const known = d?.conversations;
@@ -50,13 +56,23 @@ export function GridArea({ id, search = '', side }: { id: string | null; search?
   const shown = panes.filter(exists);
   const list = wide && (id ? shown.length > 1 : shown.length > 0) ? shown : id ? [id] : shown.slice(0, 1);
   if (id && !list.includes(id)) list[0] = id;
+  const expanded = expandedKey && list.includes(expandedKey) ? expandedKey : null;
+  const mixedLayout = wide && !side && layout !== 'classic' && list.length >= 4;
+  const ordered = [...order.filter((k) => list.includes(k)), ...list.filter((k) => !order.includes(k))];
+  const arranged = mixedLayout ? ordered : list;
+  const visible = mixedLayout ? arranged.slice(0, 4) : arranged;
   const active = id ?? (activeStore && list.includes(activeStore) ? activeStore : list[0] ?? null);
   const [drop, setDrop] = useState<{ over: string | null; kind: DragKind } | null>(null);
+  useEffect(() => {
+    const end = () => setDrop(null), dropEnd = () => queueMicrotask(end), key = (e: KeyboardEvent) => { if(e.key === 'Escape') end(); };
+    addEventListener('dragend',end); addEventListener('drop',dropEnd); addEventListener('blur',end); addEventListener('keydown',key);
+    return () => { removeEventListener('dragend',end); removeEventListener('drop',dropEnd); removeEventListener('blur',end); removeEventListener('keydown',key); };
+  }, []);
   // Tareas va en su propia columna, a la derecha y de arriba a abajo (la tercera columna): no gasta uno de los 4 cuaditos.
   // Al lado de WhatsApp o Correo el espacio es angosto y va apilada con los demás.
   const hasTasks = list.includes(TASKS_KEY);
-  const withTasks = hasTasks && !side;
-  const grid = withTasks ? list.filter((k) => k !== TASKS_KEY) : list;
+  const withTasks = hasTasks && !side && !mixedLayout;
+  const grid = withTasks ? list.filter((k) => k !== TASKS_KEY) : arranged;
   const full = grid.length >= MAX_PANES;
   const sizes = useSplitSizes();
   // Cada cuadrito con su color (tints.ts): los nuevos reciben uno que no esté repetido.
@@ -113,7 +129,9 @@ export function GridArea({ id, search = '', side }: { id: string | null; search?
     const ref = parseKey(x);
     const frame = { active: x === active, count: list.length, pinned: pinned.has(x), onClose: () => closePane(x, id), onOnly: () => onlyPane(x), onPin: () => togglePin(x), onTint: (el: HTMLElement) => openTintMenu(el, x) };
     return (
-      <div key={x} data-pane={x} data-tint={tints[x]} className={`split-cell ${x === active ? 'is-active' : ''} ${drop && drop.over === x && (full || (chatOver(x) && fitsChat(drop.kind))) ? 'is-target' : ''}`}
+      <div key={x} data-pane={x} data-tint={tints[x]} hidden={expanded ? expanded !== x : !visible.includes(x)}
+        style={mixedLayout && !expanded ? { gridArea: ['a', 'b', 'c', 'd'][arranged.indexOf(x)] } : undefined}
+        className={`split-cell ${x === active ? 'is-active' : ''} ${drop && drop.over === x && (full || (chatOver(x) && fitsChat(drop.kind))) ? 'is-target' : ''}`}
         // Tocar un panel lo vuelve el activo (antes del clic, para que el clic siga funcionando adentro).
         onPointerDownCapture={() => { if (x !== active) focusPane(x); }}>
         {ref.kind === 'chat' ? <ConversationScreen key={list.length === 1 && x === id ? x + search : x} id={x} search={x === id ? search : ''} pane={list.length > 1 || !id ? frame : undefined} />
@@ -121,6 +139,7 @@ export function GridArea({ id, search = '', side }: { id: string | null; search?
           : ref.kind === 'wa' ? <WaPane key={x} paneKey={x} accountId={ref.accountId} jid={ref.jid} frame={frame} />
           : ref.kind === 'tasks' ? <TasksPane key={x} frame={frame} />
           : ref.kind === 'inbox' ? <InboxPane key={x} frame={frame} />
+          : ref.kind === 'agenda' || ref.kind === 'trazo' || ref.kind === 'calls' ? <SectionPane key={x} kind={ref.kind} frame={frame} />
           : <WaListPane key={x} frame={frame} />}
       </div>
     );
@@ -152,20 +171,38 @@ export function GridArea({ id, search = '', side }: { id: string | null; search?
       );
     }
     return (
-      <div className={`split n${items.length}`}
-        style={{ gridTemplateColumns: `${sizes.col}fr ${1 - sizes.col}fr`, ...(items.length > 2 ? { gridTemplateRows: `${sizes.row}fr ${1 - sizes.row}fr` } : {}) }}>
+      <div className={`split n${items.length} ${mixedLayout ? 'is-custom' : ''} ${expanded ? 'is-expanded' : ''}`}
+        style={mixedLayout ? { gridTemplateAreas: layout === 'tall-left' ? '"c a b" "d a b"' : layout === 'tall-right' ? '"a b c" "a b d"' : '"a c b" "a d b"', gridTemplateColumns: `${sizes.col * 2}fr 1fr ${(1 - sizes.col) * 2}fr`, gridTemplateRows: `${sizes.row}fr ${1 - sizes.row}fr` }
+          : { gridTemplateColumns: `${sizes.col}fr ${1 - sizes.col}fr`, ...(items.length > 2 ? { gridTemplateRows: `${sizes.row}fr ${1 - sizes.row}fr` } : {}) }}>
         {items.map(cell)}
         {/* Divisiones que se arrastran para cambiar el tamaño (doble clic: mitad y mitad). */}
-        <SplitHandle dir="col" at={sizes.col} />
-        {items.length > 2 && <SplitHandle dir="row" at={sizes.row} />}
+        {!expanded && !mixedLayout && <SplitHandle dir="col" at={sizes.col} />}
+        {!expanded && !mixedLayout && items.length > 2 && <SplitHandle dir="row" at={sizes.row} />}
       </div>
     );
   };
   return (
-    <div className={`split-root ${withTasks ? 'has-tasks' : ''} ${side ? 'is-side' : ''} ${drop ? 'is-dropping' : ''}`} onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}>
-      {body(grid)}
-      {withTasks && <div className="split-tasks">{cell(TASKS_KEY)}</div>}
+    <div className="grid-workspace">
+      {(expanded || (wide && list.length > 1)) && <div className="grid-layout-tools">
+        {expanded ? <button className="btn small" onClick={collapsePane}>↙ {locale().startsWith('en') ? 'Back to grid' : 'Volver a la cuadrícula'}</button>
+          : <><label>{locale().startsWith('en') ? 'Layout' : 'Diseño'} <select value={layout} onChange={(e) => setGridLayout(e.target.value as GridLayout)}>
+            <option value="classic">{locale().startsWith('en') ? 'Classic' : 'Clásico'}</option>
+            <option value="tall-center">{locale().startsWith('en') ? '2 tall + 2 small (center)' : '2 largos + 2 pequeños (centro)'}</option>
+            <option value="tall-left">{locale().startsWith('en') ? 'Small on left' : 'Pequeños a la izquierda'}</option>
+            <option value="tall-right">{locale().startsWith('en') ? 'Small on right' : 'Pequeños a la derecha'}</option>
+          </select></label>
+          {mixedLayout && <><label>{locale().startsWith('en') ? 'Width' : 'Ancho'} <input aria-label={locale().startsWith('en') ? 'Column width' : 'Ancho de columnas'} type="range" min="20" max="80" value={Math.round(sizes.col * 100)} onChange={(e) => setSplitSize({ col: +e.target.value / 100 }, true)} /></label>
+            <label>{locale().startsWith('en') ? 'Height' : 'Alto'} <input aria-label={locale().startsWith('en') ? 'Small panels height' : 'Alto de paneles pequeños'} type="range" min="20" max="80" value={Math.round(sizes.row * 100)} onChange={(e) => setSplitSize({ row: +e.target.value / 100 }, true)} /></label>
+            <details><summary>{locale().startsWith('en') ? 'Arrange panels' : 'Ordenar paneles'}</summary>{arranged.map((key, at) => <label key={key}>{parseKey(key).kind === 'chat' ? (d && known?.find((c) => c.id === key) ? conversationTitle(d, known.find((c) => c.id === key)!) : key.slice(0, 8)) : sectionLabel(key)}
+              <select aria-label={locale().startsWith('en') ? 'Panel position' : 'Posición del panel'} value={at} onChange={(e) => moveLayoutPane(key, +e.target.value)}>{arranged.map((_, index) => <option key={index} value={index}>{index < 4 ? `${index + 1} · ${index < 2 ? (locale().startsWith('en') ? 'Tall' : 'Largo') : (locale().startsWith('en') ? 'Small' : 'Pequeño')}` : locale().startsWith('en') ? 'Saved panel' : 'Panel guardado'}</option>)}</select></label>)}</details>
+          </>}
+          {mixedLayout && arranged.slice(4).map((key) => <button key={key} className="btn small" onClick={() => moveLayoutPane(key, 3)}>{locale().startsWith('en') ? 'Show saved panel' : 'Mostrar panel guardado'} · {sectionLabel(key)}</button>)}</>}
+      </div>}
+      <div className={`split-root ${withTasks ? 'has-tasks' : ''} ${side ? 'is-side' : ''} ${drop ? 'is-dropping' : ''} ${expanded ? 'is-expanded' : ''}`} onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}>
+      <div className="grid-main-body" hidden={expanded === TASKS_KEY && withTasks}>{body(grid)}</div>
+      {withTasks && <div className="split-tasks" hidden={!!expanded && expanded !== TASKS_KEY}>{cell(TASKS_KEY)}</div>}
       {hint && <div className="split-drop" aria-hidden><span>⊞ {hint}</span></div>}
+      </div>
     </div>
   );
 }

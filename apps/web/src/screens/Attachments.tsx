@@ -4,35 +4,59 @@ import type { AttachmentDTO } from '@tiecoms/contracts';
 import { MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS_PER_MESSAGE } from '@tiecoms/contracts';
 import { client } from '../app-client.ts';
 import { errorText, getLang, t } from '../i18n.ts';
-import { toast } from '../menu.tsx';
+import { menuProps, toast } from '../menu.tsx';
 import { VoiceNote } from './Voice.tsx';
 import { formatBytes, formatDuration } from '../video.ts';
 
 // ---------- Descarga autenticada con caché en memoria ----------
-const blobs = new Map<string, Promise<string>>();
-/** URL local (blob:) de una ruta del API que exige Bearer. */
-export function blobUrl(path: string) {
-  let p = blobs.get(path);
-  if (!p) {
-    p = client.fetchBlob(path).then((b) => URL.createObjectURL(b));
-    p.catch(() => blobs.delete(path));
-    blobs.set(path, p);
+type BlobEntry = { promise: Promise<string>; url?: string; bytes: number; refs: number; used: number };
+const blobs = new Map<string, BlobEntry>();
+const cacheKey = (path: string) => `${client.getState().data?.me.id ?? 'anonymous'}:${path}`;
+function trimBlobs() {
+  let bytes = [...blobs.values()].reduce((sum, e) => sum + e.bytes, 0);
+  for (const [key, entry] of [...blobs].sort((a,b) => a[1].used - b[1].used)) {
+    if (bytes <= 64 * 1024 * 1024 && blobs.size <= 64) break;
+    if (entry.refs || !entry.url) continue;
+    URL.revokeObjectURL(entry.url); blobs.delete(key); bytes -= entry.bytes;
   }
-  return p;
 }
-function useBlobUrl(path: string | null) {
+function entryFor(path: string) {
+  const key = cacheKey(path);
+  let entry = blobs.get(key);
+  if (!entry) {
+    entry = { promise: Promise.resolve(''), bytes: 0, refs: 0, used: Date.now() };
+    const created = entry;
+    entry.promise = client.fetchBlob(path).then((blob) => {
+      if (cacheKey(path) !== key) throw new Error('Session changed');
+      created.url = URL.createObjectURL(blob); created.bytes = blob.size;
+      // Consumers get the resolved URL before unused entries are considered for eviction.
+      window.setTimeout(trimBlobs, 0);
+      return created.url;
+    }).catch((error) => { if (blobs.get(key) === created) blobs.delete(key); throw error; });
+    blobs.set(key, entry);
+  }
+  entry.used = Date.now();
+  return entry;
+}
+/** Mounted consumers hold a lease; only unused URLs may be evicted. */
+export function acquireBlob(path: string) {
+  const entry = entryFor(path); entry.refs++; let released = false;
+  return { url: entry.promise, release: () => { if (released) return; released = true; entry.refs--; entry.used = Date.now(); trimBlobs(); } };
+}
+export function useBlobUrl(path: string | null) {
   const [url, setUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
   useEffect(() => {
     let alive = true;
     setUrl(null); setFailed(false);
-    if (path) blobUrl(path).then((u) => alive && setUrl(u)).catch(() => alive && setFailed(true));
-    return () => { alive = false; };
+    const lease = path ? acquireBlob(path) : null;
+    lease?.url.then((u) => alive && setUrl(u)).catch(() => alive && setFailed(true));
+    return () => { alive = false; lease?.release(); };
   }, [path]);
   return { url, failed };
 }
 
-export const isImage = (a: { contentType: string }) => a.contentType.startsWith('image/') && a.contentType !== 'image/heic' && a.contentType !== 'image/heif';
+export const isImage = (a: { contentType: string }) => { const mime = a.contentType.split(';')[0]!.trim().toLowerCase(); return mime.startsWith('image/') && !['image/heic', 'image/heif'].includes(mime); };
 export const isVideo = (a: { contentType: string }) => a.contentType.startsWith('video/');
 export const isPdf = (a: { contentType: string; name: string }) => a.contentType === 'application/pdf' || /\.pdf$/i.test(a.name);
 /** Visor y firma de PDFs: pdf.js se descarga solo cuando alguien abre uno. */
@@ -58,18 +82,55 @@ function fileIcon(a: { contentType: string; name: string }) {
 
 export async function downloadAttachment(a: AttachmentDTO) {
   try {
-    const href = await blobUrl(a.url);
+    const lease = acquireBlob(a.url);
+    let href: string;
+    try { href = await lease.url; } catch (error) { lease.release(); throw error; }
+    window.setTimeout(lease.release, 30_000);
     const link = document.createElement('a');
     link.href = href; link.download = a.name; document.body.appendChild(link); link.click(); link.remove();
   } catch (e) { toast(errorText(e) || t('att.unavailable')); }
 }
 
+/** Clipboard uses a PNG image; downloading always preserves the original (including GIF animation). */
+export async function copyAttachmentImage(a: AttachmentDTO) {
+  const es = getLang() !== 'en';
+  try {
+    if (a.sizeBytes > 24 * 1024 * 1024 || (a.width && a.height && a.width * a.height > 20_000_000)) throw new Error(es ? 'Imagen demasiado grande para copiar. Descarga el original.' : 'Image too large to copy. Download the original.');
+    const png = async () => {
+      const blob = await client.fetchBlob(a.url);
+      if (blob.type === 'image/png') return blob;
+      const bitmap = await createImageBitmap(blob);
+      try {
+        if (bitmap.width * bitmap.height > 20_000_000) throw new Error('Image too large');
+        const canvas = document.createElement('canvas'); canvas.width = bitmap.width; canvas.height = bitmap.height;
+        const context = canvas.getContext('2d'); if (!context) throw new Error('Canvas unavailable'); context.drawImage(bitmap, 0, 0);
+        return await new Promise<Blob>((resolve, reject) => canvas.toBlob((b) => b ? resolve(b) : reject(new Error('Image unavailable')), 'image/png'));
+      } finally { bitmap.close(); }
+    };
+    if ('__TAURI_INTERNALS__' in window) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      const blob = await png(); await invoke('copy_image', { png: Array.from(new Uint8Array(await blob.arrayBuffer())) });
+    } else {
+      if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') throw new Error(es ? 'Este navegador no permite copiar imágenes. Abre o descarga el original.' : 'This browser cannot copy images. Open or download the original.');
+      // Start clipboard permission during the gesture, before the authenticated image fetch.
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': png() })]);
+    }
+    toast(es ? (a.contentType.includes('gif') ? 'Imagen copiada (fotograma del GIF)' : 'Imagen copiada') : (a.contentType.includes('gif') ? 'Image copied (GIF frame)' : 'Image copied'));
+  } catch (e) { toast(e instanceof Error ? e.message : es ? 'No se pudo copiar la imagen' : 'Could not copy image'); }
+}
+const imageMenu = (a: AttachmentDTO) => [
+  { label: getLang() === 'en' ? 'Copy image' : 'Copiar imagen', icon: '⧉', onSelect: () => void copyAttachmentImage(a) },
+  { label: getLang() === 'en' ? 'Download original' : 'Descargar original', icon: '↓', onSelect: () => void downloadAttachment(a) },
+];
+
 // ---------- En la burbuja ----------
 function Tile({ a, more, onOpen }: { a: AttachmentDTO; more?: number; onOpen: () => void }) {
-  const { url, failed } = useBlobUrl(isImage(a) ? a.thumbUrl ?? a.url : a.thumbUrl);
+  const tile = useRef<HTMLButtonElement>(null);
+  const seen = useSeen(tile);
+  const { url, failed } = useBlobUrl(seen ? (a.contentType.split(';')[0]?.toLowerCase() === 'image/gif' ? a.url : isImage(a) ? a.thumbUrl ?? a.url : a.thumbUrl) : null);
   const ratio = a.width && a.height ? a.width / a.height : 4 / 3;
   return (
-    <button type="button" className="att-tile" onClick={onOpen} aria-label={a.name} style={{ aspectRatio: String(Math.min(2, Math.max(0.6, ratio))) }}>
+    <button ref={tile} type="button" className="att-tile" onClick={onOpen} {...menuProps(() => imageMenu(a))} aria-label={a.name} style={{ aspectRatio: String(Math.min(2, Math.max(0.6, ratio))) }}>
       {url ? <img src={url} alt="" draggable={false} /> : <span className="att-tile-ph">{failed ? '⚠' : isVideo(a) ? '🎬' : ''}</span>}
       {isVideo(a) && <span className="att-play">▶</span>}
       {more ? <span className="att-more">{t('att.more', { n: more })}</span> : null}
@@ -108,6 +169,7 @@ export function AttachmentsView({ list, onCreateIssue }: { list: AttachmentDTO[]
           {shown.map((a, i) => <Tile key={a.id} a={a} more={i === 3 && visual.length > 4 ? visual.length - 4 : undefined} onOpen={() => setViewing(i)} />)}
         </div>
       )}
+      {list.filter((a) => !!a.provenance).map((a) => <details className="media-credits" key={`credits-${a.id}`}><summary>{getLang() === 'en' ? 'Credits' : 'Créditos'}</summary><span>{a.provenance!.title} · {a.provenance!.author} · {a.provenance!.license}</span>{a.provenance!.sourceUrl && <a href={a.provenance!.sourceUrl!} target="_blank" rel="noopener noreferrer">{getLang() === 'en' ? 'Source' : 'Fuente'}</a>}{a.provenance!.licenseUrl && <a href={a.provenance!.licenseUrl!} target="_blank" rel="noopener noreferrer">{getLang() === 'en' ? 'License' : 'Licencia'}</a>}</details>)}
       {videos.map((a) => <VideoCard key={a.id} a={a} />)}
       {files.map((a) => isPdf(a) ? (
         <div key={a.id} className="att-file-btn is-pdf">
@@ -158,7 +220,7 @@ function Viewer({ list, start, onClose }: { list: AttachmentDTO[]; start: number
       <div className="viewer-stage" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
         {failed ? <div className="viewer-msg">{t('att.unavailable')}</div>
           : !url ? <div className="viewer-msg">{t('common.loading')}</div>
-          : <img src={url} alt={a.name} />}
+          : <img src={url} alt={a.name} {...menuProps(() => imageMenu(a))} />}
       </div>
       {i < list.length - 1 && <button className="viewer-nav next" aria-label={t('att.next')} onClick={() => setI(i + 1)}>›</button>}
     </div>

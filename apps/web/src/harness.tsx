@@ -312,6 +312,25 @@ const memeItems = [['#444', 'Drake', 2], ['#555', 'Distracted', 3], ['#666', 'Su
   }
   throw new Error('arnés sin backend');
 };
+// Nightly regression fixtures are deliberately isolated from production and real recipients.
+if (q.has('nightly')) {
+  seq = Math.max(...g.map((m) => m.seq));
+  data.people.find((p) => p.id === 'laura')!.availability = { mode: 'focus', until: new Date(Date.now()+3600000).toISOString(), silent: true, revision: 1 };
+  g.push(msg('general','laura','**Prueba de lectura completa**\n- Primero\n- Segundo\n\n```typescript\nconst mensaje = "hola";\nconsole.log(mensaje);\n```\n' + ('Un párrafo de prueba largo que conserva toda su información.\n\n').repeat(75) + 'FIN DEL MENSAJE LARGO',0));
+  const conv = data.conversations.find((c) => c.id === 'general')!; conv.lastMessageSeq = g.length;
+  let prefs = { sections: [], conversations: {}, issues: { view: 'board', grouping: 'group' } };
+  const original = client.request.bind(client);
+  (window as any).__requests = [];
+  (client as any).request = async (path: string, init: any = {}) => {
+    (window as any).__requests.push({path,method:init.method ?? 'GET'});
+    if (path === '/me/personal-preferences') { if (init.json) prefs = {...prefs,...init.json,issues:{...prefs.issues,...init.json.issues}}; return prefs; }
+    if (path === '/gg/calendar/slots') return { status:'ready',provider:'google',checkedAt:new Date().toISOString(),timezone:init.json.timezone,slots:[{startsAt:init.json.from,endsAt:new Date(Date.parse(init.json.from)+3600000).toISOString()}] };
+    return original(path,init);
+  };
+  (client as any).loadIssues = async () => Object.values(client.getState().issues);
+  (client as any).updateIssue = async (id: string, patch: any) => { const next = {...client.getState().issues[id], ...patch}; (client as any).set({ issues: {...client.getState().issues,[id]:next} }); return next; };
+  ggThreads['c:general'] = [ggMsg('gg','Archivo «Certificados_Embolizacion_' + 'muy_largo_'.repeat(25) + '»\n' + 'Contenido de prueba que debe permanecer dentro del panel. '.repeat(20),{followUps:['¿Quieres revisar este mensaje muy largo con nombres sin espacios?','¿Ver disponibilidad?']})];
+}
 // Para las pruebas en el navegador: el cliente y la burbuja de mensaje nuevo.
 Object.assign(window, { __client: client, __bubble: showMessageBubble });
 history.replaceState(null, '', q.get('to') ?? '/');

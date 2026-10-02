@@ -16,6 +16,10 @@ let dialog: ((close: () => void) => ReactNode) | null = null;
 const dl = new Set<() => void>();
 export function openDialog(render: (close: () => void) => ReactNode) { dialog = render; dl.forEach((l) => l()); }
 const closeDialog = () => { dialog = null; dl.forEach((l) => l()); };
+/** A sequential workflow awaits each form instead of replacing it with the next suggestion. */
+export function showDialogUntilClosed(render: (close: () => void) => ReactNode): Promise<void> {
+  return new Promise((resolve) => openDialog((close) => render(() => { close(); resolve(); })));
+}
 export function DialogHost() {
   const d = useSyncExternalStore((l) => { dl.add(l); return () => dl.delete(l); }, () => dialog);
   return d ? <>{d(closeDialog)}</> : null;

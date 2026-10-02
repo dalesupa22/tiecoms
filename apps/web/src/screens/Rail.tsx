@@ -1,4 +1,4 @@
-import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import type { BootstrapDTO, ConversationDTO } from '@tiecoms/contracts';
 import { client, useClient } from '../app-client.ts';
 import { t } from '../i18n.ts';
@@ -19,10 +19,10 @@ import { MeAvatar } from './Silence.tsx';
  */
 
 // ---------- Qué lista muestra la barra: Todo (Hoy), Grupos o DMs ----------
-export type SideMode = 'all' | 'groups' | 'dms';
+export type SideMode = 'all' | 'groups' | 'dms' | 'whatsapp' | 'mail';
 const MODE_KEY = 'chaggu:sidebarTab';
 const modeStore = (() => {
-  let value: SideMode = (() => { try { const v = localStorage.getItem(MODE_KEY); return v === 'groups' || v === 'dms' ? v : 'all'; } catch { return 'all'; } })();
+  let value: SideMode = (() => { try { const v = localStorage.getItem(MODE_KEY); return v === 'groups' || v === 'dms' || v === 'whatsapp' || v === 'mail' ? v : 'all'; } catch { return 'all'; } })();
   const listeners = new Set<() => void>();
   return {
     get: () => value,
@@ -31,7 +31,10 @@ const modeStore = (() => {
   };
 })();
 export const useSideMode = () => useSyncExternalStore(modeStore.subscribe, modeStore.get);
-export const setSideMode = modeStore.set;
+export const setSideMode = (mode: SideMode) => {
+  const u = new URL(location.href); u.searchParams.delete('provider');
+  history.replaceState(null, '', u); modeStore.set(mode); window.dispatchEvent(new Event('chaggu:provider'));
+};
 
 export const isDmRow = (c: ConversationDTO) => (c.kind === 'direct' || c.kind === 'multi') && !(c.parentId && c.deriveKind !== 'side');
 const isGroupRow = (c: ConversationDTO) => !!c.workspaceId && c.deriveKind !== 'side';
@@ -41,12 +44,17 @@ const sum = (d: BootstrapDTO, f: (c: ConversationDTO) => boolean) => d.conversat
 function useWaUnread() {
   const rev = useClient((s) => s.waRevision);
   const [n, setN] = useState(0);
+  const lastLoad = useRef(0);
   useEffect(() => {
     let live = true;
+    const wait = Math.max(0, 10_000 - (Date.now() - lastLoad.current));
+    const timer = setTimeout(() => {
+    lastLoad.current = Date.now();
     client.request<{ categories: Record<string, { unread: number }> }>('/whatsapp/chats?limit=1')
       .then((r) => live && setN(Object.values(r.categories ?? {}).reduce((k, c) => k + (c?.unread ?? 0), 0)))
       .catch(() => {});
-    return () => { live = false; };
+    }, wait);
+    return () => { live = false; clearTimeout(timer); };
   }, [rev]);
   return n;
 }
@@ -92,7 +100,7 @@ function RailItem({ icon, label, on, count, tone = 'brand', dot, at, drag, onCli
     // Tareas, Correo y WhatsApp se arrastran enteros a la cuadrícula (o a la bandeja que sube al arrastrar).
     <button className={`rail-item ${on ? 'on' : ''} ${lit ? `lit tone-${tone}` : ''}`} onClick={onClick} title={drag ? `${label} · ${t('grid.railDrag')}` : label} aria-label={aria} aria-current={on ? 'page' : undefined}
       {...(drag ? { draggable: true, onDragStart: (e: React.DragEvent) => setDrag(e, 'section', { section: drag }, label) } : {})}>
-      <Icon name={icon} />
+      {ICONS[icon] ? <Icon name={icon} /> : <span aria-hidden>{icon}</span>}
       <span className="rail-label">{label}</span>
       {(at ?? 0) > 0 ? <span className="rail-count tone-brand">@{at! > 1 ? at : ''}</span>
         : n > 0 ? <span className={`rail-count tone-${tone}`}>{n > 99 ? '99+' : n}</span>
@@ -103,14 +111,14 @@ function RailItem({ icon, label, on, count, tone = 'brand', dot, at, drag, onCli
 
 const PAGES_MORE: { name: Route['name']; label: string; icon: string; to: string }[] = [
   { name: 'notes', label: 'nav.notes', icon: '📝', to: '/notas' },
+  { name: 'files', label: 'nav.files', icon: '▣', to: '/archivos' },
+  { name: 'people', label: 'nav.directory', icon: '◎', to: '/participantes' },
   { name: 'alerts', label: 'nav.alerts', icon: '⏰', to: '/alertas' },
   { name: 'community', label: 'nav.community', icon: '📣', to: '/comunidad' },
   { name: 'organize', label: 'nav.organize', icon: '▤', to: '/organizar' },
   { name: 'saved', label: 'nav.saved', icon: '🔖', to: '/ver-despues' },
   { name: 'scheduled', label: 'nav.scheduled', icon: '🕒', to: '/programados' },
   { name: 'signed', label: 'nav.signed', icon: '✍️', to: '/firmas' },
-  { name: 'files', label: 'nav.files', icon: '▣', to: '/archivos' },
-  { name: 'people', label: 'nav.directory', icon: '◎', to: '/participantes' },
 ];
 
 const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -148,16 +156,29 @@ export function Rail({ route }: { route: Route }) {
   // La cuadrícula siempre a la mano: un 2×2 vivo que se llena al fijar. Entrar guarda de dónde vienes para el «← Volver».
   const goGrid = () => { rememberBack(route.name === 'grid' ? null : location.pathname.slice(BASE.length) || '/'); navigate('/cuadricula'); };
   const pick = (m: SideMode) => { setSideMode(m); if (m === 'all') navigate('/'); };
+  const railRef = useRef<HTMLElement>(null);
+  const [extraCount, setExtraCount] = useState(3);
+  useEffect(() => {
+    const el = railRef.current; if (!el) return;
+    const measure = () => {
+      const item = el.querySelector('.rail-item')?.getBoundingClientRect().height || 58;
+      const base = 8 + Number(mailOn) + Number(callsOn);
+      setExtraCount(Math.max(3, Math.min(PAGES_MORE.length, Math.floor((el.clientHeight - 132) / (item + 2)) - base)));
+    };
+    const observer = new ResizeObserver(measure); observer.observe(el); measure();
+    return () => observer.disconnect();
+  }, [mailOn, callsOn]);
   const more = (e: React.MouseEvent<HTMLButtonElement>) => {
     const r = e.currentTarget.getBoundingClientRect();
-    const items: MenuItem[] = PAGES_MORE.map((p) => ({ label: t(p.label as never), icon: p.icon, hint: route.name === p.name ? '✓' : undefined, onSelect: () => navigate(p.to) }));
+    const items: MenuItem[] = PAGES_MORE.slice(extraCount).map((p) => ({ label: t(p.label as never), icon: p.icon, hint: route.name === p.name ? '✓' : undefined, onSelect: () => navigate(p.to) }));
     openMenuAt(r.right + 6, r.top, items);
   };
   const moreOn = PAGES_MORE.some((p) => p.name === route.name);
 
   return (
-    <nav className="rail" aria-label={t('nav.mainNav')}>
+    <nav ref={railRef} className="rail" aria-label={t('nav.mainNav')}>
       <button className="rail-logo" onClick={() => pick('all')} aria-label="chaggu" title="chaggu"><img src={asset('/icon.svg')} alt="" width={30} height={30} /></button>
+      <div className="rail-scroll">
       <RailItem icon="today" label={t('nav.today')} on={mode === 'all'} at={mentions} onClick={() => pick('all')} />
       <button className={`rail-item rail-grid ${route.name === 'grid' ? 'on' : ''} ${panes.length ? 'lit tone-brand' : ''}`} onClick={goGrid} title={t('nav.grid')} aria-label={panes.length ? `${t('nav.grid')}, ${splitMain(panes).main.length}/4${splitMain(panes).tasks ? ` + ${t('nav.issues')}` : ''}` : t('nav.grid')} aria-current={route.name === 'grid' ? 'page' : undefined}>
         <span key={pulse} className={pulse ? 'glyph-pulse' : ''}><GridGlyph /></span>
@@ -166,15 +187,16 @@ export function Rail({ route }: { route: Route }) {
       </button>
       <RailItem icon="groups" label={t('nav.groups')} on={mode === 'groups'} count={groups} onClick={() => pick(mode === 'groups' ? 'all' : 'groups')} />
       <RailItem icon="dms" label={t('nav.dms')} on={mode === 'dms'} count={dms} onClick={() => pick(mode === 'dms' ? 'all' : 'dms')} />
-      <RailItem icon="whatsapp" label={t('nav.whatsapp')} on={route.name === 'whatsapp' || route.name === 'waChat'} count={wa} tone="wa" drag="wachats" onClick={() => navigate('/whatsapp')} />
-      {mailOn && <RailItem icon="mail" label={t('nav.mail')} on={route.name === 'mail'} count={mail} tone="mail" drag="inbox" onClick={() => navigate('/correo')} />}
+      <RailItem icon="whatsapp" label={t('nav.whatsapp')} on={mode === 'whatsapp'} count={wa} tone="wa" drag="wachats" onClick={() => setSideMode('whatsapp')} />
+      {mailOn && <RailItem icon="mail" label={t('nav.mail')} on={mode === 'mail'} count={mail} tone="mail" drag="inbox" onClick={() => setSideMode('mail')} />}
       <span className="rail-sep" aria-hidden />
-      <RailItem icon="agenda" label={t('nav.agenda')} on={route.name === 'agenda'} dot={soon} onClick={() => navigate('/agenda')} />
+      <RailItem icon="agenda" label={t('nav.agenda')} on={route.name === 'agenda'} dot={soon} drag="agenda" onClick={() => navigate('/agenda')} />
       <RailItem icon="tasks" label={t('nav.issues')} on={route.name === 'issues'} dot={due} drag="tasks" onClick={() => navigate('/asuntos')} />
-      <RailItem icon="trazo" label={t('nav.trazo')} on={route.name === 'trazo'} onClick={() => navigate('/trazo')} />
-      {callsOn && <RailItem icon="calls" label={missed > 0 ? t('calls.missedN', { n: missed }) : t('nav.calls')} on={route.name === 'calls'} count={missed} tone={missed > 0 ? 'missed' : 'call'} dot={anyCall || inCall} onClick={() => navigate('/llamadas')} />}
-      <span className="grow" />
-      <RailItem icon="more" label={t('nav.more')} on={moreOn} onClick={more} />
+      <RailItem icon="trazo" label={t('nav.trazo')} on={route.name === 'trazo'} drag="trazo" onClick={() => navigate('/trazo')} />
+      {callsOn && <RailItem icon="calls" label={missed > 0 ? t('calls.missedN', { n: missed }) : t('nav.calls')} on={route.name === 'calls'} count={missed} tone={missed > 0 ? 'missed' : 'call'} dot={anyCall || inCall} drag="calls" onClick={() => navigate('/llamadas')} />}
+      {PAGES_MORE.slice(0, extraCount).map((p) => <RailItem key={p.name} icon={p.icon} label={t(p.label as never)} on={route.name === p.name} onClick={() => navigate(p.to)} />)}
+      </div>
+      {extraCount < PAGES_MORE.length && <RailItem icon="more" label={t('nav.more')} on={moreOn} onClick={more} />}
       <button className="rail-me" aria-haspopup="menu" title={t('profile.menu')} aria-label={t('profile.menu')} onClick={(e) => openAccountMenu(e.currentTarget)}>
         <MeAvatar size={34} />
       </button>

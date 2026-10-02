@@ -1,3 +1,4 @@
+import { useMinuteClock } from './minute-clock.ts';
 import { asset } from './router.ts';
 import { useEffect, type ReactNode } from 'react';
 import type { BootstrapDTO, ConversationDTO, OrganizationDTO, PersonDTO } from '@tiecoms/contracts';
@@ -58,16 +59,23 @@ export const isSelfChat = (d: BootstrapDTO, c: ConversationDTO) => c.kind === 'd
 export const isGgChat = (c: ConversationDTO) => c.kind === 'direct' && c.memberIds.includes(GG_ID);
 
 export function Avatar({ person, org, size = 34 }: { person?: PersonDTO | null; org?: OrganizationDTO | null; size?: number }) {
+  useMinuteClock();
+  const availability = person?.availability;
+  const mode = availability?.until && Date.parse(availability.until) <= Date.now() ? null : availability?.mode;
+  const en = locale().startsWith('en');
+  const states: Record<string, [string, string]> = { available: ['🟢', en ? 'Available' : 'Disponible'], busy: ['🔴', en ? 'Busy' : 'Ocupado'], focus: ['🎯', en ? 'Focus' : 'Concentración'], dnd: ['🌙', en ? 'Do not disturb' : 'No molestar'], rest: ['🛌', en ? 'Rest' : 'Descanso'] };
+  const badge = mode ? states[mode] : null;
   if (person?.id === GG_ID) return <span className="avatar gg-avatar" style={{ width: size, height: size }}><img src={asset('/gg-mark.svg')} alt="gg" draggable={false} /></span>;
   // Sin foto: iniciales sobre el color estable de la persona. Sin insignia de empresa: el nombre
   // de la empresa ya va escrito junto a la persona y la letra suelta («x») confundía.
   const bg = person?.kind === 'agent' ? 'var(--ink)' : person ? personColor(person.id) : 'var(--paper-3)';
   const fg = person?.kind === 'agent' ? 'var(--paper)' : person ? '#ffffff' : 'var(--ink-2)';
   return (
-    <span className="avatar" style={{ width: size, height: size, background: bg, color: fg, fontSize: size * 0.36, borderRadius: person?.kind === 'agent' ? 10 : 99 }}>
+    <span className="avatar" style={{ position: 'relative', overflow: 'visible', width: size, height: size, background: bg, color: fg, fontSize: size * 0.36, borderRadius: person?.kind === 'agent' ? 10 : 99 }}>
       {person?.avatarUrl
         ? <img src={apiUrl(person.avatarUrl)} alt="" loading="lazy" draggable={false} style={{ width: '100%', height: '100%', borderRadius: 'inherit', objectFit: 'cover' }} />
         : person?.kind === 'agent' ? '◇' : initials(person?.name ?? '?')}
+      {badge && <span className="availability-badge" role="img" title={badge[1]} aria-label={badge[1]}>{badge[0]}</span>}
     </span>
   );
 }

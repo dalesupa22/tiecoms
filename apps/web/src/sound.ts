@@ -91,8 +91,12 @@ function pop(ac: AudioContext, mention: boolean): boolean {
 
 /** Una nota: frecuencia (Hz), inicio y duración (s), forma de onda y volumen pico. */
 type Note = [freq: number, at: number, dur: number, wave: OscillatorType, peak: number];
-/** Recetas de los 10 sonidos de mensaje (≤ 0,6 s cada uno). La mención suena una quinta más aguda. */
+/** Recetas de los sonidos de mensaje (≤ 0,6 s cada uno). La mención suena una quinta más aguda. */
 export const MESSAGE_RECIPES: Record<MessageSound, Note[]> = {
+  energy: [[220, 0, 0.14, 'triangle', 0.09], [440, 0.10, 0.16, 'triangle', 0.09], [880, 0.22, 0.25, 'sine', 0.1]],
+  spark: [[1760, 0, 0.12, 'sine', 0.1], [2349.3, 0.07, 0.20, 'sine', 0.07]],
+  portal: [[784, 0, 0.32, 'sine', 0.08], [523.3, 0.09, 0.35, 'triangle', 0.07], [392, 0.18, 0.35, 'sine', 0.07]],
+  victory: [[523.3, 0, 0.12, 'triangle', 0.09], [659.3, 0.10, 0.12, 'triangle', 0.09], [784, 0.20, 0.12, 'triangle', 0.09], [1046.5, 0.3, 0.26, 'sine', 0.1]],
   pop: [[659.3, 0, 0.09, 'sine', 0.16], [987.8, 0.085, 0.13, 'sine', 0.13]],
   gota: [[1400, 0, 0.06, 'sine', 0.14], [700, 0.05, 0.16, 'sine', 0.12]],
   campana: [[1046.5, 0, 0.5, 'sine', 0.13], [2093, 0, 0.3, 'sine', 0.04], [1568, 0.01, 0.35, 'sine', 0.03]],
@@ -128,6 +132,7 @@ function playNotes(ac: AudioContext, notes: Note[], transpose = 1): boolean {
       osc.connect(gain).connect(ac.destination);
       osc.start(t0 + at);
       osc.stop(t0 + at + dur + 0.03);
+      osc.onended = () => { osc.disconnect(); gain.disconnect(); };
     }
     return true;
   } catch { return false; }

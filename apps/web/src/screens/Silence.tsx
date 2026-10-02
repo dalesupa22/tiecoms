@@ -13,7 +13,7 @@ export function MeAvatar({ size }: { size: number }) {
   return (
     <span className={`me-avatar ${on ? 'is-dnd' : ''}`}>
       <Avatar person={personById(d, d.me.id)} org={orgById(d, d.me.primaryOrgId)} size={size} />
-      {on && <span className="dnd-moon" title={dndText(d.me.dndUntil) ?? ''} aria-label={t('dnd.title')}>🌙</span>}
+      {on && !d.me.availability?.mode && <span className="dnd-moon" title={dndText(d.me.dndUntil) ?? ''} aria-label={t('dnd.title')}>🌙</span>}
     </span>
   );
 }

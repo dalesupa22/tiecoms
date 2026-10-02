@@ -8,7 +8,7 @@ import { client } from './app-client.ts';
 import { errorText, t } from './i18n.ts';
 import { toast } from './menu.tsx';
 import { BASE, navigate } from './router.ts';
-import { TASKS_KEY, TASKS_SLOT, type MailProviderKey, type Section, mailKey, sectionKey, splitMain, waKey } from './grid-keys.ts';
+import { SECTIONS, TASKS_KEY, TASKS_SLOT, type MailProviderKey, type Section, mailKey, sectionKey, splitMain, waKey } from './grid-keys.ts';
 import { DRAG_MAIL, DRAG_TYPE, DRAG_WA, DRAG_WAMSG, type DragKind, MAX_PANES, currentPanes, dragType, openBeside, pinAt, rememberMeta } from './split.ts';
 
 export interface MailDrag { provider: MailProviderKey; id: string; subject: string; from: string }
@@ -28,7 +28,17 @@ export function readDrag(dt: DataTransfer, kind: DragKind): DragPayload | null {
   const raw = dt.getData(dragType(kind));
   if (!raw) return null;
   if (kind === 'chat') return { kind, id: raw };
-  try { return { kind, ...JSON.parse(raw) } as DragPayload; } catch { return null; }
+  try {
+    const p = JSON.parse(raw);
+    if (!p || typeof p !== 'object' || Array.isArray(p)) return null;
+    const string = (key: string) => typeof p[key] === 'string' && p[key].length > 0 && p[key].length <= 2048;
+    if (kind === 'section' && !SECTIONS.includes(p.section)) return null;
+    if (kind === 'mail' && (!['google', 'microsoft'].includes(p.provider) || !string('id'))) return null;
+    if ((kind === 'wa' || kind === 'wamsg') && (!string('accountId') || !string('jid'))) return null;
+    if (kind === 'wamsg' && !string('messageId')) return null;
+    if (kind === 'task' && !string('id')) return null;
+    return { ...p, kind } as DragPayload;
+  } catch { return null; }
 }
 
 /** La clave y el nombre del panel que sería esto en la cuadrícula (los mensajes sueltos no son un panel). */
@@ -36,7 +46,7 @@ export function paneOf(p: DragPayload): { key: string; title: string; sub?: stri
   if (p.kind === 'chat') return { key: p.id, title: '' };
   if (p.kind === 'mail') return { key: mailKey(p.provider, p.id), title: p.subject || t('mail.noSubject'), sub: p.from };
   if (p.kind === 'wa') return { key: waKey(p.accountId, p.jid), title: p.name, sub: 'WhatsApp' };
-  if (p.kind === 'section') return { key: sectionKey(p.section), title: p.section === 'tasks' ? t('nav.issues') : p.section === 'inbox' ? t('nav.mail') : 'WhatsApp', sub: p.section === 'wachats' ? t('grid.allChats') : undefined };
+  if (p.kind === 'section') return { key: sectionKey(p.section), title: p.section === 'tasks' ? t('nav.issues') : p.section === 'inbox' ? t('nav.mail') : p.section === 'agenda' ? t('nav.agenda') : p.section === 'trazo' ? t('nav.trazo') : p.section === 'calls' ? t('nav.calls') : 'WhatsApp', sub: p.section === 'wachats' ? t('grid.allChats') : undefined };
   return null;
 }
 

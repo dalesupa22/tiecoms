@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import type { BootstrapDTO, IssueDTO, IssueEventDTO, IssueStatus, IssueVisibility } from '@tiecoms/contracts';
 import { client, useClient } from '../app-client.ts';
+import { updateIssuePreferences, usePersonalPreferences } from '../personal-prefs.ts';
 import { PinToGrid } from './Tray.tsx';
 import { setDrag } from '../grid-actions.ts';
 import { errorText, locale, t } from '../i18n.ts';
@@ -159,9 +160,9 @@ export function IssueRow({ i, showWhere = true, showOwner = true, child = false,
 }
 
 /** Un asunto con sus tareas debajo, sangradas. */
-export function IssueWithTasks({ i, showWhere, showOwner, onOpen }: { i: IssueDTO; showWhere?: boolean; showOwner?: boolean; onOpen: (id: string) => void }) {
+export function IssueWithTasks({ i, showWhere, showOwner, onOpen, allowedIds }: { allowedIds?: Set<string>; i: IssueDTO; showWhere?: boolean; showOwner?: boolean; onOpen: (id: string) => void }) {
   const all = useClient((s) => s.issues);
-  const kids = childrenOf(all, i.id);
+  const kids = childrenOf(all, i.id).filter((child) => !allowedIds || allowedIds.has(child.id));
   return (
     <div className="issue-group">
       <IssueRow i={i} showWhere={showWhere} showOwner={showOwner} onOpen={onOpen} />
@@ -371,7 +372,9 @@ export function IssueDrawer({ id: startId, onClose }: { id: string; onClose: () 
   const f = issueFlags(i);
   const canSeeOrigin = !!conv && i.originMessageSeq !== null && i.originMessageSeq > conv.historyFromSeq;
   const requester = personById(d, i.requestedBy);
-  const update = (patch: Parameters<typeof client.updateIssue>[1]) => client.updateIssue(i.id, patch).catch((e) => setError(errorText(e)));
+  const [saving, setSaving] = useState(false);
+  const saveLock = useRef(false);
+  const update = async (patch: Parameters<typeof client.updateIssue>[1]) => { if (saveLock.current) return; saveLock.current = true; setSaving(true); try { await client.updateIssue(i.id, patch); } catch (e) { setError(errorText(e)); } finally { saveLock.current = false; setSaving(false); } };
   const upload = async (files: FileList | null) => {
     if (!files?.length || uploading) return;
     if ((i.attachments?.length ?? 0) + files.length > 20) { setError(taskText('Máximo 20 archivos por tarea.', 'Maximum 20 files per task.')); return; }
@@ -425,11 +428,11 @@ export function IssueDrawer({ id: startId, onClose }: { id: string; onClose: () 
         <div className="issue-q-label">{t('issue.qWho')}</div>
         <div className="chips">
           {members.map((p) => (
-            <button key={p.id} className={`chip-person ${assignedTo(i, p.id) ? 'on' : ''}`} aria-pressed={assignedTo(i, p.id)} onClick={() => update({ assigneeIds: assignedTo(i, p.id) ? taskAssignees(i).filter((uid) => uid !== p.id) : [...taskAssignees(i), p.id] })}>
+            <button key={p.id} className={`chip-person ${assignedTo(i, p.id) ? 'on' : ''}`} aria-pressed={assignedTo(i, p.id)} disabled={saving} onClick={() => update({ assigneeIds: assignedTo(i, p.id) ? taskAssignees(i).filter((uid) => uid !== p.id) : [...taskAssignees(i), p.id] })}>
               <Avatar person={p} org={orgById(d, p.orgId)} size={22} /> {p.id === d.me.id ? t('issue.me') : p.name.split(' ')[0]}
             </button>
           ))}
-          {taskAssignees(i).length > 0 && <button className="chip-person ghost" onClick={() => update({ assigneeIds: [] })}>{t('issue.noOwner')}</button>}
+          {taskAssignees(i).length > 0 && <button className="chip-person ghost" disabled={saving} onClick={() => update({ assigneeIds: [] })}>{t('issue.noOwner')}</button>}
         </div>
       </div>}
 
@@ -535,20 +538,25 @@ function dateShortcuts(): ['issue.dToday' | 'issue.dTomorrow' | 'issue.dFriday' 
 export function IssuesBody() {
   const d = useClient((s) => s.data)!;
   const all = useClient((s) => s.issues);
-  const [filter, setFilter] = useState<'mine' | 'open' | 'closed'>(() => (localStorage.getItem('chaggu:issueFilter') as 'mine') || 'mine');
-  const [groupBy, setGroupBy] = useState<'group' | 'person'>(() => (localStorage.getItem('chaggu:issueGroupBy') as 'person') || 'group');
-  const [view, setView] = useState<'list' | 'cards' | 'board'>(() => (localStorage.getItem('chaggu:issueView') as 'list') || 'list');
+  const preferences = usePersonalPreferences();
+  const [scope, setScope] = useState<'mine' | 'all'>('mine');
+  const [stateFilter, setStateFilter] = useState<'all' | 'open' | 'closed'>('all');
+  const view = preferences.issues?.view ?? 'list';
+  const groupBy = preferences.issues?.grouping === 'assignee' ? 'person' : 'group';
+  const [pendingMoves, setPendingMoves] = useState<Set<string>>(() => new Set());
+  const [query, setQuery] = useState('');
   // ?issue=<id>: abre el asunto (enlaces de gg, del push o de un asunto personal).
   const [open, setOpen] = useState<string | null>(() => queryParam('issue'));
   const [error, setError] = useState<string | null>(null);
   useEffect(() => { client.loadIssues({}).catch((e) => setError(errorText(e))); }, []);
-  const remember = (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* sin almacenamiento */ } };
   const visibleConvs = useMemo(() => new Set(d.conversations.map((c) => c.id)), [d]);
   // Los restringidos pueden ser de un chat que no leo (me asignaron una tarea): el servidor ya filtró.
   const list = Object.values(all)
     .filter((i) => !i.conversationId || visibleConvs.has(i.conversationId) || isRestricted(i))
-    .filter((i) => (filter === 'closed' ? isClosed(i) : !isClosed(i) && (filter === 'open' || assignedTo(i, d.me.id))))
-    .sort(filter === 'closed' ? (a, b) => (b.closedAt ?? '').localeCompare(a.closedAt ?? '') : byUrgency);
+    .filter((i) => scope === 'all' || assignedTo(i, d.me.id))
+    .filter((i) => stateFilter === 'all' || (stateFilter === 'closed' ? isClosed(i) : !isClosed(i)))
+    .filter((i) => !query.trim() || i.title.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()))
+    .sort(stateFilter === 'closed' ? (a, b) => (b.closedAt ?? '').localeCompare(a.closedAt ?? '') : byUrgency);
   // Por grupo: la conversación con su espacio. Por persona: el responsable, yo primero y «Sin responsable» al final.
   const NONE = '__none';
   const buckets = new Map<string, IssueDTO[]>();
@@ -567,29 +575,40 @@ export function IssuesBody() {
   const sections = [...buckets.entries()].sort(([a, ai], [b, bi]) => groupBy === 'person'
     ? (Number(b === d.me.id) - Number(a === d.me.id)) || (Number(a === NONE) - Number(b === NONE)) || sectionTitle(a).localeCompare(sectionTitle(b))
     : bi.length - ai.length || sectionTitle(a).localeCompare(sectionTitle(b)));
-  const label = { mine: t('issue.mine'), open: t('issue.allOpen'), closed: t('issue.closed') };
-  const count = (f: 'mine' | 'open' | 'closed') => Object.values(all).filter((i) => (!i.conversationId || visibleConvs.has(i.conversationId) || isRestricted(i)) && (f === 'closed' ? isClosed(i) : !isClosed(i) && (f === 'open' || assignedTo(i, d.me.id)))).length;
+  const eligible = Object.values(all).filter((i) => !i.conversationId || visibleConvs.has(i.conversationId) || isRestricted(i));
+  const move = async (taskId: string, status: IssueStatus) => {
+    if (!all[taskId] || pendingMoves.has(taskId) || all[taskId]!.status === status) return;
+    setPendingMoves((ids) => new Set([...ids, taskId])); setError(null);
+    try { await client.updateIssue(taskId, { status }); }
+    catch (err) { setError(errorText(err)); }
+    finally { setPendingMoves((ids) => { const next = new Set(ids); next.delete(taskId); return next; }); }
+  };
   return (
     <>
       <div className="row issue-toolbar">
-        <div className="seg">
-          {(['mine', 'open', 'closed'] as const).map((f) => <button key={f} className={filter === f ? 'on' : ''} onClick={() => { setFilter(f); remember('chaggu:issueFilter', f); }}>{label[f]} <span className="muted">{count(f)}</span></button>)}
+        <div className="seg" role="radiogroup" aria-label={taskText('Responsables', 'Assignees')}>
+          <button role="radio" aria-checked={scope === 'mine'} className={scope === 'mine' ? 'on' : ''} onClick={() => setScope('mine')}>{taskText('Mis tareas', 'My tasks')} <span className="muted">{eligible.filter((i) => assignedTo(i, d.me.id)).length}</span></button>
+          <button role="radio" aria-checked={scope === 'all'} className={scope === 'all' ? 'on' : ''} onClick={() => setScope('all')}>{taskText('Todas', 'All')} <span className="muted">{eligible.length}</span></button>
         </div>
+        <select className="input" aria-label={taskText('Estado', 'Status')} value={stateFilter} onChange={(e) => setStateFilter(e.target.value as typeof stateFilter)}>
+          <option value="all">{taskText('Todos los estados', 'All statuses')}</option><option value="open">{t('issue.allOpen')}</option><option value="closed">{t('issue.closed')}</option>
+        </select>
+        <input className="input" type="search" aria-label={taskText('Buscar tareas', 'Search tasks')} placeholder={taskText('Buscar tareas', 'Search tasks')} value={query} onChange={(e) => setQuery(e.target.value)} />
         <div className="seg" role="radiogroup" aria-label={t('issue.groupBy')}>
-          {(['group', 'person'] as const).map((g) => <button key={g} role="radio" aria-checked={groupBy === g} className={groupBy === g ? 'on' : ''} onClick={() => { setGroupBy(g); remember('chaggu:issueGroupBy', g); }}>{g === 'group' ? t('issue.byGroup') : t('issue.byPerson')}</button>)}
+          {(['group', 'person'] as const).map((g) => <button key={g} role="radio" aria-checked={groupBy === g} className={groupBy === g ? 'on' : ''} onClick={() => { void updateIssuePreferences({ grouping: g === 'person' ? 'assignee' : 'group' }).catch(() => {}); }}>{g === 'group' ? t('issue.byGroup') : t('issue.byPerson')}</button>)}
         </div>
-        <div className="seg" role="radiogroup" aria-label={taskText('Vista de tareas', 'Task view')}>{(['list', 'cards', 'board'] as const).map((v) => <button key={v} role="radio" aria-checked={view === v} className={view === v ? 'on' : ''} onClick={() => { setView(v); remember('chaggu:issueView', v); }}>{v === 'list' ? taskText('Lista', 'List') : v === 'cards' ? taskText('Tarjetas', 'Cards') : taskText('Tablero', 'Board')}</button>)}</div>
+        <div className="seg" role="radiogroup" aria-label={taskText('Vista de tareas', 'Task view')}>{(['list', 'cards', 'board'] as const).map((v) => <button key={v} role="radio" aria-checked={view === v} className={view === v ? 'on' : ''} onClick={() => { void updateIssuePreferences({ view: v }).catch(() => {}); }}>{v === 'list' ? taskText('Lista', 'List') : v === 'cards' ? taskText('Tarjetas', 'Cards') : taskText('Tablero', 'Board')}</button>)}</div>
         <TaskReportButton />
       </div>
-      {filter !== 'closed' && <QuickAddIssue />}
+      {stateFilter !== 'closed' && <QuickAddIssue />}
       {error && <div className="error">{error}</div>}
       {list.length === 0 && <div className="empty">{t('issue.empty')}</div>}
-      {view === 'board' && <div className="task-board">{ISSUE_STATUSES.map((status) => <section key={status} className="task-board-column" onDragOver={(e) => { if (e.dataTransfer.types.includes('application/x-chaggu-issue-id')) e.preventDefault(); }} onDrop={(e) => { e.preventDefault(); const taskId = e.dataTransfer.getData('application/x-chaggu-issue-id'); if (all[taskId]) void client.updateIssue(taskId, { status }).catch((err) => setError(errorText(err))); }}><h3>{t(`issue.st.${status}`)} · {list.filter((i) => i.status === status).length}</h3>{list.filter((i) => i.status === status).map((i) => <IssueRow key={i.id} i={i} showWhere onOpen={setOpen} />)}</section>)}</div>}
+      {view === 'board' && <div className="task-board">{ISSUE_STATUSES.map((status) => <section key={status} className="task-board-column" aria-busy={pendingMoves.size > 0} onDragOver={(e) => { if (e.dataTransfer.types.includes('application/x-chaggu-issue-id')) { e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'move'; } }} onDrop={(e) => { e.preventDefault(); e.stopPropagation(); const taskId = e.dataTransfer.getData('application/x-chaggu-issue-id'); void move(taskId, status); }}><h3>{t(`issue.st.${status}`)} · {list.filter((i) => i.status === status).length}</h3>{list.filter((i) => i.status === status).map((i) => <IssueRow key={i.id} i={i} showWhere onOpen={setOpen} />)}</section>)}</div>}
       {view !== 'board' && sections.map(([k, items]) => (
         <section key={k} style={{ marginBottom: 18 }}>
           <div className="eyebrow" style={{ marginBottom: 8 }}>{sectionTitle(k)} · {items.length}</div>
           <div className={view === 'cards' ? 'task-cards' : 'list'} style={{ gap: 6 }}>{items.map((i) => groupBy === 'group'
-            ? <IssueWithTasks key={i.id} i={i} showWhere={false} onOpen={setOpen} />
+            ? <IssueWithTasks key={i.id} i={i} allowedIds={new Set(list.map((task) => task.id))} showWhere={false} onOpen={setOpen} />
             : <IssueRow key={i.id} i={i} showWhere showOwner={false} onOpen={setOpen} />)}</div>
         </section>
       ))}

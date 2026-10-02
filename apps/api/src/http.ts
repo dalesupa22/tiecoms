@@ -513,8 +513,8 @@ export async function buildHttp() {
       const q=z.object({ messageId:z.uuid().optional(), seq:z.coerce.number().int().positive().optional(), limit:z.coerce.number().int().min(10).max(100).default(50) }).refine((v)=>!!v.messageId || !!v.seq).parse(req.query);
       return messagesAround(req.userId,z.uuid().parse(req.params.id),q,q.limit);
     });
-    priv.post('/api/v1/gg/calendar/slots',async(req)=>calendarSlots(req.userId,CalendarSlotsInput.parse(req.body)));
-    priv.post('/api/v1/gg/calendar/confirm',async(req)=>confirmCalendar(req.userId,CalendarConfirmInput.parse(req.body)));
+    priv.post('/api/v1/gg/calendar/slots',ggLimit,async(req)=>calendarSlots(req.userId,CalendarSlotsInput.parse(req.body)));
+    priv.post('/api/v1/gg/calendar/confirm',ggLimit,async(req)=>confirmCalendar(req.userId,CalendarConfirmInput.parse(req.body)));
     // Preferencias personales, no leído, mensajes
     priv.put<{ Params: { id: string } }>('/api/v1/conversations/:id/prefs', async (req) => prefs.setConversationPrefs(req.userId, req.params.id, ConversationPrefsInput.parse(req.body)));
     priv.put<{ Params: { id: string } }>('/api/v1/workspaces/:id/prefs', async (req) => prefs.setWorkspacePrefs(req.userId, req.params.id, WorkspacePrefsInput.parse(req.body).pinned));

@@ -8,7 +8,7 @@ import { createMeeting } from './meetings.ts';
 import { ownChat } from './whatsapp.ts';
 
 const sourceFields={source:z.string().max(500),messageIds:z.array(z.string().min(1).max(200)).max(30).optional()};
-export const CalendarSlotsInput=z.object({...sourceFields,from:z.iso.datetime({offset:true}),to:z.iso.datetime({offset:true}),durationMin:z.number().int().min(15).max(240),timezone:z.string().min(1).max(64)});
+export const CalendarSlotsInput=z.object({...sourceFields,from:z.iso.datetime({offset:true}),to:z.iso.datetime({offset:true}),durationMin:z.number().int().min(15).max(240),timezone:z.string().min(1).max(64),startHour:z.number().int().min(0).max(23).optional().default(9),endHour:z.number().int().min(1).max(24).optional().default(18)}).refine(i=>i.endHour>i.startHour,{message:'La jornada debe terminar después de comenzar',path:['endHour']});
 export const CalendarConfirmInput=z.object({...sourceFields,provider:z.enum(['google','microsoft']),idempotencyKey:z.string().min(8).max(80),title:z.string().trim().min(2).max(200),startsAt:z.iso.datetime({offset:true}),endsAt:z.iso.datetime({offset:true}),timezone:z.string().min(1).max(64),conversationId:z.uuid().nullable().optional(),shareToChat:z.boolean().default(false),description:z.string().trim().max(4000).optional(),attendeeEmails:z.array(z.email().max(254)).max(20).optional(),inviteeIds:z.array(z.uuid()).max(20).optional()});
 
 async function authorize(userId:string,source:string,ids:string[]=[]){
@@ -31,16 +31,21 @@ async function ownAgendaBusy(userId:string,from:string,to:string):Promise<[numbe
   return r.rows.map((e)=>[new Date(e.starts_at).getTime(),new Date(e.ends_at).getTime()]);
 }
 function zone(tz:string){try{new Intl.DateTimeFormat('en',{timeZone:tz});}catch{throw badRequest('Zona horaria inválida');}}
-export async function calendarSlots(userId:string,input:z.infer<typeof CalendarSlotsInput>){
+export async function calendarSlots(userId:string,input:z.input<typeof CalendarSlotsInput>){
+  input=CalendarSlotsInput.parse(input);
   await authorize(userId,input.source,input.messageIds);zone(input.timezone);
   const from=Date.parse(input.from),to=Date.parse(input.to);
   if(to<=from || to-from>31*86400_000) throw badRequest('Elige un rango de hasta 31 días');
   const provider=await busyIntervals(userId,from,to,input.timezone,true),checkedAt=new Date().toISOString();
   if(provider.state!=='ok') return {status:provider.state==='none' ? 'needs_connect' : provider.state,provider:'provider' in provider ? provider.provider : null,checkedAt:null,timezone:input.timezone,slots:[]};
   const busy=[...provider.intervals,...await ownAgendaBusy(userId,input.from,input.to)],duration=input.durationMin*60_000,step=15*60_000;
+  const startHour=input.startHour ?? 9,endHour=input.endHour ?? 18;
+  const clock=new Intl.DateTimeFormat('en-CA',{timeZone:input.timezone,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
+  const local=(at:number)=>{const parts=clock.formatToParts(new Date(at)),part=(key:string)=>parts.find(p=>p.type===key)!.value;return {day:part('year')+'-'+part('month')+'-'+part('day'),minute:Number(part('hour'))*60+Number(part('minute'))};};
+  const inWorkday=(at:number)=>{const start=local(at),last=local(at+duration-1);return start.day===last.day && start.minute>=startHour*60 && last.minute<endHour*60;};
   const slots:{startsAt:string;endsAt:string}[]=[];
-  for(let at=Math.ceil(Math.max(from,Date.now()+5*60_000)/step)*step;at+duration<=to && slots.length<3;at+=step) if(!busy.some(([a,b])=>a<at+duration && b>at)) {slots.push({startsAt:new Date(at).toISOString(),endsAt:new Date(at+duration).toISOString()});at+=duration-step;}
-  return {status:'ready' as const,provider:provider.provider,calendar:'primary' as const,scope:'owned-primary-and-chaggu' as const,checkedAt,timezone:input.timezone,slots};
+  for(let at=Math.ceil(Math.max(from,Date.now()+5*60_000)/step)*step;at+duration<=to && slots.length<3;at+=step) if(inWorkday(at) && !busy.some(([a,b])=>a<at+duration && b>at)) {slots.push({startsAt:new Date(at).toISOString(),endsAt:new Date(at+duration).toISOString()});at+=duration-step;}
+  return {status:'ready' as const,provider:provider.provider,calendar:'primary' as const,scope:'owned-primary-and-chaggu' as const,checkedAt,timezone:input.timezone,startHour,endHour,slots};
 }
 export async function confirmCalendar(userId:string,input:z.infer<typeof CalendarConfirmInput>){
   const sourceConversation=await authorize(userId,input.source,input.messageIds);zone(input.timezone);
@@ -58,8 +63,10 @@ export async function confirmCalendar(userId:string,input:z.infer<typeof Calenda
   const inputMeeting={provider:input.provider,idempotencyKey:input.idempotencyKey,title:input.title,startsAt:input.startsAt,durationMin,timezone:input.timezone,conversationId,share:input.shareToChat,description:input.description,attendeeEmails:[...new Set(input.attendeeEmails ?? [])],inviteeIds:input.inviteeIds ?? (input.shareToChat ? [] : undefined)};
   // A connection-level advisory lock serializes our own confirmations without holding a SQL transaction over network I/O.
   const lock=await pool.connect();
+  let locked = false;
   try {
-    await lock.query("SELECT pg_advisory_lock(hashtext('gg-calendar:'||$1))",[userId]);
+    locked = (await lock.query("SELECT pg_try_advisory_lock(hashtext('gg-calendar:'||$1)) AS locked",[userId])).rows[0].locked;
+    if (!locked) throw new ApiError(409,'calendar_confirmation_busy','Ya hay una confirmación en curso. Espera su resultado antes de reintentar.');
     const previous=(await pool.query('SELECT id,status,operation_state FROM meetings WHERE user_id=$1 AND idempotency_key=$2',[userId,input.idempotencyKey])).rows[0];
     let expectedGeneration:string|undefined;
     if(!previous || previous.operation_state==='reserved') {
@@ -71,5 +78,5 @@ export async function confirmCalendar(userId:string,input:z.infer<typeof Calenda
       if(busy.some(([a,b])=>a<Date.parse(input.endsAt)&&b>Date.parse(input.startsAt))) throw new ApiError(409,'calendar_conflict','Este horario ya está ocupado. Actualiza las opciones.');
     }
     return await createMeeting(userId,inputMeeting,expectedGeneration);
-  } finally {await lock.query("SELECT pg_advisory_unlock(hashtext('gg-calendar:'||$1))",[userId]).catch(()=>{});lock.release();}
+  } finally {if (locked) await lock.query("SELECT pg_advisory_unlock(hashtext('gg-calendar:'||$1))",[userId]).catch(()=>{});lock.release();}
 }

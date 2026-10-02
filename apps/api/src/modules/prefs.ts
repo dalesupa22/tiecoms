@@ -143,7 +143,7 @@ export async function setAvailability(userId: string, input: { mode: Availabilit
   if (silent && !until) throw badRequest('Elige una duración futura para el modo silencioso');
   return tx(async (c) => {
     await c.query(`UPDATE users SET
-      dnd_until=CASE WHEN $4 THEN $3::timestamptz WHEN availability_mode IN ('focus','dnd','rest') AND dnd_until=availability_until AND $2::text IS NULL THEN NULL ELSE dnd_until END,
+      dnd_until=CASE WHEN $4 THEN $3::timestamptz WHEN availability_mode IN ('focus','dnd','rest') AND dnd_until=availability_until AND NOT $4 THEN NULL ELSE dnd_until END,
       availability_mode=$2, availability_until=$3, availability_revision=availability_revision+1 WHERE id=$1`, [userId,input.mode,until,silent]);
     const state = await publishAvailability(c,userId);
     const dnd = (await c.query('SELECT dnd_until FROM users WHERE id=$1',[userId])).rows[0];

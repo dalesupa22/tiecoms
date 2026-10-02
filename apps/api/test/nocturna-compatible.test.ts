@@ -4,8 +4,8 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-const mock=vi.hoisted(()=>({reply:'fixture reply',history:[] as any[],body:Buffer.from('R0lGODlhAwACAPAAAAAAAP///yH/C05FVFNDQVBFMi4wAwEAAAAh+QQACgAAACwAAAAAAwACAAACAoRRACH5BAAKAAAALAAAAAADAAIAAAIChFEAOw==','base64')}));
-vi.mock('../src/modules/assistant.ts',async(importOriginal)=>({...await importOriginal<any>(),respond:async(_u:any,h:any)=>{mock.history=h;return {reply:mock.reply,actions:[],suggestions:[]};},completeJson:async()=>JSON.stringify({answer:'Propuesta con calendario del servidor',followUps:['Buscar horarios'],suggestions:[]})}));
+const mock=vi.hoisted(()=>({reply:'fixture reply',respondCalls:0,afterRespond:null as null|(()=>Promise<void>),history:[] as any[],body:Buffer.from('R0lGODlhAwACAPAAAAAAAP///yH/C05FVFNDQVBFMi4wAwEAAAAh+QQACgAAACwAAAAAAwACAAACAoRRACH5BAAKAAAALAAAAAADAAIAAAIChFEAOw==','base64')}));
+vi.mock('../src/modules/assistant.ts',async(importOriginal)=>({...await importOriginal<any>(),respond:async(_u:any,h:any)=>{mock.respondCalls++;mock.history=h;if(mock.afterRespond) await mock.afterRespond();return {reply:mock.reply,actions:[],suggestions:[]};},completeJson:async()=>JSON.stringify({answer:'Propuesta con calendario del servidor',followUps:['Buscar horarios'],suggestions:[]})}));
 vi.mock('baileys',async(importOriginal)=>({...await importOriginal<any>(),downloadMediaMessage:async()=>Readable.from([mock.body])}));
 const run=randomUUID().slice(0,8);
 describe.skipIf(!process.env.DATABASE_URL)('nocturna compatible: API and canonical media',()=>{
@@ -23,6 +23,7 @@ describe.skipIf(!process.env.DATABASE_URL)('nocturna compatible: API and canonic
     await new Promise((r)=>setTimeout(r,400));
     db=await import('../src/db.ts');const {migrate}=await import('../src/migrate.ts');await migrate();api=await import('../src/http.ts');app=await api.buildHttp();
     a=await signup('NocturnaA');b=await signup('NocturnaB');c=await signup('NocturnaC');d=await signup('NocturnaD');
+    await db.pool.query('UPDATE users SET sleep_on=false WHERE id=ANY($1::uuid[])',[[a.id,b.id,c.id,d.id]]);
     const w=await req('POST','/workspaces',a.token,{name:'nocturna '+run});expect(w.status).toBe(200);cid=w.json.generalConversationId;ws=w.json.id;
     for(const user of [b,c]){await db.pool.query("INSERT INTO workspace_memberships(workspace_id,user_id,role) VALUES($1,$2,'member') ON CONFLICT DO NOTHING",[ws,user.id]);await db.pool.query("INSERT INTO conversation_memberships(conversation_id,user_id) VALUES($1,$2) ON CONFLICT DO NOTHING",[cid,user.id]);}
     const acc=await req('POST','/whatsapp/accounts',a.token,{label:'fixture '+run,kind:'personal'});expect(acc.status).toBe(200);account=acc.json.id;
@@ -35,10 +36,12 @@ describe.skipIf(!process.env.DATABASE_URL)('nocturna compatible: API and canonic
     expect((await req('PUT','/me/personal-preferences',a.token,{sections:[],conversations:{}})).status).toBe(200);
     p=(await req('GET','/me/personal-preferences',a.token)).json;expect(p.issues.view).toBe('board');expect(p.appearance.mode).toBe('dark');expect((await req('GET','/me/personal-preferences',b.token)).json.issues).toBeUndefined();
   });
-  it('focus is compatible with old DND; busy does not silently lift silence and public state is minimal',async()=>{
+  it('Focus to Available releases associated DND, while independent DND survives and public state stays minimal',async()=>{
     const until=new Date(Date.now()+3_600_000).toISOString();expect((await req('PUT','/me/availability',a.token,{mode:'focus',until})).status).toBe(200);
     let boot=(await req('GET','/bootstrap',a.token)).json;expect(boot.me.dndUntil).toBe(until);expect(boot.me.availability.mode).toBe('focus');
-    await req('PUT','/me/availability',a.token,{mode:'busy'});boot=(await req('GET','/bootstrap',b.token)).json;const person=boot.people.find((p:any)=>p.id===a.id);expect(person.availability.silent).toBe(true);expect(Object.keys(person.availability).sort()).toEqual(['mode','revision','silent','until']);
+    await req('PUT','/me/availability',a.token,{mode:'available'});boot=(await req('GET','/bootstrap',a.token)).json;expect(boot.me.dndUntil).toBeNull();expect(boot.me.availability).toMatchObject({mode:'available',silent:false});
+    await req('PUT','/me/availability',a.token,{mode:'focus',until});const independent=new Date(Date.now()+2*3_600_000).toISOString();await req('PUT','/me/dnd',a.token,{until:independent});
+    await req('PUT','/me/availability',a.token,{mode:'busy'});boot=(await req('GET','/bootstrap',b.token)).json;const person=boot.people.find((p:any)=>p.id===a.id);expect(person.availability).toMatchObject({mode:'dnd',silent:true,until:independent});expect(Object.keys(person.availability).sort()).toEqual(['mode','revision','silent','until']);
     expect((await req('PUT','/me/availability',a.token,{mode:'rest'})).status).toBe(400);await req('PUT','/me/dnd',a.token,{until:null});
   });
   it('three assignees survive create, edit, reload and child-task without giving outsider visibility',async()=>{
@@ -122,7 +125,7 @@ describe.skipIf(!process.env.DATABASE_URL)('nocturna compatible: API and canonic
   });  it('real-adapter fake calendar checks busy slots, rechecks conflicts, invites only explicit attendees, and retries once',async()=>{
     const key=createHash('sha256').update('chaggu:meetings:'+process.env.JWT_SECRET).digest(),iv=randomBytes(12),cipher=createCipheriv('aes-256-gcm',key,iv);const enc=Buffer.concat([cipher.update('at-fixture','utf8'),cipher.final()]);const sealed=Buffer.concat([iv,cipher.getAuthTag(),enc]);
     await db.pool.query("INSERT INTO meeting_connections(user_id,provider,access_token_enc,expires_at,status) VALUES($1,'google',$2,now()+interval '1 hour','active')",[a.id,sealed]);
-    const from=new Date(Math.ceil((Date.now()+3600_000)/900_000)*900_000).toISOString(),to=new Date(Date.parse(from)+6*3600_000).toISOString();
+    const from=new Date(Math.ceil((Date.now()+3600_000)/900_000)*900_000).toISOString(),to=new Date(Date.parse(from)+3*24*3600_000).toISOString();
     const control=async(body:any)=>fetch(fakeUrl+'/control',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
     await control({busy:[{start:{dateTime:from},end:{dateTime:new Date(Date.parse(from)+3600_000).toISOString()}}]});
     const slots=await req('POST','/gg/calendar/slots',a.token,{source:'c:'+cid,from,to,durationMin:30,timezone:'America/Bogota'});expect(slots.json.status).toBe('ready');expect(slots.json.checkedAt).toBeTruthy();expect(slots.json.slots).toHaveLength(3);expect(Date.parse(slots.json.slots[0].startsAt)).toBeGreaterThanOrEqual(Date.parse(from)+3600_000);
@@ -145,6 +148,35 @@ describe.skipIf(!process.env.DATABASE_URL)('nocturna compatible: API and canonic
     const source='c:'+cid,messageIds=[text.json.message.id];const clarify=await req('POST','/gg/side/suggest',a.token,{source,messageIds});expect(clarify.status).toBe(200);expect(clarify.json.calendar.status).toBe('needs_clarification');expect(clarify.json.calendar.checkedAt).toBeNull();
     const from=new Date(Date.now()+24*3600_000).toISOString(),to=new Date(Date.now()+48*3600_000).toISOString();const before:any=await(await fetch(fakeUrl+'/stats')).json();
     const checked=await req('POST','/gg/side',a.token,{source,text:'Busca tres horarios',quotedMessageIds:messageIds,calendar:{from,to,durationMin:30,timezone:'America/Bogota'}});expect(checked.status).toBe(200);expect(checked.json.message.extra.calendar.status).toBe('ready');expect(checked.json.message.extra.calendar.slots).toHaveLength(3);expect(checked.json.message.extra.calendar.checkedAt).toBeTruthy();expect((await(await fetch(fakeUrl+'/stats')).json() as any).google).toBe(before.google);
+  });
+  it('gg rejects oversized total input before downloading or invoking AI, preserves every original, and emits one clear notice',async()=>{
+    const atts=await import('../src/modules/attachments.ts'),gg=await import('../src/modules/gg.ts');const content='y'.repeat(64*1024+1);const file=await atts.upload(a.id,cid,{body:Buffer.from(content),name:'oversized.txt',type:'text/plain'});
+    const sent=await req('POST',`/conversations/${cid}/messages`,a.token,{clientMessageId:randomUUID(),body:'@gg revisa íntegro',attachmentIds:[file.id]});expect(sent.status).toBe(201);const stored=(await db.pool.query('SELECT s3_key FROM attachments WHERE id=$1',[file.id])).rows[0];
+    const before=mock.respondCalls,logs=async()=>await(await fetch(process.env.S3_ENDPOINT+'/__log')).json() as any[];const readsBefore=(await logs()).filter(x=>x.method==='GET' && x.key.endsWith(stored.s3_key)).length;
+    await gg.reply(sent.json.message.id);await gg.reply(sent.json.message.id);expect(mock.respondCalls).toBe(before);expect((await logs()).filter(x=>x.method==='GET' && x.key.endsWith(stored.s3_key))).toHaveLength(readsBefore);
+    const notices=(await db.pool.query('SELECT body FROM messages WHERE conversation_id=$1 AND client_message_id=$2',[cid,'gg-reply-'+sent.json.message.id])).rows;expect(notices).toHaveLength(1);expect(notices[0].body).toContain('64 KiB');expect(notices[0].body).toContain('se conserva íntegro');expect((await req('GET',file.url.replace('/api/v1',''),b.token)).bytes.toString()).toBe(content);
+    // Aggregate accounting also rejects several individually small files; no attachment is silently filtered.
+    const small=await Promise.all([1,2,3].map(async n=>await atts.upload(a.id,cid,{body:Buffer.from('z'.repeat(25*1024)),name:'part-'+n+'.txt',type:'text/plain'})));
+    const multiple=await req('POST',`/conversations/${cid}/messages`,a.token,{clientMessageId:randomUUID(),body:'@gg revisa estos tres',attachmentIds:small.map(x=>x.id)});await gg.reply(multiple.json.message.id);expect(mock.respondCalls).toBe(before);expect((await db.pool.query('SELECT body FROM messages WHERE client_message_id=$1',['gg-reply-'+multiple.json.message.id])).rows[0].body).toContain('64 KiB');
+  });
+  it('calendar candidates stay inside daily timezone hours and fail held confirmation locks quickly',async()=>{
+    const from='2031-01-07T00:00:00-05:00',to='2031-01-09T00:00:00-05:00',base={source:'c:'+cid,from,to,durationMin:60,timezone:'America/Bogota'};
+    const slots=await req('POST','/gg/calendar/slots',a.token,base);expect(slots.status).toBe(200);expect(slots.json.slots).toHaveLength(3);
+    const local=(at:string)=>new Intl.DateTimeFormat('en-GB',{timeZone:base.timezone,hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(new Date(at));for(const slot of slots.json.slots){expect(local(slot.startsAt)>='09:00').toBe(true);expect(local(slot.endsAt)<='18:00').toBe(true);}expect(local(slots.json.slots[0].startsAt)).toBe('09:00');
+    const custom=await req('POST','/gg/calendar/slots',a.token,{...base,startHour:13,endHour:15});expect(custom.json.slots).toHaveLength(3);expect(local(custom.json.slots[0].startsAt)).toBe('13:00');for(const slot of custom.json.slots)expect(local(slot.endsAt)<='15:00').toBe(true);
+    expect((await req('POST','/gg/calendar/slots',a.token,{...base,startHour:18,endHour:9})).status).toBe(400);expect((await req('POST','/gg/calendar/slots',a.token,{...base,startHour:-1})).status).toBe(400);
+    const lock=await db.pool.connect();try {await lock.query("SELECT pg_advisory_lock(hashtext('gg-calendar:'||$1))",[a.id]);const began=Date.now();const held=await req('POST','/gg/calendar/confirm',a.token,{source:base.source,...slots.json.slots[0],timezone:base.timezone,provider:'google',idempotencyKey:'held-lock-'+run,title:'Intento bloqueado'});expect(held.status).toBe(409);expect(held.json.error.code).toBe('calendar_confirmation_busy');expect(Date.now()-began).toBeLessThan(1000);}finally{await lock.query("SELECT pg_advisory_unlock(hashtext('gg-calendar:'||$1))",[a.id]);lock.release();}
+  });
+  it('gg does not publish a response or fallback notice after the requesting member is revoked',async()=>{
+    const gg=await import('../src/modules/gg.ts');const sent=await req('POST',`/conversations/${cid}/messages`,a.token,{clientMessageId:randomUUID(),body:'@gg pregunta autorizada'});expect(sent.status).toBe(201);
+    const countBefore=(await db.pool.query('SELECT count(*)::int AS n FROM messages WHERE conversation_id=$1 AND author_id=$2',[cid,gg.GG_ID])).rows[0].n;
+    mock.afterRespond=async()=>{await db.pool.query('UPDATE conversation_memberships SET removed_at=now() WHERE conversation_id=$1 AND user_id=$2',[cid,a.id]);throw new Error('fixture provider error after revocation');};
+    try{await gg.reply(sent.json.message.id);expect((await db.pool.query('SELECT count(*)::int AS n FROM messages WHERE conversation_id=$1 AND author_id=$2',[cid,gg.GG_ID])).rows[0].n).toBe(countBefore);}finally{mock.afterRespond=null;await db.pool.query('UPDATE conversation_memberships SET removed_at=NULL WHERE conversation_id=$1 AND user_id=$2',[cid,a.id]);}
+  });
+  it('calendar queries are rate-limited by authenticated user rather than by a shared IP',async()=>{
+    const body={source:'c:'+cid,from:'2031-01-10T00:00:00-05:00',to:'2031-01-11T00:00:00-05:00',durationMin:30,timezone:'America/Bogota'};
+    let limited=false;for(let i=0;i<31;i++)if((await req('POST','/gg/calendar/slots',a.token,body)).status===429)limited=true;expect(limited).toBe(true);
+    const own=await req('POST','/gg/calendar/slots',b.token,body);expect(own.status).toBe(200);expect(own.json.status).toBe('needs_connect');
   });
 
 });

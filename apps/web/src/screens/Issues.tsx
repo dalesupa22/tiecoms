@@ -357,6 +357,8 @@ export function IssueDrawer({ id: startId, onClose }: { id: string; onClose: () 
   const [moveTo, setMoveTo] = useState('');
   const uploadInput = useRef<HTMLInputElement>(null);
   const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const saveLock = useRef(false);
   const load = () => client.issueDetail(id).then((r) => setEvents(r.events)).catch((e) => setError(errorText(e)));
   useEffect(() => { void load(); }, [id, live?.updatedAt]);
   if (!live) return <Modal title={t('nav.issues')} onClose={onClose}><div className="muted">{error ?? t('common.loading')}</div></Modal>;
@@ -372,8 +374,6 @@ export function IssueDrawer({ id: startId, onClose }: { id: string; onClose: () 
   const f = issueFlags(i);
   const canSeeOrigin = !!conv && i.originMessageSeq !== null && i.originMessageSeq > conv.historyFromSeq;
   const requester = personById(d, i.requestedBy);
-  const [saving, setSaving] = useState(false);
-  const saveLock = useRef(false);
   const update = async (patch: Parameters<typeof client.updateIssue>[1]) => { if (saveLock.current) return; saveLock.current = true; setSaving(true); try { await client.updateIssue(i.id, patch); } catch (e) { setError(errorText(e)); } finally { saveLock.current = false; setSaving(false); } };
   const upload = async (files: FileList | null) => {
     if (!files?.length || uploading) return;

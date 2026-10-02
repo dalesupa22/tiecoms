@@ -15,6 +15,7 @@ export function GgCalendarDialog({ source, messageIds, onClose }: { source: stri
   const [to, setTo]=useState(()=>{const d=nextWeek();d.setDate(d.getDate()+4);return day(d);});
   const [minutes,setMinutes]=useState(60), [title,setTitle]=useState('');
   const [emails,setEmails]=useState(''),[description,setDescription]=useState('');
+  const [startHour,setStartHour]=useState(9),[endHour,setEndHour]=useState(18);
   const [result,setResult]=useState<Slots|null>(null), [chosen,setChosen]=useState<Slot|null>(null);
   const [error,setError]=useState<string|null>(null),[busy,setBusy]=useState(false),[saved,setSaved]=useState(false);
   const idempotency = useRef(crypto.randomUUID());
@@ -22,8 +23,8 @@ export function GgCalendarDialog({ source, messageIds, onClose }: { source: stri
   const format=(iso:string)=>new Date(iso).toLocaleString(locale(),{weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit',timeZone:timezone});
   const search=async()=>{
     if(busy)return;setBusy(true);setError(null);setResult(null);setChosen(null);setSaved(false);
-    try { const start=new Date(`${from}T00:00:00`), end=new Date(`${to}T23:59:59`); if(!Number.isFinite(start.getTime())||end<=start||end.getTime()-start.getTime()>31*86400000)throw new Error(tr('Elige un rango de hasta 31 días.','Choose a range up to 31 days.'));
-      setResult(await client.request<Slots>('/gg/calendar/slots',{method:'POST',json:{source,messageIds,from:start.toISOString(),to:end.toISOString(),durationMin:minutes,timezone}}));
+    try { if (endHour<=startHour) throw new Error(tr('La hora final debe ser posterior a la inicial.','End time must be after start time.')); const start=new Date(`${from}T00:00:00`), end=new Date(`${to}T23:59:59`); if(!Number.isFinite(start.getTime())||end<=start||end.getTime()-start.getTime()>31*86400000)throw new Error(tr('Elige un rango de hasta 31 días.','Choose a range up to 31 days.'));
+      setResult(await client.request<Slots>('/gg/calendar/slots',{method:'POST',json:{source,messageIds,from:start.toISOString(),to:end.toISOString(),durationMin:minutes,timezone,startHour,endHour}}));
     } catch(e){setError(errorText(e));} finally{setBusy(false);}
   };
   const save=async()=>{
@@ -38,6 +39,7 @@ export function GgCalendarDialog({ source, messageIds, onClose }: { source: stri
       <label className="field"><span>{tr('Hasta','Until')}</span><input className="input" type="date" value={to} onChange={(e)=>{setTo(e.target.value);setResult(null);setChosen(null);}} /></label>
       <label className="field"><span>{tr('Duración','Duration')}</span><select className="input" value={minutes} onChange={(e)=>{setMinutes(+e.target.value);setResult(null);setChosen(null);}}>{[15,30,45,60,90,120].map((m)=><option key={m} value={m}>{m} min</option>)}</select></label>
     </div>
+    <div className="row" style={{flexWrap:'wrap'}}><label className="field"><span>{tr('Cada día desde','Each day from')}</span><select className="input" value={startHour} onChange={(e)=>{setStartHour(+e.target.value);setResult(null);setChosen(null);}}>{Array.from({length:24},(_,h)=><option key={h} value={h}>{String(h).padStart(2,'0')}:00</option>)}</select></label><label className="field"><span>{tr('Hasta','Until')}</span><select className="input" value={endHour} onChange={(e)=>{setEndHour(+e.target.value);setResult(null);setChosen(null);}}>{Array.from({length:24},(_,i)=>i+1).map((h)=><option key={h} value={h}>{String(h).padStart(2,'0')}:00</option>)}</select></label></div>
     <button className="btn" disabled={busy} onClick={()=>void search()}>{busy ? tr('Consultando…','Checking…') : tr('Buscar horarios libres','Find available times')}</button>
     {result?.status==='ready' && <div className="list" style={{marginTop:12}}><p className="small muted">{tr('Calendario consultado','Calendar checked')}: {result.checkedAt ? format(result.checkedAt) : ''}</p>
       {!result.slots.length && <p>{tr('No encontré horarios libres en este rango.','No available times found in this range.')}</p>}

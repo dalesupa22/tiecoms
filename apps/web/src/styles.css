@@ -2319,3 +2319,5 @@ button.slot:disabled { opacity: .5; cursor: not-allowed; }
   .conv-head .head-keep:first-of-type, .conv-head > .avatar { display: none; }
   .conv-head { padding-inline: 6px; }
 }
+
+fieldset.composer { min-inline-size: 0; margin: 0; border: 0; border-top: 1px solid var(--line); }

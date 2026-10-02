@@ -17,4 +17,17 @@ describe('nocturna core',()=>{
     let resolve:any;c.request=vi.fn(()=>new Promise(r=>resolve=r));c.markRead('chat',10);await new Promise(r=>setTimeout(r,450));c.sessionGeneration++;c.state={...c.state,data:{me:{id:'new'},conversations:[{id:'chat',lastMessageSeq:10,lastReadSeq:0,historyFromSeq:0,unread:10}]}};
     resolve({lastReadSeq:10,readRevision:1});await new Promise(r=>setTimeout(r,0));expect(c.state.data.me.id).toBe('new');expect(c.state.data.conversations[0].lastReadSeq).toBe(0);
   });
+  it('a distant jump preserves a contiguous history that can still page older',async()=>{
+    const c:any=new TieComsClient(options);
+    const message=(seq:number)=>({id:`m${seq}`,conversationId:'chat',seq,authorId:'u',body:String(seq),kind:'text'});
+    c.state={...c.state,conversations:{chat:{messages:Array.from({length:50},(_,i)=>message(951+i)),loaded:true,loading:false,hasMore:true,lastEventSeq:1000}}};
+    c.openConversation=async()=>{};
+    c.request=vi.fn(async(path:string)=>{expect(path).not.toContain('/around');const q=new URL(path,'http://localhost').searchParams,before=+q.get('before')!,limit=+q.get('limit')!;const first=Math.max(1,before-limit);return {messages:Array.from({length:before-first},(_,i)=>message(first+i)),hasMore:first>1};});
+    expect(await c.ensureMessage('chat',100)).toBe(true);
+    const messages=c.state.conversations.chat.messages;
+    expect(messages.at(-1).seq).toBe(1000);for(let i=1;i<messages.length;i++)expect(messages[i].seq).toBe(messages[i-1].seq+1);
+    expect(c.request.mock.calls.length).toBeLessThanOrEqual(10);
+    await c.loadOlder('chat');expect(c.state.conversations.chat.messages[0].seq).toBe(1);
+  });
+
 });

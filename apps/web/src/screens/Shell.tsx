@@ -246,7 +246,7 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
       </main>
       <MobileTabs route={route} />
       {/* gg siempre a mano (Danny, 29-sep-2026): también dentro de un chat, por encima del campo de escribir. */}
-      <AssistantBubble hidden={false} inConv={inConv} />
+      <AssistantBubble hidden={false} inConv={inConv || route.name === 'grid' || route.name === 'waChat' || sideGrid || !!provider} />
     </div>
   );
 }

@@ -7,6 +7,8 @@ import { createRoot } from 'react-dom/client';
 import type { BootstrapDTO, ConversationDTO, IssueDTO, MessageDTO, TopicDTO } from '@tiecoms/contracts';
 import { showMessageBubble } from './bubbles.tsx';
 import { App } from './App.tsx';
+import { openDialog } from './actions.tsx';
+import { IssueDrawer } from './screens/Issues.tsx';
 import { client } from './app-client.ts';
 import { setLang } from './i18n.ts';
 import { initTheme, setThemePreference } from './theme.ts';
@@ -314,6 +316,13 @@ const memeItems = [['#444', 'Drake', 2], ['#555', 'Distracted', 3], ['#666', 'Su
 };
 // Nightly regression fixtures are deliberately isolated from production and real recipients.
 if (q.has('nightly')) {
+  Object.assign(mails.em1,{from:{name:'Equipo de pruebas',email:'qa@example.test'},accountEmail:'tester@example.test',subject:'Solicitud de revisión de prueba',snippet:'Revisa el adjunto de prueba.',body:'Este correo contiene datos sintéticos para validar el flujo de revisión.',comment:'¿Puedes revisar esta solicitud?'});
+  for(const message of g) if(message.kind==='system' && message.body.includes('mail.shared')) message.body=JSON.stringify({k:'mail.shared',emailId:'em1',comment:'¿Puedes revisar esta solicitud?'});
+  for(const mail of mailItems) {mail.from={name:'Equipo de pruebas',email:'qa@example.test'};mail.to=[{name:'Persona de prueba',email:'tester@example.test'}];mail.subject='Solicitud de revisión de prueba';mail.snippet='Mensaje sintético para la prueba de correo lateral.';mailHtml[mail.id]='<p>Correo sintético de prueba. No contiene información de clientes.</p>';}
+  const mark=document.createElement('div'); mark.textContent='QA local · datos sintéticos'; mark.style.cssText='position:fixed;bottom:0;left:75px;z-index:9999;font:10px sans-serif;padding:3px 6px;background:#fff9;color:#333;pointer-events:none';document.body.appendChild(mark);
+  (client as any).issueDetail=async(id:string)=>{await new Promise(resolve=>setTimeout(resolve,180));const row=client.getState().issues[id] ?? {...issues.i2,id,title:'Tarea cargada después de abrir'};(client as any).set({issues:{...client.getState().issues,[id]:row}});return {issue:row,events:[]};};
+  (window as any).__openLateIssue=()=>openDialog(close=><IssueDrawer id='fixture-late' onClose={close}/>);
+
   seq = Math.max(...g.map((m) => m.seq));
   data.people.find((p) => p.id === 'laura')!.availability = { mode: 'focus', until: new Date(Date.now()+3600000).toISOString(), silent: true, revision: 1 };
   g.push(msg('general','laura','**Prueba de lectura completa**\n- Primero\n- Segundo\n\n```typescript\nconst mensaje = "hola";\nconsole.log(mensaje);\n```\n' + ('Un párrafo de prueba largo que conserva toda su información.\n\n').repeat(75) + 'FIN DEL MENSAJE LARGO',0));

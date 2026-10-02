@@ -782,14 +782,14 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
         // Archivos del sistema soltados en cualquier parte del chat: mismo flujo que «+» (drafts.add).
         // Solo con «Files» en dataTransfer.types: los arrastres internos (chats a paneles, temas) no activan la capa.
         onDragOver={(e) => {
-          if (!conv.canPost || !claimFileDrag(e)) return;
+          if (!conv.canPost || longSending || !claimFileDrag(e)) return;
           if (!dropping) setDropping(true);
           if (dropTimer.current) clearTimeout(dropTimer.current);
           dropTimer.current = setTimeout(endDrop, 700);
         }}
         onDragLeave={(e) => { if (e.relatedTarget && !e.currentTarget.contains(e.relatedTarget as Node)) endDrop(); }}
         onDrop={(e) => {
-          if (!conv.canPost || !isFileDrag(e.dataTransfer)) return;
+          if (!conv.canPost || longSending || !isFileDrag(e.dataTransfer)) return;
           e.preventDefault(); e.stopPropagation(); endDrop();
           const files = [...e.dataTransfer.files];
           if (files.length) { drafts.add(files); input.current?.focus(); }
@@ -967,7 +967,7 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
           <QuickReplies onSend={(q) => { atBottom.current = true; void client.send(id, q); }} onAsk={() => setAdding(true)} />
         )}
         <div className="typing">{typers.length ? t(typers.length > 1 ? 'chat.typingMany' : 'chat.typingOne', { names: typers.join(', ') }) : ''}</div>
-        <div className="composer">
+        <fieldset className="composer" disabled={longSending}>
           {privateReply && (
             <div className="reply-bar is-private">
               <span className="grow ellipsis"><b>✉ {t('preply.bar', { name: personById(d, privateReply.authorId)?.name ?? '' })}</b> · {excerpt(cardQuote(privateReply) ?? privateReply.displayBody ?? privateReply.body, 100)}</span>
@@ -1042,7 +1042,7 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
             </div>
             </>
           ) : <div className="hint" style={{ textAlign: 'center', padding: 8 }}>{t('chat.readOnly')}</div>}
-        </div>
+        </fieldset>
       </section>
 
       {sideConv && (

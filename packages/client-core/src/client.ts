@@ -905,7 +905,7 @@ export class TieComsClient {
     return operation.promise;
   }
 
-  async loadOlder(id: string) {
+  async loadOlder(id: string, limit = 50) {
     const local = this.state.conversations[id];
     if (!local?.loaded || !local.hasMore || local.loading) return false;
     const before = local.messages[0]?.seq;
@@ -913,7 +913,7 @@ export class TieComsClient {
     const generation = this.sessionGeneration;
     this.setConv(id, { loading: true });
     try {
-      const page = await this.request<{ messages: MessageDTO[]; hasMore: boolean }>(`/conversations/${id}/messages?before=${before}&limit=50`);
+      const page = await this.request<{ messages: MessageDTO[]; hasMore: boolean }>(`/conversations/${id}/messages?before=${before}&limit=${Math.min(100, Math.max(1, limit))}`);
       this.assertSession(generation);
       const cur = this.state.conversations[id];
       if (!cur?.loaded) return false;
@@ -1736,25 +1736,18 @@ export class TieComsClient {
     await this.openConversation(conversationId);
     this.assertSession(generation);
     if (this.state.conversations[conversationId]?.messages.some((m)=>m.seq===seq)) return true;
-    try {
-      const page=await this.request<{messages:MessageDTO[];hasMore:boolean;lastEventSeq:number}>(`/conversations/${conversationId}/messages/around?seq=${seq}&limit=50`);
+    // Keep one continuous window. Merging a distant /around page would leave an
+    // unread gap that loadOlder cannot fill, and could advance the read cursor past it.
+    // An explicit jump may load at most 2,000 messages; callers offer Retry beyond that.
+    for (let guard=0; guard<20; guard++) {
       this.assertSession(generation);
-      const cur=this.state.conversations[conversationId];
-      if (!cur?.loaded) return false;
-      const merged=new Map(cur.messages.map((m)=>[m.id,m])); for(const m of page.messages) merged.set(m.id,m);
-      this.setConv(conversationId,{messages:[...merged.values()].sort((a,b)=>a.seq-b.seq),hasMore:cur.hasMore || page.hasMore});
-      return page.messages.some((m)=>m.seq===seq);
-    } catch(e) {
-      if (!(e instanceof ApiRequestError) || e.status!==404) throw e;
-      // Older servers have no around endpoint. Keep the bounded legacy fallback explicit.
-      for(let guard=0;guard<40;guard++) {
-        this.assertSession(generation); const c=this.state.conversations[conversationId];
-        if(!c?.loaded) return false; if(c.messages.some((m)=>m.seq===seq)) return true;
-        if(!c.hasMore || (c.messages[0]?.seq ?? 0)<=seq) return false;
-        if(!await this.loadOlder(conversationId)) return false;
-      }
-      return false;
+      const current=this.state.conversations[conversationId];
+      if(!current?.loaded) return false;
+      if(current.messages.some((message)=>message.seq===seq)) return true;
+      if(!current.hasMore || (current.messages[0]?.seq ?? 0)<=seq) return false;
+      if(!await this.loadOlder(conversationId,100)) return false;
     }
+    return this.state.conversations[conversationId]?.messages.some((message)=>message.seq===seq) ?? false;
   }
 
   patchPersonalPreferences(input: import('zod').z.infer<typeof import('@tiecoms/contracts').PersonalPreferencesPatchInput>) {

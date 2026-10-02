@@ -127,7 +127,7 @@ export function GridArea({ id, search = '', side }: { id: string | null; search?
 
   const cell = (x: string) => {
     const ref = parseKey(x);
-    const frame = { active: x === active, count: list.length, pinned: pinned.has(x), onClose: () => closePane(x, id), onOnly: () => onlyPane(x), onPin: () => togglePin(x), onTint: (el: HTMLElement) => openTintMenu(el, x) };
+    const frame = { visible: expanded ? expanded === x : visible.includes(x), active: x === active, count: list.length, pinned: pinned.has(x), onClose: () => closePane(x, id), onOnly: () => onlyPane(x), onPin: () => togglePin(x), onTint: (el: HTMLElement) => openTintMenu(el, x) };
     return (
       <div key={x} data-pane={x} data-tint={tints[x]} hidden={expanded ? expanded !== x : !visible.includes(x)}
         style={mixedLayout && !expanded ? { gridArea: ['a', 'b', 'c', 'd'][arranged.indexOf(x)] } : undefined}

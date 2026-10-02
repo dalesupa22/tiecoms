@@ -34,7 +34,7 @@ export function SectionPane({ kind, frame }: { kind: 'agenda' | 'trazo' | 'calls
     <div className="section-pane-body">{kind === 'agenda' ? <AgendaScreen /> : kind === 'trazo' ? <TrazoScreen /> : <CallsScreen />}</div></div>;
 }
 
-export interface PaneFrame { presentation?: 'sidebar'; expanded?: boolean; active: boolean; count: number; pinned: boolean; onClose: () => void; onOnly: () => void; onPin: () => void; onTint: (anchor: HTMLElement) => void }
+export interface PaneFrame { visible?: boolean; presentation?: 'sidebar'; expanded?: boolean; active: boolean; count: number; pinned: boolean; onClose: () => void; onOnly: () => void; onPin: () => void; onTint: (anchor: HTMLElement) => void }
 
 /** Cabecera común de un panel: qué es, cómo se llama, fijar, dejar solo este y cerrar. */
 function PaneHead({ icon, title, sub, frame, extra }: { icon: ReactNode; title: string; sub?: string; frame: PaneFrame; extra?: ReactNode }) {
@@ -212,14 +212,19 @@ function WaChatView({ accountId, jid, name, isGroup, gg, active = true }: { acco
   const [messages, setMessages] = useState<WaMessageDTO[] | null>(null);
   const box = useRef<HTMLDivElement>(null);
   const loadGeneration = useRef(0);
+  const activeRef = useRef(active);
+  activeRef.current = active;
+  const sentRefresh = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stickToBottom = useRef(true);
   const load = useCallback(() => {
+    if (!activeRef.current) return;
     const token = ++loadGeneration.current;
     client.request<{ messages: WaMessageDTO[] }>(`/whatsapp/chats/${accountId}/${encodeURIComponent(jid)}/messages?limit=80`)
       .then((r) => { if (token === loadGeneration.current) setMessages(r.messages); }).catch((e) => { if (token === loadGeneration.current) toast(errorText(e)); });
   }, [accountId, jid]);
   useEffect(() => { setMessages(null); stickToBottom.current = true; }, [load]);
   useEffect(() => { if (!active) return; const timer = setTimeout(load, 200); return () => { clearTimeout(timer); loadGeneration.current++; }; }, [load, revision, active]);
+  useEffect(() => () => { if (sentRefresh.current) clearTimeout(sentRefresh.current); }, [active, accountId, jid]);
   useEffect(() => { if (stickToBottom.current) box.current?.scrollTo({ top: box.current.scrollHeight }); }, [messages]);
   const last = messages?.[messages.length - 1] ?? null;
   return (
@@ -257,7 +262,7 @@ function WaChatView({ accountId, jid, name, isGroup, gg, active = true }: { acco
       </div>
       {gg && <SelectionBar n={gg.selected.size} onAsk={gg.onSelectAsk} onClear={gg.onClear} />}
       {gg && last && !last.fromMe && <div className="row gg-compose-row"><span className="grow" /><ReplyForMe source={gg.source} host={gg.host} /></div>}
-      <WaReply accountId={accountId} jid={jid} onSent={() => window.setTimeout(load, 1500)} draft={gg?.draft} />
+      <WaReply accountId={accountId} jid={jid} onSent={() => { if (sentRefresh.current) clearTimeout(sentRefresh.current); sentRefresh.current = setTimeout(load, 1500); }} draft={gg?.draft} />
       <div className="pane-foot small muted">{t('grid.waFoot')}</div>
     </>
   );
@@ -268,7 +273,7 @@ export function WaPane({ paneKey, accountId, jid, frame }: { paneKey: string; ac
   const name = meta?.title ?? jid.split('@')[0]!;
   return (
     <div className={`pane-typed ${frame.active ? 'is-active' : ''}`}>
-      <WaGgChat accountId={accountId} jid={jid} name={name} isGroup={jid.endsWith('@g.us')}
+      <WaGgChat active={frame.visible !== false} accountId={accountId} jid={jid} name={name} isGroup={jid.endsWith('@g.us')}
         head={(gg) => <PaneHead icon={<WaIcon size={20} />} title={name} sub={meta?.sub ?? 'WhatsApp'} frame={frame} extra={gg} />} />
     </div>
   );
@@ -368,7 +373,7 @@ export function WaListPane({ frame }: { frame: PaneFrame }) {
   const [error, setError] = useState<string | null>(null);
   const generation = useRef(0);
   const [open, setOpen] = useState<WaChatDTO | null>(null);
-  const active = frame.presentation !== 'sidebar' || frame.active;
+  const active = frame.visible !== false && (frame.presentation !== 'sidebar' || frame.active);
   useEffect(() => { if (!active) return; let live = true; waAccounts().then((accounts) => { if (live) setAccounts(accounts); }).catch((e) => { if (live) setError(errorText(e)); }); return () => { live = false; }; }, [revision, active]);
   const loadPage = async (cursor?: string, token = generation.current) => {
     setLoading(true); setError(null);

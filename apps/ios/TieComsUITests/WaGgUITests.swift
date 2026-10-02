@@ -206,4 +206,95 @@ final class WaGgUITests: XCTestCase {
             sleep(1)
         }
     }
+
+    /// 2-oct-2026: gg prepara la reunión y redacta el correo con el chat; nada se agenda ni se envía sin confirmar.
+    /// Fixture: tools/fixtures/gg-acciones-fixture.mjs (API local + fake-mail.mjs MOCK). `TEST_RUNNER_TC_FIXTURE_GGACCIONES=/ruta.json`.
+    func testGgAgendaYCorreoConConfirmacion() throws {
+        struct F: Decodable { struct P: Decodable { var email: String }; var apiUrl: String; var fakeMail: String; var password: String; var a: P; var generalId: String }
+        guard let path = ProcessInfo.processInfo.environment["TC_FIXTURE_GGACCIONES"], !path.isEmpty else { throw XCTSkip("Sin TC_FIXTURE_GGACCIONES") }
+        let f = try JSONDecoder().decode(F.self, from: Data(contentsOf: URL(fileURLWithPath: path)))
+        guard f.apiUrl.contains("localhost") || f.apiUrl.contains("127.0.0.1"), f.fakeMail.contains("localhost") else { throw XCTSkip("solo API local") }
+        func sent() throws -> [[String: Any]] {
+            let data = try Data(contentsOf: URL(string: "\(f.fakeMail)/sent")!)
+            return (try JSONSerialization.jsonObject(with: data) as? [[String: Any]]) ?? []
+        }
+        let before = try sent().count
+        let app = login(Fixture(apiUrl: f.apiUrl, password: f.password, a: .init(email: f.a.email, id: ""), generalId: f.generalId, waGroupKey: "", waDmKey: ""))
+        if app.tabBars.buttons["Grupos"].exists { app.tabBars.buttons["Grupos"].tap() }
+        let row = app.buttons["conv.row.\(f.generalId)"]
+        if !row.waitForExistence(timeout: 8), app.tabBars.buttons["DMs"].exists { app.tabBars.buttons["DMs"].tap() }
+        XCTAssertTrue(row.waitForExistence(timeout: 12), "fila del chat")
+        row.tap()
+        XCTAssertTrue(app.buttons["chat.gg"].waitForExistence(timeout: 10), "botón gg")
+        app.buttons["chat.gg"].tap()
+        func openFromGg(_ chip: String, _ menuItem: String) {
+            let c = app.buttons[chip]
+            if c.waitForExistence(timeout: 15) && c.isHittable { c.tap(); return }
+            app.buttons["gg.menu"].tap()
+            XCTAssertTrue(app.buttons[menuItem].waitForExistence(timeout: 5), menuItem)
+            app.buttons[menuItem].tap()
+        }
+
+        // 1. Agendar: gg llena el formulario; nada se agenda (sin calendario conectado ni siquiera sale «Confirmar y agendar»).
+        openFromGg("gg.chip.meeting", "gg.meeting.open")
+        XCTAssertTrue(app.staticTexts["gg.meeting.notice"].waitForExistence(timeout: 20), "aviso de borrador de reunión")
+        let title = app.descendants(matching: .any)["gg.meeting.title"]
+        XCTAssertEqual(title.value as? String, "Revisión de la propuesta")
+        XCTAssertTrue(app.descendants(matching: .any)["gg.meeting.invitee"].firstMatch.exists, "Beto como invitado del chat")
+        XCTAssertTrue(app.staticTexts["Beto Ríos"].exists)
+        XCTAssertEqual(app.descendants(matching: .any)["gg.meeting.emails"].value as? String, "jorge@cliente.com", "solo el correo escrito en el chat")
+        XCTAssertTrue(app.descendants(matching: .any)["gg.meeting.missing"].firstMatch.exists, "aviso de quién falta")
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Marta Gil")).firstMatch.exists, "no encontré a Marta")
+        XCTAssertTrue((app.descendants(matching: .any)["gg.meeting.description"].value as? String ?? "").contains("https://docs.example.com/propuesta"), "enlace en la descripción")
+        sleep(2); shot("gg-reunion-borrador")
+        XCTAssertFalse(app.buttons["gg.meeting.create"].exists, "nada se agenda solo")
+        // Quitar a Beto de los invitados.
+        app.buttons["gg.meeting.invitee.remove"].firstMatch.tap()
+        sleep(1); XCTAssertFalse(app.buttons["gg.meeting.invitee.remove"].exists, "Beto quitado")
+        app.navigationBars.buttons[app.navigationBars.buttons["Cerrar"].exists ? "Cerrar" : "Close"].firstMatch.tap()
+
+        // 2. Correo: borrador editable, aviso, validación, alerta de confirmación y envío una vez.
+        openFromGg("gg.chip.mail", "gg.mail.open")
+        XCTAssertTrue(app.staticTexts["gg.mail.notice"].waitForExistence(timeout: 20), "aviso de borrador de correo")
+        XCTAssertTrue(app.descendants(matching: .any)["gg.mail.from"].firstMatch.exists, "Desde")
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "@example.com")).firstMatch.exists, "Desde: el buzón conectado")
+        let to = app.descendants(matching: .any)["gg.mail.to"]
+        XCTAssertEqual(to.value as? String, "jorge@cliente.com", "solo correos escritos en el chat; hacker@malo.com no")
+        XCTAssertTrue(app.descendants(matching: .any)["gg.mail.missing"].firstMatch.exists)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "No veo el correo de Marta Gil")).firstMatch.exists)
+        XCTAssertEqual(app.descendants(matching: .any)["gg.mail.subject"].value as? String, "Propuesta para revisar")
+        sleep(1); shot("gg-correo-borrador")
+        let cc = app.descendants(matching: .any)["gg.mail.cc"]
+        cc.tap(); cc.typeText("luis")
+        app.buttons["gg.mail.send"].tap()
+        sleep(1)
+        // Si el toque solo cerró el teclado, un segundo toque.
+        if !app.descendants(matching: .any)["gg.mail.validation"].firstMatch.exists && !app.alerts.firstMatch.exists { app.buttons["gg.mail.send"].tap() }
+        shot("gg-correo-validacion")
+        XCTAssertTrue(app.descendants(matching: .any)["gg.mail.validation"].firstMatch.waitForExistence(timeout: 3), "correo inválido")
+        cc.coordinate(withNormalizedOffset: CGVector(dx: 0.97, dy: 0.5)).tap(); sleep(1)
+        cc.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 8))
+        let ccValue = cc.value as? String ?? ""
+        XCTAssertTrue(ccValue.isEmpty || ccValue == "Opcional", "copia vacía: \(ccValue)")
+        XCTAssertFalse(app.descendants(matching: .any)["gg.mail.validation"].firstMatch.exists, "al editar se quita el aviso")
+        app.buttons["gg.mail.send"].tap()
+        if !app.alerts.firstMatch.waitForExistence(timeout: 2) { app.buttons["gg.mail.send"].tap() }
+        let alert = app.alerts.firstMatch
+        XCTAssertTrue(alert.waitForExistence(timeout: 5), "alerta de confirmación")
+        XCTAssertTrue(alert.staticTexts.allElementsBoundByIndex.contains { $0.label.contains("jorge@cliente.com") }, "la alerta dice a quién")
+        shot("gg-correo-confirmar")
+        alert.buttons[alert.buttons["Cancelar"].exists ? "Cancelar" : "Cancel"].tap()
+        sleep(1)
+        XCTAssertEqual(try sent().count, before, "cancelar no envía")
+        app.buttons["gg.mail.send"].tap()
+        XCTAssertTrue(alert.waitForExistence(timeout: 5))
+        alert.buttons["gg.mail.confirmSend"].firstMatch.exists ? alert.buttons["gg.mail.confirmSend"].firstMatch.tap() : alert.buttons["Enviar"].firstMatch.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["gg.mail.sent"].firstMatch.waitForExistence(timeout: 15), "✓ Enviado")
+        shot("gg-correo-enviado")
+        let out = try sent()
+        XCTAssertEqual(out.count, before + 1, "salió una sola vez")
+        let last = String(describing: out.last ?? [:])
+        XCTAssertTrue(last.contains("jorge@cliente.com"), last)
+        XCTAssertFalse(last.contains("hacker@malo.com"), last)
+    }
 }

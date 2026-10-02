@@ -907,7 +907,8 @@
 "gg.forOther" = "For {name}";
 "gg.mail.action" = "✉ Draft email";
 "gg.mail.body" = "Message";
-"gg.mail.cc" = "Cc (optional)";
+"gg.mail.cc" = "Optional";
+"gg.mail.ccShort" = "Cc";
 "gg.mail.checkEmails" = "Check these emails: {list}";
 "gg.mail.confirmBody" = "Send this email from {from} to {to}?";
 "gg.mail.confirmCc" = "Cc: {cc}";
@@ -923,7 +924,8 @@
 "gg.mail.sent" = "✓ Sent. It is in your Sent folder.";
 "gg.mail.subject" = "Subject";
 "gg.mail.title" = "Email with gg";
-"gg.mail.to" = "To (comma-separated emails)";
+"gg.mail.to" = "email@company.com, …";
+"gg.mail.toShort" = "To";
 "gg.mail.tooMany" = "Up to 20 emails in To and 20 in Cc.";
 "gg.meeting.action" = "📅 Schedule";
 "gg.meeting.confirm" = "Confirm and schedule";

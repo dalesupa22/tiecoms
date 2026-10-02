@@ -5788,12 +5788,12 @@
     "From"
   ],
   "gg.mail.to": [
-    "Para (correos separados por coma)",
-    "To (comma-separated emails)"
+    "correo@empresa.com, …",
+    "email@company.com, …"
   ],
   "gg.mail.cc": [
-    "Copia (opcional)",
-    "Cc (optional)"
+    "Opcional",
+    "Optional"
   ],
   "gg.mail.subject": [
     "Asunto",
@@ -5834,5 +5834,13 @@
   "gg.mail.tooMany": [
     "Máximo 20 correos en Para y 20 en Copia.",
     "Up to 20 emails in To and 20 in Cc."
+  ],
+  "gg.mail.toShort": [
+    "Para",
+    "To"
+  ],
+  "gg.mail.ccShort": [
+    "Copia",
+    "Cc"
   ]
 }

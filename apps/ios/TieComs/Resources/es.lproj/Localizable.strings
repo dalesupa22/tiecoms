@@ -907,7 +907,8 @@
 "gg.forOther" = "Para {name}";
 "gg.mail.action" = "✉ Redactar correo";
 "gg.mail.body" = "Mensaje";
-"gg.mail.cc" = "Copia (opcional)";
+"gg.mail.cc" = "Opcional";
+"gg.mail.ccShort" = "Copia";
 "gg.mail.checkEmails" = "Revisa estos correos: {list}";
 "gg.mail.confirmBody" = "¿Enviar este correo desde {from} a {to}?";
 "gg.mail.confirmCc" = "Copia: {cc}";
@@ -923,7 +924,8 @@
 "gg.mail.sent" = "✓ Enviado. Queda en tus Enviados.";
 "gg.mail.subject" = "Asunto";
 "gg.mail.title" = "Correo con gg";
-"gg.mail.to" = "Para (correos separados por coma)";
+"gg.mail.to" = "correo@empresa.com, …";
+"gg.mail.toShort" = "Para";
 "gg.mail.tooMany" = "Máximo 20 correos en Para y 20 en Copia.";
 "gg.meeting.action" = "📅 Agendar";
 "gg.meeting.confirm" = "Confirmar y agendar";

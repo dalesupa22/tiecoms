@@ -305,14 +305,21 @@ struct GgMailSheet: View {
                     }
                     Section {
                         LabeledContent(L("gg.mail.from"), value: d.fromLabel).accessibilityIdentifier("gg.mail.from")
-                        TextField(L("gg.mail.to"), text: edit($to), axis: .vertical).lineLimit(1...3)
-                            .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.emailAddress)
-                            .accessibilityIdentifier("gg.mail.to")
-                        TextField(L("gg.mail.cc"), text: edit($cc), axis: .vertical).lineLimit(1...3)
-                            .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.emailAddress)
-                            .accessibilityIdentifier("gg.mail.cc")
-                        TextField(L("gg.mail.subject"), text: edit($subject)).accessibilityIdentifier("gg.mail.subject")
+                        field(L("gg.mail.toShort")) {
+                            TextField(L("gg.mail.to"), text: edit($to), axis: .vertical).lineLimit(1...3)
+                                .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.emailAddress)
+                                .accessibilityIdentifier("gg.mail.to")
+                        }
+                        field(L("gg.mail.ccShort")) {
+                            TextField(L("gg.mail.cc"), text: edit($cc), axis: .vertical).lineLimit(1...3)
+                                .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.emailAddress)
+                                .accessibilityIdentifier("gg.mail.cc")
+                        }
+                        field(L("gg.mail.subject")) {
+                            TextField(L("gg.mail.subject"), text: edit($subject)).accessibilityIdentifier("gg.mail.subject")
+                        }
                     }
+
                     Section(L("gg.mail.body")) {
                         TextField(L("gg.mail.body"), text: edit($text), axis: .vertical).lineLimit(6...20)
                             .accessibilityIdentifier("gg.mail.body")
@@ -323,7 +330,7 @@ struct GgMailSheet: View {
                         }
                         .disabled(busy || toList.isEmpty)
                         .accessibilityIdentifier("gg.mail.send")
-                        if let error { Text(error).font(.caption).foregroundStyle(.red).accessibilityIdentifier("gg.mail.validation") }
+                        if let error { Text(error).font(.footnote).foregroundStyle(.red).accessibilityIdentifier("gg.mail.validation") }
                     }
                 }
             }
@@ -356,6 +363,14 @@ struct GgMailSheet: View {
         .accessibilityIdentifier("gg.mail")
     }
 
+    /// Etiqueta fija a la izquierda: «Para», «Copia», «Asunto» se ven aunque el campo ya venga lleno.
+    private func field<C: View>(_ label: String, @ViewBuilder _ content: () -> C) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Text(label).font(.subheadline).foregroundStyle(Theme.textSecondary).frame(minWidth: 56, alignment: .leading)
+            content()
+        }
+    }
+
     private var confirmText: String {
         let from: String = { if case .ready(let d) = phase { return d.fromLabel }; return "" }()
         var s = L("gg.mail.confirmBody", ["from": from, "to": toList.joined(separator: ", ")])
@@ -365,7 +380,7 @@ struct GgMailSheet: View {
 
     /// Cualquier cambio en lo que se va a enviar es otro correo: otra clave.
     private func edit(_ b: Binding<String>) -> Binding<String> {
-        Binding(get: { b.wrappedValue }, set: { v in if v != b.wrappedValue { b.wrappedValue = v; key = UUID().uuidString.lowercased() } })
+        Binding(get: { b.wrappedValue }, set: { v in if v != b.wrappedValue { b.wrappedValue = v; key = UUID().uuidString.lowercased(); error = nil } })
     }
 
     private func load() async {

@@ -1,3 +1,4 @@
+import { PaneSizeControl } from './PaneSizeControl.tsx';
 import { waAccounts } from '../wa-requests.ts';
 import { sortWaChats } from '../wa-chat-order.ts';
 import { AttachmentsView } from './Attachments.tsx';
@@ -12,7 +13,7 @@ import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type Reac
 import type { MailListItemDTO, MailMessageDTO, MailProvider, WaAccountDTO, WaChatDTO, WaMessageDTO } from '@tiecoms/contracts';
 import { client, useClient } from '../app-client.ts';
 import { errorText, locale, t } from '../i18n.ts';
-import { openDialog, showDialogUntilClosed } from '../actions.tsx';
+import { openDialog } from '../actions.tsx';
 import { Modal } from '../ui.tsx';
 import { collapsePane, rememberMeta, useActiveKey, useMetas, useWide } from '../split.ts';
 import { openInGrid, setDrag } from '../grid-actions.ts';
@@ -24,10 +25,12 @@ import { WaAvatar, waInboxMenu, waMainListMenu, useWaInboxRow } from './WaInbox.
 import { ReminderDialog } from '../actions.tsx';
 import { isSelfChat } from '../ui.tsx';
 import { BASE, navigate } from '../router.ts';
-import { copyText, menuProps, openMenuAt, toast } from '../menu.tsx';
+import { copyText, toast } from '../menu.tsx';
 import { AgendaScreen } from './Calendar.tsx';
 import { TrazoScreen } from './Lineage.tsx';
 import { CallsScreen } from './Call.tsx';
+import { captureWaPrivacy, openWaDialog, openWaMenuAt, showWaDialogUntilClosed, useWaPrivacy, waMenuProps, waPrivacySyncing, waPrivacyUnavailable } from '../wa-privacy-ui.tsx';
+import { waPrivacyAffected } from '../wa-privacy.ts';
 
 export function SectionPane({ kind, frame }: { kind: 'agenda' | 'trazo' | 'calls'; frame: PaneFrame }) {
   const label = kind === 'agenda' ? t('nav.agenda') : kind === 'trazo' ? t('nav.trazo') : t('nav.calls');
@@ -35,7 +38,7 @@ export function SectionPane({ kind, frame }: { kind: 'agenda' | 'trazo' | 'calls
     <div className="section-pane-body">{kind === 'agenda' ? <AgendaScreen /> : kind === 'trazo' ? <TrazoScreen /> : <CallsScreen />}</div></div>;
 }
 
-export interface PaneFrame { visible?: boolean; presentation?: 'sidebar'; expanded?: boolean; active: boolean; count: number; pinned: boolean; onClose: () => void; onOnly: () => void; onPin: () => void; onTint: (anchor: HTMLElement) => void }
+export interface PaneFrame { size?: import('./PaneSizeControl.tsx').PaneSizing; visible?: boolean; presentation?: 'sidebar'; expanded?: boolean; active: boolean; count: number; pinned: boolean; onClose: () => void; onOnly: () => void; onPin: () => void; onTint: (anchor: HTMLElement) => void }
 
 /** Cabecera común de un panel: qué es, cómo se llama, fijar, dejar solo este y cerrar. */
 function PaneHead({ icon, title, sub, frame, extra }: { icon: ReactNode; title: string; sub?: string; frame: PaneFrame; extra?: ReactNode }) {
@@ -43,12 +46,15 @@ function PaneHead({ icon, title, sub, frame, extra }: { icon: ReactNode; title: 
     <div className="pane-head">
       <span className="pane-ico" aria-hidden>{icon}</span>
       <div className="pane-title"><b className="ellipsis">{title}</b>{sub && <span className="small muted ellipsis">{sub}</span>}</div>
+      <div className="pane-head-actions">
       {extra}
+      <PaneSizeControl size={frame.size} />
       {frame.presentation !== 'sidebar' && <button className="icon-btn head-keep" aria-label={t('tint.title')} title={t('tint.title')} onClick={(e) => frame.onTint(e.currentTarget)}>🎨</button>}
-      {frame.presentation !== 'sidebar' && <button className={`icon-btn head-keep ${frame.pinned ? 'is-on' : ''}`} aria-pressed={frame.pinned} aria-label={t(frame.pinned ? 'grid.unpin' : 'grid.pin')} title={t(frame.pinned ? 'grid.unpin' : 'grid.pin')} onClick={frame.onPin}>📌</button>}
+      {frame.presentation !== 'sidebar' && <button className={`icon-btn head-keep pane-pin-control ${frame.pinned ? 'is-on' : ''}`} aria-pressed={frame.pinned} aria-label={t(frame.pinned ? 'grid.unpin' : 'grid.pin')} title={t(frame.pinned ? 'grid.unpin' : 'grid.pin')} onClick={frame.onPin}><span aria-hidden>📌</span>{frame.pinned && <span className="pane-pin-label">{locale().startsWith('en') ? 'Pinned' : 'Fijado'}</span>}</button>}
       {frame.presentation === 'sidebar' && <button className="btn small" onClick={frame.onOnly}>{frame.expanded ? (locale().startsWith('en') ? '↙ Side panel' : '↙ Vista lateral') : (locale().startsWith('en') ? '⤢ Expand' : '⤢ Expandir')}</button>}
       {frame.presentation !== 'sidebar' && frame.count > 1 && <button className="icon-btn head-keep" aria-label={t('split.only')} title={t('split.only')} onClick={frame.onOnly}>⤢</button>}
       <button className="icon-btn head-keep" aria-label={t('split.close')} title={t('split.close')} onClick={frame.onClose}>×</button>
+      </div>
     </div>
   );
 }
@@ -175,8 +181,13 @@ export function InboxPane({ frame }: { frame: PaneFrame }) {
 function useWaAccount(accountId: string) {
   const revision = useClient((s) => s.waRevision);
   const [acc, setAcc] = useState<WaAccountDTO | null | undefined>(undefined);
-  const load = useCallback(() => waAccounts().then((accounts) => { const a = accounts.find((x) => x.id === accountId); setAcc(a ? { ...a } : null); }).catch(() => setAcc(null)), [accountId]);
-  useEffect(() => { void load(); }, [load, revision]);
+  const generation = useRef(0);
+  useWaPrivacy((event) => { generation.current++; if (event.reset) setAcc((a) => a ? { ...a, privacyReady: false, chats: 0, groups: 0 } : a); }, { accountId });
+  const load = useCallback(() => {
+    const token = ++generation.current, valid = captureWaPrivacy();
+    return waAccounts().then((accounts) => { if (token !== generation.current || !valid()) return; const a = accounts.find((x) => x.id === accountId); setAcc(a ? { ...a } : null); }).catch(() => { if (token === generation.current && valid()) setAcc(null); });
+  }, [accountId]);
+  useEffect(() => { void load(); return () => { generation.current++; }; }, [load, revision]);
   return { acc, reload: () => waAccounts(true).then(() => load()) };
 }
 
@@ -185,9 +196,10 @@ function WaReply({ accountId, jid, onSent, draft }: { accountId: string; jid: st
   const { acc, reload } = useWaAccount(accountId);
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
+  const visible = useWaPrivacy(() => { setText(''); setBusy(false); }, { accountId, jid });
   // Borrador de gg: cae en la caja para editarlo; nunca se envía solo.
   useEffect(() => { if (draft) setText(draft.text); }, [draft?.key]);
-  if (!acc) return null;
+  if (!acc || !visible || acc.privacyReady === false) return null;
   if (!acc.sendEnabled) {
     return (
       <div className="reply-off small muted">
@@ -199,13 +211,15 @@ function WaReply({ accountId, jid, onSent, draft }: { accountId: string; jid: st
   if (acc.status !== 'connected') return <div className="reply-off small muted">{t('grid.waDisconnected')}</div>;
   const send = async () => {
     const body = text.trim();
-    if (!body || busy) return;
+    const valid = captureWaPrivacy(accountId, jid);
+    if (!body || busy || !valid()) return;
     setBusy(true);
     try {
       const r = await client.sendWhatsApp(accountId, jid, body);
+      if (!valid()) return;
       if (r.status === 'failed') toast(`${t('grid.waFailed')}: ${r.error ?? ''}`);
       else { setText(''); toast(t(r.status === 'sent' ? 'grid.waSent' : 'grid.waQueued')); onSent(); }
-    } catch (e) { toast(errorText(e)); } finally { setBusy(false); }
+    } catch (e) { if (valid()) toast(errorText(e)); } finally { if (valid()) setBusy(false); }
   };
   const key = (e: KeyboardEvent<HTMLTextAreaElement>) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void send(); } };
   return (
@@ -230,27 +244,31 @@ function WaChatView({ accountId, jid, name, isGroup, gg, active = true }: { acco
   activeRef.current = active;
   const sentRefresh = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stickToBottom = useRef(true);
+  const visible = useWaPrivacy(() => { loadGeneration.current++; setMessages(null); if (sentRefresh.current) clearTimeout(sentRefresh.current); }, { accountId, jid });
   const load = useCallback(() => {
     if (!activeRef.current) return;
+    const valid = captureWaPrivacy(accountId, jid);
+    if (!valid()) return;
     const token = ++loadGeneration.current;
     client.request<{ messages: WaMessageDTO[] }>(`/whatsapp/chats/${accountId}/${encodeURIComponent(jid)}/messages?limit=80`)
-      .then((r) => { if (token === loadGeneration.current) setMessages(r.messages); }).catch((e) => { if (token === loadGeneration.current) toast(errorText(e)); });
+      .then((r) => { if (token === loadGeneration.current && activeRef.current && valid()) setMessages(r.messages); }).catch((e) => { if (token === loadGeneration.current && valid()) toast(errorText(e)); });
   }, [accountId, jid]);
   useEffect(() => { setMessages(null); stickToBottom.current = true; }, [load]);
   useEffect(() => { if (!active) return; const timer = setTimeout(load, 200); return () => { clearTimeout(timer); loadGeneration.current++; }; }, [load, revision, active]);
   useEffect(() => () => { if (sentRefresh.current) clearTimeout(sentRefresh.current); }, [active, accountId, jid]);
   useEffect(() => { if (stickToBottom.current) box.current?.scrollTo({ top: box.current.scrollHeight }); }, [messages]);
   const last = messages?.[messages.length - 1] ?? null;
+  if (!visible) return null;
   return (
     <>
       <div className="wa-msgs pane-wa" ref={box} onScroll={(e) => { const el = e.currentTarget; stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; }}>
         {messages === null && <div className="hint">{t('common.loading')}</div>}
         {messages?.length === 0 && <div className="hint">{t('wa.noMessages')}</div>}
         {messages?.map((m) => {
-          const bring = () => openDialog((close) => <WaShareDialog accountId={accountId} jid={jid} chatName={name} isGroup={isGroup} message={m} onClose={close} />);
+          const bring = () => openWaDialog({ accountId, jid }, (close) => <WaShareDialog accountId={accountId} jid={jid} chatName={name} isGroup={isGroup} message={m} onClose={close} />);
           return (
             <div key={m.id} className={`wa-msg ${m.fromMe ? 'me' : ''} ${gg?.selected.has(m.id) ? 'is-selected' : ''}`}
-              {...menuProps(() => [
+              {...waMenuProps({ accountId, jid }, () => [
                 ...(mailOn ? [{ label: t('wa.bring'), icon: '⤴', onSelect: bring }] : []),
                 { label: t('common.copy'), icon: '⧉', onSelect: () => void copyText(m.body).then(() => toast(t('common.copied'))) },
                 ...(gg ? [{ divider: true }, { label: t('ggs.ask'), onSelect: () => gg.ask(m) }, { label: gg.selected.has(m.id) ? t('ggs.clearSel') : t('ggs.select'), icon: '◯', hint: t('ggs.selectHint'), onSelect: () => gg.toggle(m) }] : []),
@@ -315,19 +333,22 @@ function WaGgChat({ accountId, jid, name, isGroup, head, active = true }: { acco
   const [suggestFor, setSuggestFor] = useState<string[] | null>(null);
   const [draft, setDraft] = useState<{ text: string; key: number } | null>(null);
   const closeGg = () => { if (document.activeElement instanceof HTMLElement) document.activeElement.blur(); setOpen(false); setSelected(new Set()); setQuotes([]); setRequest(null); setSuggestFor(null); };
+  const visible = useWaPrivacy(() => { closeGg(); setDraft(null); }, { accountId, jid });
   useEffect(() => { closeGg(); }, [source]);
   useEffect(() => { if (!active) closeGg(); }, [active]);
   useEffect(() => { if (!open) return; const escape = (event: globalThis.KeyboardEvent) => { if (event.key === 'Escape') closeGg(); }; window.addEventListener('keydown', escape); return () => window.removeEventListener('keydown', escape); }, [open]);
-  const canSend = !!acc?.sendEnabled && acc.status === 'connected';
+  const canSend = !!acc?.sendEnabled && acc.status === 'connected' && acc.privacyReady !== false;
+  const hostValid = captureWaPrivacy(accountId, jid);
   const host: GgHost = {
     // Solo cae en la caja si la cuenta puede responder desde chaggu; si no, se copia para pegarlo en WhatsApp.
-    useDraft: (text) => { if (canSend) setDraft({ text, key: Date.now() }); else void copyText(text).then(() => toast(t('wa.copiedDraft'))); },
-    task: (p) => showDialogUntilClosed((close) => <NewIssueDialog defaultTitle={p.title} defaultDue={p.due} onClose={close} />),
-    reminder: (p) => selfConversation().then((conv) => { if (conv) return showDialogUntilClosed((close) => <ReminderDialog conv={conv} defaultNote={`${name}: ${p.title}`} defaultDate={p.due} onClose={close} />); }).catch((e) => toast(errorText(e))),
+    useDraft: (text) => { if (!hostValid()) return; if (canSend) setDraft({ text, key: Date.now() }); else void copyText(text).then(() => { if (hostValid()) toast(t('wa.copiedDraft')); }); },
+    task: (p) => { if (hostValid()) return showWaDialogUntilClosed({ accountId, jid }, (close) => <NewIssueDialog defaultTitle={p.title} defaultDue={p.due} onClose={close} />); },
+    reminder: (p) => { if (!hostValid()) return; return selfConversation().then((conv) => { if (hostValid() && conv) return showWaDialogUntilClosed({ accountId, jid }, (close) => <ReminderDialog conv={conv} defaultNote={`${name}: ${p.title}`} defaultDate={p.due} onClose={close} />); }).catch((e) => { if (hostValid()) toast(errorText(e)); }); },
   };
-  const ask = (m: WaMessageDTO) => { setQuotes((q) => (q.some((x) => x.id === m.id) ? q : [...q, { id: m.id, author: m.fromMe ? t('common.youShort') : m.author ?? t('wa.someone'), text: m.body.slice(0, 1000) }])); setOpen(true); };
-  const toggle = (m: WaMessageDTO) => setSelected((x) => { const n = new Set(x); if (n.has(m.id)) n.delete(m.id); else n.add(m.id); return n; });
+  const ask = (m: WaMessageDTO) => { if (!hostValid()) return; setQuotes((q) => (q.some((x) => x.id === m.id) ? q : [...q, { id: m.id, author: m.fromMe ? t('common.youShort') : m.author ?? t('wa.someone'), text: m.body.slice(0, 1000) }])); setOpen(true); };
+  const toggle = (m: WaMessageDTO) => { if (hostValid()) setSelected((x) => { const n = new Set(x); if (n.has(m.id)) n.delete(m.id); else n.add(m.id); return n; }); };
   const btn = <GgButton source={source} on={open} onClick={() => open ? closeGg() : setOpen(true)} />;
+  if (!visible || !acc || acc.privacyReady === false) return <div className="hint" role="status">{visible || !client.isWaChatVisible(accountId) ? waPrivacySyncing() : waPrivacyUnavailable()}</div>;
   return (
     <>
       {head(btn)}
@@ -350,15 +371,21 @@ function WaGgChat({ accountId, jid, name, isGroup, head, active = true }: { acco
 export function WaChatScreen({ accountId, jid }: { accountId: string; jid: string }) {
   const row = useWaInboxRow(accountId, jid);
   const [fetched, setFetched] = useState<WaChatDTO | null>(null);
+  const visible = useWaPrivacy(() => setFetched(null), { accountId, jid });
+  const revision = useClient((s) => s.waRevision);
   useEffect(() => {
-    if (row) return;
+    let live = true; setFetched(null);
+    if (row || !visible) return;
+    const valid = captureWaPrivacy(accountId, jid);
     // Abierto por enlace y fuera de la bandeja: se busca en la lista de esa cuenta.
-    client.request<{ chats: WaChatDTO[] }>(`/whatsapp/chats?accountId=${accountId}&limit=1000`).then((r) => setFetched(r.chats.find((c) => c.jid === jid) ?? null)).catch(() => {});
-  }, [accountId, jid, !!row]);
-  const chat = row ?? fetched;
+    client.request<{ chats: WaChatDTO[] }>(`/whatsapp/chats?accountId=${accountId}&limit=1000`).then((r) => { if (live && valid()) setFetched(r.chats.find((c) => c.jid === jid) ?? null); }).catch(() => {});
+    return () => { live = false; };
+  }, [accountId, jid, !!row, revision, visible]);
+  const chat = row ?? (fetched?.accountId === accountId && fetched.jid === jid ? fetched : null);
   const name = chat?.name ?? jid.split('@')[0]!;
   const isGroup = chat?.isGroup ?? jid.endsWith('@g.us');
   const off = !!chat?.accountStatus && chat.accountStatus !== 'connected';
+  if (!visible) return <div className="hint" role="status">{client.isWaChatVisible(accountId) ? waPrivacyUnavailable() : waPrivacySyncing()}</div>;
   return (
     <div className="pane-typed wa-chat-screen">
       <WaGgChat key={`${accountId}|${jid}`} accountId={accountId} jid={jid} name={name} isGroup={isGroup} head={(gg) => (
@@ -367,7 +394,7 @@ export function WaChatScreen({ accountId, jid }: { accountId: string; jid: strin
           <WaAvatar w={{ name, isGroup }} size={30} />
           <div className="pane-title"><b className="ellipsis">{name}</b><span className="small muted ellipsis">{off ? t('wa.disconnected') : `WhatsApp${chat ? ` · ${chat.accountLabel}` : ''}`}</span></div>
           {gg}
-          {chat && <button className="icon-btn" aria-label={t('menu.open')} onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); openMenuAt(r.left, r.bottom + 4, chat.inboxPlace ? waInboxMenu(chat) : waMainListMenu(chat, setFetched)); }}>⋯</button>}
+          {chat && <button className="icon-btn" aria-label={t('menu.open')} onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); openWaMenuAt(chat, r.left, r.bottom + 4, chat.inboxPlace ? waInboxMenu(chat) : waMainListMenu(chat, setFetched)); }}>⋯</button>}
         </div>
       )} />
     </div>
@@ -389,17 +416,27 @@ export function WaListPane({ frame }: { frame: PaneFrame }) {
   const [open, setOpen] = useState<WaChatDTO | null>(null);
   const [pinBusy, setPinBusy] = useState<string | null>(null);
   const active = frame.visible !== false && (frame.presentation !== 'sidebar' || frame.active);
-  useEffect(() => { if (!active) return; let live = true; waAccounts().then((accounts) => { if (live) setAccounts(accounts); }).catch((e) => { if (live) setError(errorText(e)); }); return () => { live = false; }; }, [revision, active]);
+  useWaPrivacy((event) => {
+    generation.current++;
+    setChats((old) => old?.filter((c) => !waPrivacyAffected(event, c)) ?? null);
+    setOpen((old) => old && waPrivacyAffected(event, old) ? null : old);
+    if (event.reset) setAccounts((old) => old?.map((a) => a.id === event.accountId ? { ...a, privacyReady: false, chats: 0, groups: 0 } : a) ?? null);
+    setNext(null); setLoading(false); setPinBusy(null); setError(null);
+  });
+  useEffect(() => { if (!active) return; let live = true; const valid = captureWaPrivacy(); waAccounts().then((accounts) => { if (live && valid()) setAccounts(accounts); }).catch((e) => { if (live && valid()) setError(errorText(e)); }); return () => { live = false; }; }, [revision, active]);
   const loadPage = async (cursor?: string, token = generation.current) => {
+    const valid = captureWaPrivacy(accountId || undefined);
+    if (!valid()) return;
     setLoading(true); setError(null);
     const p = new URLSearchParams({ limit: '80' });
     if (groups) p.set('groups','1'); if (q.trim()) p.set('q',q.trim()); if (accountId) p.set('accountId',accountId); if (cursor) p.set('cursor',cursor);
     try {
       const r = await client.request<{ chats: WaChatDTO[]; next?: string | null }>(`/whatsapp/chats?${p}`);
-      if (token !== generation.current) return;
-      setChats((old) => sortWaChats(cursor ? [...new Map([...(old ?? []), ...r.chats].map((c) => [`${c.accountId}|${c.jid}`, c])).values()] : r.chats)); setNext(r.next ?? null);
-    } catch (e) { if (token === generation.current) setError(errorText(e)); }
-    finally { if (token === generation.current) setLoading(false); }
+      if (token !== generation.current || !valid()) return;
+      const visible = r.chats.filter((c) => client.isWaChatVisible(c.accountId, c.jid));
+      setChats((old) => sortWaChats(cursor ? [...new Map([...(old ?? []), ...visible].map((c) => [`${c.accountId}|${c.jid}`, c])).values()] : visible)); setNext(r.next ?? null);
+    } catch (e) { if (token === generation.current && valid()) setError(errorText(e)); }
+    finally { if (token === generation.current && valid()) setLoading(false); }
   };
   useEffect(() => {
     const token = ++generation.current; if (!active) return;
@@ -407,20 +444,24 @@ export function WaListPane({ frame }: { frame: PaneFrame }) {
     return () => { clearTimeout(timer); generation.current++; };
   }, [q, groups, accountId, revision, active]);
   const connected = accounts?.some((a) => a.status === 'connected') ?? false;
+  const privacySyncing = accounts?.some((a) => (!accountId || accountId === a.id) && a.privacyReady === false) ?? false;
+  const visibleChats = chats?.filter((c) => client.isWaChatVisible(c.accountId, c.jid)) ?? null;
+  const visibleOpen = open && client.isWaChatVisible(open.accountId, open.jid) ? open : null;
   const toggleChatPin = async (chat: WaChatDTO) => {
     if (pinBusy) return;
-    const owner = client.getSessionIdentity();
+    const valid = captureWaPrivacy(chat.accountId, chat.jid);
+    if (!valid()) return;
     const token = generation.current;
     setPinBusy(`${chat.accountId}|${chat.jid}`);
     try {
       const updated = await client.request<WaChatDTO>(`/whatsapp/chats/${chat.accountId}/${encodeURIComponent(chat.jid)}`, { method: 'PATCH', json: { pinned: !chat.pinned } });
-      if (client.getSessionIdentity() !== owner || token !== generation.current) return;
+      if (!valid() || token !== generation.current) return;
       setChats((old) => old && sortWaChats(old.map((c) => c.accountId === updated.accountId && c.jid === updated.jid ? updated : c)));
       // Refresh the cursor once after changing the server sort key.
       generation.current++;
       void loadPage(undefined, generation.current);
-    } catch (e) { if (client.getSessionIdentity() === owner) toast(errorText(e)); }
-    finally { setPinBusy(null); }
+    } catch (e) { if (valid()) toast(errorText(e)); }
+    finally { if (valid() && token <= generation.current) setPinBusy(null); }
   };
   const when = (iso: string | null) => {
     if (!iso) return '';
@@ -429,14 +470,14 @@ export function WaListPane({ frame }: { frame: PaneFrame }) {
   };
   return (
     <div className={`pane-typed ${frame.active ? 'is-active' : ''}`}>
-      <PaneHead icon={<WaIcon size={20} />} title="WhatsApp" sub={open ? open.name : (locale().startsWith('en') ? 'Recent conversations' : 'Conversaciones recientes')} frame={frame} />
-      {open && (
+      <PaneHead icon={<WaIcon size={20} />} title="WhatsApp" sub={visibleOpen ? visibleOpen.name : (locale().startsWith('en') ? 'Recent conversations' : 'Conversaciones recientes')} frame={frame} />
+      {visibleOpen && (
         <>
-          <div className="pane-subbar"><button className="link-btn" onClick={() => setOpen(null)}>{t('grid.backChats')}</button><b className="ellipsis">{open.name}</b></div>
-          <WaGgChat active={active} key={`${open.accountId}|${open.jid}`} accountId={open.accountId} jid={open.jid} name={open.name} isGroup={open.isGroup} head={(gg) => <div className="pane-subbar"><span className="grow" />{gg}</div>} />
+          <div className="pane-subbar"><button className="link-btn" onClick={() => setOpen(null)}>{t('grid.backChats')}</button><b className="ellipsis">{visibleOpen.name}</b></div>
+          <WaGgChat active={active} key={`${visibleOpen.accountId}|${visibleOpen.jid}`} accountId={visibleOpen.accountId} jid={visibleOpen.jid} name={visibleOpen.name} isGroup={visibleOpen.isGroup} head={(gg) => <div className="pane-subbar"><span className="grow" />{gg}</div>} />
         </>
       )}
-        <div className="pane-fill" hidden={!!open}>
+        <div className="pane-fill" hidden={!!visibleOpen}>
           {error && <div className="error" role="alert">{error}<button className="link-btn" onClick={() => void loadPage()}>{locale().startsWith('en') ? 'Retry' : 'Reintentar'}</button></div>}
           {accounts && accounts.length === 0 && (
             <div className="grid-empty-card" style={{ padding: 12 }}>
@@ -455,11 +496,12 @@ export function WaListPane({ frame }: { frame: PaneFrame }) {
               </div>
               {accounts.length > 1 && <select className="input" aria-label={locale().startsWith('en') ? 'Account' : 'Cuenta'} value={accountId} onChange={(e) => setAccountId(e.target.value)}><option value="">{locale().startsWith('en') ? 'All accounts' : 'Todas las cuentas'}</option>{accounts.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}</select>}
               <div className="pane-list" aria-busy={loading}>
-                {chats === null && <div className="hint">{t('common.loading')}</div>}
-                {chats?.length === 0 && <div className="empty">{connected ? t('grid.noChats') : t('wa.syncing')}</div>}
-                {chats?.map((c) => (
+                {privacySyncing && <div className="hint" role="status">{waPrivacySyncing()}</div>}
+                {visibleChats === null && !privacySyncing && <div className="hint">{t('common.loading')}</div>}
+                {visibleChats?.length === 0 && !privacySyncing && <div className="empty">{connected ? t('grid.noChats') : t('wa.syncing')}</div>}
+                {visibleChats?.map((c) => (
                   <div key={`${c.accountId}|${c.jid}`} className={`wa-row ${c.unread ? 'unread' : ''}`} role="button" tabIndex={0} draggable
-                    onClick={() => setOpen(c)} onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); setOpen(c); } }}
+                    onClick={() => { if (client.isWaChatVisible(c.accountId, c.jid)) setOpen(c); }} onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); if (client.isWaChatVisible(c.accountId, c.jid)) setOpen(c); } }}
                     onDragStart={(e) => setDrag(e, 'wa', { accountId: c.accountId, jid: c.jid, name: c.name, isGroup: c.isGroup }, c.name)}>
                     <span className="wa-av" aria-hidden>{c.isGroup ? '👥' : '👤'}</span>
                     <span className="grow" style={{ minWidth: 0 }}>

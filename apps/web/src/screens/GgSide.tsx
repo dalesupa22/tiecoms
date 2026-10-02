@@ -9,6 +9,8 @@ import { openMenuAt, toast } from '../menu.tsx';
 import { asset } from '../router.ts';
 import { Modal } from '../ui.tsx';
 import { GgConsentBanner, openGgChat } from './Assistant.tsx';
+import { captureGgPrivacy, openWaMenuAt, useGgPrivacy } from '../wa-privacy-ui.tsx';
+import { waPrivacyAffected, waSourceScope } from '../wa-privacy.ts';
 
 /**
  * «gg de este chat» (docs/WA-BANDEJA-GG-CHAT.md, parte B del contrato). Una conversación PRIVADA de la persona con gg
@@ -35,14 +37,21 @@ export interface GgHost {
 const pending = new Map<string, number>();
 const pendingListeners = new Set<() => void>();
 const setPending = (source: string, n: number) => { if (pending.get(source) !== n) { pending.set(source, n); pendingListeners.forEach((l) => l()); } };
+client.subscribeWaPrivacy((event) => {
+  let changed = false;
+  for (const source of pending.keys()) { const scope = waSourceScope(source); if (scope && waPrivacyAffected(event, scope)) { pending.delete(source); changed = true; } }
+  if (changed) pendingListeners.forEach((l) => l());
+});
 export function useGgPending(source: string) {
   const n = useSyncExternalStore((l) => { pendingListeners.add(l); return () => { pendingListeners.delete(l); }; }, () => pending.get(source) ?? 0);
   const consent = useClient((s) => s.data?.me.aiConsent === true);
   useEffect(() => {
     let live = true;
-    client.ggSidePending([source]).then((r) => live && setPending(source, r[source] ?? 0)).catch(() => {});
+    const valid = captureGgPrivacy(source);
+    if (!valid()) return;
+    client.ggSidePending([source]).then((r) => live && valid() && setPending(source, r[source] ?? 0)).catch(() => {});
     // Al entrar al chat: si hay mensajes nuevos de otra persona, el servidor recalcula (máximo 1 vez cada 10 min).
-    if (consent) client.ggSidePendingRefresh(source).then((r) => live && setPending(source, r.pending)).catch(() => {});
+    if (consent) client.ggSidePendingRefresh(source).then((r) => live && valid() && setPending(source, r.pending)).catch(() => {});
     return () => { live = false; };
   }, [source, consent]);
   return n;
@@ -78,20 +87,31 @@ export function GgSidePanel({ source, chatName, quoted, onClearQuote, host, onCl
   const [text, setText] = useState('');
   const box = useRef<HTMLDivElement>(null);
   const done = useRef<number | null>(null);
+  const operations = useRef(0);
+  const { visible, capture } = useGgPrivacy(source, () => {
+    operations.current++; setMessages(null); setText(''); setBusy(false); setCalendar(false); setNeedConsent(false); done.current = null;
+    onClearQuote(); onClose();
+  });
+  const begin = () => { const valid = capture(), generation = ++operations.current; return () => valid() && generation === operations.current; };
 
   const fail = (e: unknown) => { if (isConsent(e)) setNeedConsent(true); else toast(errorText(e)); };
   const load = useCallback(async () => {
+    const valid = begin();
+    if (!valid()) return;
+    setBusy(true);
     try {
       const th = await client.ggSide(source);
+      if (!valid()) return;
       setPending(source, th.pending);
       if (th.messages.length) { setMessages(th.messages); return; }
       setMessages([]);
       setBusy(true);
       const o = await client.ggSideOpen(source);
+      if (!valid()) return;
       setMessages([o.message]);
       setPending(source, o.message.extra?.pending?.length ?? 0);
       setNeedConsent(false);
-    } catch (e) { setMessages((m) => m ?? []); fail(e); } finally { setBusy(false); }
+    } catch (e) { if (valid()) { setMessages((m) => m ?? []); fail(e); } } finally { if (valid()) setBusy(false); }
   }, [source]);
   useEffect(() => { setMessages(null); void load(); }, [load]);
   // Al autorizar desde el banner, gg arranca solo.
@@ -101,23 +121,27 @@ export function GgSidePanel({ source, chatName, quoted, onClearQuote, host, onCl
   const ask = async (q: string, ids?: string[]) => {
     const body = q.trim();
     if (!body || busy) return;
+    const valid = begin(); if (!valid()) return;
     const quoteIds = ids ?? quoted.map((x) => x.id);
     const mine: GgSideMessageDTO = { id: `tmp-${Date.now()}`, role: 'user', body, quoted: ids ? null : quoted.length ? quoted : null, createdAt: new Date().toISOString() };
     setMessages((m) => [...(m ?? []), mine]);
     setText(''); onClearQuote();
     setBusy(true);
-    try { const r = await client.ggSideAsk(source, body, quoteIds); setMessages((m) => [...(m ?? []), r.message]); }
-    catch (e) { setMessages((m) => (m ?? []).filter((x) => x.id !== mine.id)); setText(body); fail(e); } finally { setBusy(false); }
+    try { const r = await client.ggSideAsk(source, body, quoteIds); if (valid()) setMessages((m) => [...(m ?? []), r.message]); }
+    catch (e) { if (valid()) { setMessages((m) => (m ?? []).filter((x) => x.id !== mine.id)); setText(body); fail(e); } } finally { if (valid()) setBusy(false); }
   };
   const reply = async (tone?: Tone) => {
     if (busy) return;
+    const valid = begin(); if (!valid()) return;
     setBusy(true);
     try {
       await client.ggSideReply(source, tone, quoted.map((x) => x.id));
+      if (!valid()) return;
       onClearQuote();
       // El servidor dejó guardado el mensaje con los borradores: se vuelve a leer el hilo.
-      setMessages((await client.ggSide(source)).messages);
-    } catch (e) { fail(e); } finally { setBusy(false); }
+      const thread = await client.ggSide(source);
+      if (valid()) setMessages(thread.messages);
+    } catch (e) { if (valid()) fail(e); } finally { if (valid()) setBusy(false); }
   };
   useEffect(() => {
     if (!request || done.current === request.key || messages === null) return;
@@ -127,8 +151,13 @@ export function GgSidePanel({ source, chatName, quoted, onClearQuote, host, onCl
   }, [request, messages === null]);
 
   const fresh = async () => {
-    try { await client.ggSideNew(source); setMessages([]); setBusy(true); const o = await client.ggSideOpen(source); setMessages([o.message]); }
-    catch (e) { fail(e); } finally { setBusy(false); }
+    const valid = begin(); if (!valid()) return;
+    setBusy(true);
+    try {
+      await client.ggSideNew(source); if (!valid()) return;
+      setMessages([]); const o = await client.ggSideOpen(source);
+      if (valid()) setMessages([o.message]);
+    } catch (e) { if (valid()) fail(e); } finally { if (valid()) setBusy(false); }
   };
   const lastGg = [...(messages ?? [])].reverse().find((m) => m.role === 'gg');
   const starters = (messages?.length ?? 0) <= 1;
@@ -136,6 +165,7 @@ export function GgSidePanel({ source, chatName, quoted, onClearQuote, host, onCl
   const chips = starters || lastGg?.extra?.drafts?.length ? [] : lastGg?.extra?.followUps ?? [];
   const chip = (c: string) => (c === t('ggs.chipReply') || /^responder por m[ií]$|^reply for me$/i.test(c) ? void reply() : void ask(c));
   const submit = (e: FormEvent) => { e.preventDefault(); void ask(text); };
+  if (!visible) return null;
 
   return (
     <aside className="panel gg-side" aria-label={t('ggs.title')}>
@@ -145,10 +175,10 @@ export function GgSidePanel({ source, chatName, quoted, onClearQuote, host, onCl
           <b className="ellipsis" style={{ display: 'block' }}>{t('ggs.title')}</b>
           <span className="small muted ellipsis" style={{ display: 'block' }}>{chatName}</span>
         </span>
-        <button className="icon-btn" aria-label={t('menu.open')} onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); openMenuAt(r.left, r.bottom + 4, [
+        <button className="icon-btn" aria-label={t('menu.open')} onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); const items = [
           { label: t('ggs.newSession'), icon: '＋', onSelect: () => void fresh() },
           { label: t('ggs.openGg'), icon: '↗', onSelect: () => void openGgChat() },
-        ]); }}>⋯</button>
+        ]; const scope = waSourceScope(source); if (scope) openWaMenuAt(scope, r.left, r.bottom + 4, items); else openMenuAt(r.left, r.bottom + 4, items); }}>⋯</button>
         <button className="icon-btn" aria-label={t('common.close')} onClick={onClose}>×</button>
       </div>
       <div className="gg-side-scope small">🔒 {t('ggs.scope')}</div>
@@ -286,12 +316,18 @@ export function ReplyForMe({ source, host }: { source: string; host: GgHost }) {
   const [busy, setBusy] = useState(false);
   const [needConsent, setNeedConsent] = useState(false);
   const consent = useClient((s) => s.data?.me.aiConsent === true);
+  const generation = useRef(0);
+  const { visible, capture } = useGgPrivacy(source, () => { generation.current++; setOpen(false); setDrafts(null); setBusy(false); setNeedConsent(false); });
   const load = async (tone?: Tone) => {
+    const valid = capture(), token = ++generation.current;
+    if (!valid()) return;
     setBusy(true);
-    try { setDrafts((await client.ggSideReply(source, tone)).drafts); setNeedConsent(false); }
-    catch (e) { if (isConsent(e)) setNeedConsent(true); else toast(errorText(e)); } finally { setBusy(false); }
+    try { const r = await client.ggSideReply(source, tone); if (valid() && token === generation.current) { setDrafts(r.drafts); setNeedConsent(false); } }
+    catch (e) { if (valid() && token === generation.current) { if (isConsent(e)) setNeedConsent(true); else toast(errorText(e)); } } finally { if (valid() && token === generation.current) setBusy(false); }
   };
   useEffect(() => { if (open && consent && needConsent) void load(); }, [consent]);
+  useEffect(() => { generation.current++; setOpen(false); setDrafts(null); setBusy(false); setNeedConsent(false); }, [source]);
+  if (!visible) return null;
   return (
     <div className="gg-reply-wrap">
       {open && (
@@ -327,14 +363,20 @@ export function SuggestDialog({ source, messageIds, host, onAsk, onClose }: { so
   const [free, setFree] = useState('');
   const [calendar, setCalendar] = useState(false);
   const consent = useClient((s) => s.data?.me.aiConsent === true);
+  const generation = useRef(0);
+  const { visible, capture } = useGgPrivacy(source, () => { generation.current++; setList(null); setFree(''); setCalendar(false); setNeedConsent(false); onClose(); });
   const load = useCallback(() => {
+    const valid = capture(), token = ++generation.current;
+    if (!valid()) return;
     setList(null);
-    client.ggSideSuggest(source, messageIds).then((r) => { setList(r.suggestions); setNeedConsent(false); })
-      .catch((e) => { setList([]); if (isConsent(e)) setNeedConsent(true); else toast(errorText(e)); });
+    client.ggSideSuggest(source, messageIds).then((r) => { if (valid() && token === generation.current) { setList(r.suggestions); setNeedConsent(false); } })
+      .catch((e) => { if (valid() && token === generation.current) { setList([]); if (isConsent(e)) setNeedConsent(true); else toast(errorText(e)); } });
   }, [source, messageIds.join(',')]);
   useEffect(() => { load(); }, [load]);
   useEffect(() => { if (consent && needConsent) load(); }, [consent]);
-  const ask = (q: string, ids?: string[]) => { onAsk(q, ids ?? messageIds); onClose(); };
+  const askValid = capture();
+  const ask = (q: string, ids?: string[]) => { if (askValid()) { onAsk(q, ids ?? messageIds); onClose(); } };
+  if (!visible) return null;
   return (
     <Modal title={t('ggs.suggestTitle', { n: messageIds.length })} onClose={onClose}>
       {calendar && <GgCalendarDialog source={source} messageIds={messageIds} onClose={() => setCalendar(false)} />}

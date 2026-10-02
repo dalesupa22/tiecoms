@@ -16,7 +16,7 @@ import {
   MAX_PANES, closePane, dragKindOf, fitsChat, fitsSlot, focusPane, onlyPane, rememberBack, setSplitSize, syncActive, togglePin,
   useActiveKey, useBack, usePanes, usePinned, useSplitSizes, useWide, type DragKind,
   useExpandedPane, collapsePane, useGridLayout, useLayoutOrder, setGridLayout, moveLayoutPane, type GridLayout,
-  useTallPanes, setPaneRows, useMetas,
+  useTallPanes, useWidePanes, setPaneSize, useMetas,
 } from '../split.ts';
 import { gridSpanLayout } from '../grid-span-layout.ts';
 import { ConversationScreen } from './Conversation.tsx';
@@ -50,6 +50,7 @@ export function GridArea({ id, search = '', side }: { id: string | null; search?
   const layout = useGridLayout();
   const order = useLayoutOrder();
   const tallPanes = useTallPanes();
+  const widePanes = useWidePanes();
   const metas = useMetas();
   const wide = useWide();
   const d = useClient((s) => s.data);
@@ -80,7 +81,13 @@ export function GridArea({ id, search = '', side }: { id: string | null; search?
   const grid = withTasks ? list.filter((k) => k !== TASKS_KEY) : arranged;
   const full = list.filter((k) => k !== TASKS_KEY).length >= MAX_PANES;
   const currentTall = customLayout ? tallPanes : mixedLayout ? arranged.slice(0, 2) : hasTasks ? [TASKS_KEY] : [];
-  const spanLayout = gridSpanLayout(arranged, new Set(currentTall));
+  const currentWide = customLayout ? widePanes : [];
+  const spanLayout = gridSpanLayout(arranged, new Set(currentTall), new Set(currentWide));
+  // Translate presets to their visible column order before the first direct resize.
+  const sizingOrder = mixedLayout
+    ? (layout === 'tall-left' ? [arranged[2]!, arranged[3]!, arranged[0]!, arranged[1]!] : layout === 'tall-center' ? [arranged[0]!, arranged[2]!, arranged[3]!, arranged[1]!] : arranged.slice(0, 4)).concat(arranged.slice(4))
+    : !customLayout && grid.length >= 4 ? [grid[0]!, grid[2]!, grid[1]!, grid[3]!, ...grid.slice(4), ...(withTasks ? [TASKS_KEY] : [])] : arranged;
+  const resizePane = (key: string, rows: 1 | 2, columns: 1 | 2) => setPaneSize(key, rows, columns, currentTall, currentWide, [...new Set(sizingOrder)]);
   const paneName = (key: string) => parseKey(key).kind === 'chat'
     ? (d && known?.find((c) => c.id === key) ? conversationTitle(d, known.find((c) => c.id === key)!) : key.slice(0, 8))
     : metas[key]?.title ?? (parseKey(key).kind === 'wa' ? 'WhatsApp' : parseKey(key).kind === 'mail' ? t('nav.mail') : sectionLabel(key));
@@ -137,12 +144,13 @@ export function GridArea({ id, search = '', side }: { id: string | null; search?
 
   const cell = (x: string) => {
     const ref = parseKey(x);
-    const frame = { visible: expanded ? expanded === x : visible.includes(x), active: x === active, count: list.length, pinned: pinned.has(x), onClose: () => closePane(x, id), onOnly: () => onlyPane(x), onPin: () => togglePin(x), onTint: (el: HTMLElement) => openTintMenu(el, x) };
+    const size = wide && !side && !expanded ? { rows: (currentTall.includes(x) ? 2 : 1) as 1 | 2, columns: (currentWide.includes(x) ? 2 : 1) as 1 | 2, set: (rows: 1 | 2, columns: 1 | 2) => resizePane(x, rows, columns) } : undefined;
+    const frame = { size, visible: expanded ? expanded === x : visible.includes(x), active: x === active, count: list.length, pinned: pinned.has(x), onClose: () => closePane(x, id), onOnly: () => onlyPane(x), onPin: () => togglePin(x), onTint: (el: HTMLElement) => openTintMenu(el, x) };
     return (
       <div key={x} data-pane={x} data-tint={tints[x]} hidden={expanded ? expanded !== x : !visible.includes(x)}
-        style={!expanded && customLayout ? { gridColumn: spanLayout.cells[x]!.column, gridRow: `${spanLayout.cells[x]!.row} / span ${spanLayout.cells[x]!.span}` }
+        style={!expanded && customLayout && list.length > 1 ? { gridColumn: `${spanLayout.cells[x]!.column} / span ${spanLayout.cells[x]!.width}`, gridRow: `${spanLayout.cells[x]!.row} / span ${spanLayout.cells[x]!.span}` }
           : mixedLayout && !expanded ? { gridArea: ['a', 'b', 'c', 'd'][arranged.indexOf(x)] } : undefined}
-        className={`split-cell ${x === active ? 'is-active' : ''} ${drop && drop.over === x && (full || (chatOver(x) && fitsChat(drop.kind))) ? 'is-target' : ''}`}
+        className={`split-cell ${pinned.has(x) ? 'is-pinned-pane' : ''} ${x === active ? 'is-active' : ''} ${drop && drop.over === x && (full || (chatOver(x) && fitsChat(drop.kind))) ? 'is-target' : ''}`}
         // Tocar un panel lo vuelve el activo (antes del clic, para que el clic siga funcionando adentro).
         onPointerDownCapture={() => { if (x !== active) focusPane(x); }}>
         {ref.kind === 'chat' ? <ConversationScreen key={list.length === 1 && x === id ? x + search : x} id={x} search={x === id ? search : ''} pane={list.length > 1 || !id ? frame : undefined} />
@@ -206,9 +214,9 @@ export function GridArea({ id, search = '', side }: { id: string | null; search?
           </select></label>
           <details className="grid-pane-sizes"><summary>{locale().startsWith('en') ? 'Panel sizes' : 'Tamaño de paneles'}</summary>
             {arranged.map((key) => <label key={key}>{paneName(key)}<select aria-label={`${locale().startsWith('en') ? 'Height of' : 'Alto de'} ${paneName(key)}`}
-              value={currentTall.includes(key) ? '2' : '1'} onChange={(e) => setPaneRows(key, +e.target.value as 1 | 2, currentTall)}>
+              value={currentTall.includes(key) ? '2' : '1'} onChange={(e) => resizePane(key, +e.target.value as 1 | 2, currentWide.includes(key) ? 2 : 1)}>
               <option value="1">{locale().startsWith('en') ? '1 row' : '1 fila'}</option><option value="2">{locale().startsWith('en') ? '2 rows' : '2 filas'}</option>
-            </select></label>)}
+            </select><select aria-label={`${locale().startsWith('en') ? 'Width of' : 'Ancho de'} ${paneName(key)}`} value={currentWide.includes(key) ? '2' : '1'} onChange={(e) => resizePane(key, currentTall.includes(key) ? 2 : 1, +e.target.value as 1 | 2)}><option value="1">{locale().startsWith('en') ? '1 column' : '1 columna'}</option><option value="2">{locale().startsWith('en') ? '2 columns' : '2 columnas'}</option></select></label>)}
           </details>
           {customLayout && <label>{locale().startsWith('en') ? 'Height' : 'Alto'} <input aria-label={locale().startsWith('en') ? 'Small panels height' : 'Alto de paneles pequeños'} type="range" min="20" max="80" value={Math.round(sizes.row * 100)} onChange={(e) => setSplitSize({ row: +e.target.value / 100 }, true)} /></label>}
           {mixedLayout && <><label>{locale().startsWith('en') ? 'Width' : 'Ancho'} <input aria-label={locale().startsWith('en') ? 'Column width' : 'Ancho de columnas'} type="range" min="20" max="80" value={Math.round(sizes.col * 100)} onChange={(e) => setSplitSize({ col: +e.target.value / 100 }, true)} /></label>

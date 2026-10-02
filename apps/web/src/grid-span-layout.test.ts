@@ -5,9 +5,29 @@ describe('two-row pane layout', () => {
   it('fits Agenda and Tasks tall beside two short chats', () => {
     const layout = gridSpanLayout(['wa', 'agenda:', 'chat', 'tasks:'], new Set(['agenda:', 'tasks:']));
     expect(layout.columns).toBe(3);
-    expect(layout.cells['agenda:']).toEqual({ column: 2, row: 1, span: 2 });
-    expect(layout.cells['tasks:']).toEqual({ column: 3, row: 1, span: 2 });
-    expect(layout.cells.chat).toEqual({ column: 1, row: 2, span: 1 });
+    expect(layout.cells['agenda:']).toEqual({ column: 2, row: 1, span: 2, width: 1 });
+    expect(layout.cells['tasks:']).toEqual({ column: 3, row: 1, span: 2, width: 1 });
+    expect(layout.cells.chat).toEqual({ column: 1, row: 2, span: 1, width: 1 });
+  });
+  it('packs every two-dimensional size combination without overlap or dropped panels', () => {
+    const keys = ['chat-a', 'agenda:', 'chat-b', 'tasks:'];
+    for (let mask = 0; mask < 256; mask++) {
+      const tall = new Set(keys.filter((_, i) => mask & (1 << (2 * i))));
+      const wide = new Set(keys.filter((_, i) => mask & (2 << (2 * i))));
+      const layout = gridSpanLayout(keys, tall, wide);
+      const occupied = new Set<string>();
+      for (const key of keys) {
+        const cell = layout.cells[key]!;
+        expect(cell.span).toBe(tall.has(key) ? 2 : 1);
+        expect(cell.width).toBe(wide.has(key) ? 2 : 1);
+        for (let x = cell.column; x < cell.column + cell.width; x++) for (let y = cell.row; y < cell.row + cell.span; y++) {
+          expect(occupied.has(`${x}:${y}`)).toBe(false);
+          occupied.add(`${x}:${y}`);
+          expect(y).toBeLessThanOrEqual(2);
+          expect(x).toBeLessThanOrEqual(layout.columns);
+        }
+      }
+    }
   });
   it('keeps every pane without overlapping for every supported span combination', () => {
     const keys = ['one', 'two', 'three', 'four', 'tasks:'];

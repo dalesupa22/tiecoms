@@ -1,17 +1,21 @@
 import { Suspense, lazy, useEffect, useRef, useState } from 'react';
-import { flushSync } from 'react-dom';
+import { createPortal, flushSync } from 'react-dom';
 import type { AttachmentDTO } from '@tiecoms/contracts';
 import { MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS_PER_MESSAGE } from '@tiecoms/contracts';
-import { client } from '../app-client.ts';
+import { matchesWaPrivacy, waPathScope } from '@tiecoms/client-core';
+import { client, useClient } from '../app-client.ts';
+import { invalidateWaBlobCache } from '../wa-blob-cache.ts';
 import { errorText, getLang, t } from '../i18n.ts';
 import { menuProps, toast } from '../menu.tsx';
 import { VoiceNote } from './Voice.tsx';
 import { formatBytes, formatDuration } from '../video.ts';
+import { ImageViewer } from './ImageViewer.tsx';
 
 // ---------- Descarga autenticada con caché en memoria ----------
-type BlobEntry = { promise: Promise<string>; url?: string; bytes: number; refs: number; used: number };
+type BlobEntry = { path: string; promise: Promise<string>; url?: string; bytes: number; refs: number; used: number };
 const blobs = new Map<string, BlobEntry>();
-const cacheKey = (path: string) => `${client.getState().data?.me.id ?? 'anonymous'}:${path}`;
+const cacheKey = (path: string) => `${client.getWaPathPrivacyIdentity(path)}:${path}`;
+client.subscribeWaPrivacy((event) => invalidateWaBlobCache(blobs, event, (url) => URL.revokeObjectURL(url)));
 function trimBlobs() {
   let bytes = [...blobs.values()].reduce((sum, e) => sum + e.bytes, 0);
   for (const [key, entry] of [...blobs].sort((a,b) => a[1].used - b[1].used)) {
@@ -24,10 +28,10 @@ function entryFor(path: string) {
   const key = cacheKey(path);
   let entry = blobs.get(key);
   if (!entry) {
-    entry = { promise: Promise.resolve(''), bytes: 0, refs: 0, used: Date.now() };
+    entry = { path, promise: Promise.resolve(''), bytes: 0, refs: 0, used: Date.now() };
     const created = entry;
     entry.promise = client.fetchBlob(path).then((blob) => {
-      if (cacheKey(path) !== key) throw new Error('Session changed');
+      if (cacheKey(path) !== key || blobs.get(key) !== created) throw new Error('Private media is no longer available');
       created.url = URL.createObjectURL(blob); created.bytes = blob.size;
       // Consumers get the resolved URL before unused entries are considered for eviction.
       window.setTimeout(trimBlobs, 0);
@@ -44,16 +48,19 @@ export function acquireBlob(path: string) {
   return { url: entry.promise, release: () => { if (released) return; released = true; entry.refs--; entry.used = Date.now(); trimBlobs(); } };
 }
 export function useBlobUrl(path: string | null) {
-  const [url, setUrl] = useState<string | null>(null);
+  const identity = useClient(() => path ? client.getWaPathPrivacyIdentity(path) : '');
+  const [loaded, setLoaded] = useState<{ identity: string; url: string } | null>(null);
   const [failed, setFailed] = useState(false);
   useEffect(() => {
     let alive = true;
-    setUrl(null); setFailed(false);
+    setLoaded(null); setFailed(false);
     const lease = path ? acquireBlob(path) : null;
-    lease?.url.then((u) => alive && setUrl(u)).catch(() => alive && setFailed(true));
+    lease?.url.then((url) => alive && setLoaded({ identity, url })).catch(() => alive && setFailed(true));
     return () => { alive = false; lease?.release(); };
-  }, [path]);
-  return { url, failed };
+  }, [path, identity]);
+  const scope = path ? waPathScope(path) : null;
+  const allowed = !scope || client.isWaChatVisible(scope.accountId, scope.jid);
+  return { url: allowed && loaded?.identity === identity ? loaded.url : null, failed };
 }
 
 export const isImage = (a: { contentType: string }) => { const mime = a.contentType.split(';')[0]!.trim().toLowerCase(); return mime.startsWith('image/') && !['image/heic', 'image/heif'].includes(mime); };
@@ -95,7 +102,8 @@ export async function downloadAttachment(a: AttachmentDTO) {
 export async function copyAttachmentImage(a: AttachmentDTO) {
   const es = getLang() !== 'en';
   const session = client.getSessionIdentity();
-  const sameSession = () => { if (session !== client.getSessionIdentity()) throw new Error('Session changed'); };
+  const privacy = client.getWaPathPrivacyIdentity(a.url);
+  const sameSession = () => { if (session !== client.getSessionIdentity() || privacy !== client.getWaPathPrivacyIdentity(a.url)) throw new Error('Private media is no longer available'); };
   try {
     if (a.sizeBytes > 24 * 1024 * 1024 || (a.width && a.height && a.width * a.height > 20_000_000)) throw new Error(es ? 'Imagen demasiado grande para copiar. Descarga el original.' : 'Image too large to copy. Download the original.');
     const png = async () => {
@@ -166,12 +174,17 @@ export function FileChip({ a, onRemove, status }: { a: { name: string; contentTy
 export function AttachmentsView({ list, onCreateIssue }: { list: AttachmentDTO[]; onCreateIssue?: (title: string) => void }) {
   const [viewing, setViewing] = useState<number | null>(null);
   const [pdf, setPdf] = useState<{ a: AttachmentDTO; sign: boolean } | null>(null);
+  useClient((state) => state.waRevision);
+  useEffect(() => client.subscribeWaPrivacy((event) => {
+    if (list.some((attachment) => { const scope = waPathScope(attachment.url); return scope && matchesWaPrivacy(event, scope); })) { setViewing(null); setPdf(null); }
+  }), [list]);
   const voices = list.filter((a) => a.kind === 'voice');
   // Los videos van aparte, cada uno con su reproductor en la burbuja (no en la cuadrícula ni en el visor).
   const videos = list.filter((a) => a.kind !== 'voice' && isVideo(a));
   const visual = list.filter((a) => a.kind !== 'voice' && isImage(a));
   const files = list.filter((a) => a.kind !== 'voice' && !isVisual(a));
   const shown = visual.slice(0, 4);
+  if (list.some((attachment) => { const scope = waPathScope(attachment.url); return scope && !client.isWaChatVisible(scope.accountId, scope.jid); })) return null;
   return (
     <div className="att-wrap">
       {voices.map((a) => <VoiceNote key={a.id} a={a} onCreateIssue={onCreateIssue} />)}
@@ -206,36 +219,22 @@ export function AttachmentsView({ list, onCreateIssue }: { list: AttachmentDTO[]
   );
 }
 
-/** Visor a pantalla completa con flechas, teclado y descarga. */
+/** Portal outside the conversation's text zoom and clipping containers. */
 function Viewer({ list, start, onClose }: { list: AttachmentDTO[]; start: number; onClose: () => void }) {
   const [i, setI] = useState(start);
+  const trigger = useRef(document.activeElement as HTMLElement | null);
   const a = list[i]!;
-  const { url, failed } = useBlobUrl(a.url);
   useEffect(() => {
-    const k = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-      if (e.key === 'ArrowRight') setI((x) => Math.min(list.length - 1, x + 1));
-      if (e.key === 'ArrowLeft') setI((x) => Math.max(0, x - 1));
-    };
-    window.addEventListener('keydown', k);
-    return () => window.removeEventListener('keydown', k);
-  }, [list.length, onClose]);
-  return (
-    <div className="viewer" role="dialog" aria-modal="true" aria-label={t('att.viewer')} onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="viewer-bar">
-        <span className="grow ellipsis">{a.name}{list.length > 1 ? ` · ${t('att.count', { i: i + 1, n: list.length })}` : ''}</span>
-        <button className="icon-btn" aria-label={t('att.download')} onClick={() => void downloadAttachment(a)}>⤓</button>
-        <button className="icon-btn" aria-label={t('common.close')} onClick={onClose}>×</button>
-      </div>
-      {i > 0 && <button className="viewer-nav prev" aria-label={t('att.prev')} onClick={() => setI(i - 1)}>‹</button>}
-      <div className="viewer-stage" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-        {failed ? <div className="viewer-msg">{t('att.unavailable')}</div>
-          : !url ? <div className="viewer-msg">{t('common.loading')}</div>
-          : <img src={url} alt={a.name} {...menuProps(() => imageMenu(a))} />}
-      </div>
-      {i < list.length - 1 && <button className="viewer-nav next" aria-label={t('att.next')} onClick={() => setI(i + 1)}>›</button>}
-    </div>
-  );
+    return () => { if (trigger.current?.isConnected) trigger.current.focus({ preventScroll: true }); };
+  }, []);
+  return createPortal(<ViewerAttachment key={a.url} a={a} count={list.length > 1 ? t('att.count', { i: i + 1, n: list.length }) : ''}
+    onClose={onClose} onPrevious={i > 0 ? () => setI(i - 1) : undefined} onNext={i < list.length - 1 ? () => setI(i + 1) : undefined} />, document.body);
+}
+
+/** Remount per original so loading/errors/zoom never leak to the next image. */
+function ViewerAttachment({ a, ...props }: { a: AttachmentDTO } & Pick<React.ComponentProps<typeof ImageViewer>, 'count' | 'onClose' | 'onPrevious' | 'onNext'>) {
+  const { url, failed } = useBlobUrl(a.url);
+  return <ImageViewer {...props} name={a.name} url={url} failed={failed} onDownload={() => void downloadAttachment(a)} imageMenu={() => imageMenu(a)} />;
 }
 
 // ---------- Videos en la burbuja (docs/VIDEO.md) ----------

@@ -82,14 +82,25 @@ export function collapsePane() {
 }
 export type GridLayout = 'classic' | 'tall-center' | 'tall-left' | 'tall-right' | 'custom';
 const LAYOUT_KEY = 'chaggu:grid-layout-v1';
-const savedLayout = read<{ version?: number; kind?: GridLayout; order?: string[]; tall?: string[] }>(LAYOUT_KEY, {});
+const savedLayout = read<{ version?: number; kind?: GridLayout; order?: string[]; tall?: string[]; wide?: string[] }>(LAYOUT_KEY, {});
 let layout: GridLayout = savedLayout.version === 1 && ['classic', 'tall-center', 'tall-left', 'tall-right', 'custom'].includes(savedLayout.kind ?? '') ? savedLayout.kind! : 'classic';
 let layoutOrder: string[] = Array.isArray(savedLayout.order) ? savedLayout.order.filter((x): x is string => typeof x === 'string') : [];
 let tallPanes: string[] = Array.isArray(savedLayout.tall) ? savedLayout.tall.filter((x): x is string => typeof x === 'string') : [TASKS_KEY];
-const saveLayout = () => write(LAYOUT_KEY, { version: 1, kind: layout, order: layoutOrder, tall: tallPanes });
+let widePanes: string[] = Array.isArray(savedLayout.wide) ? savedLayout.wide.filter((x): x is string => typeof x === 'string') : [];
+const saveLayout = () => write(LAYOUT_KEY, { version: 1, kind: layout, order: layoutOrder, tall: tallPanes, wide: widePanes });
 export const useGridLayout = () => useSyncExternalStore(subscribe, () => layout);
 export const useLayoutOrder = () => useSyncExternalStore(subscribe, () => layoutOrder);
 export const useTallPanes = () => useSyncExternalStore(subscribe, () => tallPanes);
+export const useWidePanes = () => useSyncExternalStore(subscribe, () => widePanes);
+export function setPaneSize(key: string, rows: 1 | 2, columns: 1 | 2, currentTall: readonly string[], currentWide: readonly string[], currentOrder: readonly string[]) {
+  const tall = new Set(currentTall), wide = new Set(currentWide);
+  if (rows === 2) tall.add(key); else tall.delete(key);
+  if (columns === 2) wide.add(key); else wide.delete(key);
+  tallPanes = [...tall].filter((k) => panes.includes(k));
+  widePanes = [...wide].filter((k) => panes.includes(k));
+  layoutOrder = currentOrder.filter((k) => panes.includes(k));
+  layout = 'custom'; saveLayout(); emit();
+}
 export function setPaneRows(key: string, rows: 1 | 2, currentTall: readonly string[]) {
   const next = new Set(layout === 'custom' ? tallPanes : currentTall);
   if (rows === 2) next.add(key); else next.delete(key);
@@ -239,6 +250,32 @@ export function closePane(key: string, active: string | null) {
     if (to) focusPane(to);
   }
 }
+
+/** Revoke specific panels without collapsing any surviving panel, pin or layout choice. */
+export function removePanes(keys: readonly string[]) {
+  if (!keys.length) return;
+  const removed = new Set(keys);
+  const before = [...panes], previousActive = activeKey;
+  if (expandedKey && removed.has(expandedKey)) collapsePane();
+  layoutOrder = layoutOrder.filter((key) => !removed.has(key));
+  tallPanes = tallPanes.filter((key) => !removed.has(key));
+  widePanes = widePanes.filter((key) => !removed.has(key));
+  saveLayout();
+  panes = panes.filter((key) => !removed.has(key));
+  pinned = new Set([...pinned].filter((key) => !removed.has(key)));
+  metas = Object.fromEntries(Object.entries(metas).filter(([key]) => !removed.has(key)));
+  if (activeKey && removed.has(activeKey)) activeKey = null;
+  write(KEY, panes); write(PIN_KEY, [...pinned]); write(META_KEY, metas); emit();
+  if (lastActive && removed.has(lastActive)) lastActive = null;
+  if (previousActive && removed.has(previousActive)) {
+    const at = before.indexOf(previousActive);
+    const next = panes[Math.min(Math.max(0, at - 1), panes.length - 1)];
+    if (next) focusPane(next);
+  }
+}
+
+/** Include saved references even if their panel is currently absent. */
+export const currentPaneReferences = () => [...new Set([...panes, ...pinned, ...Object.keys(metas), ...layoutOrder, ...tallPanes, ...widePanes, ...(expandedKey ? [expandedKey] : [])])];
 
 /** Expande sin borrar paneles, fijados, metadatos o tamaños. */
 export function onlyPane(key: string) {

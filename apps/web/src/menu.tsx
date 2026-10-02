@@ -18,6 +18,8 @@ export interface MenuItem {
 
 interface MenuState { x: number; y: number; items: MenuItem[] }
 let menu: MenuState | null = null;
+/** Identity only: owners of scoped menus can close their own menu after a revocation. */
+export const getMenuIdentity = (): object | null => menu;
 const menuListeners = new Set<() => void>();
 const emitMenu = () => menuListeners.forEach((l) => l());
 

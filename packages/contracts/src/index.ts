@@ -1619,6 +1619,8 @@ export const WaMessagesQuery = z.object({ before: z.iso.datetime().optional(), l
 
 export interface WaAccountDTO {
   id: string;
+  /** False mientras el puente comprueba los chats bloqueados de WhatsApp. */
+  privacyReady?: boolean;
   /** ¿Se puede responder desde chaggu con esta cuenta? Por defecto no. */
   sendEnabled: boolean;
   label: string;
@@ -1723,6 +1725,8 @@ export type AccountEvent =
   | { type: 'me.sleep'; sleep: SleepDTO }
   | { type: 'person.availability'; userId: string; availability: AvailabilityDTO }
   | { type: 'whatsapp.updated'; accountId: string }
+  /** Revoca de inmediato la vista local; reset invalida toda la cuenta durante su verificación. */
+  | { type: 'wa.privacy'; accountId: string; jids?: string[]; reset?: boolean }
   /** Cambió un chat de WhatsApp de la bandeja (se movió, fijó o sacó, o le entró un mensaje): reemplazar la fila por accountId+jid. */
   | { type: 'wa.inbox'; chat: WaChatDTO }
   | { type: 'drive.updated'; workspaceId: string | null; conversationId?: string | null };

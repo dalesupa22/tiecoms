@@ -1,19 +1,22 @@
 /** Two-row packing: tall panels keep a column; short panels share the next column. */
-export function gridSpanLayout(keys: readonly string[], tall: ReadonlySet<string>) {
-  let column = 1;
-  let shortColumn: number | null = null;
-  const cells: Record<string, { column: number; row: number; span: number }> = {};
+export function gridSpanLayout(keys: readonly string[], tall: ReadonlySet<string>, wide: ReadonlySet<string> = new Set()) {
+  let columns = 1;
+  const occupied = new Set<string>();
+  const cells: Record<string, { column: number; row: number; span: number; width: number }> = {};
   for (const key of keys) {
-    if (tall.has(key)) cells[key] = { column: column++, row: 1, span: 2 };
-    else if (shortColumn !== null) {
-      cells[key] = { column: shortColumn, row: 2, span: 1 };
-      shortColumn = null;
-    } else {
-      shortColumn = column++;
-      cells[key] = { column: shortColumn, row: 1, span: 1 };
+    const span = tall.has(key) ? 2 : 1, width = wide.has(key) ? 2 : 1;
+    // Fill each column before moving right, so two short panels share one column.
+    let placed = false;
+    for (let column = 1; !placed; column++) for (let row = 1; row <= 3 - span; row++) {
+      const slots = Array.from({ length: width * span }, (_, i) => `${column + i % width}:${row + Math.floor(i / width)}`);
+      if (slots.some((slot) => occupied.has(slot))) continue;
+      slots.forEach((slot) => occupied.add(slot));
+      cells[key] = { column, row, span, width };
+      columns = Math.max(columns, column + width - 1);
+      placed = true; break;
     }
   }
-  return { cells, columns: Math.max(1, column - 1) };
+  return { cells, columns };
 }
 
 /** Translate an explicit drop without shuffling unrelated visual positions. */

@@ -2,9 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { WaAccountDTO, WaCategory, WaChatDTO, WaKind, WaMessageDTO } from '@tiecoms/contracts';
 import { client, useClient } from '../app-client.ts';
 import { errorText, locale, t } from '../i18n.ts';
-import { copyText, menuProps, openMenuAt, toast } from '../menu.tsx';
+import { copyText, toast } from '../menu.tsx';
+import { captureWaPrivacy, openWaDialog, openWaMenuAt, useWaPrivacy, waMenuProps, waPrivacySyncing } from '../wa-privacy-ui.tsx';
+import { waPrivacyAffected } from '../wa-privacy.ts';
 import { waMainListMenu } from './WaInbox.tsx';
-import { openDialog } from '../actions.tsx';
 import { WaShareDialog } from './Mail.tsx';
 import { navigate } from '../router.ts';
 import { Modal, conversationTitle } from '../ui.tsx';
@@ -66,15 +67,33 @@ export function WhatsAppScreen() {
   const [showHidden, setShowHidden] = useState(false);
   const [q, setQ] = useState('');
   const [open, setOpen] = useState<WaChatDTO | null>(null);
+  const chatGeneration = useRef(0);
+  const alive = useRef(true);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; chatGeneration.current++; }; }, []);
+  useWaPrivacy((event) => {
+    chatGeneration.current++;
+    setChats((old) => old.filter((c) => !waPrivacyAffected(event, c)));
+    setOpen((old) => old && waPrivacyAffected(event, old) ? null : old);
+    if (event.reset) setAccounts((old) => old?.map((a) => a.id === event.accountId ? { ...a, privacyReady: false, chats: 0, groups: 0 } : a) ?? null);
+    setCounts({});
+  });
 
-  const loadAccounts = useCallback(() => api.accounts().then((r) => { setAccounts(r.accounts); setMax(r.max); }).catch(() => {}), []);
-  const loadChats = useCallback(() => api.chats({
+  const loadAccounts = useCallback(() => {
+    const valid = captureWaPrivacy();
+    return api.accounts().then((r) => { if (alive.current && valid()) { setAccounts(r.accounts); setMax(r.max); } }).catch(() => {});
+  }, []);
+  const loadChats = useCallback(() => {
+    const generation = ++chatGeneration.current;
+    const valid = captureWaPrivacy(accountId === 'all' ? undefined : accountId);
+    if (!valid()) return Promise.resolve();
+    return api.chats({
     accountId: accountId === 'all' ? undefined : accountId,
     category: category === 'all' ? undefined : category,
     groups: onlyGroups ? '1' : undefined,
     hidden: showHidden ? '1' : undefined,
     q: q.trim() || undefined,
-  }).then((r) => { setChats(r.chats); setCounts(r.categories); }).catch(() => {}), [accountId, category, onlyGroups, showHidden, q]);
+    }).then((r) => { if (alive.current && generation === chatGeneration.current && valid()) { setChats(r.chats.filter((c) => client.isWaChatVisible(c.accountId, c.jid))); setCounts(r.categories); } }).catch(() => {});
+  }, [accountId, category, onlyGroups, showHidden, q]);
 
   useEffect(() => { void loadAccounts(); }, [loadAccounts, revision]);
   useEffect(() => { const h = setTimeout(() => void loadChats(), q ? 250 : 0); return () => clearTimeout(h); }, [loadChats, revision]);
@@ -87,6 +106,9 @@ export function WhatsAppScreen() {
   }, [waiting, loadAccounts]);
 
   const connected = accounts?.filter((a) => a.status === 'connected') ?? [];
+  const privacySyncing = accounts?.some((a) => (accountId === 'all' || accountId === a.id) && a.privacyReady === false) ?? false;
+  const visibleChats = chats.filter((c) => client.isWaChatVisible(c.accountId, c.jid));
+  const visibleOpen = open && client.isWaChatVisible(open.accountId, open.jid) ? open : null;
   const total = Object.values(counts).reduce((n, c) => n + (c?.total ?? 0), 0);
 
   async function organize() {
@@ -94,16 +116,20 @@ export function WhatsAppScreen() {
   }
   /** Una fila cambió fuera de patch (p. ej. «Mover a mi lista principal»): se reemplaza en la lista y en el detalle. */
   const replace = (up: WaChatDTO) => {
+    if (!client.isWaChatVisible(up.accountId, up.jid)) return;
     setChats((list) => list.map((x) => (x.accountId === up.accountId && x.jid === up.jid ? up : x)));
     setOpen((o) => (o && o.jid === up.jid && o.accountId === up.accountId ? up : o));
   };
   async function patch(c: WaChatDTO, p: Record<string, unknown>) {
+    const valid = captureWaPrivacy(c.accountId, c.jid);
+    if (!valid()) return;
     try {
       const up = await api.patchChat(c, p);
+      if (!alive.current || !valid()) return;
       setChats((list) => list.map((x) => (x.accountId === up.accountId && x.jid === up.jid ? up : x)));
       if (open && open.jid === up.jid && open.accountId === up.accountId) setOpen(up);
       void loadChats();
-    } catch (e) { toast(errorText(e)); }
+    } catch (e) { if (alive.current && valid()) toast(errorText(e)); }
   }
 
   return (
@@ -158,15 +184,16 @@ export function WhatsAppScreen() {
             <label className="row small muted" style={{ gap: 6 }}><input type="checkbox" checked={showHidden} onChange={(e) => setShowHidden(e.target.checked)} />{t('wa.showHidden')}</label>
           </div>
 
-          <div className={`wa-split ${open ? 'has-open' : ''}`}>
+          {privacySyncing && <div className="hint" role="status">{waPrivacySyncing()}</div>}
+          <div className={`wa-split ${visibleOpen ? 'has-open' : ''}`}>
             <div className="list wa-list">
-              {chats.length === 0 && <div className="empty">{connected.length ? t('wa.noChats') : t('wa.syncing')}</div>}
-              {chats.map((c) => (
-                <ChatRow key={`${c.accountId}|${c.jid}`} c={c} active={open?.jid === c.jid && open.accountId === c.accountId}
-                  multi={(accounts?.length ?? 0) > 1} onOpen={() => setOpen(c)} onPatch={(p) => patch(c, p)} onChanged={replace} />
+              {visibleChats.length === 0 && !privacySyncing && <div className="empty">{connected.length ? t('wa.noChats') : t('wa.syncing')}</div>}
+              {visibleChats.map((c) => (
+                <ChatRow key={`${c.accountId}|${c.jid}`} c={c} active={visibleOpen?.jid === c.jid && visibleOpen.accountId === c.accountId}
+                  multi={(accounts?.length ?? 0) > 1} onOpen={() => { if (client.isWaChatVisible(c.accountId, c.jid)) setOpen(c); }} onPatch={(p) => patch(c, p)} onChanged={replace} />
               ))}
             </div>
-            {open && <ChatPanel key={`${open.accountId}|${open.jid}`} c={open} revision={revision} onClose={() => setOpen(null)} onPatch={(p) => patch(open, p)} onChanged={replace} />}
+            {visibleOpen && <ChatPanel key={`${visibleOpen.accountId}|${visibleOpen.jid}`} c={visibleOpen} revision={revision} onClose={() => setOpen(null)} onPatch={(p) => patch(visibleOpen, p)} onChanged={replace} />}
           </div>
         </>
       )}
@@ -199,7 +226,7 @@ function AccountCard({ a, onChanged }: { a: WaAccountDTO; onChanged: () => void 
       </div>
       <div className="small" style={{ marginTop: 8 }}>
         <b>{statusText}</b>
-        {a.status === 'connected' && <span className="muted"> · {t('wa.counts', { chats: a.chats, groups: a.groups })}</span>}
+        {a.privacyReady === false ? <span className="muted"> · {waPrivacySyncing()}</span> : a.status === 'connected' && <span className="muted"> · {t('wa.counts', { chats: a.chats, groups: a.groups })}</span>}
         {a.lastError && a.status !== 'connected' && a.status !== 'qr' && <span className="muted"> · {a.lastError}</span>}
       </div>
 
@@ -288,7 +315,7 @@ function ConnectDialog({ existing, onClose, onDone }: { existing: WaAccountDTO[]
 function ChatRow({ c, active, multi, onOpen, onPatch, onChanged }: { c: WaChatDTO; active: boolean; multi: boolean; onOpen: () => void; onPatch: (p: Record<string, unknown>) => void; onChanged: (c: WaChatDTO) => void }) {
   // Clic derecho o pulsación larga: «Mover a mi lista principal», «📌 Fijar arriba» o «Sacar de mi lista principal».
   return (
-    <div className={`card wa-chat ${active ? 'active' : ''} ${c.unread ? 'unread' : ''}`} draggable {...menuProps(() => waMainListMenu(c, onChanged))}
+    <div className={`card wa-chat ${active ? 'active' : ''} ${c.unread ? 'unread' : ''}`} draggable {...waMenuProps(c, () => waMainListMenu(c, onChanged))}
       onDragStart={(e) => setDrag(e, 'wa', { accountId: c.accountId, jid: c.jid, name: c.name, isGroup: c.isGroup }, c.name)}>
       <button className="wa-chat-main" onClick={onOpen}>
         <span className="wa-av" aria-hidden>{c.isGroup ? '👥' : CAT_ICON[c.category]}</span>
@@ -308,7 +335,7 @@ function ChatRow({ c, active, multi, onOpen, onPatch, onChanged }: { c: WaChatDT
         {c.unread > 0 && <span className="pill">{c.unread}</span>}
       </button>
       <PinToGrid payload={{ kind: 'wa', accountId: c.accountId, jid: c.jid, name: c.name, isGroup: c.isGroup }} name={c.name} />
-      <button className="icon-btn" aria-label={t('menu.open')} title={t('wa.moveToInbox')} onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); openMenuAt(r.left, r.bottom + 4, waMainListMenu(c, onChanged)); }}>⋯</button>
+      <button className="icon-btn" aria-label={t('menu.open')} title={t('wa.moveToInbox')} onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); openWaMenuAt(c, r.left, r.bottom + 4, waMainListMenu(c, onChanged)); }}>⋯</button>
       <select className="wa-cat-select" value={c.category} onChange={(e) => onPatch({ category: e.target.value })} aria-label={t('wa.category')}
         title={c.categoryManual ? t('wa.manual') : t('wa.suggested')}>
         {CATEGORIES.map((k) => <option key={k} value={k}>{CAT_ICON[k]} {t(`wa.cat.${k}`)}</option>)}
@@ -322,10 +349,16 @@ function ChatPanel({ c, revision, onClose, onPatch, onChanged }: { c: WaChatDTO;
   const [messages, setMessages] = useState<WaMessageDTO[] | null>(null);
   const box = useRef<HTMLDivElement>(null);
   const mailOn = d.features?.mail === true;
-  useEffect(() => { api.messages(c).then((r) => setMessages(r.messages)).catch(() => setMessages([])); }, [c.accountId, c.jid, revision]);
+  const visible = useWaPrivacy(() => { setMessages(null); onClose(); }, c);
+  useEffect(() => {
+    let live = true; const valid = captureWaPrivacy(c.accountId, c.jid);
+    if (valid()) api.messages(c).then((r) => { if (live && valid()) setMessages(r.messages); }).catch(() => { if (live && valid()) setMessages([]); });
+    return () => { live = false; };
+  }, [c.accountId, c.jid, revision]);
   useEffect(() => { box.current?.scrollTo({ top: box.current.scrollHeight }); }, [messages]);
   const targets = useMemo(() => d.conversations.filter((x) => x.kind !== 'direct' && x.canPost !== false), [d]);
   const linked = c.linkedConversationId ? d.conversations.find((x) => x.id === c.linkedConversationId) : null;
+  if (!visible) return null;
   return (
     <aside className="card wa-panel">
       <div className="row" style={{ padding: '12px 14px', borderBottom: '1px solid var(--line)' }}>
@@ -346,9 +379,9 @@ function ChatPanel({ c, revision, onClose, onPatch, onChanged }: { c: WaChatDTO;
         {messages === null && <div className="hint">{t('common.loading')}</div>}
         {messages?.length === 0 && <div className="hint">{t('wa.noMessages')}</div>}
         {messages?.map((m) => {
-          const bring = () => openDialog((close) => <WaShareDialog accountId={c.accountId} jid={c.jid} chatName={c.name} isGroup={c.isGroup} message={m} onClose={close} />);
+          const bring = () => openWaDialog(c, (close) => <WaShareDialog accountId={c.accountId} jid={c.jid} chatName={c.name} isGroup={c.isGroup} message={m} onClose={close} />);
           return (
-          <div key={m.id} className={`wa-msg ${m.fromMe ? 'me' : ''}`} {...(mailOn ? menuProps(() => [
+          <div key={m.id} className={`wa-msg ${m.fromMe ? 'me' : ''}`} {...(mailOn ? waMenuProps(c, () => [
             { label: t('wa.bring'), icon: '⤴', onSelect: bring },
             { label: t('common.copy'), icon: '⧉', onSelect: () => void copyText(m.body).then(() => toast(t('common.copied'))) },
           ]) : {})}>
@@ -368,7 +401,7 @@ function ChatPanel({ c, revision, onClose, onPatch, onChanged }: { c: WaChatDTO;
         <div className="row" style={{ flexWrap: 'wrap', marginBottom: 8 }}>
           {waMainListMenu(c, onChanged).map((it) => (
             <button key={it.label} className={`btn small ${it.danger ? 'ghost' : ''}`}
-              onClick={(e) => { if (it.items) { const r = e.currentTarget.getBoundingClientRect(); openMenuAt(r.left, r.bottom + 4, it.items); } else it.onSelect?.(); }}>
+              onClick={(e) => { if (it.items) { const r = e.currentTarget.getBoundingClientRect(); openWaMenuAt(c, r.left, r.bottom + 4, it.items); } else it.onSelect?.(); }}>
               {it.icon && !it.label?.startsWith('📌') ? `${it.icon} ` : ''}{it.label}{it.items ? ' ▾' : ''}
             </button>
           ))}

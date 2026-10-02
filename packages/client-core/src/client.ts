@@ -12,6 +12,7 @@ import {
 } from '@tiecoms/contracts';
 import { ApiRequestError, parseError } from './api.ts';
 import type { KeyValueStorage, SecretStore } from './storage.ts';
+import { matchesWaPrivacy, waPathScope, waRequestScopes, type WaPrivacyEvent, type WaPrivacyState } from './wa-privacy.ts';
 import {
   CACHE_VERSION, LAST_USER_KEY, PREFETCH_CONCURRENCY, bootKey, convIndexKey, convKey, conversationsToCache, prefetchCandidates, runLimited,
   snapshotConversation, usableBoot, usableConversation, type CachedBoot, type CachedConversation,
@@ -82,6 +83,8 @@ export interface ClientState {
   mails: Record<string, import('@tiecoms/contracts').SharedMailDTO>;
   /** Sube cuando el puente de WhatsApp trae chats o mensajes nuevos: la pantalla vuelve a pedir la lista. */
   waRevision: number;
+  /** Revocations are scoped to the linked account; private WA data is never trusted from boot cache. */
+  waPrivacy?: Record<string, WaPrivacyState>;
   /** Sube cuando cambia algún árbol de archivos visible para la persona. */
   driveRevision: number;
   /** «No molestar» guardado solo en este dispositivo porque el servidor no conoce /me/dnd (servidor viejo). */
@@ -194,12 +197,40 @@ export class TieComsClient {
   private dirtyConvs = new Set<string>();
   private lastBootstrapAt = 0;
   private sharedGets = new Map<string, { generation: number; at: number; promise: Promise<unknown> }>();
+  private waPrivacyEpoch = 0;
+  private waResetEpoch = new Map<string, number>();
+  private waJidEpoch = new Map<string, number>();
+  private waPrivacyListeners = new Set<(event: WaPrivacyEvent) => void>();
 
   constructor(private opts: ClientOptions) {}
 
   // ---------- Estado observable (useSyncExternalStore) ----------
   getState = () => this.state;
   getSessionIdentity = () => `${this.sessionGeneration}:${this.state.data?.me.id ?? ''}`;
+  getWaPrivacyIdentity = (accountId: string, jid?: string) => `${this.getSessionIdentity()}:${this.waResetEpoch.get(accountId) ?? 0}:${jid ? this.waJidEpoch.get(`${accountId}:${jid}`) ?? 0 : this.state.waPrivacy?.[accountId]?.epoch ?? 0}`;
+  getWaPathPrivacyIdentity = (path: string) => { const scope = waPathScope(path); return scope ? this.getWaPrivacyIdentity(scope.accountId, scope.jid) : this.getSessionIdentity(); };
+  isWaChatVisible = (accountId: string, jid?: string) => {
+    const state = this.state.waPrivacy?.[accountId];
+    return state?.ready !== false && (!jid || !state?.blockedJids.includes(jid));
+  };
+  subscribeWaPrivacy = (fn: (event: WaPrivacyEvent) => void) => { this.waPrivacyListeners.add(fn); return () => { this.waPrivacyListeners.delete(fn); }; };
+  /** Also used for a denied open chat, so cached names/content cannot outlive its 404. */
+  invalidateWaPrivacy(event: WaPrivacyEvent) {
+    const previous = this.state.waPrivacy?.[event.accountId] ?? { epoch: 0, blockedJids: [] };
+    ++this.waPrivacyEpoch;
+    if (event.reset) this.waResetEpoch.set(event.accountId, (this.waResetEpoch.get(event.accountId) ?? 0) + 1);
+    for (const jid of event.jids ?? []) this.waJidEpoch.set(`${event.accountId}:${jid}`, (this.waJidEpoch.get(`${event.accountId}:${jid}`) ?? 0) + 1);
+    const next: WaPrivacyState = { ...previous, epoch: previous.epoch + 1, blockedJids: [...new Set([...previous.blockedJids, ...(event.jids ?? [])])], ...(event.reset ? { ready: false } : {}) };
+    const data = this.state.data;
+    for (const path of this.sharedGets.keys()) {
+      const scope = waRequestScopes(path);
+      if (scope && (scope.global || scope.scopes.some((s) => matchesWaPrivacy(event, s)))) this.sharedGets.delete(path);
+    }
+    this.set({ waPrivacy: { ...this.state.waPrivacy, [event.accountId]: next }, waRevision: this.state.waRevision + 1,
+      ...(data ? { data: { ...data, waInbox: (data.waInbox ?? []).filter((chat) => chat.accountId !== event.accountId || (!event.reset && !event.jids?.includes(chat.jid))) } } : {}) });
+    this.waPrivacyListeners.forEach((fn) => fn(event));
+    this.bootDirty = true; this.schedulePersist();
+  }
   subscribe = (fn: () => void) => { this.listeners.add(fn); return () => this.listeners.delete(fn); };
   private set(patch: Partial<ClientState>) {
     this.state = { ...this.state, ...patch };
@@ -232,7 +263,7 @@ export class TieComsClient {
     const store = this.opts.storage;
     if (this.bootDirty) {
       this.bootDirty = false;
-      const boot: CachedBoot = { v: CACHE_VERSION, userId, savedAt: new Date().toISOString(), data };
+      const boot: CachedBoot = { v: CACHE_VERSION, userId, savedAt: new Date().toISOString(), data: { ...data, waInbox: [] } };
       await store.set(bootKey(userId), boot);
       await store.set(LAST_USER_KEY, userId);
     }
@@ -311,20 +342,68 @@ export class TieComsClient {
 
   async request<T>(path: string, init: RequestInit & { json?: unknown } = {}): Promise<T> {
     const generation = this.sessionGeneration;
+    const privacy = waRequestScopes(path, init.json);
+    const privacyIdentity = privacy?.global ? String(this.waPrivacyEpoch) : privacy?.scopes.map((s) => this.getWaPrivacyIdentity(s.accountId, s.jid)).join('|');
+    const assertPrivacy = () => {
+      const current = privacy?.global ? String(this.waPrivacyEpoch) : privacy?.scopes.map((s) => this.getWaPrivacyIdentity(s.accountId, s.jid)).join('|');
+      if (privacyIdentity !== current) throw new ApiRequestError(409, 'wa_privacy_changed', 'Cambió la privacidad de WhatsApp. Vuelve a abrir el chat.');
+      if (privacy?.scopes.some((s) => s.jid && !this.isWaChatVisible(s.accountId, s.jid))) throw new ApiRequestError(404, 'wa_private', 'Chat de WhatsApp no disponible.');
+    };
+    assertPrivacy();
     if (this.accessToken && Date.now() > this.accessExp - 30_000) await this.refresh();
     this.assertSession(generation);
+    assertPrivacy();
     let res = await this.raw(path, init);
     this.assertSession(generation);
+    assertPrivacy();
     if (res.status === 401 && (await this.refresh())) {
       this.assertSession(generation);
+      assertPrivacy();
       res = await this.raw(path, init);
     }
     this.assertSession(generation);
+    assertPrivacy();
     if (res.status === 401) { await this.handleSignedOut(); throw await parseError(res); }
-    if (!res.ok) throw await parseError(res);
+    if (!res.ok) {
+      if (res.status === 404) for (const scope of privacy?.scopes ?? []) if (scope.jid) this.invalidateWaPrivacy({ type: 'wa.privacy', accountId: scope.accountId, jids: [scope.jid] });
+      throw await parseError(res);
+    }
     const result = await res.json() as T;
     this.assertSession(generation);
+    assertPrivacy();
+    this.acceptWaResponse(path, result);
     return result;
+  }
+
+  private acceptWaResponse(path: string, result: unknown) {
+    const pathname = new URL(path, 'http://client.invalid').pathname;
+    const response = result as { accounts?: import('@tiecoms/contracts').WaAccountDTO[]; chats?: import('@tiecoms/contracts').WaChatDTO[] };
+    if (pathname === '/whatsapp/accounts' && Array.isArray(response.accounts)) {
+      const present = new Set(response.accounts.map((account) => account.id));
+      const known = new Set([...Object.keys(this.state.waPrivacy ?? {}), ...(this.state.data?.waInbox ?? []).map((chat) => chat.accountId)]);
+      for (const accountId of known) if (!present.has(accountId) && this.state.waPrivacy?.[accountId]?.ready !== false) this.invalidateWaPrivacy({ type: 'wa.privacy', accountId, reset: true });
+      for (const account of response.accounts) {
+        if (account.privacyReady === false && this.state.waPrivacy?.[account.id]?.ready !== false) this.invalidateWaPrivacy({ type: 'wa.privacy', accountId: account.id, reset: true });
+        else if (account.privacyReady === true && this.state.waPrivacy?.[account.id]?.ready !== true) {
+          const previous = this.state.waPrivacy?.[account.id] ?? { epoch: 0, blockedJids: [] };
+          this.set({ waPrivacy: { ...this.state.waPrivacy, [account.id]: { ...previous, ready: true } } });
+        }
+      }
+    }
+    // Only a fresh authoritative list may restore an explicitly unblocked chat.
+    if (pathname === '/whatsapp/chats' && Array.isArray(response.chats)) {
+      this.authorizeWaChats(response.chats);
+      response.chats = response.chats.filter((chat) => this.isWaChatVisible(chat.accountId, chat.jid));
+    }
+  }
+  private authorizeWaChats(chats: import('@tiecoms/contracts').WaChatDTO[]) {
+    const privacy = { ...this.state.waPrivacy }; let changed = false;
+    for (const chat of chats) {
+      const previous = privacy[chat.accountId];
+      if (!previous || previous.ready === false || !previous.blockedJids.includes(chat.jid)) continue;
+      privacy[chat.accountId] = { ...previous, blockedJids: previous.blockedJids.filter((jid) => jid !== chat.jid) }; changed = true;
+    }
+    if (changed) this.set({ waPrivacy: privacy });
   }
 
   // ---------- Sesión ----------
@@ -345,11 +424,14 @@ export class TieComsClient {
   /** Arranque: intenta reanudar la sesión guardada. */
   async start(): Promise<void> {
     this.set({ status: 'loading' });
+    const generation = this.sessionGeneration;
     // Pinta de inmediato con lo último que se vio en este dispositivo; el bootstrap real lo reemplaza enseguida.
     const cached = await this.readBootCache();
-    const generation = this.sessionGeneration;
-    if (cached && generation === this.sessionGeneration) this.set({ status: 'ready', data: cached.data });
-    if (await this.refresh()) {
+    if (generation !== this.sessionGeneration) return;
+    if (cached && generation === this.sessionGeneration) this.set({ status: 'ready', data: { ...cached.data, waInbox: [] } });
+    const refreshed = await this.refresh();
+    if (generation !== this.sessionGeneration) return;
+    if (refreshed) {
       try { await this.afterLogin(); } catch (e) {
         // Sin red a mitad del arranque: se sigue con la caché y se completa al volver la conexión.
         if (!(cached && generation === this.sessionGeneration && e instanceof TypeError)) throw e;
@@ -480,6 +562,7 @@ export class TieComsClient {
     ++this.sessionGeneration;
     this.refreshing = null;
     this.issueHiddenAt.clear(); this.issueHiddenRevision = 0;
+    this.waPrivacyEpoch = 0; this.waResetEpoch.clear(); this.waJidEpoch.clear();
     this.socket?.removeAllListeners();
     this.socket?.disconnect();
     this.socket = null;
@@ -527,6 +610,7 @@ export class TieComsClient {
   // ---------- Snapshot ----------
   async loadBootstrap() {
     const generation = this.sessionGeneration;
+    const waEpoch = this.waPrivacyEpoch;
     const data = await this.request<BootstrapDTO>('/bootstrap');
     const dndLocalOnly = data.me.dndUntil === undefined;
     if (dndLocalOnly) {
@@ -548,6 +632,8 @@ export class TieComsClient {
       });
     }
     this.lastBootstrapAt = Date.now();
+    if (waEpoch === this.waPrivacyEpoch) this.authorizeWaChats(data.waInbox ?? []);
+    data.waInbox = (data.waInbox ?? []).filter((chat) => this.isWaChatVisible(chat.accountId, chat.jid));
     this.set({ data, dndLocalOnly });
     if (data.myActiveCall) this.putCall(data.myActiveCall);
     this.bootDirty = true; this.schedulePersist();
@@ -656,6 +742,7 @@ export class TieComsClient {
     if (e.type === 'reminders.changed') void this.loadReminders().catch(() => {});
     if (e.type === 'scheduled.updated') this.putScheduled(e.scheduled);
     if (e.type === 'whatsapp.updated') this.set({ waRevision: this.state.waRevision + 1 });
+    if (e.type === 'wa.privacy') this.invalidateWaPrivacy(e);
     // WhatsApp en la bandeja: la fila se reemplaza al vuelo (se movió, fijó, sacó o le entró un mensaje).
     if (e.type === 'wa.inbox') this.putWaInbox(e.chat);
     if (e.type === 'drive.updated') this.set({ driveRevision: this.state.driveRevision + 1 });
@@ -1303,7 +1390,7 @@ export class TieComsClient {
     if (!d) return;
     const same = (x: import('@tiecoms/contracts').WaChatDTO) => x.accountId === chat.accountId && x.jid === chat.jid;
     const rest = (d.waInbox ?? []).filter((x) => !same(x));
-    this.set({ data: { ...d, waInbox: chat.inboxPlace && !chat.hidden ? [...rest, chat] : rest } });
+    this.set({ data: { ...d, waInbox: chat.inboxPlace && !chat.hidden && this.isWaChatVisible(chat.accountId, chat.jid) ? [...rest, chat] : rest } });
   }
   /**
    * WhatsApp en la bandeja (docs/WA-BANDEJA-GG-CHAT.md): mover a Grupos/DMs ('auto' = la sugerida), sacar (null)
@@ -1711,15 +1798,28 @@ export class TieComsClient {
   /** Descarga autenticada (Bearer) de una ruta del API, p. ej. AttachmentDTO.url. */
   async fetchBlob(apiPath: string): Promise<Blob> {
     const generation = this.sessionGeneration;
+    const privacyIdentity = this.getWaPathPrivacyIdentity(apiPath);
+    const scope = waPathScope(apiPath);
+    const assertPrivacy = () => {
+      if (privacyIdentity !== this.getWaPathPrivacyIdentity(apiPath)) throw new ApiRequestError(409, 'wa_privacy_changed', 'El archivo de WhatsApp ya no está disponible.');
+      if (scope && !this.isWaChatVisible(scope.accountId, scope.jid)) throw new ApiRequestError(404, 'wa_private', 'Archivo de WhatsApp no disponible.');
+    };
+    assertPrivacy();
     const path = apiPath.replace(/^\/api\/v1/, '');
     if (this.accessToken && Date.now() > this.accessExp - 30_000) await this.refresh();
     this.assertSession(generation);
+    assertPrivacy();
     let res = await this.raw(path);
     this.assertSession(generation);
-    if (res.status === 401 && (await this.refresh())) { this.assertSession(generation); res = await this.raw(path); this.assertSession(generation); }
-    if (!res.ok) throw await parseError(res);
+    assertPrivacy();
+    if (res.status === 401 && (await this.refresh())) { this.assertSession(generation); assertPrivacy(); res = await this.raw(path); this.assertSession(generation); assertPrivacy(); }
+    if (!res.ok) {
+      if (res.status === 404 && scope) this.invalidateWaPrivacy({ type: 'wa.privacy', accountId: scope.accountId, jids: [scope.jid!] });
+      throw await parseError(res);
+    }
     const blob = await res.blob();
     this.assertSession(generation);
+    assertPrivacy();
     return blob;
   }
 

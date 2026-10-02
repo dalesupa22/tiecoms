@@ -1,3 +1,4 @@
+import { PaneSizeControl, type PaneSizing } from './PaneSizeControl.tsx';
 import { showDialogUntilClosed } from '../actions.tsx';
 import { LONG_TEXT_LIMIT, textFile } from '../rich-text.ts';
 import { usePersonalPreferences, chatAppearanceStyle } from '../personal-prefs.ts';
@@ -66,7 +67,7 @@ const draftKey = (id: string) => `tiecoms:draft:${id}`;
 const excerpt = (s: string, n = 90) => s.replace(/\s+/g, ' ').trim().slice(0, n);
 
 /** Panel dentro de la vista en paralelo (Split.tsx): activo = el del URL; count = cuántos hay abiertos. */
-export interface PaneProps { active: boolean; count: number; onClose: () => void; onOnly: () => void; pinned?: boolean; onPin?: () => void; onTint?: (anchor: HTMLElement) => void }
+export interface PaneProps { size?: PaneSizing; active: boolean; count: number; onClose: () => void; onOnly: () => void; pinned?: boolean; onPin?: () => void; onTint?: (anchor: HTMLElement) => void }
 
 export function ConversationScreen({ id, embedded, pane, search }: { id: string; embedded?: { onClose: () => void; anchor?: MessageDTO | null; onSeeAnchor?: () => void }; pane?: PaneProps; search?: string }) {
   const d = useClient((s) => s.data)!;
@@ -806,9 +807,19 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
               ? <div className="small muted ellipsis side-head-people"><StackedAvatars c={conv} size={18} /> 🔒 {t('side.privateN', { n: conv.memberIds.length })}</div>
               : <div className="small muted ellipsis">{conversationSubtitle(d, conv)}{conv.kind !== 'direct' ? ` · ${tn(conv.memberIds.length, 'n.participant', 'n.participants')}` : ''}<span className="chat-header-context"> · {activeFilter ? topicById.get(activeFilter)?.name : t(generalOnly ? 'topic.general' : 'topic.all')}{messageFeed === 'activity' ? ` · ${locale().startsWith('en') ? 'Task activity' : 'Actividad de tareas'}` : ''}</span></div>}
           </div>
-          {!embedded && !ggDm && <GgButton source={ggSource} on={ggShown} onClick={() => (ggShown ? closeGg() : openGg())} />}
-          {!isSide && <span className="chat-header-primary-call"><CallButtons conv={conv} /></span>}
-          <ChatHeaderPopover>
+          <div className="chat-header-primary">
+            {!embedded && !ggDm && <GgButton source={ggSource} on={ggShown} onClick={() => (ggShown ? closeGg() : openGg())} />}
+            {!isSide && <span className="chat-header-primary-call"><CallButtons conv={conv} /></span>}
+            {embedded ? <>
+              <button className="icon-btn chat-header-primary-control" aria-label={t('side.openFull')} title={t('side.openFull')} onClick={() => navigate(`/c/${id}`)}>⤢</button>
+              <button className="icon-btn chat-header-primary-control" aria-label={t('side.close')} title={t('side.close')} onClick={embedded.onClose}>×</button>
+            </> : pane ? <>
+              <PaneSizeControl size={pane.size} />
+              {pane.onPin && <button className={`icon-btn chat-header-primary-control pane-pin-control ${pane.pinned ? 'is-on' : ''}`} aria-label={t(pane.pinned ? 'grid.unpin' : 'grid.pin')} title={t(pane.pinned ? 'grid.unpin' : 'grid.pin')} aria-pressed={!!pane.pinned} onClick={pane.onPin}><span aria-hidden>📌</span>{pane.pinned && <span className="pane-pin-label">{locale().startsWith('en') ? 'Pinned' : 'Fijado'}</span>}</button>}
+              {pane.count > 1 && <button className="icon-btn chat-header-primary-control" aria-label={t('split.only')} title={t('split.only')} onClick={pane.onOnly}>⤢</button>}
+              <button className="icon-btn chat-header-primary-control" aria-label={t('split.close')} title={t('split.close')} onClick={pane.onClose}>×</button>
+            </> : null}
+            <ChatHeaderPopover>
             <div className="chat-header-identity">{orgsHere.map((o) => o && <span key={o.id} className="row"><OrgMark org={o} size={22} /><span>{o.name}</span></span>)}</div>
             <div className="chat-header-actions">
               {embedded && pinned.size > 0 && <button className="btn ghost small" data-close-header onClick={() => setShowPins(true)}>📌 {t('pins.title')} · {pinned.size}</button>}
@@ -824,23 +835,18 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
               {!embedded && splitAvailable() && (!pane || pane.count < MAX_PANES) && <button className="btn ghost small" data-close-header onClick={() => openDialog((close) => <SplitPicker activeId={id} onClose={close} />)}>⊞ {t('split.add')}</button>}
               <button className={`btn ghost small ${searching ? 'is-on' : ''}`} data-close-header aria-label={t('csearch.open')} aria-pressed={searching} onClick={() => setSearching((value) => !value)}>🔎 {t('csearch.open')}</button>
               <button className="btn ghost small" data-close-header onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); openMenuAt(r.left, r.bottom + 4, conversationMenu(conv, { onNewMeeting: () => newEvent({ conversationId: id }) })); }}>⋯ {t('menu.open')}</button>
-              {embedded ? <>
-                <button className="btn ghost small" data-close-header aria-label={t('side.openFull')} onClick={() => navigate(`/c/${id}`)}>⤢ {t('side.openFull')}</button>
-                <button className="btn ghost small" data-close-header aria-label={t('side.close')} onClick={embedded.onClose}>× {t('side.close')}</button>
-              </> : pane ? <>
+              {!embedded && pane ? <>
                 {pane.onTint && <button className="btn ghost small" data-close-header aria-label={t('tint.title')} onClick={(e) => pane.onTint!(e.currentTarget)}>🎨 {t('tint.title')}</button>}
-                {pane.onPin && <button className={`btn ghost small ${pane.pinned ? 'is-on' : ''}`} aria-label={t(pane.pinned ? 'grid.unpin' : 'grid.pin')} aria-pressed={!!pane.pinned} onClick={pane.onPin}>📌 {t(pane.pinned ? 'grid.unpin' : 'grid.pin')}</button>}
-                {pane.count > 1 && <button className="btn ghost small" data-close-header aria-label={t('split.only')} onClick={pane.onOnly}>⤢ {t('split.only')}</button>}
-                <button className="btn ghost small" data-close-header aria-label={t('split.close')} onClick={pane.onClose}>× {t('split.close')}</button>
-              </> : <button className="btn ghost small" onClick={() => setPanel(!panelPref)}>ⓘ {t('chat.details')}</button>}
+              </> : !embedded && <button className="btn ghost small" onClick={() => setPanel(!panelPref)}>ⓘ {t('chat.details')}</button>}
             </div>
             {!embedded && <>
               <div className="chat-feed-tools"><label><input type="checkbox" checked={messageFeed === 'activity'} onChange={(e) => setMessageFeed(e.target.checked ? 'activity' : 'messages')} /> {locale().startsWith('en') ? 'Show task activity' : 'Mostrar actividad de tareas'}</label><button className="link-btn" onClick={() => navigate(`/archivos?conversationId=${id}`)}>▣ {t('nav.files')}</button></div>
               <ChatBar conv={conv} pinnedCount={pinned.size} canOpenIssues={canOpenIssues} onPins={() => setShowPins(true)} onLinks={() => setShowLinks(true)} onOpenIssue={setOpenIssue} onNewIssue={() => setNewIssue({})} onOpenThread={setSideId} />
-              <TopicDock conv={conv} list={topics} filter={showAll && activeTopicIds.size ? TOPIC_ALL : activeFilter} onFilter={(x) => { setTopicFilter(x); atBottom.current = true; requestAnimationFrame(() => { const el = scroller.current; if (el) el.scrollTop = el.scrollHeight; }); }} counts={topicCounts} unread={topicUnread} />
             </>}
-          </ChatHeaderPopover>
+            </ChatHeaderPopover>
+          </div>
         </header>
+        {!embedded && <div className="chat-header-topics"><TopicDock conv={conv} list={topics} filter={showAll && activeTopicIds.size ? TOPIC_ALL : activeFilter} onFilter={(x) => { setTopicFilter(x); atBottom.current = true; requestAnimationFrame(() => { const el = scroller.current; if (el) el.scrollTop = el.scrollHeight; }); }} counts={topicCounts} unread={topicUnread} /></div>}
         {searching && <ChatSearchBar conv={conv} scroller={scroller} onJump={jumpTo} onClose={() => { setSearching(false); input.current?.focus(); }} />}
         {!isSide && <CallBanner conversationId={id} />}
         {isSide && (embedded?.anchor || anchorExcerpt) && (

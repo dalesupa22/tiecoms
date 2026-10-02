@@ -29,16 +29,28 @@ struct GgMarkButton: View {
     }
 }
 
-/// Botón gg del encabezado de un chat (chaggu o WhatsApp). Solo sale cuando el API respondió que existe.
+/// Sello gg del encabezado de un chat (chaggu o WhatsApp), junto al nombre: pequeñito (≈ 21 pt), sin círculo oscuro,
+/// con sus estrellitas que titilan. La entrada principal es «✨ Seguir con gg» de abajo; este sigue abriendo gg.
+/// Solo sale cuando el API respondió que existe.
 struct GgHeaderButton: View {
     @Environment(AppStore.self) private var store
     let source: String
     let action: () -> Void
+    static let size: CGFloat = 21
+    /// Lo que ocupa junto al nombre (sello + separación), para el ancho del título.
+    static let slot: CGFloat = 28
     var body: some View {
-        Button(action: action) { GgMarkButton(size: 28) }
-            .buttonStyle(.plain)
-            .accessibilityLabel(L("ggs.title"))
-            .accessibilityIdentifier("chat.gg")
+        Button(action: action) {
+            GGMark(ink: Theme.textPrimary, animated: true)
+                .frame(width: Self.size, height: Self.size)
+                .padding(2)
+                .background(Circle().fill(Theme.orange.opacity(0.10)))
+                .frame(width: Self.slot, height: 32)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(L("ggs.title"))
+        .accessibilityIdentifier("chat.gg")
     }
 }
 

@@ -535,6 +535,8 @@ struct ConversationView: View {
             // Dentro del panel del sidechat la cabecera es la del panel (no se mezcla con la del chat de origen).
             if !embedded {
             ToolbarItem(placement: .principal) {
+                // El sello gg va pegado al nombre (pequeño, sin botón aparte en la píldora): el nombre gana ese espacio.
+                HStack(spacing: 2) {
                 NavigationLink(value: Route.details(conversationId)) {
                     VStack(spacing: 1) {
                         HStack(spacing: 4) {
@@ -557,11 +559,10 @@ struct ConversationView: View {
                 .accessibilityLabel([Naming.title(d, c), headerSubtitle(d, c)].filter { !$0.isEmpty }.joined(separator: ", "))
                 .accessibilityHint(L("chat.details"))
                 .accessibilityIdentifier("chat.header")
-            }
-            // gg en todos los chats, entre el nombre y la píldora de 📞/🎥/🔍/⋯ (como en la web: se ve salvo que el servidor no
-            // tenga gg). Si no cabe todo, el nombre termina en «…» (headerTitleWidth).
-            if store.ggSide.available != false {
-                ToolbarItem(placement: .topBarTrailing) { GgHeaderButton(source: ggSource) { gg.open = true } }
+                // gg en todos los chats, junto al nombre (como en la web: se ve salvo que el servidor no tenga gg).
+                // Si no cabe todo, el nombre termina en «…» (headerTitleWidth).
+                if store.ggSide.available != false { GgHeaderButton(source: ggSource) { gg.open = true } }
+                }
             }
             ToolbarItem(placement: .topBarTrailing) { CallHeaderButtons(conv: c, compact: true) }
             ToolbarItem(placement: .topBarTrailing) {
@@ -588,13 +589,14 @@ struct ConversationView: View {
         }
     }
 
-    /// Lo que puede medir el nombre en la cabecera: el ancho de la pantalla menos ‹ y la píldora (gg, 📞, 🎥, 🔍, ⋯).
+    /// Lo que puede medir el nombre en la cabecera: el ancho de la pantalla menos ‹, la píldora (📞, 🎥, 🔍, ⋯) y el sello gg.
     private func headerTitleWidth(_ c: ConversationDTO) -> CGFloat {
         let calls = store.data?.callsEnabled == true && c.canPost ? 1 : 0
-        let slots = CGFloat((store.ggSide.available != false ? 1 : 0) + calls + 2)
-        // Medido en iPhone 17 (iOS 26): cada botón de la píldora ocupa ≈ 52 pt; ‹ ≈ 60 pt.
+        let slots = CGFloat(calls + 2)
+        // Medido en iPhone 17 (iOS 26): cada botón de la píldora ocupa ≈ 52 pt; ‹ ≈ 60 pt. El sello gg, junto al nombre.
+        let gg: CGFloat = store.ggSide.available != false ? GgHeaderButton.slot + 2 : 0
         let trailing = slots * 52 + 16, leading: CGFloat = 60
-        return max(72, min(250, screenWidth - leading - trailing - 12))
+        return max(72, min(260, screenWidth - leading - trailing - gg - 12))
     }
 
     /// Línea bajo el título del chat: la empresa en un grupo (sin repetirla si el nombre ya la trae).

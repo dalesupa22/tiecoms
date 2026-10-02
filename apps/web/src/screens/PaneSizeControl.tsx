@@ -15,9 +15,9 @@ export function PaneSizeControl({ size }: { size?: PaneSizing }) {
   const en = locale().startsWith('en');
   const choices: { rows: 1 | 2; columns: 1 | 2; label: string; icon: string }[] = [
     { rows: 1, columns: 1, label: en ? '1 column · 1 row' : '1 columna · 1 fila', icon: '□' },
-    { rows: 2, columns: 1, label: en ? '2 rows · Full height' : '2 filas · Alto completo', icon: '▯' },
-    { rows: 1, columns: 2, label: en ? '2 columns · Double width' : '2 columnas · Doble ancho', icon: '▭' },
-    { rows: 2, columns: 2, label: en ? '2 columns · 2 rows' : '2 columnas · 2 filas', icon: '▣' },
+    { rows: 2, columns: 1, label: en ? '1 column · 2 rows (full height)' : '1 columna · 2 filas (alto completo)', icon: '▯' },
+    { rows: 1, columns: 2, label: en ? '2 columns · 1 row (double width)' : '2 columnas · 1 fila (doble ancho)', icon: '▭' },
+    { rows: 2, columns: 2, label: en ? '2 columns · 2 rows (big)' : '2 columnas · 2 filas (grande)', icon: '▣' },
   ];
   const places: { where: 'left' | 'center' | 'right'; label: string; icon: string }[] = [
     { where: 'left', label: en ? 'Full height on the left' : 'Alto completo a la izquierda', icon: '⇤' },

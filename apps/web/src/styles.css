@@ -2240,6 +2240,12 @@ button.slot:disabled { opacity: .5; cursor: not-allowed; }
 .split.is-expanded { display: block; }
 .split.is-expanded > .split-cell { height: 100%; grid-area: auto !important; }
 .split.is-custom > .split-cell { grid-column: auto; }
+.split.has-pane-spans { overflow-x: auto; overflow-y: hidden; }
+.grid-pane-sizes[open] { max-width: min(420px, 85vw); }
+.grid-pane-sizes label { justify-content: space-between; gap: 12px; }
+.wa-list-pin:not([aria-pressed="true"]) { opacity: .4; }
+.wa-list-pin:hover, .wa-list-pin:focus-visible { opacity: 1; }
+.wa-list-pin[aria-pressed="true"] { background: var(--accent-soft); }
 .section-pane { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .section-pane-body { flex: 1; min-height: 0; overflow: auto; }
 .section-pane-body .page-narrow { padding: 14px; width: 100%; max-width: none; }
@@ -2306,7 +2312,7 @@ button.slot:disabled { opacity: .5; cursor: not-allowed; }
 .provider-sidebar.is-expanded { left: calc(68px * var(--ui-zoom, 1)); }
 
 /* Keep the complete composer and primary controls usable in narrow grid cells. */
-@container (max-width: 430px) {
+@container (max-width: 560px) {
   .composer-box { flex-wrap: wrap; }
   .composer-box > .mention-wrap { order: -1; flex: 1 0 100%; width: 100%; }
   .composer-box > .composer-import { display: none; }

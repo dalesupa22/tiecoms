@@ -13,9 +13,10 @@ import { openDialog } from '../actions.tsx';
 import { ConvAvatar, Modal, conversationTitle } from '../ui.tsx';
 import { activityOf } from '../home-order.ts';
 import { parseKey } from '../grid-keys.ts';
+import { BASE, navigate } from '../router.ts';
 import { type DragPayload, paneOf, pinToSlot, readDrag, shareToChat } from '../grid-actions.ts';
 import {
-  MAX_PANES, type DragKind, dragKindOf, fitsChat, fitsSlot, setDragging, setGridSide, splitAvailable, togglePin, useDragging, useGridSide, useMetas, usePanes, usePinned, useWide,
+  MAX_PANES, type DragKind, dragKindOf, fitsChat, fitsSlot, setDragging, setGridSide, splitAvailable, togglePin, useDragging, useGridSide, useMetas, usePanes, usePinned, useWide, rememberBack,
 } from '../split.ts';
 import { TASKS_KEY, TASKS_SLOT, slots, splitMain } from '../grid-keys.ts';
 import { ProviderIcon, WaIcon } from './Mail.tsx';
@@ -158,16 +159,21 @@ export function DragTray({ gridVisible }: { gridVisible: boolean }) {
   const accept = (ok: boolean, id: string, e: DragEvent) => { if (!ok) return; e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; if (over !== id) setOver(id); };
   const take = (kind: DragKind | null, dt: DataTransfer) => (kind ? readDrag(dt, kind) : null);
   const dropChat = (cid: string, e: DragEvent) => {
-    e.preventDefault(); setOver(null);
+    e.preventDefault(); e.stopPropagation(); setOver(null);
     const p = take(dragKindOf(e.dataTransfer.types), e.dataTransfer); if (!p) return;
     const c = d.conversations.find((x) => x.id === cid);
     void shareToChat(p, cid, c ? conversationTitle(d, c) : '');
   };
   const dropSlot = (i: number, e: DragEvent) => {
-    e.preventDefault(); setOver(null);
+    e.preventDefault(); e.stopPropagation(); setOver(null);
     const p = take(dragKindOf(e.dataTransfer.types), e.dataTransfer); if (!p) return;
-    const name = p.kind === 'chat' ? conversationTitle(d, d.conversations.find((x) => x.id === p.id)!) : '';
-    pinToSlot(p, i, name);
+    const conversation = p.kind === 'chat' ? d.conversations.find((x) => x.id === p.id) : null;
+    const name = conversation ? conversationTitle(d, conversation) : '';
+    if (pinToSlot(p, i, name) >= 0) {
+      rememberBack(location.pathname.slice(BASE.length) || '/');
+      setDragging(null);
+      navigate('/cuadricula');
+    }
   };
   return (
     <div className="tray" role="region" aria-label={t('tray.title')}>

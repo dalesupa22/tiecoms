@@ -11,6 +11,8 @@ import { MyLinks } from './MyLinks.tsx';
 import { isMeetingUrl } from './Meetings.tsx';
 import { addDays, startOfDay, storedView, viewRange, VIEW_KEY, type CalView } from '../calendar-grid.ts';
 import { groupColorIndex, isAllDayEvent } from '@tiecoms/client-core';
+import { CAL_EVENT_MIN_COLUMN, CAL_EVENT_MIN_HEIGHT, layoutTimedDay, timedHourRange } from '../calendar-event-layout.ts';
+import './CalendarLayout.css';
 
 // ---------- Zonas horarias sin librerías ----------
 const BROWSER_TZ = Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Bogota';
@@ -242,7 +244,7 @@ function eventMenu(ev: CalendarEventDTO): MenuItem[] {
 }
 
 // ---------- Agenda: Día · Semana · Mes (Semana por defecto) ----------
-const H0 = 7, H1 = 21, PX = 48;
+const PX = 48;
 const overlaps = (e: CalendarEventDTO, day: Date) => Date.parse(e.startsAt) < addDays(day, 1).getTime() && Date.parse(e.endsAt) > day.getTime();
 const meetIcon = (e: CalendarEventDTO) => (isMeetingUrl(e.location) ? '📹 ' : '');
 
@@ -264,6 +266,13 @@ export function AgendaScreen() {
   const legendIds = [...new Set(inRange.map((e) => e.conversationId))];
   const events = inRange.filter((e) => !hidden.has(e.conversationId));
   const timed = events.filter((e) => !allDay(e));
+  const timeDays = view === 'month' ? [] : days;
+  const { startHour: H0, endHour: H1 } = timedHourRange(timeDays, timed);
+  const layouts = timeDays.map((day) => layoutTimedDay(timed, day, H0, PX));
+  const dayWidths = layouts.map((list) => list.reduce((columns, p) => Math.max(columns, p.columns), 1) * CAL_EVENT_MIN_COLUMN);
+  const timeColumns = `56px ${dayWidths.map((width) => `minmax(${width}px, 1fr)`).join(' ')}`;
+  const timeGridMinWidth = 56 + dayWidths.reduce((sum, width) => sum + width, 0);
+  const gridTime = (at: Date) => at.toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
   const today = new Date().toDateString();
   const shift = (n: number) => setAnchor(view === 'day' ? addDays(anchor, n) : view === 'week' ? addDays(anchor, 7 * n) : new Date(anchor.getFullYear(), anchor.getMonth() + n, 1));
   const newAt = (at: Date) => openDialog((close) => <EventDialog defaultStart={at} onClose={close} />);
@@ -314,49 +323,48 @@ export function AgendaScreen() {
         </div>
       ) : (
         <>
-          <div className={`week only-desktop ${view === 'day' ? 'is-day' : ''}`} style={{ ['--cols' as string]: days.length }}>
-            <div className="week-head"><span />{days.map((x) => <span key={x.toISOString()} className={x.toDateString() === today ? 'is-today' : ''}>{fmtDay(x)}</span>)}</div>
+          <div className="cal-time-scroll only-desktop"><div className={`week cal-time-grid ${view === 'day' ? 'is-day' : ''}`} style={{ minWidth: timeGridMinWidth }}>
+            <div className="week-head" style={{ gridTemplateColumns: timeColumns }}><span />{days.map((x) => <span key={x.toISOString()} className={x.toDateString() === today ? 'is-today' : ''}>{fmtDay(x)}</span>)}</div>
             {events.some(allDay) && (
-              <div className="week-allday"><span className="small muted">{t('cal.allDay')}</span>{days.map((x) => (
+              <div className="week-allday" style={{ gridTemplateColumns: timeColumns }}><span className="small muted">{t('cal.allDay')}</span>{days.map((x) => (
                 <div key={x.toISOString()}>{events.filter((e) => allDay(e) && overlaps(e, x)).map((e) => {
                   const c = eventColors(d, e);
                   return <button key={e.id} className="month-ev" style={{ background: c.bg, color: c.fg }} onClick={() => openEvent(e.id)} onContextMenu={contextHandler(() => eventMenu(e))}><span className="ellipsis">{e.title}</span></button>;
                 })}</div>
               ))}</div>
             )}
-            <div className="week-body" style={{ height: (H1 - H0) * PX }}>
+            <div className="week-body" style={{ height: (H1 - H0) * PX + CAL_EVENT_MIN_HEIGHT, gridTemplateColumns: timeColumns }}>
               <div className="week-hours">{Array.from({ length: H1 - H0 }, (_, i) => <span key={i} style={{ top: i * PX }}>{String(H0 + i).padStart(2, '0')}:00</span>)}</div>
-              {days.map((x) => {
-                const dayEvents = timed.filter((e) => new Date(e.startsAt).toDateString() === x.toDateString());
-                const cols: CalendarEventDTO[][] = [];
-                for (const e of dayEvents) { const c = cols.find((col) => col[col.length - 1]!.endsAt <= e.startsAt); if (c) c.push(e); else cols.push([e]); }
+              {days.map((x, dayIndex) => {
                 return (
                   <div key={x.toISOString()} className={`week-day ${x.toDateString() === today ? 'is-today' : ''}`}
                     onDoubleClick={(ev) => { if (ev.target !== ev.currentTarget) return; const r = ev.currentTarget.getBoundingClientRect(); const h = H0 + Math.floor((ev.clientY - r.top) / PX); const at = new Date(x); at.setHours(h, 0, 0, 0); newAt(at); }}>
                     {Array.from({ length: H1 - H0 }, (_, i) => <i key={i} style={{ top: i * PX }} />)}
-                    {cols.flatMap((col, ci) => col.map((e) => {
-                      const st = new Date(e.startsAt), en = new Date(e.endsAt);
-                      const top = Math.max(0, ((st.getHours() + st.getMinutes() / 60) - H0) * PX);
-                      const h = Math.max(22, ((en.getTime() - st.getTime()) / 3600_000) * PX - 2);
-                      const c = eventColors(d, e);
+                    {layouts[dayIndex]!.map((p) => {
+                      const e = p.event, c = eventColors(d, e);
+                      const conv = conversationTitle(d, d.conversations.find((cv) => cv.id === e.conversationId)!);
+                      const time = `${gridTime(p.startsAt)}–${p.endMinute === 1440 ? '24:00' : gridTime(p.endsAt)}`;
+                      const full = `${e.title} · ${fmtDay(new Date(e.startsAt))} ${gridTime(new Date(e.startsAt))} – ${fmtDay(new Date(e.endsAt))} ${gridTime(new Date(e.endsAt))} · ${conv}`;
                       return (
-                        <button key={e.id} className={`week-ev ${e.cancelledAt ? 'is-cancelled' : ''}`} onContextMenu={contextHandler(() => eventMenu(e))}
-                          style={{ top, height: h, left: `${(ci / cols.length) * 100}%`, width: `${100 / cols.length}%`, background: c.bg, color: c.fg }}
+                        <button key={e.id} className={`week-ev ${p.compact ? 'is-compact' : ''} ${e.cancelledAt ? 'is-cancelled' : ''}`} onContextMenu={contextHandler(() => eventMenu(e))}
+                          title={full} aria-label={full}
+                          style={{ top: p.top, height: p.height, left: `${(p.column / p.columns) * 100}%`, width: `calc(${100 / p.columns}% - 4px)`, background: c.bg, color: c.fg }}
                           onClick={() => openEvent(e.id)}>
-                          <b className="ellipsis">{meetIcon(e)}{e.title}</b><span className="ellipsis">{fmtTime(e.startsAt)} · {conversationTitle(d, d.conversations.find((cv) => cv.id === e.conversationId)!)}</span>
+                          <b className="ellipsis">{p.continuesBefore ? '↥ ' : ''}{meetIcon(e)}{e.title}{p.continuesAfter ? ' ↧' : ''}</b>
+                          {p.compact ? <span className="cal-ev-time">{time}</span> : <span className="ellipsis cal-ev-detail">{time} · {conv}</span>}
                         </button>
                       );
-                    }))}
+                    })}
                   </div>
                 );
               })}
             </div>
-          </div>
+          </div></div>
 
           <div className="only-mobile list">
             {events.length === 0 && <div className="empty">{t(view === 'day' ? 'cal.dayEmpty' : 'cal.empty')}</div>}
             {days.map((x) => {
-              const list = events.filter((e) => (allDay(e) ? overlaps(e, x) : new Date(e.startsAt).toDateString() === x.toDateString()));
+              const list = events.filter((e) => overlaps(e, x));
               if (!list.length) return null;
               return (
                 <section key={x.toISOString()}>

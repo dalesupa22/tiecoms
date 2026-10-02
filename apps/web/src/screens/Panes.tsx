@@ -1,4 +1,5 @@
 import { waAccounts } from '../wa-requests.ts';
+import { sortWaChats } from '../wa-chat-order.ts';
 import { AttachmentsView } from './Attachments.tsx';
 import { RichText } from './RichText.tsx';
 /**
@@ -13,8 +14,8 @@ import { client, useClient } from '../app-client.ts';
 import { errorText, locale, t } from '../i18n.ts';
 import { openDialog, showDialogUntilClosed } from '../actions.tsx';
 import { Modal } from '../ui.tsx';
-import { rememberMeta, useMetas } from '../split.ts';
-import { setDrag } from '../grid-actions.ts';
+import { collapsePane, rememberMeta, useActiveKey, useMetas, useWide } from '../split.ts';
+import { openInGrid, setDrag } from '../grid-actions.ts';
 import { ConnectCards, MailBrowser, MailHtml, MailMeta, ProviderIcon, ShareStep, WaIcon, WaShareDialog, kb, liveHtmlOf, previewOf, useMailConnections } from './Mail.tsx';
 import { setWaSend } from './WhatsApp.tsx';
 import { IssuesBody, NewIssueDialog } from './Issues.tsx';
@@ -22,7 +23,7 @@ import { GgButton, GgSidePanel, ReplyForMe, SelectionBar, SuggestDialog, waSourc
 import { WaAvatar, waInboxMenu, waMainListMenu, useWaInboxRow } from './WaInbox.tsx';
 import { ReminderDialog } from '../actions.tsx';
 import { isSelfChat } from '../ui.tsx';
-import { navigate } from '../router.ts';
+import { BASE, navigate } from '../router.ts';
 import { copyText, menuProps, openMenuAt, toast } from '../menu.tsx';
 import { AgendaScreen } from './Calendar.tsx';
 import { TrazoScreen } from './Lineage.tsx';
@@ -88,7 +89,7 @@ function MailView({ paneKey, provider, id, preserveWorkspace }: { preserveWorksp
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     let live = true;
-    setM(null); setHtml(undefined); setError(null);
+    setM(null); setHtml(undefined); setError(null); setAsText(false);
     previewOf(provider, id).then((r) => { if (!live) return; setM(r); if (paneKey) rememberMeta(paneKey, { title: r.subject || t('mail.noSubject'), sub: r.from ? r.from.name || r.from.email : undefined }); }).catch((e) => live && setError(errorText(e)));
     liveHtmlOf(provider, id).then((h) => live && setHtml(h)).catch(() => live && setHtml(null));
     return () => { live = false; };
@@ -97,7 +98,7 @@ function MailView({ paneKey, provider, id, preserveWorkspace }: { preserveWorksp
     <Modal title={t('mail.shareTitle')} onClose={close}><ShareStep provider={provider} item={m} onBack={close} onDone={(cid) => { close(); if (!preserveWorkspace) navigate(`/c/${cid}`); }} /></Modal>
   ));
   return (
-    <>
+    <div className="mail-reader">
       {error && <div className="error">{error}</div>}
       {!m && !error && <div className="hint">{t('common.loading')}</div>}
       {m && <h4 className="pane-subject">{m.subject || t('mail.noSubject')}</h4>}
@@ -114,7 +115,7 @@ function MailView({ paneKey, provider, id, preserveWorkspace }: { preserveWorksp
           <span className="small muted">{t('grid.carryMailHint')}</span>
         </div>
       )}
-    </>
+    </div>
   );
 }
 
@@ -128,11 +129,24 @@ export function MailPane({ paneKey, provider, id, frame }: { paneKey: string; pr
   );
 }
 
-/** La bandeja entera: la lista de tu correo con búsqueda y filtros; al tocar uno se abre ahí mismo, con «← Bandeja» para volver. */
+/** In the grid, read in this cell. The desktop sidebar keeps its inbox and opens a reader to the right. */
 export function InboxPane({ frame }: { frame: PaneFrame }) {
   const { list, error, reload } = useMailConnections();
   const [open, setOpen] = useState<{ provider: MailProvider; item: MailListItemDTO } | null>(null);
+  const wide = useWide();
+  const activeKey = useActiveKey();
   const ready = !!list?.some((c) => c.status === 'active');
+  const openMail = (provider: MailProvider, item: MailListItemDTO) => {
+    if (frame.presentation === 'sidebar' && wide) {
+      const opened = openInGrid({ kind: 'mail', provider, id: item.id, subject: item.subject, from: item.from?.name || item.from?.email || '' }, activeKey, null);
+      if (!opened) return;
+      collapsePane();
+      if (frame.expanded) frame.onOnly();
+      if (location.pathname !== `${BASE}/cuadricula`) navigate('/cuadricula');
+      return;
+    }
+    setOpen({ provider, item });
+  };
   return (
     <div className={`pane-typed ${frame.active ? 'is-active' : ''}`}>
       <PaneHead icon={<ProviderIcon provider="google" size={20} />} title={t('nav.mail')} sub={open ? open.item.subject || t('mail.noSubject') : undefined} frame={frame} />
@@ -147,7 +161,7 @@ export function InboxPane({ frame }: { frame: PaneFrame }) {
           {!list && !error && <div className="hint">{t('common.loading')}</div>}
           {list && !ready && <><p className="muted" style={{ margin: 0 }}>{t('mail.intro')}</p><ConnectCards list={list} reload={() => void reload()} /></>}
           {list && ready && (
-            <MailBrowser connections={list} inPane pickLabel={t('mail.bring')} onOpen={(provider, item) => setOpen({ provider, item })}
+            <MailBrowser connections={list} inPane pickLabel={t('mail.bring')} onOpen={openMail}
               onPick={(provider, item) => openDialog((close) => (
                 <Modal title={t('mail.shareTitle')} onClose={close}><ShareStep provider={provider} item={item} onBack={close} onDone={(cid) => { close(); if (frame.presentation !== 'sidebar') navigate(`/c/${cid}`); }} /></Modal>
               ))} />
@@ -373,6 +387,7 @@ export function WaListPane({ frame }: { frame: PaneFrame }) {
   const [error, setError] = useState<string | null>(null);
   const generation = useRef(0);
   const [open, setOpen] = useState<WaChatDTO | null>(null);
+  const [pinBusy, setPinBusy] = useState<string | null>(null);
   const active = frame.visible !== false && (frame.presentation !== 'sidebar' || frame.active);
   useEffect(() => { if (!active) return; let live = true; waAccounts().then((accounts) => { if (live) setAccounts(accounts); }).catch((e) => { if (live) setError(errorText(e)); }); return () => { live = false; }; }, [revision, active]);
   const loadPage = async (cursor?: string, token = generation.current) => {
@@ -382,7 +397,7 @@ export function WaListPane({ frame }: { frame: PaneFrame }) {
     try {
       const r = await client.request<{ chats: WaChatDTO[]; next?: string | null }>(`/whatsapp/chats?${p}`);
       if (token !== generation.current) return;
-      setChats((old) => cursor ? [...new Map([...(old ?? []), ...r.chats].map((c) => [`${c.accountId}|${c.jid}`, c])).values()] : r.chats); setNext(r.next ?? null);
+      setChats((old) => sortWaChats(cursor ? [...new Map([...(old ?? []), ...r.chats].map((c) => [`${c.accountId}|${c.jid}`, c])).values()] : r.chats)); setNext(r.next ?? null);
     } catch (e) { if (token === generation.current) setError(errorText(e)); }
     finally { if (token === generation.current) setLoading(false); }
   };
@@ -392,6 +407,21 @@ export function WaListPane({ frame }: { frame: PaneFrame }) {
     return () => { clearTimeout(timer); generation.current++; };
   }, [q, groups, accountId, revision, active]);
   const connected = accounts?.some((a) => a.status === 'connected') ?? false;
+  const toggleChatPin = async (chat: WaChatDTO) => {
+    if (pinBusy) return;
+    const owner = client.getSessionIdentity();
+    const token = generation.current;
+    setPinBusy(`${chat.accountId}|${chat.jid}`);
+    try {
+      const updated = await client.request<WaChatDTO>(`/whatsapp/chats/${chat.accountId}/${encodeURIComponent(chat.jid)}`, { method: 'PATCH', json: { pinned: !chat.pinned } });
+      if (client.getSessionIdentity() !== owner || token !== generation.current) return;
+      setChats((old) => old && sortWaChats(old.map((c) => c.accountId === updated.accountId && c.jid === updated.jid ? updated : c)));
+      // Refresh the cursor once after changing the server sort key.
+      generation.current++;
+      void loadPage(undefined, generation.current);
+    } catch (e) { if (client.getSessionIdentity() === owner) toast(errorText(e)); }
+    finally { setPinBusy(null); }
+  };
   const when = (iso: string | null) => {
     if (!iso) return '';
     const x = new Date(iso);
@@ -429,14 +459,18 @@ export function WaListPane({ frame }: { frame: PaneFrame }) {
                 {chats?.length === 0 && <div className="empty">{connected ? t('grid.noChats') : t('wa.syncing')}</div>}
                 {chats?.map((c) => (
                   <div key={`${c.accountId}|${c.jid}`} className={`wa-row ${c.unread ? 'unread' : ''}`} role="button" tabIndex={0} draggable
-                    onClick={() => setOpen(c)} onKeyDown={(e) => { if (e.key === 'Enter') setOpen(c); }}
+                    onClick={() => setOpen(c)} onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); setOpen(c); } }}
                     onDragStart={(e) => setDrag(e, 'wa', { accountId: c.accountId, jid: c.jid, name: c.name, isGroup: c.isGroup }, c.name)}>
                     <span className="wa-av" aria-hidden>{c.isGroup ? '👥' : '👤'}</span>
                     <span className="grow" style={{ minWidth: 0 }}>
-                      <span className="row" style={{ gap: 6 }}><b className="ellipsis grow">{c.name}</b><span className="small muted">{when(c.lastMessageAt)}</span></span>
+                      <span className="row" style={{ gap: 6 }}><b className="ellipsis grow">{c.pinned && <span aria-label={locale().startsWith('en') ? 'Pinned conversation' : 'Conversación fijada'}>📌 </span>}{c.name}</b><span className="small muted" title={c.lastMessageAt ? new Date(c.lastMessageAt).toLocaleString(locale()) : ''}>{when(c.lastMessageAt)}</span></span>
                       <span className="small muted ellipsis" style={{ display: 'block' }}>{c.lastPreview ?? ''}</span>
                     </span>
                     {c.unread > 0 && <span className="pill">{c.unread}</span>}
+                    <button className="icon-btn wa-list-pin" aria-pressed={c.pinned} disabled={pinBusy !== null} draggable={false}
+                      aria-label={locale().startsWith('en') ? `${c.pinned ? 'Unpin' : 'Pin'} conversation: ${c.name}` : `${c.pinned ? 'Desfijar' : 'Fijar'} conversación: ${c.name}`}
+                      title={t(c.pinned ? 'wa.unpin' : 'wa.pin')}
+                      onClick={(e) => { e.stopPropagation(); void toggleChatPin(c); }}>📌</button>
                   </div>
                 ))}
                 {next && <button className="btn small" disabled={loading} onClick={() => void loadPage(next)}>{locale().startsWith('en') ? 'Load more' : 'Cargar más'}</button>}

@@ -1,7 +1,7 @@
 import { showDialogUntilClosed } from '../actions.tsx';
 import { LONG_TEXT_LIMIT, textFile } from '../rich-text.ts';
 import { usePersonalPreferences, chatAppearanceStyle } from '../personal-prefs.ts';
-import { PersonalChatControls } from './PersonalChats.tsx';
+import { PersonalChatDialog } from './PersonalChats.tsx';
 import { isTaskActivity } from '../chat-activity.ts';
 import { TOPIC_ALL, filterForEntry, filterForMessage, topicUnreadCounts } from '../topic-order.ts';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
@@ -50,6 +50,8 @@ import { claimFileDrag, clipboardFiles, installFileDropGuard, isFileDrag } from 
 
 import { GifButton, openGifPicker } from './Gifs.tsx';
 import { parseGifCommand } from '../gifs.ts';
+import { ChatHeaderPopover } from './ChatHeaderPopover.tsx';
+import { startCall } from '../call.ts';
 
 type Row =
   | { kind: 'day'; key: string; label: string }
@@ -795,40 +797,49 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
           if (files.length) { drafts.add(files); input.current?.focus(); }
         }}>
         {dropping && <div className="drop-hint" aria-hidden><span>⤓ {t('att.drop', { name: isSide ? t('side.title') : title })}</span></div>}
-        <header className="conv-head" onContextMenu={contextHandler(() => conversationMenu(conv, { onNewMeeting: () => newEvent({ conversationId: id }) }))}>
+        <header className="conv-head chat-header-compact" onContextMenu={contextHandler(() => conversationMenu(conv, { onNewMeeting: () => newEvent({ conversationId: id }) }))}>
           {!embedded && <button className="icon-btn only-mobile" aria-label={t('common.back')} onClick={() => (history.length > 1 ? history.back() : navigate('/conversaciones'))}>‹</button>}
           {conv.kind === 'direct' ? <Avatar person={personById(d, directOtherId(d, conv))} size={28} /> : conv.avatarUrl ? <ConvAvatar c={conv} size={30} /> : null}
           <div className="grow conv-head-title" style={{ minWidth: 0 }}>
             <h2 className="ellipsis">{conv.kind === 'internal' ? '◌ ' : conv.level === 'directivo' ? '◆ ' : ''}{isSide ? `💬 ${t('side.title')}` : title}{muted && <> <button className="head-mute" title={`${muteLine ?? t('side.muted')} · ${t('menu.unmute')}`} aria-label={t('menu.unmute')} onClick={(e) => openMuteMenu(e.currentTarget)}>🔕</button></>}</h2>
             {isSide
               ? <div className="small muted ellipsis side-head-people"><StackedAvatars c={conv} size={18} /> 🔒 {t('side.privateN', { n: conv.memberIds.length })}</div>
-              : <div className="small muted ellipsis">{conversationSubtitle(d, conv)}{conv.kind !== 'direct' ? ` · ${tn(conv.memberIds.length, 'n.participant', 'n.participants')}` : ''}</div>}
+              : <div className="small muted ellipsis">{conversationSubtitle(d, conv)}{conv.kind !== 'direct' ? ` · ${tn(conv.memberIds.length, 'n.participant', 'n.participants')}` : ''}<span className="chat-header-context"> · {activeFilter ? topicById.get(activeFilter)?.name : t(generalOnly ? 'topic.general' : 'topic.all')}{messageFeed === 'activity' ? ` · ${locale().startsWith('en') ? 'Task activity' : 'Actividad de tareas'}` : ''}</span></div>}
           </div>
           {!embedded && !ggDm && <GgButton source={ggSource} on={ggShown} onClick={() => (ggShown ? closeGg() : openGg())} />}
-          <div className="row only-desktop head-orgs">{orgsHere.map((o) => o && <OrgMark key={o.id} org={o} size={22} />)}</div>
-          {embedded && pinned.size > 0 && <button className="btn ghost small" onClick={() => setShowPins(true)} title={t('pins.title')}>📌 {pinned.size}</button>}
-          {embedded && conv.canManage && conv.kind !== 'direct' && <button className="btn ghost small" onClick={() => openDialog((close) => <AddMembersDialog conversationId={id} onClose={close} />)} title={t('bar.addPeople')}>＋ {t('bar.people')}</button>}
-          {!embedded && <PersonalChatControls conv={conv} />}
-          {ws && !embedded && <button className="btn ghost small only-desktop head-space" onClick={() => navigate(`/w/${ws.id}`)}>{t('chat.space')}</button>}
-          {!isSide && <CallButtons conv={conv} />}
-          {!embedded && <span className="zoom-pill only-desktop" role="group" aria-label={t('zoom.label')}>
-            <button className="icon-btn" aria-label={t('zoom.out')} title={t('zoom.out')} disabled={zoom <= ZOOM_MIN} onClick={() => setConvZoom(id, zoom - 0.1)}>A−</button>
-            {zoom !== 1 && <button className="zoom-val" title={t('zoom.reset')} onClick={() => setConvZoom(id, 1)}>{Math.round(zoom * 100)}%</button>}
-            <button className="icon-btn" aria-label={t('zoom.in')} title={t('zoom.in')} disabled={zoom >= ZOOM_MAX} onClick={() => setConvZoom(id, zoom + 0.1)}>A+</button>
-          </span>}
-          {/* ⊞ Abrir otro chat al lado (hasta 4, split.ts): lo mismo que arrastrar un chat de la lista. */}
-          {!embedded && splitAvailable() && (!pane || pane.count < MAX_PANES) && <button className="icon-btn only-desktop head-split" aria-label={t('split.add')} title={t('split.add')} onClick={() => openDialog((close) => <SplitPicker activeId={id} onClose={close} />)}>⊞</button>}
-          <button className={`icon-btn only-desktop head-search ${searching ? 'is-on' : ''}`} aria-label={t('csearch.open')} title={t('csearch.open')} aria-pressed={searching} onClick={() => setSearching((v) => !v)}>🔎</button>
-          <button className="icon-btn" aria-label={t('menu.open')} onClick={(e) => { const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); openMenuAt(r.left, r.bottom + 4, [{ label: t('csearch.open'), icon: '🔎', onSelect: () => setSearching(true) }, ...(!embedded ? [{ label: `${t('zoom.in')} · ${Math.round(zoom * 100)}%`, icon: 'A+', onSelect: () => setConvZoom(id, zoom + 0.1) }, { label: t('zoom.out'), icon: 'A−', onSelect: () => setConvZoom(id, zoom - 0.1) }, ...(zoom !== 1 ? [{ label: t('zoom.reset'), icon: '↺', onSelect: () => setConvZoom(id, 1) }] : [])] : []), { divider: true }, ...conversationMenu(conv, { onNewMeeting: () => newEvent({ conversationId: id }) })]); }}>⋯</button>
-          {embedded ? <>
-            <button className="icon-btn" aria-label={t('side.openFull')} title={t('side.openFull')} onClick={() => navigate(`/c/${id}`)}>⤢</button>
-            <button className="icon-btn" aria-label={t('side.close')} title={t('side.close')} onClick={embedded.onClose}>×</button>
-          </> : pane ? <>
-            {pane.onTint && <button className="icon-btn head-keep" aria-label={t('tint.title')} title={t('tint.title')} onClick={(e) => pane.onTint!(e.currentTarget)}>🎨</button>}
-            {pane.onPin && <button className={`icon-btn head-keep ${pane.pinned ? 'is-on' : ''}`} aria-pressed={!!pane.pinned} aria-label={t(pane.pinned ? 'grid.unpin' : 'grid.pin')} title={t(pane.pinned ? 'grid.unpin' : 'grid.pin')} onClick={pane.onPin}>📌</button>}
-            {pane.count > 1 && <button className="icon-btn head-keep" aria-label={t('split.only')} title={t('split.only')} onClick={pane.onOnly}>⤢</button>}
-            <button className="icon-btn head-keep" aria-label={t('split.close')} title={t('split.close')} onClick={pane.onClose}>×</button>
-          </> : <button className="icon-btn" aria-label={t('chat.details')} onClick={() => setPanel(!panelPref)}>ⓘ</button>}
+          {!isSide && <span className="chat-header-primary-call"><CallButtons conv={conv} /></span>}
+          <ChatHeaderPopover>
+            <div className="chat-header-identity">{orgsHere.map((o) => o && <span key={o.id} className="row"><OrgMark org={o} size={22} /><span>{o.name}</span></span>)}</div>
+            <div className="chat-header-actions">
+              {embedded && pinned.size > 0 && <button className="btn ghost small" data-close-header onClick={() => setShowPins(true)}>📌 {t('pins.title')} · {pinned.size}</button>}
+              {embedded && conv.canManage && conv.kind !== 'direct' && <button className="btn ghost small" data-close-header onClick={() => openDialog((close) => <AddMembersDialog conversationId={id} onClose={close} />)}>＋ {t('bar.people')}</button>}
+              {!embedded && <button className="btn ghost small" data-close-header onClick={() => openDialog((close) => <PersonalChatDialog conv={conv} onClose={close} />)}>🎨 {locale().startsWith('en') ? 'Customize chat' : 'Personalizar chat'}</button>}
+              {ws && !embedded && <button className="btn ghost small" data-close-header onClick={() => navigate(`/w/${ws.id}`)}>{t('chat.space')}</button>}
+              {!isSide && d.features?.calls === true && conv.canPost && <button className="btn ghost small head-call-video" data-close-header aria-label={t('call.video')} onClick={() => void startCall(id, 'video').catch((e) => toast(errorText(e)))}>🎥 {t('call.video')}</button>}
+              {!embedded && <>
+                <button className="btn ghost small" aria-label={t('zoom.out')} disabled={zoom <= ZOOM_MIN} onClick={() => setConvZoom(id, zoom - .1)}>A− {t('zoom.out')}</button>
+                <button className="btn ghost small" aria-label={t('zoom.in')} disabled={zoom >= ZOOM_MAX} onClick={() => setConvZoom(id, zoom + .1)}>A+ {t('zoom.in')}</button>
+                <button className="btn ghost small" aria-label={t('zoom.reset')} onClick={() => setConvZoom(id, 1)}>↺ {t('zoom.reset')} · {Math.round(zoom * 100)}%</button>
+              </>}
+              {!embedded && splitAvailable() && (!pane || pane.count < MAX_PANES) && <button className="btn ghost small" data-close-header onClick={() => openDialog((close) => <SplitPicker activeId={id} onClose={close} />)}>⊞ {t('split.add')}</button>}
+              <button className={`btn ghost small ${searching ? 'is-on' : ''}`} data-close-header aria-label={t('csearch.open')} aria-pressed={searching} onClick={() => setSearching((value) => !value)}>🔎 {t('csearch.open')}</button>
+              <button className="btn ghost small" data-close-header onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); openMenuAt(r.left, r.bottom + 4, conversationMenu(conv, { onNewMeeting: () => newEvent({ conversationId: id }) })); }}>⋯ {t('menu.open')}</button>
+              {embedded ? <>
+                <button className="btn ghost small" data-close-header aria-label={t('side.openFull')} onClick={() => navigate(`/c/${id}`)}>⤢ {t('side.openFull')}</button>
+                <button className="btn ghost small" data-close-header aria-label={t('side.close')} onClick={embedded.onClose}>× {t('side.close')}</button>
+              </> : pane ? <>
+                {pane.onTint && <button className="btn ghost small" data-close-header aria-label={t('tint.title')} onClick={(e) => pane.onTint!(e.currentTarget)}>🎨 {t('tint.title')}</button>}
+                {pane.onPin && <button className={`btn ghost small ${pane.pinned ? 'is-on' : ''}`} aria-label={t(pane.pinned ? 'grid.unpin' : 'grid.pin')} aria-pressed={!!pane.pinned} onClick={pane.onPin}>📌 {t(pane.pinned ? 'grid.unpin' : 'grid.pin')}</button>}
+                {pane.count > 1 && <button className="btn ghost small" data-close-header aria-label={t('split.only')} onClick={pane.onOnly}>⤢ {t('split.only')}</button>}
+                <button className="btn ghost small" data-close-header aria-label={t('split.close')} onClick={pane.onClose}>× {t('split.close')}</button>
+              </> : <button className="btn ghost small" onClick={() => setPanel(!panelPref)}>ⓘ {t('chat.details')}</button>}
+            </div>
+            {!embedded && <>
+              <div className="chat-feed-tools"><label><input type="checkbox" checked={messageFeed === 'activity'} onChange={(e) => setMessageFeed(e.target.checked ? 'activity' : 'messages')} /> {locale().startsWith('en') ? 'Show task activity' : 'Mostrar actividad de tareas'}</label><button className="link-btn" onClick={() => navigate(`/archivos?conversationId=${id}`)}>▣ {t('nav.files')}</button></div>
+              <ChatBar conv={conv} pinnedCount={pinned.size} canOpenIssues={canOpenIssues} onPins={() => setShowPins(true)} onLinks={() => setShowLinks(true)} onOpenIssue={setOpenIssue} onNewIssue={() => setNewIssue({})} onOpenThread={setSideId} />
+              <TopicDock conv={conv} list={topics} filter={showAll && activeTopicIds.size ? TOPIC_ALL : activeFilter} onFilter={(x) => { setTopicFilter(x); atBottom.current = true; requestAnimationFrame(() => { const el = scroller.current; if (el) el.scrollTop = el.scrollHeight; }); }} counts={topicCounts} unread={topicUnread} />
+            </>}
+          </ChatHeaderPopover>
         </header>
         {searching && <ChatSearchBar conv={conv} scroller={scroller} onJump={jumpTo} onClose={() => { setSearching(false); input.current?.focus(); }} />}
         {!isSide && <CallBanner conversationId={id} />}
@@ -847,13 +858,7 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
             </div>
           </div>
         )}
-        {!embedded && <div className="chat-feed-tools"><label><input type="checkbox" checked={messageFeed === 'activity'} onChange={(e) => setMessageFeed(e.target.checked ? 'activity' : 'messages')} /> {locale().startsWith('en') ? 'Show task activity' : 'Mostrar actividad de tareas'}</label><span className="grow" /><button className="link-btn" onClick={() => navigate(`/archivos?conversationId=${id}`)}>▣ {t('nav.files')}</button></div>}
         <LineageBar conv={conv} />
-        {!embedded && (
-          <ChatBar conv={conv} pinnedCount={pinned.size} canOpenIssues={canOpenIssues} onPins={() => setShowPins(true)} onLinks={() => setShowLinks(true)}
-            onOpenIssue={setOpenIssue} onNewIssue={() => setNewIssue({})} onOpenThread={setSideId} />
-        )}
-        {!embedded && <TopicDock conv={conv} list={topics} filter={showAll && activeTopicIds.size ? TOPIC_ALL : activeFilter} onFilter={(x) => { setTopicFilter(x); atBottom.current = true; requestAnimationFrame(() => { const el = scroller.current; if (el) el.scrollTop = el.scrollHeight; }); }} counts={topicCounts} unread={topicUnread} />}
         {!embedded && <DerivedPendingStrip conv={conv} />}
 
         {placementFailed && <div className="error" role="alert">{t('chat.unreadLoadFailed')} <button className="link-btn" disabled={local?.loading} onClick={() => void retryUnreadHistory()}>{t('chat.retryUnread')}</button></div>}

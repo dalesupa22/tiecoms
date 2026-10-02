@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useContext, useEffect, useState } from 'react';
 import type { BootstrapDTO, ConversationDTO, IssueDTO } from '@tiecoms/contracts';
 import { client, useClient } from '../app-client.ts';
 import { getLang, locale, t } from '../i18n.ts';
@@ -6,6 +6,7 @@ import { Avatar, Modal, conversationTitle, personById, timeLabel } from '../ui.t
 import { EventRow, newEvent } from './Calendar.tsx';
 import { ConversationIssues, isClosed, localIso } from './Issues.tsx';
 import { updatePersonalChat, usePersonalPreferences } from '../personal-prefs.ts';
+import { ChatHeaderVisibility } from './ChatHeaderPopover.tsx';
 
 /**
  * Barra de accesos del chat (mismas reglas en web, iOS y Android: docs/GRUPOS.md): Fijados, Asuntos, Hilos,
@@ -50,6 +51,8 @@ export function ChatBar({ conv, pinnedCount, canOpenIssues, onPins, onLinks, onO
   const reminders = useClient((s) => s.reminders);
   const events = useClient((s) => s.events);
   const [pane, setPane] = useState<ChatBarPane | null>(null);
+  const headerOpen = useContext(ChatHeaderVisibility);
+  useEffect(() => { if (headerOpen === false) setPane(null); }, [headerOpen]);
   const personal = usePersonalPreferences();
   const hidden = !!personal.conversations[conv.id]?.hideBar;
   const toggleBar = () => { void updatePersonalChat(conv.id, { hideBar: !hidden }).catch(() => {}); };

@@ -16,7 +16,9 @@ import {
   MAX_PANES, closePane, dragKindOf, fitsChat, fitsSlot, focusPane, onlyPane, rememberBack, setSplitSize, syncActive, togglePin,
   useActiveKey, useBack, usePanes, usePinned, useSplitSizes, useWide, type DragKind,
   useExpandedPane, collapsePane, useGridLayout, useLayoutOrder, setGridLayout, moveLayoutPane, type GridLayout,
+  useTallPanes, setPaneRows, useMetas,
 } from '../split.ts';
+import { gridSpanLayout } from '../grid-span-layout.ts';
 import { ConversationScreen } from './Conversation.tsx';
 import { ensureAssigned, openTintMenu, usePaneTints } from '../tints.ts';
 import { InboxPane, MailPane, SectionPane, TasksPane, WaListPane, WaPane } from './Panes.tsx';
@@ -47,6 +49,8 @@ export function GridArea({ id, search = '', side }: { id: string | null; search?
   const expandedKey = useExpandedPane();
   const layout = useGridLayout();
   const order = useLayoutOrder();
+  const tallPanes = useTallPanes();
+  const metas = useMetas();
   const wide = useWide();
   const d = useClient((s) => s.data);
   const known = d?.conversations;
@@ -57,9 +61,10 @@ export function GridArea({ id, search = '', side }: { id: string | null; search?
   const list = wide && (id ? shown.length > 1 : shown.length > 0) ? shown : id ? [id] : shown.slice(0, 1);
   if (id && !list.includes(id)) list[0] = id;
   const expanded = expandedKey && list.includes(expandedKey) ? expandedKey : null;
-  const mixedLayout = wide && !side && layout !== 'classic' && list.length >= 4;
+  const customLayout = wide && !side && layout === 'custom';
+  const mixedLayout = wide && !side && layout !== 'classic' && layout !== 'custom' && list.length >= 4;
   const ordered = [...order.filter((k) => list.includes(k)), ...list.filter((k) => !order.includes(k))];
-  const arranged = mixedLayout ? ordered : list;
+  const arranged = mixedLayout || customLayout ? ordered : list;
   const visible = mixedLayout ? arranged.slice(0, 4) : arranged;
   const active = id ?? (activeStore && list.includes(activeStore) ? activeStore : list[0] ?? null);
   const [drop, setDrop] = useState<{ over: string | null; kind: DragKind } | null>(null);
@@ -71,9 +76,14 @@ export function GridArea({ id, search = '', side }: { id: string | null; search?
   // Tareas va en su propia columna, a la derecha y de arriba a abajo (la tercera columna): no gasta uno de los 4 cuaditos.
   // Al lado de WhatsApp o Correo el espacio es angosto y va apilada con los demás.
   const hasTasks = list.includes(TASKS_KEY);
-  const withTasks = hasTasks && !side && !mixedLayout;
+  const withTasks = hasTasks && !side && !mixedLayout && !customLayout;
   const grid = withTasks ? list.filter((k) => k !== TASKS_KEY) : arranged;
-  const full = grid.length >= MAX_PANES;
+  const full = list.filter((k) => k !== TASKS_KEY).length >= MAX_PANES;
+  const currentTall = customLayout ? tallPanes : mixedLayout ? arranged.slice(0, 2) : hasTasks ? [TASKS_KEY] : [];
+  const spanLayout = gridSpanLayout(arranged, new Set(currentTall));
+  const paneName = (key: string) => parseKey(key).kind === 'chat'
+    ? (d && known?.find((c) => c.id === key) ? conversationTitle(d, known.find((c) => c.id === key)!) : key.slice(0, 8))
+    : metas[key]?.title ?? (parseKey(key).kind === 'wa' ? 'WhatsApp' : parseKey(key).kind === 'mail' ? t('nav.mail') : sectionLabel(key));
   const sizes = useSplitSizes();
   // Cada cuadrito con su color (tints.ts): los nuevos reciben uno que no esté repetido.
   const tints = usePaneTints();
@@ -122,7 +132,7 @@ export function GridArea({ id, search = '', side }: { id: string | null; search?
       const c = d?.conversations.find((x) => x.id === chat);
       return t('grid.dropShare', { name: c && d ? conversationTitle(d, c) : '' });
     }
-    return full ? t('split.dropReplace') : t('split.dropAdd', { n: grid.length + 1, max: MAX_PANES });
+    return full ? t('split.dropReplace') : t('split.dropAdd', { n: list.filter((k) => k !== TASKS_KEY).length + 1, max: MAX_PANES });
   })();
 
   const cell = (x: string) => {
@@ -130,7 +140,8 @@ export function GridArea({ id, search = '', side }: { id: string | null; search?
     const frame = { visible: expanded ? expanded === x : visible.includes(x), active: x === active, count: list.length, pinned: pinned.has(x), onClose: () => closePane(x, id), onOnly: () => onlyPane(x), onPin: () => togglePin(x), onTint: (el: HTMLElement) => openTintMenu(el, x) };
     return (
       <div key={x} data-pane={x} data-tint={tints[x]} hidden={expanded ? expanded !== x : !visible.includes(x)}
-        style={mixedLayout && !expanded ? { gridArea: ['a', 'b', 'c', 'd'][arranged.indexOf(x)] } : undefined}
+        style={!expanded && customLayout ? { gridColumn: spanLayout.cells[x]!.column, gridRow: `${spanLayout.cells[x]!.row} / span ${spanLayout.cells[x]!.span}` }
+          : mixedLayout && !expanded ? { gridArea: ['a', 'b', 'c', 'd'][arranged.indexOf(x)] } : undefined}
         className={`split-cell ${x === active ? 'is-active' : ''} ${drop && drop.over === x && (full || (chatOver(x) && fitsChat(drop.kind))) ? 'is-target' : ''}`}
         // Tocar un panel lo vuelve el activo (antes del clic, para que el clic siga funcionando adentro).
         onPointerDownCapture={() => { if (x !== active) focusPane(x); }}>
@@ -171,13 +182,14 @@ export function GridArea({ id, search = '', side }: { id: string | null; search?
       );
     }
     return (
-      <div className={`split n${items.length} ${mixedLayout ? 'is-custom' : ''} ${expanded ? 'is-expanded' : ''}`}
-        style={mixedLayout ? { gridTemplateAreas: layout === 'tall-left' ? '"c a b" "d a b"' : layout === 'tall-right' ? '"a b c" "a b d"' : '"a c b" "a d b"', gridTemplateColumns: `${sizes.col * 2}fr 1fr ${(1 - sizes.col) * 2}fr`, gridTemplateRows: `${sizes.row}fr ${1 - sizes.row}fr` }
+      <div className={`split n${items.length} ${mixedLayout || customLayout ? 'is-custom' : ''} ${customLayout && !expanded ? 'has-pane-spans' : ''} ${expanded ? 'is-expanded' : ''}`}
+        style={customLayout ? { gridTemplateColumns: `repeat(${spanLayout.columns}, minmax(240px, 1fr))`, gridTemplateRows: `${sizes.row}fr ${1 - sizes.row}fr` }
+          : mixedLayout ? { gridTemplateAreas: layout === 'tall-left' ? '"c a b" "d a b"' : layout === 'tall-right' ? '"a b c" "a b d"' : '"a c b" "a d b"', gridTemplateColumns: `${sizes.col * 2}fr 1fr ${(1 - sizes.col) * 2}fr`, gridTemplateRows: `${sizes.row}fr ${1 - sizes.row}fr` }
           : { gridTemplateColumns: `${sizes.col}fr ${1 - sizes.col}fr`, ...(items.length > 2 ? { gridTemplateRows: `${sizes.row}fr ${1 - sizes.row}fr` } : {}) }}>
         {items.map(cell)}
         {/* Divisiones que se arrastran para cambiar el tamaño (doble clic: mitad y mitad). */}
-        {!expanded && !mixedLayout && <SplitHandle dir="col" at={sizes.col} />}
-        {!expanded && !mixedLayout && items.length > 2 && <SplitHandle dir="row" at={sizes.row} />}
+        {!expanded && !mixedLayout && !customLayout && <SplitHandle dir="col" at={sizes.col} />}
+        {!expanded && !mixedLayout && !customLayout && items.length > 2 && <SplitHandle dir="row" at={sizes.row} />}
       </div>
     );
   };
@@ -187,10 +199,18 @@ export function GridArea({ id, search = '', side }: { id: string | null; search?
         {expanded ? <button className="btn small" onClick={collapsePane}>↙ {locale().startsWith('en') ? 'Back to grid' : 'Volver a la cuadrícula'}</button>
           : <><label>{locale().startsWith('en') ? 'Layout' : 'Diseño'} <select value={layout} onChange={(e) => setGridLayout(e.target.value as GridLayout)}>
             <option value="classic">{locale().startsWith('en') ? 'Classic' : 'Clásico'}</option>
+            <option value="custom">{locale().startsWith('en') ? 'Custom panels' : 'Paneles a tu medida'}</option>
             <option value="tall-center">{locale().startsWith('en') ? '2 tall + 2 small (center)' : '2 largos + 2 pequeños (centro)'}</option>
             <option value="tall-left">{locale().startsWith('en') ? 'Small on left' : 'Pequeños a la izquierda'}</option>
             <option value="tall-right">{locale().startsWith('en') ? 'Small on right' : 'Pequeños a la derecha'}</option>
           </select></label>
+          <details className="grid-pane-sizes"><summary>{locale().startsWith('en') ? 'Panel sizes' : 'Tamaño de paneles'}</summary>
+            {arranged.map((key) => <label key={key}>{paneName(key)}<select aria-label={`${locale().startsWith('en') ? 'Height of' : 'Alto de'} ${paneName(key)}`}
+              value={currentTall.includes(key) ? '2' : '1'} onChange={(e) => setPaneRows(key, +e.target.value as 1 | 2, currentTall)}>
+              <option value="1">{locale().startsWith('en') ? '1 row' : '1 fila'}</option><option value="2">{locale().startsWith('en') ? '2 rows' : '2 filas'}</option>
+            </select></label>)}
+          </details>
+          {customLayout && <label>{locale().startsWith('en') ? 'Height' : 'Alto'} <input aria-label={locale().startsWith('en') ? 'Small panels height' : 'Alto de paneles pequeños'} type="range" min="20" max="80" value={Math.round(sizes.row * 100)} onChange={(e) => setSplitSize({ row: +e.target.value / 100 }, true)} /></label>}
           {mixedLayout && <><label>{locale().startsWith('en') ? 'Width' : 'Ancho'} <input aria-label={locale().startsWith('en') ? 'Column width' : 'Ancho de columnas'} type="range" min="20" max="80" value={Math.round(sizes.col * 100)} onChange={(e) => setSplitSize({ col: +e.target.value / 100 }, true)} /></label>
             <label>{locale().startsWith('en') ? 'Height' : 'Alto'} <input aria-label={locale().startsWith('en') ? 'Small panels height' : 'Alto de paneles pequeños'} type="range" min="20" max="80" value={Math.round(sizes.row * 100)} onChange={(e) => setSplitSize({ row: +e.target.value / 100 }, true)} /></label>
             <details><summary>{locale().startsWith('en') ? 'Arrange panels' : 'Ordenar paneles'}</summary>{arranged.map((key, at) => <label key={key}>{parseKey(key).kind === 'chat' ? (d && known?.find((c) => c.id === key) ? conversationTitle(d, known.find((c) => c.id === key)!) : key.slice(0, 8)) : sectionLabel(key)}

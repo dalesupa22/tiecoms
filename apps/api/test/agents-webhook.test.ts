@@ -75,7 +75,7 @@ describe("webhook de agentes miembro", { timeout: 60_000 }, () => {
     expect(again.agentId).toBe(agentId);
     expect(again.mcpToken).toBeUndefined();
     const w = await setAgentWebhook(danny.id, agentId, `http://localhost:${(server.address() as AddressInfo).port}/hook`);
-    secret = w.secret!;
+    secret = (w as { secret?: string }).secret!;
     expect(secret).toMatch(/^whsec_/);
   });
   afterAll(async () => { server?.close(); await pool.end(); });

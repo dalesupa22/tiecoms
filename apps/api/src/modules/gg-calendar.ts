@@ -20,7 +20,7 @@ async function authorize(userId:string,source:string,ids:string[]=[]){
   if(source.startsWith('wa:')) {
     const sep=source.indexOf(':',3),accountId=z.uuid().parse(source.slice(3,sep)),jid=source.slice(sep+1);
     await ownChat(userId,accountId,jid);
-    if(ids.length) {const r=await pool.query('SELECT id FROM wa_messages WHERE account_id=$1 AND chat_jid=$2 AND id=ANY($3::text[])',[accountId,jid,ids]);if(r.rowCount!==new Set(ids).size) throw notFound('Mensajes seleccionados');}
+    if(ids.length) {const r=await pool.query('SELECT id FROM wa_messages WHERE account_id=$1 AND chat_jid=$2 AND wa_chat_visible(account_id,chat_jid) AND id=ANY($3::text[])',[accountId,jid,ids]);if(r.rowCount!==new Set(ids).size) throw notFound('Mensajes seleccionados');}
     return null;
   }
   throw badRequest('Fuente de calendario inválida');

@@ -1,3 +1,4 @@
+import { requireWaVisible } from './wa-privacy.ts';
 /** Original WA media is private to the linked-account owner. Shared copies use canonical destination ACL. */
 import { createHash, randomUUID } from 'node:crypto';
 import { type AttachmentDTO, type WaMediaDTO } from '@tiecoms/contracts';
@@ -15,13 +16,15 @@ export function waMediaDTO(row: any): WaMediaDTO | undefined {
   return {status, ...(status==='ready' && info ? {attachment:{id:row.id,name:info.name,contentType:info.contentType,sizeBytes:info.sizeBytes,width:info.width,height:info.height,url,thumbUrl:info.contentType.startsWith('image/') ? url : null,kind:info.kind,durationMs:info.durationMs}} : {}), ...(status==='failed' ? {error:'No se pudo descargar el original. Reintenta.'} : {})};
 }
 export async function ownMedia(userId:string,accountId:string,jid:string,messageId:string) {
-  const r=await pool.query(`SELECT m.* FROM wa_messages m JOIN wa_accounts a ON a.id=m.account_id WHERE m.account_id=$1 AND m.chat_jid=$2 AND m.id=$3 AND a.user_id=$4 AND a.removed_at IS NULL`,[accountId,jid,messageId,userId]);
+  const r=await pool.query(`SELECT m.* FROM wa_messages m JOIN wa_accounts a ON a.id=m.account_id WHERE m.account_id=$1 AND m.chat_jid=$2 AND m.id=$3 AND a.user_id=$4 AND a.removed_at IS NULL AND wa_chat_visible(m.account_id,m.chat_jid)`,[accountId,jid,messageId,userId]);
   if (!r.rows[0]) throw notFound('Archivo de WhatsApp'); return r.rows[0];
 }
 export async function readWaMedia(userId:string,accountId:string,jid:string,messageId:string) {
   const row=await ownMedia(userId,accountId,jid,messageId);
   if (row.media_state!=='ready' || !row.media_info) throw new ApiError(409,'wa_media_unavailable','El original todavía no está disponible');
-  return getObject(row.media_info.key);
+  const object=await getObject(row.media_info.key);
+  await requireWaVisible(pool,accountId,jid);
+  return object;
 }
 export async function retryWaMedia(userId:string,accountId:string,jid:string,messageId:string) {
   const row=await ownMedia(userId,accountId,jid,messageId);
@@ -33,6 +36,7 @@ export async function retryWaMedia(userId:string,accountId:string,jid:string,mes
 
 /** External I/O happens before the sharing transaction; the independent key remains owned by the target copy. */
 export async function prepareWaCopy(row:any) {
+  await requireWaVisible(pool,row.account_id,row.chat_jid);
   if (row.media_state==='restricted') throw new ApiError(409,'wa_media_restricted','Este contenido temporal no puede compartirse como archivo permanente');
   if (row.media_state==='pending' || row.media_state==='failed') throw new ApiError(409,'wa_media_pending','El archivo todavía no está listo. Reintenta la descarga antes de compartir.');
   if(row.media_state!=='ready' || !row.media_info) return null;

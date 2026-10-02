@@ -16,7 +16,7 @@ describe.skipIf(!process.env.DATABASE_URL)('nocturna compatible: API and canonic
   }
   async function signup(name:string){const r=await req('POST','/auth/signup',undefined,{name,orgName:name+run,email:name.toLowerCase()+run+'@example.com',password:'fixture-password-123',device:{deviceId:randomUUID(),name:'fixture',platform:'web'}},'10.12.0.'+Math.floor(Math.random()*200+1));expect(r.status).toBe(200);return {id:r.json.user.id,token:r.json.accessToken};}
   beforeAll(async()=>{
-    const target=new URL(process.env.DATABASE_URL!);if(!['localhost','127.0.0.1'].includes(target.hostname) || target.port!=='55481' || !['/tiecoms_nocturna_20261001','/tiecoms_nocturna_20261001_fresh'].includes(target.pathname)) throw new Error('Dedicated local nocturna fixture DB required');
+    const target=new URL(process.env.DATABASE_URL!);if(!['localhost','127.0.0.1'].includes(target.hostname) || target.port!=='55481' || !['/tiecoms_nocturna_20261001','/tiecoms_nocturna_20261001_fresh','/tiecoms_nocturna_wa_privacy_20261002','/tiecoms_nocturna_wa_privacy_20261002_v2'].includes(target.pathname)) throw new Error('Dedicated local nocturna fixture DB required');
     const port=59900+Math.floor(Math.random()*70);s3=spawn(process.execPath,[fileURLToPath(new URL('./fake-s3.mjs',import.meta.url)),String(port)],{stdio:'ignore'});
     const meetPort=59700+Math.floor(Math.random()*70);fakeUrl='http://127.0.0.1:'+meetPort;fakeMeeting=spawn(process.execPath,[fileURLToPath(new URL('./fake-meetings.mjs',import.meta.url)),String(meetPort)],{stdio:'ignore'});
     Object.assign(process.env,{MEETINGS_ENABLED:'true',GOOGLE_CLIENT_ID:'fixture',GOOGLE_CLIENT_SECRET:'fixture',MEETINGS_GOOGLE_API:fakeUrl+'/google/api',FFMPEG_PATH:fileURLToPath(new URL('./fake-ffmpeg.mjs',import.meta.url)),S3_ENDPOINT:'http://127.0.0.1:'+port,S3_BUCKET:'nocturna-fixture',AWS_ACCESS_KEY_ID:'fixture',AWS_SECRET_ACCESS_KEY:'fixture',CALLS_ENABLED:'true',CALLS_PROVIDER:'fake',MIGRATE_ON_START:'false'});
@@ -27,6 +27,8 @@ describe.skipIf(!process.env.DATABASE_URL)('nocturna compatible: API and canonic
     const w=await req('POST','/workspaces',a.token,{name:'nocturna '+run});expect(w.status).toBe(200);cid=w.json.generalConversationId;ws=w.json.id;
     for(const user of [b,c]){await db.pool.query("INSERT INTO workspace_memberships(workspace_id,user_id,role) VALUES($1,$2,'member') ON CONFLICT DO NOTHING",[ws,user.id]);await db.pool.query("INSERT INTO conversation_memberships(conversation_id,user_id) VALUES($1,$2) ON CONFLICT DO NOTHING",[cid,user.id]);}
     const acc=await req('POST','/whatsapp/accounts',a.token,{label:'fixture '+run,kind:'personal'});expect(acc.status).toBe(200);account=acc.json.id;
+    // Provider state is synthetic and explicitly attested by this isolated fixture.
+    await db.pool.query(`UPDATE wa_accounts SET privacy_synced_at=now(),lease_owner='fixture',lease_until=now()+interval '1 hour' WHERE id=$1`,[account]);
   });
   afterAll(async()=>{await app?.close();s3?.kill();fakeMeeting?.kill();await db?.pool.end();});
 

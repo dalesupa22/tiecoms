@@ -1,3 +1,4 @@
+import { requireWaVisible, visibleWaChatSql } from './wa-privacy.ts';
 import { waMediaDTO } from './wa-media.ts';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { config } from '../config.ts';
@@ -18,6 +19,7 @@ export const MAX_WA_ACCOUNTS = 5;
 async function toAccountDTO(r: any): Promise<WaAccountDTO> {
   return {
     id: r.id,
+    privacyReady: r.privacy_ready === true,
     sendEnabled: r.send_enabled === true,
     label: r.label,
     kind: r.kind,
@@ -37,8 +39,8 @@ async function toAccountDTO(r: any): Promise<WaAccountDTO> {
   };
 }
 
-const ACCOUNT_SELECT = `SELECT a.*, (SELECT count(*) FROM wa_chats c WHERE c.account_id = a.id) AS chats,
-                               (SELECT count(*) FROM wa_chats c WHERE c.account_id = a.id AND c.is_group) AS groups
+const ACCOUNT_SELECT = `SELECT a.*, wa_account_visible(a.id) AS privacy_ready, (SELECT count(*) FROM wa_chats c WHERE c.account_id = a.id AND ${visibleWaChatSql()}) AS chats,
+                               (SELECT count(*) FROM wa_chats c WHERE c.account_id = a.id AND c.is_group AND ${visibleWaChatSql()}) AS groups
                           FROM wa_accounts a`;
 
 export async function listAccounts(userId: string) {
@@ -86,7 +88,10 @@ export async function relinkAccount(userId: string, id: string, pairPhone?: stri
   const a = await ownAccount(pool, userId, id);
   if (a.status === 'connected') return (await listAccounts(userId)).find((x) => x.id === id)!;
   await tx(async (c) => {
-    if (a.status === 'logged_out' || a.status === 'error') await c.query('DELETE FROM wa_auth WHERE account_id = $1', [id]);
+    if (a.status === 'logged_out' || a.status === 'error') {
+      await c.query('DELETE FROM wa_auth WHERE account_id = $1', [id]);
+      await c.query('UPDATE wa_accounts SET privacy_synced_at=NULL,privacy_hydrated_at=NULL WHERE id=$1',[id]);
+    }
     await c.query(
       `UPDATE wa_accounts SET status = 'pending', qr = NULL, pairing_code = NULL, last_error = NULL,
               pair_phone = COALESCE($2, pair_phone), lease_until = NULL, updated_at = now() WHERE id = $1`,
@@ -169,7 +174,7 @@ export async function listChats(userId: string, q: { accountId?: string; categor
     `SELECT c.*, COALESCE(c.name, ct.name) AS name, ct.pn, a.label AS account_label, a.kind AS account_kind, a.status AS account_status
        FROM wa_chats c JOIN wa_accounts a ON a.id = c.account_id
        LEFT JOIN LATERAL ${whoSql('c.account_id', 'c.jid')} ct ON true
-      WHERE a.user_id = $1 AND a.removed_at IS NULL
+      WHERE a.user_id = $1 AND a.removed_at IS NULL AND ${visibleWaChatSql()}
         AND ($2::uuid IS NULL OR c.account_id = $2)
         AND ($3::text IS NULL OR c.category = $3)
         AND ($4::boolean IS NULL OR c.is_group = $4)
@@ -186,7 +191,7 @@ export async function listChats(userId: string, q: { accountId?: string; categor
   const { rows: counts } = await pool.query(
     `SELECT c.category, count(*)::int AS n, sum(CASE WHEN c.unread > 0 THEN 1 ELSE 0 END)::int AS unread
        FROM wa_chats c JOIN wa_accounts a ON a.id = c.account_id
-      WHERE a.user_id = $1 AND a.removed_at IS NULL AND NOT c.hidden AND ($2::uuid IS NULL OR c.account_id = $2)
+      WHERE a.user_id = $1 AND a.removed_at IS NULL AND ${visibleWaChatSql()} AND NOT c.hidden AND ($2::uuid IS NULL OR c.account_id = $2)
         AND ($3::boolean IS NULL OR c.is_group = $3)
         AND c.jid NOT LIKE '%@broadcast' AND c.jid NOT LIKE '%@newsletter'
       GROUP BY c.category`,
@@ -203,7 +208,7 @@ export async function ownChat(userId: string, accountId: string, jid: string) {
   const { rows } = await pool.query(
     `SELECT c.*, COALESCE(c.name, ct.name) AS name, ct.pn, a.label AS account_label, a.kind AS account_kind, a.status AS account_status FROM wa_chats c JOIN wa_accounts a ON a.id = c.account_id
        LEFT JOIN LATERAL ${whoSql('c.account_id', 'c.jid')} ct ON true
-      WHERE c.account_id = $1 AND c.jid = $2 AND a.user_id = $3 AND a.removed_at IS NULL`,
+      WHERE c.account_id = $1 AND c.jid = $2 AND a.user_id = $3 AND a.removed_at IS NULL AND ${visibleWaChatSql()}`,
     [accountId, jid, userId],
   );
   if (!rows[0]) throw notFound('Chat');
@@ -251,7 +256,10 @@ export async function updateChat(userId: string, accountId: string, jid: string,
 
 /** Aviso a la dueña: cambió una fila de WhatsApp de su bandeja (el cliente la reemplaza sin recargar el bootstrap). */
 export async function emitInbox(userId: string, chat: WaChatDTO) {
-  await tx((c) => enqueueOutbox(c, 'account.event', { userIds: [userId], event: { type: 'wa.inbox', chat } }));
+  await tx(async c => {
+    await requireWaVisible(c,chat.accountId,chat.jid);
+    await enqueueOutbox(c, 'account.event', { userIds: [userId], event: { type: 'wa.inbox', chat } });
+  });
 }
 
 /** Para el bootstrap: los chats de WhatsApp movidos a la bandeja, de cuentas vivas y sin ocultar. */
@@ -260,7 +268,7 @@ export async function inboxChats(userId: string, only?: { accountId: string; jid
     `SELECT c.*, COALESCE(c.name, ct.name) AS name, ct.pn, a.label AS account_label, a.kind AS account_kind, a.status AS account_status
        FROM wa_chats c JOIN wa_accounts a ON a.id = c.account_id
        LEFT JOIN LATERAL ${whoSql('c.account_id', 'c.jid')} ct ON true
-      WHERE a.user_id = $1 AND a.removed_at IS NULL AND c.inbox_place IS NOT NULL AND NOT c.hidden
+      WHERE a.user_id = $1 AND a.removed_at IS NULL AND ${visibleWaChatSql()} AND c.inbox_place IS NOT NULL AND NOT c.hidden
         AND ($2::uuid IS NULL OR (c.account_id = $2 AND c.jid = ANY($3)))
       ORDER BY c.inbox_pinned_at DESC NULLS LAST, c.last_message_at DESC NULLS LAST
       LIMIT 300`,
@@ -274,7 +282,7 @@ export async function reorganize(userId: string) {
   const { rows } = await pool.query(
     `SELECT c.account_id, c.jid, COALESCE(c.name, ct.name) AS name, c.is_group, c.category, a.kind FROM wa_chats c JOIN wa_accounts a ON a.id = c.account_id
        LEFT JOIN LATERAL ${whoSql('c.account_id', 'c.jid')} ct ON true
-      WHERE a.user_id = $1 AND a.removed_at IS NULL AND NOT c.category_manual`,
+      WHERE a.user_id = $1 AND a.removed_at IS NULL AND ${visibleWaChatSql()} AND NOT c.category_manual`,
     [userId],
   );
   let changed = 0;
@@ -292,7 +300,7 @@ export async function listChatMessages(userId: string, accountId: string, jid: s
   const { rows } = await pool.query(
     `SELECT m.*, w.name AS who_name, w.pn AS who_pn FROM wa_messages m
        LEFT JOIN LATERAL ${whoSql('m.account_id', 'm.author_jid')} w ON NOT m.from_me
-      WHERE m.account_id = $1 AND m.chat_jid = $2 AND ($3::timestamptz IS NULL OR m.sent_at < $3)
+      WHERE m.account_id = $1 AND m.chat_jid = $2 AND wa_chat_visible(m.account_id,m.chat_jid) AND ($3::timestamptz IS NULL OR m.sent_at < $3)
       ORDER BY m.sent_at DESC LIMIT $4`,
     [accountId, jid, before ?? null, limit],
   );
@@ -304,6 +312,7 @@ export async function listChatMessages(userId: string, accountId: string, jid: s
   const read = await pool.query('UPDATE wa_chats SET unread = 0 WHERE account_id = $1 AND jid = $2 AND unread > 0 RETURNING inbox_place', [accountId, jid]);
   // Leído en un dispositivo: la fila de la bandeja se apaga en los demás.
   if (read.rows[0]?.inbox_place) for (const chat of await inboxChats(userId, { accountId, jids: [jid] })) await emitInbox(userId, chat);
+  await requireWaVisible(pool,accountId,jid);
   return { messages, hasMore: rows.length === limit };
 }
 
@@ -317,7 +326,8 @@ export async function sendToChat(userId: string, accountId: string, jid: string,
   if (!a.send_enabled) throw forbidden('Esta cuenta está en solo lectura. Activa «Responder desde chaggu» en WhatsApp para poder escribir.');
   if (a.status !== 'connected') throw conflict('La cuenta de WhatsApp no está conectada ahora mismo');
   await ownChat(userId, accountId, jid);
-  const { rows } = await pool.query('INSERT INTO wa_outbox (account_id, user_id, jid, body) VALUES ($1,$2,$3,$4) RETURNING id', [accountId, userId, jid, text]);
+  const { rows } = await pool.query('INSERT INTO wa_outbox (account_id, user_id, jid, body) SELECT $1,$2,$3,$4 WHERE wa_chat_visible($1,$3) RETURNING id', [accountId, userId, jid, text]);
+  if (!rows[0]) throw notFound('Chat');
   const id = rows[0].id as string;
   await pool.query("SELECT pg_notify('tiecoms_wa', $1)", [accountId]);
   for (let i = 0; i < 24; i++) {
@@ -334,10 +344,11 @@ export async function sendToChat(userId: string, accountId: string, jid: string,
  * nada como leído. Quien llama ya comprobó con ownChat que el chat es de la persona.
  */
 export async function messagesForGg(accountId: string, jid: string, opts: { limit?: number; ids?: string[] }) {
+  await requireWaVisible(pool,accountId,jid);
   const { rows } = await pool.query(
     `SELECT m.id, m.from_me, m.body, m.kind, m.sent_at, COALESCE(m.author_name, w.name) AS author, w.pn FROM wa_messages m
        LEFT JOIN LATERAL ${whoSql('m.account_id', 'm.author_jid')} w ON NOT m.from_me
-      WHERE m.account_id = $1 AND m.chat_jid = $2 AND m.body <> '' AND ($3::text[] IS NULL OR m.id = ANY($3))
+      WHERE m.account_id = $1 AND m.chat_jid = $2 AND wa_chat_visible(m.account_id,m.chat_jid) AND m.body <> '' AND ($3::text[] IS NULL OR m.id = ANY($3))
       ORDER BY m.sent_at DESC LIMIT $4`,
     [accountId, jid, opts.ids ?? null, opts.limit ?? 60],
   );

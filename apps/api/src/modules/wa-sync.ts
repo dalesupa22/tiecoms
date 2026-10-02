@@ -1,3 +1,5 @@
+import {waLeaseQuery} from './wa-lease.ts';
+import { applyWaLocks, reconcileWaLockAliases, requireWaVisible } from './wa-privacy.ts';
 /**
  * Guardado de lo que llega de WhatsApp (credenciales cifradas, contactos, chats,
  * mensajes) y reenvío a chaggu de los chats vinculados. Lo usa src/wa-bridge.ts.
@@ -29,8 +31,8 @@ export function openWa(buf: Buffer): any {
   return JSON.parse(Buffer.concat([d.update(buf.subarray(28)), d.final()]).toString('utf8'), BufferJSON.reviver);
 }
 
-export async function dbAuthState(accountId: string) {
-  const { rows } = await pool.query("SELECT value FROM wa_auth WHERE account_id = $1 AND key = 'creds'", [accountId]);
+export async function dbAuthState(accountId: string,leaseOwner?:string) {
+  const { rows } = await waLeaseQuery(accountId,leaseOwner,"SELECT value FROM wa_auth WHERE account_id = $1 AND key = 'creds'", [accountId]);
   const creds: AuthenticationCreds = rows[0] ? openWa(rows[0].value) : initAuthCreds();
   return {
     state: {
@@ -39,7 +41,7 @@ export async function dbAuthState(accountId: string) {
         async get<T extends keyof SignalDataTypeMap>(type: T, ids: string[]) {
           const out: { [id: string]: SignalDataTypeMap[T] } = {};
           if (!ids.length) return out;
-          const r = await pool.query('SELECT key, value FROM wa_auth WHERE account_id = $1 AND key = ANY($2)', [accountId, ids.map((id) => `${type}:${id}`)]);
+          const r = await waLeaseQuery(accountId,leaseOwner,'SELECT key, value FROM wa_auth WHERE account_id = $1 AND key = ANY($2)', [accountId, ids.map((id) => `${type}:${id}`)]);
           for (const row of r.rows) {
             let v = openWa(row.value);
             if (type === 'app-state-sync-key' && v) v = proto.Message.AppStateSyncKeyData.fromObject(v);
@@ -56,18 +58,18 @@ export async function dbAuthState(accountId: string) {
             }
           }
           if (up.length) {
-            await pool.query(
+            await waLeaseQuery(accountId,leaseOwner,
               `INSERT INTO wa_auth (account_id, key, value) SELECT $1, k, v FROM unnest($2::text[], $3::bytea[]) AS t(k, v)
                ON CONFLICT (account_id, key) DO UPDATE SET value = EXCLUDED.value`,
               [accountId, up.map((x) => x[0]), up.map((x) => x[1])],
             );
           }
-          if (del.length) await pool.query('DELETE FROM wa_auth WHERE account_id = $1 AND key = ANY($2)', [accountId, del]);
+          if (del.length) await waLeaseQuery(accountId,leaseOwner,'DELETE FROM wa_auth WHERE account_id = $1 AND key = ANY($2)', [accountId, del]);
         },
       },
     },
     async saveCreds() {
-      await pool.query(
+      await waLeaseQuery(accountId,leaseOwner,
         `INSERT INTO wa_auth (account_id, key, value) VALUES ($1, 'creds', $2)
          ON CONFLICT (account_id, key) DO UPDATE SET value = EXCLUDED.value`,
         [accountId, sealWa(creds)],
@@ -122,10 +124,12 @@ export interface Session {
   registered: boolean;
   me: string | null;
   notifyTimer: NodeJS.Timeout | null;
+  leaseOwner?:string;
+  leasePaused?:boolean;
 }
-export async function setStatus(id: string, fields: Record<string, unknown>) {
+export async function setStatus(id: string, fields: Record<string, unknown>, leaseOwner?:string) {
   const keys = Object.keys(fields);
-  await pool.query(
+  await waLeaseQuery(id,leaseOwner,
     `UPDATE wa_accounts SET ${keys.map((k, i) => `${k} = $${i + 2}`).join(', ')}, updated_at = now() WHERE id = $1`,
     [id, ...keys.map((k) => fields[k])],
   );
@@ -151,7 +155,7 @@ export async function upsertContacts(s: Session, contacts: Partial<Contact>[]) {
   await storeAliases(s, contacts.map(aliasOf));
   for (let i = 0; i < rows.length; i += 500) {
     const part = rows.slice(i, i + 500);
-    await pool.query(
+    await waLeaseQuery(s.id,s.leaseOwner,
       `INSERT INTO wa_contacts (account_id, jid, name) SELECT $1, j, n FROM unnest($2::text[], $3::text[]) AS t(j, n)
        ON CONFLICT (account_id, jid) DO UPDATE SET name = EXCLUDED.name`,
       [s.id, part.map((r) => r[0]), part.map((r) => r[1])],
@@ -168,14 +172,18 @@ export async function storeAliases(s: Session, pairs: { lid?: string | null; pn?
     if (lid.endsWith('@lid') && pn.endsWith('@s.whatsapp.net')) seen.set(lid, pn);
   }
   const rows = [...seen];
+  const changed:{lid:string;pn:string}[]=[];
   for (let i = 0; i < rows.length; i += 500) {
     const part = rows.slice(i, i + 500);
-    await pool.query(
+    const result=await waLeaseQuery(s.id,s.leaseOwner,
       `INSERT INTO wa_jid_alias (account_id, lid, pn) SELECT $1, l, p FROM unnest($2::text[], $3::text[]) AS t(l, p)
-       ON CONFLICT (account_id, lid) DO UPDATE SET pn = EXCLUDED.pn WHERE wa_jid_alias.pn IS DISTINCT FROM EXCLUDED.pn`,
+       ON CONFLICT (account_id, lid) DO UPDATE SET pn = EXCLUDED.pn WHERE wa_jid_alias.pn IS DISTINCT FROM EXCLUDED.pn RETURNING lid,pn`,
       [s.id, part.map((r) => r[0]), part.map((r) => r[1])],
     );
+    changed.push(...result.rows);
   }
+  await reconcileWaLockAliases(s.id,s.userId,changed.flatMap(({lid,pn})=>[lid,pn]),s.leaseOwner);
+  if(changed.length) notifyOwner(s);
 }
 
 /** Pares LID ↔ número que trae un contacto o participante de grupo. */
@@ -203,7 +211,7 @@ export async function rememberSenders(s: Session, messages: WAMessage[]) {
   await storeAliases(s, pairs);
   for (let i = 0; i < names.length; i += 500) {
     const part = names.slice(i, i + 500);
-    await pool.query(
+    await waLeaseQuery(s.id,s.leaseOwner,
       `INSERT INTO wa_contacts (account_id, jid, push_name) SELECT DISTINCT ON (j) $1, j, n FROM unnest($2::text[], $3::text[]) AS t(j, n)
        ON CONFLICT (account_id, jid) DO UPDATE SET push_name = EXCLUDED.push_name WHERE wa_contacts.push_name IS DISTINCT FROM EXCLUDED.push_name`,
       [s.id, part.map((r) => r[0]), part.map((r) => r[1])],
@@ -211,25 +219,27 @@ export async function rememberSenders(s: Session, messages: WAMessage[]) {
   }
 }
 
-export interface ChatRow { jid: string; name: string | null; isGroup: boolean; participants?: number | null; description?: string | null; lastAt?: Date | null; unread?: number | null; archived?: boolean | null }
+export interface ChatRow { jid: string; name: string | null; isGroup: boolean; participants?: number | null; description?: string | null; lastAt?: Date | null; unread?: number | null; archived?: boolean | null; locked?: boolean | null }
 
-export async function upsertChats(s: Session, chats: ChatRow[]) {
+export async function upsertChats(s: Session, chats: ChatRow[], materialize = true) {
   const list = chats.filter((c) => !skipJid(c.jid));
+  await applyWaLocks(s.id,s.userId,list.filter(c=>typeof c.locked==='boolean').map(c=>({jid:c.jid,locked:c.locked!})),true,s.leaseOwner);
   for (let i = 0; i < list.length; i += 300) {
     const part = list.slice(i, i + 300);
     const params = [s.id, part.map((c) => c.jid), part.map((c) => c.name), part.map((c) => c.isGroup), part.map((c) => c.participants ?? null),
       part.map((c) => c.description ?? null), part.map((c) => c.lastAt ?? null), part.map((c) => c.unread ?? null), part.map((c) => c.archived ?? null),
-      part.map((c) => suggestCategory(c.name, { isGroup: c.isGroup, accountKind: s.kind }))];
+      part.map((c) => suggestCategory(c.name, { isGroup: c.isGroup, accountKind: s.kind })), materialize];
     const src = `unnest($2::text[], $3::text[], $4::boolean[], $5::int[], $6::text[], $7::timestamptz[], $8::int[], $9::boolean[], $10::text[])
                    AS t(jid, name, is_group, participants, description, last_at, unread, archived, category)`;
     // Nuevos con sus valores por defecto; luego se actualiza solo lo que vino (un null no borra lo que ya había).
-    await pool.query(
-      `INSERT INTO wa_chats (account_id, jid, is_group, category) SELECT $1, t.jid, t.is_group, t.category FROM ${src}
+    await waLeaseQuery(s.id,s.leaseOwner,
+      `INSERT INTO wa_chats (account_id, jid, is_group, category, privacy_only) SELECT $1, t.jid, t.is_group, t.category, NOT $11 FROM ${src}
        ON CONFLICT (account_id, jid) DO NOTHING`,
       params,
     );
-    await pool.query(
+    await waLeaseQuery(s.id,s.leaseOwner,
       `UPDATE wa_chats c SET
+         privacy_only = c.privacy_only AND NOT $11,
          name = COALESCE(t.name, c.name),
          is_group = t.is_group OR c.is_group,
          participants = COALESCE(t.participants, c.participants),
@@ -255,6 +265,7 @@ export function chatFromWa(c: Partial<Chat>): ChatRow | null {
     lastAt: ts ? new Date(ts * 1000) : null,
     unread: typeof c.unreadCount === 'number' ? Math.max(0, c.unreadCount) : null,
     archived: typeof c.archived === 'boolean' ? c.archived : null,
+    locked: Object.prototype.hasOwnProperty.call(c,'locked') && typeof c.locked === 'boolean' ? c.locked : null,
   };
 }
 
@@ -283,7 +294,7 @@ export async function storeMessages(s: Session, rows: MsgRow[], live: boolean) {
   const inserted: MsgRow[] = [];
   for (let i = 0; i < rows.length; i += 500) {
     const part = rows.slice(i, i + 500);
-    const r = await pool.query(
+    const r = await waLeaseQuery(s.id,s.leaseOwner,
       `INSERT INTO wa_messages (account_id, chat_jid, id, from_me, author_jid, author_name, kind, body, sent_at, media_envelope, media_state)
        SELECT $1, * FROM unnest($2::text[], $3::text[], $4::boolean[], $5::text[], $6::text[], $7::text[], $8::text[], $9::timestamptz[], $10::bytea[], $11::text[])
        ON CONFLICT DO NOTHING RETURNING chat_jid, id`,
@@ -291,7 +302,7 @@ export async function storeMessages(s: Session, rows: MsgRow[], live: boolean) {
         part.map((m) => m.authorName), part.map((m) => m.kind), part.map((m) => m.body), part.map((m) => m.sentAt), part.map((m)=>m.mediaEnvelope ?? null), part.map((m)=>m.mediaState ?? null)],
     );
     // A legitimate provider re-delivery can fill a legacy descriptor, without adding unread or moving recency.
-    await pool.query(`UPDATE wa_messages m SET media_envelope=v.envelope,media_state=v.state
+    await waLeaseQuery(s.id,s.leaseOwner,`UPDATE wa_messages m SET media_envelope=v.envelope,media_state=v.state
       FROM unnest($2::text[],$3::text[],$4::bytea[],$5::text[]) AS v(jid,id,envelope,state)
       WHERE m.account_id=$1 AND m.chat_jid=v.jid AND m.id=v.id AND m.media_envelope IS NULL AND v.envelope IS NOT NULL`,
       [s.id,part.map(m=>m.chat),part.map(m=>m.id),part.map(m=>m.mediaEnvelope ?? null),part.map(m=>m.mediaState ?? null)]);
@@ -309,8 +320,9 @@ export async function storeMessages(s: Session, rows: MsgRow[], live: boolean) {
   const newChats: ChatRow[] = [];
   for (const [jid, { m, unread }] of latest) {
     const preview = `${m.fromMe ? 'Tú: ' : m.authorName && isJidGroup(jid) ? `${m.authorName}: ` : ''}${m.body}`.slice(0, 160);
-    const r = await pool.query(
+    const r = await waLeaseQuery(s.id,s.leaseOwner,
       `UPDATE wa_chats SET
+          privacy_only = false,
           last_preview = CASE WHEN last_message_at IS NULL OR $3 >= last_message_at OR last_preview IS NULL THEN $4 ELSE last_preview END,
           last_message_at = GREATEST(last_message_at, $3),
           unread = CASE WHEN $6 AND $5 = 0 AND $7 THEN 0 ELSE unread + $5 END,
@@ -323,7 +335,7 @@ export async function storeMessages(s: Session, rows: MsgRow[], live: boolean) {
   if (newChats.length) {
     await upsertChats(s, newChats);
     for (const c of newChats) {
-      await pool.query('UPDATE wa_chats SET last_preview = $3 WHERE account_id = $1 AND jid = $2', [s.id, c.jid, latest.get(c.jid)!.m.body.slice(0, 160)]);
+      await waLeaseQuery(s.id,s.leaseOwner,'UPDATE wa_chats SET last_preview = $3 WHERE account_id = $1 AND jid = $2', [s.id, c.jid, latest.get(c.jid)!.m.body.slice(0, 160)]);
       // Grupo nuevo: se pide su nombre y tamaño.
       if (c.isGroup && s.sock) void s.sock.groupMetadata(c.jid).then((g) => upsertChats(s, [groupRow(g)])).catch(() => {});
     }
@@ -339,19 +351,20 @@ export async function storeMessages(s: Session, rows: MsgRow[], live: boolean) {
 /** Chats vinculados a una conversación de chaggu: los mensajes nuevos llegan allí como reenviados de WhatsApp. */
 export async function bridgeToTieComs(s: Session, rows: MsgRow[]) {
   if (!rows.length) return;
-  const { rows: links } = await pool.query(
-    `SELECT jid, linked_conversation_id, linked_since, name FROM wa_chats WHERE account_id = $1 AND jid = ANY($2) AND linked_conversation_id IS NOT NULL`,
+  const { rows: links } = await waLeaseQuery(s.id,s.leaseOwner,
+    `SELECT jid, linked_conversation_id, linked_since, name FROM wa_chats WHERE account_id = $1 AND jid = ANY($2) AND linked_conversation_id IS NOT NULL AND wa_chat_visible(account_id,jid)`,
     [s.id, [...new Set(rows.map((r) => r.chat))]],
   );
   if (!links.length) return;
   const byJid = new Map(links.map((l) => [l.jid, l]));
-  const { rows: me } = await pool.query('SELECT push_name FROM wa_accounts WHERE id = $1', [s.id]);
+  const { rows: me } = await waLeaseQuery(s.id,s.leaseOwner,'SELECT push_name FROM wa_accounts WHERE id = $1', [s.id]);
   for (const m of rows.sort((a, b) => +a.sentAt - +b.sentAt)) {
     const l = byJid.get(m.chat);
     if (!l || m.sentAt < new Date(l.linked_since)) continue;
     const author = m.fromMe ? (me[0]?.push_name ?? 'Yo') : (m.authorName ?? m.authorJid?.split('@')[0] ?? null);
     const clientMessageId = bridgedClientId(s.id, m.chat, m.id);
     try {
+      await requireWaVisible(pool,s.id,m.chat);
       await sendMessage(s.userId, l.linked_conversation_id, {
         clientMessageId, body: m.body,
         forwarded: { source: 'whatsapp', author: author?.slice(0, 120) ?? null, sentAt: m.sentAt.toISOString() },
@@ -359,7 +372,7 @@ export async function bridgeToTieComs(s: Session, rows: MsgRow[]) {
     } catch (e: any) {
       // Sin permiso para publicar allí (salió de la conversación, se archivó): se desvincula.
       if (e?.status === 403 || e?.status === 404) {
-        await pool.query('UPDATE wa_chats SET linked_conversation_id = NULL, linked_since = NULL WHERE account_id = $1 AND jid = $2', [s.id, m.chat]);
+        await waLeaseQuery(s.id,s.leaseOwner,'UPDATE wa_chats SET linked_conversation_id = NULL, linked_since = NULL WHERE account_id = $1 AND jid = $2', [s.id, m.chat]);
         byJid.delete(m.chat);
       } else console.error(`[wa] no pude reenviar ${m.id} a chaggu`, e?.message);
     }
@@ -368,15 +381,15 @@ export async function bridgeToTieComs(s: Session, rows: MsgRow[]) {
 
 /** Después del historial: se clasifican de nuevo los chats sin nombre propio usando el nombre del contacto. */
 export async function organizeAccount(s: Session) {
-  const { rows } = await pool.query(
+  const { rows } = await waLeaseQuery(s.id,s.leaseOwner,
     `SELECT c.jid, COALESCE(c.name, ct.name) AS name, c.is_group, c.category FROM wa_chats c
        LEFT JOIN wa_contacts ct ON ct.account_id = c.account_id AND ct.jid = c.jid
-      WHERE c.account_id = $1 AND NOT c.category_manual`,
+      WHERE c.account_id = $1 AND NOT c.category_manual AND wa_chat_visible(c.account_id,c.jid)`,
     [s.id],
   );
   for (const r of rows) {
     const cat = suggestCategory(r.name, { isGroup: r.is_group, accountKind: s.kind });
-    if (cat !== r.category) await pool.query('UPDATE wa_chats SET category = $3 WHERE account_id = $1 AND jid = $2', [s.id, r.jid, cat]);
+    if (cat !== r.category) await waLeaseQuery(s.id,s.leaseOwner,'UPDATE wa_chats SET category = $3 WHERE account_id = $1 AND jid = $2', [s.id, r.jid, cat]);
   }
 }
 
@@ -393,21 +406,22 @@ export async function storeReaction(s: Session, m: WAMessage) {
   const rawChat = target?.remoteJid ?? m.key.remoteJid;
   const chat = rawChat ? jidNormalizedUser(rawChat) || rawChat : null;
   if (!r || !target?.id || !chat || skipJid(chat)) return;
+  try { await requireWaVisible(pool,s.id,chat); } catch { return; }
   const reactorRaw = m.key.fromMe ? s.me : (isJidGroup(chat) ? (m.key.participant ?? (m.key as any).participantAlt ?? null) : chat);
   if (!reactorRaw) return;
   const reactor = jidNormalizedUser(reactorRaw) || reactorRaw;
   const emoji = (r.text ?? '').trim() || null;
   let name = m.key.fromMe ? null : m.pushName ?? null;
-  if (m.key.fromMe) name = (await pool.query('SELECT push_name FROM wa_accounts WHERE id = $1', [s.id])).rows[0]?.push_name ?? 'Yo';
-  if (!name) name = (await pool.query('SELECT name FROM wa_contacts WHERE account_id = $1 AND jid = $2', [s.id, reactor])).rows[0]?.name ?? reactor.split('@')[0]!;
-  const up = await pool.query(
+  if (m.key.fromMe) name = (await waLeaseQuery(s.id,s.leaseOwner,'SELECT push_name FROM wa_accounts WHERE id = $1', [s.id])).rows[0]?.push_name ?? 'Yo';
+  if (!name) name = (await waLeaseQuery(s.id,s.leaseOwner,'SELECT name FROM wa_contacts WHERE account_id = $1 AND jid = $2', [s.id, reactor])).rows[0]?.name ?? reactor.split('@')[0]!;
+  const up = await waLeaseQuery(s.id,s.leaseOwner,
     `UPDATE wa_messages SET reactions = NULLIF(CASE WHEN $4::text IS NULL THEN COALESCE(reactions, '{}'::jsonb) - $5
                                                ELSE COALESCE(reactions, '{}'::jsonb) || jsonb_build_object($5, jsonb_build_object('emoji', $4::text, 'name', $6::text)) END, '{}'::jsonb)
       WHERE account_id = $1 AND chat_jid = $2 AND id = $3`,
     [s.id, chat, target.id, emoji, reactor, name],
   );
   if (up.rowCount) notifyOwner(s);
-  const tc = await pool.query('SELECT id FROM messages WHERE author_id = $1 AND client_message_id = $2', [s.userId, bridgedClientId(s.id, chat, target.id)]);
+  const tc = await waLeaseQuery(s.id,s.leaseOwner,'SELECT id FROM messages WHERE author_id = $1 AND client_message_id = $2', [s.userId, bridgedClientId(s.id, chat, target.id)]);
   if (tc.rows[0]) await externalReaction(tc.rows[0].id, `wa:${reactor}`, emoji, name!);
 }
 

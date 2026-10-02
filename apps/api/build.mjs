@@ -9,6 +9,10 @@ if (!(await readFile(baileysSocket, 'utf8')).includes('companion_reg_refresh')) 
   throw new Error('baileys sin parchear: corre npm install (postinstall aplica patches/)');
 }
 
+if (!(await readFile(baileysSocket.replace(/socket\.js$/, 'chats.js'), 'utf8')).includes('Chaggu privacy receipt')) {
+  throw new Error('baileys sin recibo de privacidad: corre npm install');
+}
+
 await rm('dist', { recursive: true, force: true });
 const bundled = await build({
   entryPoints: { server: 'src/server.ts', worker: 'src/worker.ts', 'wa-bridge': 'src/wa-bridge.ts', migrate: 'src/migrate-cli.ts', moderation: 'src/moderation-cli.ts', deletion: 'src/deletion-cli.ts', ops: 'src/ops-cli.ts' },

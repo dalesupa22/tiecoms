@@ -1,3 +1,51 @@
+diff --git a/node_modules/baileys/lib/Socket/chats.js b/node_modules/baileys/lib/Socket/chats.js
+index 711e7f1..bf104ff 100644
+--- a/node_modules/baileys/lib/Socket/chats.js
++++ b/node_modules/baileys/lib/Socket/chats.js
+@@ -408,6 +408,9 @@ export const makeChatsSocket = (config) => {
+         };
+     };
+     const resyncAppState = ev.createBufferedFunction(async (collections, isInitialSync) => {
++        // Chaggu privacy receipt: void also meant swallowed failures in upstream.
++        const completedCollections = new Set();
++        const failedCollections = new Set();
+         const appStateSyncKeyCache = new Map();
+         const getCachedAppStateSyncKey = async (keyId) => {
+             if (appStateSyncKeyCache.has(keyId)) {
+@@ -502,7 +505,8 @@ export const makeChatsSocket = (config) => {
+                             logger.info(`${name} has more patches...`);
+                         }
+                         else {
+-                            // collection is done with sync
++                            // collection is done with sync (including a valid empty collection)
++                            completedCollections.add(name);
+                             collectionsToHandle.delete(name);
+                         }
+                     }
+@@ -521,6 +525,7 @@ export const makeChatsSocket = (config) => {
+                             // until the key arrives via APP_STATE_SYNC_KEY_SHARE.
+                             logger.warn(logData, `${name} blocked on missing key from v${states[name].version}, parking after ${attemptsMap[name]} attempts`);
+                             blockedCollections.add(name);
++                            failedCollections.add(name);
+                             collectionsToHandle.delete(name);
+                         }
+                         else if (isMissingKeyError(error)) {
+@@ -530,6 +535,7 @@ export const makeChatsSocket = (config) => {
+                         }
+                         else if (isAppStateSyncIrrecoverable(error, attemptsMap[name])) {
+                             logger.warn(logData, `failed to sync ${name} from v${states[name].version}, giving up`);
++                            failedCollections.add(name);
+                             collectionsToHandle.delete(name);
+                         }
+                         else {
+@@ -546,6 +552,7 @@ export const makeChatsSocket = (config) => {
+         for (const key in globalMutationMap) {
+             onMutation(globalMutationMap[key]);
+         }
++        return { completedCollections: [...completedCollections], failedCollections: [...failedCollections] };
+     });
+     /**
+      * fetch the profile picture of a user/group
 diff --git a/node_modules/baileys/lib/Socket/messages-recv.js b/node_modules/baileys/lib/Socket/messages-recv.js
 index f2003ac..3151f4e 100644
 --- a/node_modules/baileys/lib/Socket/messages-recv.js

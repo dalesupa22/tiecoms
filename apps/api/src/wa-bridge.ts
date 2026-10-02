@@ -1,3 +1,6 @@
+import { startWaLeaseHeartbeat,waLeaseQuery } from './modules/wa-lease.ts';
+import { applyWaLocks, requireWaVisible, finishWaPrivacy, shutdownWaPrivacy,quarantineWaSession } from './modules/wa-privacy.ts';
+import { privacyAppState, PRIVACY_COLLECTIONS } from './modules/wa-privacy-hydration.ts';
 import { downloadPendingWaMedia } from './modules/wa-media-bridge.ts';
 /**
  * Puente de WhatsApp: mantiene vivas las cuentas que cada persona conectó.
@@ -15,13 +18,17 @@ import pino from 'pino';
 import makeWASocket, { Browsers, DisconnectReason, fetchLatestWaWebVersion, jidNormalizedUser, makeCacheableSignalKeyStore } from 'baileys';
 import { pool,tx } from './db.ts';
 import {
-  bridgeToTieComs, chatFromWa, dbAuthState, groupRow, msgRow, notifyOwner, organizeAccount, setStatus, skipJid, storeMessages, tsOf,
+  bridgeToTieComs, chatFromWa, dbAuthState, groupRow, msgRow, notifyOwner, organizeAccount, setStatus as persistStatus, skipJid, storeMessages, tsOf,
   upsertChats, upsertContacts, type ChatRow, type MsgRow, type Session,
   storeReaction, aliasOf, rememberSenders, storeAliases,
 } from './modules/wa-sync.ts';
 
 const BRIDGE_ID = `${hostname()}:${process.pid}`;
 const LEASE_SECONDS = 60;
+const setStatus=(id:string,fields:Record<string,unknown>)=>persistStatus(id,fields,BRIDGE_ID);
+
+const quarantineSession=(s:Session)=>quarantineWaSession(s,BRIDGE_ID,stopLocal);
+
 /** Del historial inicial solo se guarda lo reciente. */
 const HISTORY_DAYS = 120;
 const logger = pino({ level: process.env.WA_LOG_LEVEL ?? 'error' });
@@ -69,8 +76,42 @@ async function resolveLids(s: Session) {
   if (rows.length) console.log(`[wa] ${s.id} LID resueltos ${found}/${rows.length}`);
 }
 
+async function resolveLockedAliases(s:Session) {
+  const repo=(s.sock as any)?.signalRepository?.lidMapping;
+  if(!repo) return;
+  const rows=await pool.query(`SELECT jid FROM wa_chats c WHERE c.account_id=$1 AND c.wa_locked IS TRUE
+    AND (jid LIKE '%@lid' OR jid LIKE '%@s.whatsapp.net')
+    AND NOT EXISTS(SELECT 1 FROM wa_jid_alias a WHERE a.account_id=c.account_id AND (a.lid=c.jid OR a.pn=c.jid))`,[s.id]);
+  const pairs=[];
+  for(const {jid} of rows.rows) {
+    if(jid.endsWith('@lid')) pairs.push({lid:jid,pn:await repo.getPNForLID(jid).catch(()=>null)});
+    else pairs.push({pn:jid,lid:await repo.getLIDForPN(jid).catch(()=>null)});
+  }
+  await storeAliases(s,pairs);
+}
+
 async function connect(s: Session) {
-  const auth = await dbAuthState(s.id);
+  if(s.stopping || stop) return;
+  const savedPrivacy=(await pool.query('SELECT privacy_hydrated_at FROM wa_accounts WHERE id=$1',[s.id])).rows[0];
+  const reconstruct=!savedPrivacy?.privacy_hydrated_at;
+  await quarantineSession(s);
+  const auth = await dbAuthState(s.id,BRIDGE_ID);
+  const hydration=privacyAppState(auth.state.keys,reconstruct);
+  let lockRevision=0;
+  const snapshotLocks=new Map<string,boolean>();
+  let lockWork: Promise<void> = Promise.resolve();
+  // Baileys can swallow irrecoverable/missing-key sync failures and resolve void.
+  // Observe before pino's level filtering; never treat that resolution alone as success.
+  const watchLogger=(base:any):any=>new Proxy(base,{get(target,prop){
+    if(prop==='child') return (...args:any[])=>watchLogger(target.child(...args));
+    const value=target[prop];
+    if((prop==='warn'||prop==='error') && typeof value==='function') return (...args:any[])=>{
+      if(args.some(v=>v && typeof v==='object' && PRIVACY_COLLECTIONS.includes(v.name)) || args.some(v=>typeof v==='string' && /(?:failed to sync|blocked on missing key|app.state.*(?:fail|error))/i.test(v))) {hydration.recordFailure();void quarantineSession(s).catch(()=>{});}
+      return value.apply(target,args);
+    };
+    return typeof value==='function' ? value.bind(target) : value;
+  }});
+  const sessionLogger=watchLogger(logger);
   s.registered = !!auth.state.creds.registered;
   let pairingRequested = false;
   let qrShown = false;
@@ -81,10 +122,11 @@ async function connect(s: Session) {
   };
 
   const version = await currentVersion();
+  if(s.stopping || stop) return;
   const sock = makeWASocket({
     ...(version ? { version } : {}),
-    auth: { creds: auth.state.creds, keys: makeCacheableSignalKeyStore(auth.state.keys, logger as any) },
-    logger: logger as any,
+    auth: { creds: auth.state.creds, keys: makeCacheableSignalKeyStore(hydration.keys as any, sessionLogger) },
+    logger: sessionLogger,
     // «Desktop» hace que WhatsApp cierre con 428 antes del QR (probado 24-sep-2026); Chrome sí funciona.
     browser: Browsers.macOS('Chrome'),
     syncFullHistory: true,
@@ -122,14 +164,52 @@ async function connect(s: Session) {
         });
         notifyOwner(s);
         void syncGroups(s);
+        // Runs through Baileys' app-state transaction lock; automatic history sync
+        // and this reconstruction share the same shadow state and lock-event queue.
+        void (async()=>{
+          try {
+            // A newly linked device receives app-state encryption keys after open.
+            const keyDeadline=Date.now()+30_000;
+            while(!auth.state.creds.myAppStateKeyId && !s.stopping && s.sock===sock && Date.now()<keyDeadline) await new Promise(r=>setTimeout(r,250));
+            if(s.stopping || s.sock!==sock) return;
+            if(!auth.state.creds.myAppStateKeyId) throw new Error('Falta clave de estado de privacidad');
+            let timeout:NodeJS.Timeout | undefined;
+            try { hydration.acceptReceipt(await Promise.race([(sock.resyncAppState as any)([...PRIVACY_COLLECTIONS],false),new Promise<never>((_,reject)=>{timeout=setTimeout(()=>reject(new Error('privacy timeout')),60_000);})])); } finally {if(timeout) clearTimeout(timeout);}
+            await lockWork;
+            await resolveLockedAliases(s);
+            if(s.stopping || s.sock!==sock || !hydration.complete()) throw new Error('Estado de privacidad incompleto');
+            await hydration.commit();
+            let done=false;
+            for(let attempt=0;attempt<3 && !done;attempt++) {
+              const revision=lockRevision;
+              await lockWork;
+              try {
+                await finishWaPrivacy(s.id,s.userId,()=>lockRevision===revision && !s.stopping && s.sock===sock && hydration.complete(),
+                  reconstruct ? [...snapshotLocks].filter(([,locked])=>locked).map(([jid])=>jid) : undefined,BRIDGE_ID);
+                done=true;
+              } catch { if(lockRevision===revision) throw new Error('No se pudo confirmar privacidad'); }
+            }
+            if(!done) throw new Error('La privacidad sigue cambiando');
+            notifyOwner(s);
+          } catch {
+            if(s.stopping || s.sock!==sock) return;
+            await quarantineSession(s);
+            console.error(`[wa] ${s.id} privacidad pendiente: reconstrucción incompleta`);
+          }
+        })();
       }
       if (u.connection === 'close') {
+        // Invalidate the hydration guard before yielding to the database.
+        s.sock = null;
+        lockRevision++;
+        await quarantineSession(s);
+        if(s.stopping) return;
         const code = (u.lastDisconnect?.error as any)?.output?.statusCode as number | undefined;
         console.log(`[wa] ${s.id} conexión cerrada (${code ?? '?'}: ${u.lastDisconnect?.error?.message ?? ''})`);
-        s.sock = null;
         if (code === DisconnectReason.loggedOut) {
           // Se cerró desde el teléfono («Cerrar sesión» en Dispositivos vinculados).
-          await pool.query('DELETE FROM wa_auth WHERE account_id = $1', [s.id]);
+          await waLeaseQuery(s.id,BRIDGE_ID,'DELETE FROM wa_auth WHERE account_id = $1', [s.id]);
+          await setStatus(s.id,{privacy_hydrated_at:null});
           await setStatus(s.id, { status: 'logged_out', qr: null, pairing_code: null, lease_owner: null, lease_until: null });
           stopLocal(s);
         } else if (!s.registered && qrShown && code !== DisconnectReason.restartRequired) {
@@ -148,8 +228,20 @@ async function connect(s: Session) {
     } catch (e: any) { console.error(`[wa] ${s.id} connection.update`, e?.message); }
   });
 
+  sock.ev.on('chats.lock', ({id,locked}) => {
+    lockRevision++;
+    snapshotLocks.set(jidNormalizedUser(id)||id,locked);
+    // Preserve provider ordering, including an unlock immediately after a lock.
+    lockWork=lockWork.then(async()=>{
+      if(s.stopping || s.sock!==sock) return;
+      await applyWaLocks(s.id,s.userId,[{jid:jidNormalizedUser(id)||id,locked}],false,BRIDGE_ID);
+      await resolveLockedAliases(s);
+      notifyOwner(s);
+    }).catch(async()=>{hydration.recordFailure();await quarantineSession(s).catch(()=>{});});
+  });
   sock.ev.on('messaging-history.set', async ({ chats, contacts, messages, lidPnMappings, isLatest }) => {
     try {
+      await lockWork;
       await upsertContacts(s, contacts);
       await storeAliases(s, lidPnMappings ?? []);
       await rememberSenders(s, messages);
@@ -166,13 +258,16 @@ async function connect(s: Session) {
   sock.ev.on('contacts.upsert', (c) => void upsertContacts(s, c).then(organizeSoon).catch(() => {}));
   sock.ev.on('contacts.update', (c) => void upsertContacts(s, c).catch(() => {}));
   sock.ev.on('chats.upsert', (c) => void upsertChats(s, c.map(chatFromWa).filter(Boolean) as ChatRow[]).then(() => notifyOwner(s)).catch(() => {}));
-  sock.ev.on('chats.update', (c) => void upsertChats(s, c.map(chatFromWa).filter(Boolean) as ChatRow[]).then(() => notifyOwner(s)).catch(() => {}));
+  sock.ev.on('chats.update', (c) => void upsertChats(s, c.map(chatFromWa).filter(Boolean) as ChatRow[],false).then(() => notifyOwner(s)).catch(() => {}));
   sock.ev.on('groups.upsert', (g) => void upsertChats(s, g.map(groupRow)).then(() => notifyOwner(s)).catch(() => {}));
   sock.ev.on('groups.update', (g) => void upsertChats(s, g.filter((x) => x.id).map((x) => ({
     jid: x.id!, name: x.subject ?? null, isGroup: true, participants: x.size ?? null, description: x.desc ?? null,
   }))).then(() => notifyOwner(s)).catch(() => {}));
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
     try {
+      await lockWork;
+      // Store alternative addresses before any forwarding or inbox event.
+      await rememberSenders(s,messages);
       for (const m of messages) if (m.message?.reactionMessage) await storeReaction(s, m).catch((e) => console.error(`[wa] ${s.id} reacción`, e?.message));
       const rows = messages.map((m) => msgRow(s, m)).filter(Boolean) as MsgRow[];
       const inserted = await storeMessages(s, rows, type === 'notify');
@@ -185,8 +280,10 @@ async function connect(s: Session) {
 }
 
 async function fail(s: Session, e: any) {
+  s.stopping=true;
+  await quarantineSession(s).catch(()=>{});
   console.error(`[wa] ${s.id} falló`, e?.message ?? e);
-  await setStatus(s.id, { status: 'error', last_error: String(e?.message ?? e).slice(0, 500), lease_owner: null, lease_until: null }).catch(() => {});
+  await setStatus(s.id, { status: 'error', privacy_synced_at:null, last_error: String(e?.message ?? e).slice(0, 500), lease_owner: null, lease_until: null }).catch(() => {});
   stopLocal(s);
 }
 
@@ -198,7 +295,8 @@ function stopLocal(s: Session) {
 }
 
 async function start(row: any) {
-  const s: Session = { id: row.id, userId: row.user_id, kind: row.kind, pairPhone: row.pair_phone, sock: null, stopping: false, retries: 0, registered: false, me: null, notifyTimer: null };
+  if(stop) return;
+  const s: Session = { id: row.id, userId: row.user_id, kind: row.kind, pairPhone: row.pair_phone, sock: null, stopping: false, retries: 0, registered: false, me: null, notifyTimer: null,leaseOwner:BRIDGE_ID };
   sessions.set(s.id, s);
   console.log(`[wa] ${s.id} iniciando (${row.status})`);
   try { await connect(s); } catch (e) { await fail(s, e); }
@@ -232,15 +330,17 @@ async function processOutbox() {
     const { rows } = await pool.query(
       `UPDATE wa_outbox SET status = 'sending', attempts = attempts + 1
         WHERE id IN (SELECT o.id FROM wa_outbox o JOIN wa_accounts a ON a.id = o.account_id
-                      WHERE o.status = 'queued' AND o.account_id = ANY($1) AND a.send_enabled
+                      WHERE o.status = 'queued' AND o.account_id = ANY($1) AND a.lease_owner=$2 AND a.lease_until>now() AND a.send_enabled AND wa_chat_visible(o.account_id,o.jid)
                       ORDER BY o.created_at LIMIT 20 FOR UPDATE OF o SKIP LOCKED)
         RETURNING id, account_id, jid, body`,
-      [live.map((s) => s.id)],
+      [live.map((s) => s.id),BRIDGE_ID],
     );
     for (const r of rows) {
       const s = sessions.get(r.account_id);
       try {
-        if (!s?.sock) throw new Error('La sesión de WhatsApp no está lista');
+        if (!s?.sock || s.stopping) throw new Error('La sesión de WhatsApp no está lista');
+        await waLeaseQuery(s.id,BRIDGE_ID,'SELECT 1',[ ]);
+        await requireWaVisible(pool,r.account_id,r.jid);
         const sent=await s.sock.sendMessage(r.jid,{text:r.body});
         if(sent) { const row=msgRow(s,sent); if(row) await storeMessages(s,[row],false); }
         await pool.query("UPDATE wa_outbox SET status = 'sent', sent_at = now(), body = '' WHERE id = $1", [r.id]);
@@ -257,21 +357,21 @@ async function processOutbox() {
 
 let mediaDownloading=false,mediaCursor=0;
 async function tick() {
+  if(stop) return;
   await purgeRemoved();
   // One background account per tick: provider media I/O cannot delay account leases, sends, or reconnects.
   const candidates=[...sessions.values()].filter(s=>s.sock && !s.stopping);
   if(!mediaDownloading && candidates.length) {
     const s=candidates[mediaCursor++ % candidates.length]!;mediaDownloading=true;
-    void downloadPendingWaMedia(s.id,s.sock!,()=>!s.stopping && sessions.get(s.id)===s).then(n=>{if(n && !s.stopping) notifyOwner(s);}).catch(()=>{}).finally(()=>{mediaDownloading=false;});
+    void downloadPendingWaMedia(s.id,s.sock!,()=>!s.stopping && sessions.get(s.id)===s,BRIDGE_ID).then(n=>{if(n && !s.stopping) notifyOwner(s);}).catch(()=>{}).finally(()=>{mediaDownloading=false;});
   }
   await processOutbox().catch((e: any) => console.error('[wa] outbox', e?.message));
+  if(stop) return;
   const mine = [...sessions.keys()];
-  if (mine.length) {
-    await pool.query(`UPDATE wa_accounts SET lease_until = now() + make_interval(secs => $3) WHERE id = ANY($1) AND lease_owner = $2`, [mine, BRIDGE_ID, LEASE_SECONDS]);
-  }
+
   // Las cuentas que alguien más dejó de atender (o nuevas) se reclaman aquí.
   const { rows } = await pool.query(
-    `UPDATE wa_accounts SET lease_owner = $1, lease_until = now() + make_interval(secs => $2)
+    `UPDATE wa_accounts SET lease_owner = $1, lease_until = now() + make_interval(secs => $2), privacy_synced_at = NULL
       WHERE id IN (SELECT id FROM wa_accounts
                     WHERE removed_at IS NULL AND status IN ('pending', 'qr', 'connected', 'reconnecting')
                       AND (lease_until IS NULL OR lease_until < now()) AND NOT (id = ANY($3))
@@ -279,32 +379,52 @@ async function tick() {
       RETURNING *`,
     [BRIDGE_ID, LEASE_SECONDS, mine],
   );
+  if(stop) {
+    if(rows.length) await pool.query('UPDATE wa_accounts SET privacy_synced_at=NULL,lease_owner=NULL,lease_until=NULL WHERE id=ANY($1) AND lease_owner=$2',[rows.map(r=>r.id),BRIDGE_ID]);
+    return;
+  }
   for (const r of rows) void start(r);
 }
 
 let stop = false;
 let wake: (() => void) | null = null;
+let leaseHeartbeat: ReturnType<typeof startWaLeaseHeartbeat<Session>> | null=null;
+let shutdown:Promise<void>|null=null;
+
+function requestStop() {
+  stop=true;
+  leaseHeartbeat?.stop();
+  if(!shutdown) {
+    const active=[...sessions.values()];
+    shutdown=shutdownWaPrivacy(active,BRIDGE_ID,stopLocal).catch(()=>{
+      for(const s of active) stopLocal(s);
+      console.error('[wa] no pude guardar la cuarentena de cierre; los leases vencerán');
+    });
+  }
+  wake?.();
+}
 
 async function main() {
   const listener = await pool.connect();
   await listener.query('LISTEN tiecoms_wa');
   listener.on('notification', () => wake?.());
+  leaseHeartbeat=startWaLeaseHeartbeat(()=>[...sessions.values()].filter(s=>!s.leasePaused),BRIDGE_ID,LEASE_SECONDS,stopLocal);
   console.log(`[wa] puente ${BRIDGE_ID} iniciado`);
   while (!stop) {
     try { await tick(); } catch (e: any) { console.error('[wa] error en ciclo', e?.message); }
+    if(stop) break;
     await new Promise<void>((r) => { wake = r; setTimeout(r, 5000); });
     wake = null;
   }
   listener.release();
   // Al apagar se sueltan los leases para que otra réplica retome sin esperar.
-  const ids = [...sessions.keys()];
-  for (const s of [...sessions.values()]) stopLocal(s);
-  if (ids.length) await pool.query('UPDATE wa_accounts SET lease_owner = NULL, lease_until = NULL WHERE id = ANY($1) AND lease_owner = $2', [ids, BRIDGE_ID]).catch(() => {});
+  requestStop();
+  await shutdown;
   await pool.end();
   process.exit(0);
 }
 
 process.on('unhandledRejection', (e: any) => console.error('[wa] promesa sin manejar', e?.message ?? e));
-process.on('SIGTERM', () => { stop = true; wake?.(); });
-process.on('SIGINT', () => { stop = true; wake?.(); });
+process.on('SIGTERM', requestStop);
+process.on('SIGINT', requestStop);
 void main();

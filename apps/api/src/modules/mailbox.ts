@@ -1,3 +1,5 @@
+import { ownChat } from './whatsapp.ts';
+import { requireWaVisible } from './wa-privacy.ts';
 import { discardWaCopy,prepareWaCopy,insertWaCopy } from './wa-media.ts';
 import { claimForMessage,linkToMessage,toDTO as attachmentDTO } from './attachments.ts';
 import { toMessageDTO } from './messages.ts';
@@ -1013,9 +1015,10 @@ export async function createTask(userId: string, id: string, input: z.infer<type
 export async function shareWhatsApp(userId: string, input: z.infer<typeof ShareWaInput>) {
   const acc = (await pool.query('SELECT id, kind, label FROM wa_accounts WHERE id = $1 AND user_id = $2 AND removed_at IS NULL', [input.accountId, userId])).rows[0];
   if (!acc) throw notFound('Cuenta de WhatsApp');
+  await requireWaVisible(pool,input.accountId,input.jid);
   const m = (await pool.query('SELECT * FROM wa_messages WHERE account_id = $1 AND chat_jid = $2 AND id = $3', [input.accountId, input.jid, input.messageId])).rows[0];
   if (!m) throw notFound('Mensaje de WhatsApp');
-  const chat = (await pool.query('SELECT name, is_group FROM wa_chats WHERE account_id = $1 AND jid = $2', [input.accountId, input.jid])).rows[0];
+  const chat = await ownChat(userId,input.accountId,input.jid);
   const me = (await pool.query('SELECT name FROM users WHERE id = $1', [userId])).rows[0]?.name ?? null;
   const targets = [...new Set(input.conversationIds ?? (input.conversationId ? [input.conversationId] : []))];
   for (const cid of targets) await conversationAccess(pool, userId, cid, 'post');
@@ -1031,7 +1034,8 @@ export async function shareWhatsApp(userId: string, input: z.infer<typeof ShareW
     const copy=await prepareWaCopy(m);let retained=false;
     try { await tx(async (c) => {
       await c.query('SELECT id FROM users WHERE id=$1 FOR UPDATE',[userId]);
-      if(!(await c.query('SELECT id FROM wa_accounts WHERE id=$1 AND user_id=$2 AND removed_at IS NULL',[input.accountId,userId])).rowCount) throw notFound('Cuenta de WhatsApp');
+      if(!(await c.query('SELECT id FROM wa_accounts WHERE id=$1 AND user_id=$2 AND removed_at IS NULL FOR SHARE',[input.accountId,userId])).rowCount) throw notFound('Cuenta de WhatsApp');
+      await requireWaVisible(c,input.accountId,input.jid);
       const a = await conversationAccess(c, userId, cid, 'post', true);
       if(input.clientMessageId) { const again=(await c.query('SELECT id,external_id,message_id,meta,comment FROM shared_emails WHERE shared_by=$1 AND conversation_id=$2 AND share_client_id=$3',[userId,cid,input.clientMessageId])).rows[0]; if(again) { if(!matchesShare(again)) throw badRequest('La clave de compartir ya corresponde a otro mensaje');messages.push(toMessageDTO((await c.query('SELECT * FROM messages WHERE id=$1',[again.message_id])).rows[0]));emails.push(await load(c,again.id,userId,true));return; } }
       const attachments=await insertWaCopy(c,userId,cid,copy);

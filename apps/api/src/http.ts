@@ -46,6 +46,7 @@ import * as safety from './modules/safety.ts';
 import * as push from './modules/push.ts';
 import * as attachments from './modules/attachments.ts';
 import * as fileLinks from './modules/file-links.ts';
+import * as ggActions from './modules/gg-actions.ts';
 import { registerGifMediaRoute, registerGifRoutes } from './modules/gifs.ts';
 import * as storageUsage from './modules/storage-usage.ts';
 import * as voice from './modules/voice.ts';
@@ -522,6 +523,10 @@ export async function buildHttp() {
     });
     priv.post('/api/v1/gg/calendar/slots',ggLimit,async(req)=>calendarSlots(req.userId,CalendarSlotsInput.parse(req.body)));
     priv.post('/api/v1/gg/calendar/confirm',ggLimit,async(req)=>confirmCalendar(req.userId,CalendarConfirmInput.parse(req.body)));
+    // gg propone y la persona confirma: borrador de reunión (con quién y enlaces) y de correo; el correo sale solo con «Enviar».
+    priv.post('/api/v1/gg/meeting-draft',ggLimit,async(req)=>ggActions.meetingDraft(req.userId,req.body));
+    priv.post('/api/v1/gg/mail-draft',ggLimit,async(req)=>ggActions.mailDraft(req.userId,req.body));
+    priv.post('/api/v1/gg/mail-send',{config:{rateLimit:{max:10,timeWindow:'1 minute'}}},async(req,reply)=>{reply.header('cache-control','no-store');return ggActions.mailSend(req.userId,req.body);});
     // Preferencias personales, no leído, mensajes
     priv.put<{ Params: { id: string } }>('/api/v1/conversations/:id/prefs', async (req) => prefs.setConversationPrefs(req.userId, req.params.id, ConversationPrefsInput.parse(req.body)));
     priv.put<{ Params: { id: string } }>('/api/v1/workspaces/:id/prefs', async (req) => prefs.setWorkspacePrefs(req.userId, req.params.id, WorkspacePrefsInput.parse(req.body).pinned));

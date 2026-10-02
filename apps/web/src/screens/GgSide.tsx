@@ -1,4 +1,6 @@
 import { GgCalendarDialog } from './GgCalendar.tsx';
+import { GgMailDialog } from './GgMail.tsx';
+import './GgMail.css';
 import { locale } from '../i18n.ts';
 import { RichText } from './RichText.tsx';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
@@ -83,6 +85,7 @@ export function GgSidePanel({ source, chatName, quoted, onClearQuote, host, onCl
   const [messages, setMessages] = useState<GgSideMessageDTO[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [calendar, setCalendar] = useState(false);
+  const [mail, setMail] = useState(false);
   const [needConsent, setNeedConsent] = useState(false);
   const [text, setText] = useState('');
   const box = useRef<HTMLDivElement>(null);
@@ -189,8 +192,12 @@ export function GgSidePanel({ source, chatName, quoted, onClearQuote, host, onCl
         {busy && <div className="gg-side-thinking small muted">✨ {t('ggs.thinking')}</div>}
       </div>
       {calendar && <GgCalendarDialog source={source} messageIds={quoted.map((q) => q.id)} onClose={() => setCalendar(false)} />}
+      {mail && <GgMailDialog source={source} messageIds={quoted.map((q) => q.id)} instruction={text.trim() || undefined} onClose={() => setMail(false)} />}
       <div className="gg-side-foot">
-        <button className="link-btn" onClick={() => setCalendar(true)}>▦ {locale().startsWith('en') ? 'Check availability / schedule' : 'Ver disponibilidad / agendar'}</button>
+        <div className="gg-side-actions">
+          <button className="link-btn" onClick={() => setCalendar(true)}>▦ {locale().startsWith('en') ? 'Schedule' : 'Agendar'}</button>
+          <button className="link-btn" onClick={() => setMail(true)}>✉ {locale().startsWith('en') ? 'Write email' : 'Redactar correo'}</button>
+        </div>
         <div className="gg-chips">
           {(starters ? [t('ggs.chipReply'), t('ggs.chipSummary'), t('ggs.chipMissing'), t('ggs.chipAgreed')] : chips).map((c) => (
             <button key={c} className="gg-chip" disabled={busy || needConsent} onClick={() => chip(c)}>{c}</button>
@@ -362,6 +369,7 @@ export function SuggestDialog({ source, messageIds, host, onAsk, onClose }: { so
   const [needConsent, setNeedConsent] = useState(false);
   const [free, setFree] = useState('');
   const [calendar, setCalendar] = useState(false);
+  const [mail, setMail] = useState(false);
   const consent = useClient((s) => s.data?.me.aiConsent === true);
   const generation = useRef(0);
   const { visible, capture } = useGgPrivacy(source, () => { generation.current++; setList(null); setFree(''); setCalendar(false); setNeedConsent(false); onClose(); });
@@ -380,7 +388,11 @@ export function SuggestDialog({ source, messageIds, host, onAsk, onClose }: { so
   return (
     <Modal title={t('ggs.suggestTitle', { n: messageIds.length })} onClose={onClose}>
       {calendar && <GgCalendarDialog source={source} messageIds={messageIds} onClose={() => setCalendar(false)} />}
-      <button className="btn small" onClick={() => setCalendar(true)}>▦ {locale().startsWith('en') ? 'Find available times and schedule' : 'Buscar horarios libres y agendar'}</button>
+      {mail && <GgMailDialog source={source} messageIds={messageIds} onClose={() => setMail(false)} />}
+      <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+        <button className="btn small" onClick={() => setCalendar(true)}>▦ {locale().startsWith('en') ? 'Find available times and schedule' : 'Buscar horarios libres y agendar'}</button>
+        <button className="btn small" onClick={() => setMail(true)}>✉ {locale().startsWith('en') ? 'Write an email about this' : 'Redactar un correo con esto'}</button>
+      </div>
       {needConsent && <GgConsentBanner />}
       {list === null && <div className="small muted">✨ {t('ggs.thinking')}</div>}
       {list?.length === 0 && !needConsent && <div className="small muted">{t('ggs.noSuggestions')}</div>}

@@ -29,13 +29,13 @@ const CONTEXT = 60;
 const THREAD_TURNS = 16;
 const RECALC_MS = 10 * 60_000;
 
-type Src =
+export type Src =
   | { kind: 'c'; key: string; conversationId: string; name: string; fromSeq: number }
   | { kind: 'wa'; key: string; accountId: string; jid: string; name: string };
 interface SrcMsg { id: string; mine: boolean; author: string | null; text: string; at: string; seq: number }
 
 /** Valida la fuente y que la persona la pueda leer. Lo que no es suyo da 404 (no se distingue de «no existe»). */
-async function resolve(userId: string, raw: string): Promise<Src> {
+export async function resolve(userId: string, raw: string): Promise<Src> {
   const source = GgSideSource.parse(raw);
   if (source.startsWith('c:')) {
     const id = source.slice(2).toLowerCase();
@@ -58,7 +58,7 @@ async function resolve(userId: string, raw: string): Promise<Src> {
   return { kind: 'wa', key: `wa:${accountId}:${jid}`, accountId, jid, name: chat.name ?? jid.split('@')[0] };
 }
 
-async function sourceMessages(userId: string, s: Src, opts: { limit?: number; ids?: string[] } = {}): Promise<SrcMsg[]> {
+export async function sourceMessages(userId: string, s: Src, opts: { limit?: number; ids?: string[] } = {}): Promise<SrcMsg[]> {
   if (s.kind === 'wa') return messagesForGg(s.accountId, s.jid, opts);
   // En chaggu los ids son uuid: lo que no lo sea no puede ser de esta fuente.
   const ids = opts.ids?.filter((x) => /^[0-9a-f-]{36}$/i.test(x));
@@ -76,7 +76,7 @@ async function sourceMessages(userId: string, s: Src, opts: { limit?: number; id
   }));
 }
 
-async function requireConsent(userId: string) {
+export async function requireConsent(userId: string) {
   const r = (await pool.query('SELECT name, ai_consent_at FROM users WHERE id = $1', [userId])).rows[0];
   if (!r?.ai_consent_at) throw new ApiError(403, 'ai_consent_required', 'Autoriza el uso de IA (DeepSeek) antes de usar gg');
   return { name: String(r.name ?? 'la persona') };

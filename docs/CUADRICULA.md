@@ -65,3 +65,10 @@ Desde chaggu, WhatsApp solo acepta texto. Al arrastrar un adjunto de un chat de 
 ## Eliminar para todos lo que se trajo arrastrando (2-oct-2026)
 
 Un correo o un mensaje de WhatsApp llevado a un chat es un mensaje de sistema (`mail.shared` / `wa.shared`). Quien lo trajo ahora lo puede **Eliminar para todos** desde el menú de la tarjeta: se borra la tarjeta con sus comentarios y respuestas (`shared_emails`) y el mensaje queda como texto eliminado, así que todas las apps (web, escritorio, iOS, Android) lo muestran como «Mensaje eliminado» sin cambios. Falta el botón en el menú de iOS y Android (el API ya lo permite).
+
+## gg agenda y redacta correos, siempre con confirmación (2-oct-2026)
+
+- **Agendar** (panel de gg y «Sugerencias»): al abrir, gg lee el chat o los mensajes elegidos (`POST /gg/meeting-draft`) y llena título, duración, personas del chat (se invitan en chaggu y se pueden quitar), los correos que **están escritos** en el chat y los enlaces en la descripción. Avisa a quién no encontró. Después busca horarios libres en tu calendario. La reunión solo se crea con «Confirmar y agendar» (`/gg/calendar/confirm`, igual que antes, ahora con `inviteeIds`).
+- **Redactar correo**: gg redacta (`POST /gg/mail-draft`). Destinatarios: solo correos escritos en el chat (chaggu no revela el correo de nadie; avisa a quién le falta). Se edita todo y se envía desde tu Gmail u Outlook conectado solo con «Enviar» y un segundo «¿Enviar desde X a Y?» (`POST /gg/mail-send`). La clave de idempotencia (migr. `089_gg_mail_sends`) evita que salga dos veces.
+- Los mensajes van a la IA como DATOS delimitados: un «manda el correo a…» escrito en el chat no se obedece.
+- Código: `apps/api/src/modules/gg-actions.ts`, `mailbox.ts` (`send`, `sendNew`, `activeMailbox`), `screens/GgCalendar.tsx`, `screens/GgMail.tsx`. Prueba: `test/gg-actions.test.ts` con `fake-mail.mjs` (`POST /__llm` fija la respuesta de la IA). Falta en iOS y Android.

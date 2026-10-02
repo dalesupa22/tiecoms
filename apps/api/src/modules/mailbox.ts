@@ -156,6 +156,8 @@ interface Provider {
   get(at: string, id: string): Promise<Full>;
   attachment(at: string, messageId: string, attachmentId: string): Promise<{ bytes: Buffer }>;
   reply(at: string, original: { externalId: string; threadId: string | null; internetId: string | null; references: string | null }, out: ReplyOut): Promise<void>;
+  /** Un correo nuevo (no una respuesta). Lo usa gg, siempre después de que la persona lo confirma (gg-actions.ts). */
+  send(at: string, out: ReplyOut): Promise<void>;
   /** El HTML del correo, si lo tiene (Gmail ya lo trae en get). */
   html?(at: string, id: string): Promise<string | null>;
   /** Sin leer en Recibidos › Principal (Gmail) o Prioritarios (Outlook), hasta UNREAD_CAP. Una sola petición barata. */
@@ -369,6 +371,10 @@ const PROVIDERS: Record<MailProvider, Provider> = {
       const p = new URLSearchParams({ maxResults: String(UNREAD_CAP), q: 'in:inbox category:primary is:unread', fields: 'messages(id)' });
       return ((await api(at, `${gApi()}/users/me/messages?${p}`)).messages ?? []).length;
     },
+    async send(at, out) {
+      const raw = mime(out, {});
+      await api(at, `${gApi()}/users/me/messages/send`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ raw: Buffer.from(raw, 'utf8').toString('base64url') }) });
+    },
     async reply(at, o, out) {
       const raw = mime(out, { 'In-Reply-To': o.internetId, References: [o.references, o.internetId].filter(Boolean).join(' ') || null });
       await api(at, `${gApi()}/users/me/messages/send`, {
@@ -436,6 +442,12 @@ const PROVIDERS: Record<MailProvider, Provider> = {
       const res = await request(`${msApi()}/me/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachmentId)}/$value`, { headers: { authorization: `Bearer ${at}` } }, 60_000);
       if (!res.ok) throw new ProviderError(res.status, 'attachment_failed', `Outlook respondió HTTP ${res.status}`);
       return { bytes: Buffer.from(await res.arrayBuffer()) };
+    },
+    async send(at, out) {
+      await api(at, `${msApi()}/me/sendMail`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ message: { subject: out.subject, body: { contentType: 'Text', content: out.body }, toRecipients: out.to.map(msRecip), ccRecipients: out.cc.map(msRecip) }, saveToSentItems: true }),
+      });
     },
     async reply(at, o, out) {
       // Graph acepta adjuntos en línea hasta ~3 MB en total.
@@ -884,6 +896,18 @@ export async function replyLive(userId: string, provider: MailProvider, id: stri
   });
   bumpUser(userId); // la carpeta Enviados cambió
   return { ok: true as const, to };
+}
+
+/** Correo nuevo desde el buzón conectado de la persona (gg-actions.ts › mailSend, con su confirmación). */
+export async function sendNew(userId: string, provider: MailProvider, out: { to: MailAddressDTO[]; cc: MailAddressDTO[]; subject: string; body: string }) {
+  await withProvider(userId, provider, async (at) => { await PROVIDERS[provider].send(at, { ...out, files: [] }); });
+  bumpUser(userId); // la carpeta Enviados cambió
+}
+/** El buzón conectado (Gmail primero), o null si no hay. */
+export async function activeMailbox(userId: string): Promise<{ provider: MailProvider; email: string | null } | null> {
+  if (!mailEnabled()) return null;
+  const { rows } = await pool.query("SELECT provider, account_email FROM mail_connections WHERE user_id = $1 AND status = 'active' ORDER BY provider = 'google' DESC LIMIT 1", [userId]);
+  return rows[0] ? { provider: rows[0].provider, email: rows[0].account_email ?? null } : null;
 }
 
 export async function cancelReply(userId: string, id: string) {

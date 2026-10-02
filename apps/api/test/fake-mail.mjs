@@ -14,6 +14,7 @@ const port = Number(process.argv[2] ?? 59397);
 const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
 const idToken = (email) => `${b64({ alg: 'none' })}.${b64({ email })}.`;
 const sent = [];
+let llmNext = null, llmLast = null, llmSticky = false;
 const stats = { batch: 0, gmailGet: 0, gmailList: 0, graphGet: 0, graphAttachments: 0 };
 const day = 86_400_000;
 const now = Date.now();
@@ -78,6 +79,9 @@ http.createServer(async (req, res) => {
   const u = new URL(req.url, `http://localhost:${port}`);
   const parts = u.pathname.split('/').filter(Boolean);
   if (u.pathname === '/sent') return send(res, 200, sent);
+  // Lo que «responde la IA» la próxima vez (gg-actions.test.ts); sin esto, el texto fijo de siempre. También guarda el último prompt.
+  if (u.pathname === '/__llm' && req.method === 'POST') { const b = await body(req); llmNext = b.content ?? null; llmSticky = b.sticky === true; return send(res, 200, {}); }
+  if (u.pathname === '/__llm' && req.method === 'GET') return send(res, 200, { last: llmLast });
   if (u.pathname === '/stats') return send(res, 200, stats);
   // Lote de Gmail: multipart/mixed con «GET /gmail/v1/users/me/messages/<id>?…» por parte.
   if (u.pathname === '/batch/gmail/v1' && req.method === 'POST') {
@@ -101,6 +105,7 @@ http.createServer(async (req, res) => {
   }
   if (parts[1] === 'token') return send(res, 200, { access_token: `at-${parts[0]}-${randomUUID()}`, refresh_token: `rt-${randomUUID()}`, expires_in: 3600, scope: 'mock', id_token: idToken(`mock.${parts[0]}@example.com`) });
   if (parts[1] === 'revoke') return send(res, 200, {});
+  if (parts[0] === 'llm' && llmNext != null) { llmLast = await body(req).catch(() => null); const content = llmNext; if (!llmSticky) llmNext = null; return send(res, 200, { choices: [{ message: { content } }] }); }
   if (parts[0] === 'llm') return send(res, 200, { choices: [{ message: { content: 'Hola, Jorge. Te adjunto la presentación con los precios por volumen.\n\nSaludos, Danny' } }] });
   if (!(req.headers.authorization ?? '').startsWith('Bearer at-')) return send(res, 401, { error: { code: 'unauthorized' } });
   // Gmail: /gmail/users/me/messages[/id[/attachments/aid]] y /gmail/users/me/messages/send
@@ -126,6 +131,11 @@ http.createServer(async (req, res) => {
     return send(res, 200, gmailMsg(m, u.searchParams.get('format') === 'full'));
   }
   // Graph: /graph/me/(mailFolders/x/)messages[/id[/attachments[/aid/$value]]|/reply]
+  if (parts[0] === 'graph' && parts.at(-1) === 'sendMail' && req.method === 'POST') {
+    const b = await body(req);
+    sent.push({ provider: 'microsoft', new: true, to: b.message.toRecipients.map((r) => r.emailAddress.address).join(', '), cc: b.message.ccRecipients.map((r) => r.emailAddress.address).join(', ') || null, subject: b.message.subject, body: b.message.body?.content });
+    res.writeHead(202); return res.end();
+  }
   if (parts[0] === 'graph') {
     const i = parts.indexOf('messages');
     const id = parts[i + 1]; const sub = parts[i + 2]; const aid = parts[i + 3];

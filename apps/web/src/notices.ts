@@ -99,7 +99,11 @@ export function handleNotice(n: ClientNotice) {
     // Igual que el push de reacciones: nada con «No molestar» ni en un chat silenciado.
     if (dnd || activeUntil(d.conversations.find((c) => c.id === n.conversationId)?.mutedUntil)) return;
     const who = personById(d, n.userId)?.name.split(' ')[0] ?? '';
-    const text = t('react.notice', { name: who, emoji: n.emoji, excerpt: n.message.body.replace(/\s+/g, ' ').slice(0, 60) });
+    // Un mensaje sin texto (foto, archivo, GIF, nota de voz) se nombra por lo que trae, no «».
+    const att = n.message.attachments?.[0];
+    const excerpt = n.message.body.replace(/\s+/g, ' ').trim().slice(0, 60)
+      || (att ? (att.kind === 'voice' ? `🎤 ${t('once.voice')}` : att.contentType?.startsWith('image/') ? `📷 ${att.name}` : `📎 ${att.name}`) : t('react.yourMessage'));
+    const text = t('react.notice', { name: who, emoji: n.emoji, excerpt });
     const go = () => navigate(`/c/${n.conversationId}?m=${n.message.seq}`);
     if (document.visibilityState === 'visible') toast(text, { label: t('rem.open'), run: go }, 5000);
     else if (canNotify) {

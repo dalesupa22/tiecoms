@@ -1,4 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type MouseEvent as RMouseEvent, type TouchEvent as RTouchEvent } from 'react';
+import { t } from './i18n.ts';
+import './screens/Toasts.css';
 
 /**
  * Menú contextual global (clic derecho, tecla de menú o pulsación larga en táctil)
@@ -164,6 +166,7 @@ export function toast(text: string, action?: Toast['action'], ms = 3200) {
   toastListeners.forEach((l) => l());
   setTimeout(() => { toasts = toasts.filter((x) => x.id !== id); toastListeners.forEach((l) => l()); }, ms);
 }
+export function dismissToast(id: number) { toasts = toasts.filter((y) => y.id !== id); toastListeners.forEach((l) => l()); }
 export function ToastHost() {
   const list = useSyncExternalStore((l) => { toastListeners.add(l); return () => toastListeners.delete(l); }, () => toasts);
   return (
@@ -171,7 +174,9 @@ export function ToastHost() {
       {list.map((x) => (
         <div key={x.id} className="toast">
           <span>{x.text}</span>
-          {x.action && <button onClick={() => { x.action!.run(); toasts = toasts.filter((y) => y.id !== x.id); toastListeners.forEach((l) => l()); }}>{x.action.label}</button>}
+          {x.action && <button onClick={() => { x.action!.run(); dismissToast(x.id); }}>{x.action.label}</button>}
+          {/* Cada aviso se cierra solo (2-oct-2026). */}
+          <button className="toast-x" aria-label={t('common.close')} title={t('common.close')} onClick={() => dismissToast(x.id)}>×</button>
         </div>
       ))}
     </div>

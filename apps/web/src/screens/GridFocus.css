@@ -24,3 +24,8 @@
 .split-root:has(.is-drop-candidate) > .split-drop { border-color: transparent !important; background: transparent !important; }
 .wa-msg[draggable="true"] { cursor: grab; }
 .wa-msg[draggable="true"]:active { cursor: grabbing; }
+/* Los que no son el activo se ven apagados (2-oct-2026: «al ojo se sigue sin diferenciar»). Al pasar el mouse o mientras
+   se arrastra algo hacia ellos recuperan el color, para poder leerlos y elegir. */
+.split:not(.n1):has(> .split-cell.is-active) > .split-cell { transition: opacity .18s ease, filter .18s ease; }
+.split:not(.n1):has(> .split-cell.is-active) > .split-cell:not(.is-active):not(:hover):not(.is-drop-candidate):not(.is-flash) { opacity: .62; filter: saturate(.45); }
+@media (prefers-reduced-motion: reduce) { .split:not(.n1) > .split-cell { transition: none; } }

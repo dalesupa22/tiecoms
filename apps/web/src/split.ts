@@ -66,6 +66,9 @@ let metas: Record<string, PaneMeta> = read<Record<string, PaneMeta>>(META_KEY, {
 let activeKey: string | null = null;
 let gridSide = read<boolean>(SIDE_KEY, false) === true;
 let pulse = 0;
+/** Panel que acaba de abrirse (aviso, burbuja, notificación, lista): brilla 1,6 s para saber cuál es (2-oct-2026). */
+let flashKey: string | null = null;
+let flashTimer: ReturnType<typeof setTimeout> | undefined;
 const listeners = new Set<() => void>();
 const emit = () => listeners.forEach((l) => l());
 const subscribe = (l: () => void) => { listeners.add(l); return () => { listeners.delete(l); }; };
@@ -185,6 +188,17 @@ export const isPinned = (key: string) => pinned.has(key);
 export const useMetas = () => useSyncExternalStore(subscribe, () => metas);
 export const useActiveKey = () => useSyncExternalStore(subscribe, () => activeKey);
 export const usePulse = () => useSyncExternalStore(subscribe, () => pulse);
+export const useFlash = () => useSyncExternalStore(subscribe, () => flashKey);
+/** Hace brillar el panel `key` y deja el cursor en su caja de escribir. */
+export function flashPane(key: string, focus = true) {
+  flashKey = key; clearTimeout(flashTimer);
+  flashTimer = setTimeout(() => { flashKey = null; emit(); }, 1600);
+  emit();
+  if (focus) requestAnimationFrame(() => requestAnimationFrame(() => {
+    const cell = document.querySelector<HTMLElement>(`[data-pane="${CSS.escape(key)}"]`) ?? document;
+    cell.querySelector<HTMLTextAreaElement>('.composer textarea')?.focus({ preventScroll: true });
+  }));
+}
 /** Nombre de un panel que no es un chat de chaggu (para la bandeja, el riel y el título mientras carga). */
 export function rememberMeta(key: string, meta: PaneMeta) {
   if (metas[key]?.title === meta.title && metas[key]?.sub === meta.sub) return;

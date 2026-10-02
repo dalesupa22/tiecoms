@@ -15,7 +15,7 @@ import { openInGrid, readDrag, shareToChat } from '../grid-actions.ts';
 import {
   MAX_PANES, closePane, dragKindOf, fitsChat, fitsSlot, focusPane, onlyPane, rememberBack, setSplitSize, syncActive, togglePin,
   useActiveKey, useBack, usePanes, usePinned, useSplitSizes, useWide, type DragKind,
-  useExpandedPane, collapsePane, useGridLayout, useLayoutOrder, setGridLayout, moveLayoutPane, type GridLayout,
+  useExpandedPane, collapsePane, useFlash, flashPane, useDragging, useGridLayout, useLayoutOrder, setGridLayout, moveLayoutPane, type GridLayout,
   useTallPanes, useWidePanes, setPaneSize, setGridGeometry, placeGridPane, usePanePositions, useGridColumnSizes, useMetas,
 } from '../split.ts';
 import { gridSpanLayout } from '../grid-span-layout.ts';
@@ -26,6 +26,7 @@ import { usePaneGestures } from './usePaneGestures.ts';
 import { ConversationScreen } from './Conversation.tsx';
 import { ensureAssigned, openTintMenu, usePaneTints } from '../tints.ts';
 import './GridDock.css';
+import './GridFocus.css';
 import { InboxPane, MailPane, SectionPane, TasksPane, WaListPane, WaPane } from './Panes.tsx';
 
 const sectionLabel = (key: string) => ({ tasks: t('nav.issues'), inbox: t('nav.mail'), wachats: 'WhatsApp', agenda: t('nav.agenda'), trazo: t('nav.trazo'), calls: t('nav.calls') } as Record<string,string>)[parseKey(key).kind] ?? parseKey(key).kind;
@@ -63,6 +64,13 @@ export function GridArea({ id, search = '', side }: { id: string | null; search?
   const d = useClient((s) => s.data);
   const known = d?.conversations;
   useEffect(() => { if (id) syncActive(id); }, [id]);
+  // Al cambiar de chat (aviso, burbuja, lista) el panel brilla y queda listo para escribir. No en la primera carga.
+  const firstId = useRef(true);
+  useEffect(() => { if (firstId.current) { firstId.current = false; return; } if (id) flashPane(id); }, [id]);
+  const flash = useFlash();
+  // Algo que va a un chat (mensaje de WhatsApp, correo, tarea) mientras se arrastra: se marcan los chats donde se suelta.
+  const dragging = useDragging();
+  const toChat = !!dragging && fitsChat(dragging) && wide;
   const exists = (x: string) => parseKey(x).kind !== 'chat' || x === id || !!known?.some((c) => c.id === x);
   // En /c/:id, un solo panel guardado no esconde el chat abierto; en /cuadricula se ven todos, aunque sea uno.
   const shown = panes.filter(exists);
@@ -238,7 +246,8 @@ export function GridArea({ id, search = '', side }: { id: string | null; search?
       <div key={x} data-pane={x} data-tint={tints[x]} hidden={expanded ? expanded !== x : !visible.includes(x)}
         style={!expanded && customLayout && list.length > 1 ? { gridColumn: `${spanLayout.cells[x]!.column} / span ${spanLayout.cells[x]!.width}`, gridRow: `${spanLayout.cells[x]!.row} / span ${spanLayout.cells[x]!.span}` }
           : mixedLayout && !expanded ? { gridArea: ['a', 'b', 'c', 'd'][arranged.indexOf(x)] } : classicCellStyle(x)}
-        className={`split-cell ${pinned.has(x) ? 'is-pinned-pane' : ''} ${x === active ? 'is-active' : ''} ${drop && drop.over === x && (full || (chatOver(x) && fitsChat(drop.kind))) ? 'is-target' : ''}`}
+        data-drop-label={toChat && ref.kind === 'chat' ? `⤵ ${t('grid.dropShare', { name: paneName(x) })}` : undefined}
+        className={`split-cell ${pinned.has(x) ? 'is-pinned-pane' : ''} ${x === active ? 'is-active' : ''} ${flash === x ? 'is-flash' : ''} ${toChat && ref.kind === 'chat' ? 'is-drop-candidate' : ''} ${drop && drop.over === x && (full || (chatOver(x) && fitsChat(drop.kind))) ? 'is-target' : ''}`}
         // Tocar un panel lo vuelve el activo (antes del clic, para que el clic siga funcionando adentro).
         onPointerDownCapture={() => { if (x !== active) focusPane(x); }}>
         {ref.kind === 'chat' ? <ConversationScreen key={list.length === 1 && x === id ? x + search : x} id={x} search={x === id ? search : ''} pane={list.length > 1 || !id ? frame : undefined} />

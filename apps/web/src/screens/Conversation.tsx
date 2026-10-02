@@ -19,6 +19,7 @@ import { GgButton, GgSidePanel, ReplyForMe, SelectionBar, SuggestDialog, convSou
 import { errorText, locale, systemText, t, tn } from '../i18n.ts';
 import { contextHandler, copyText, menuProps, openMenuAt, toast, type MenuItem } from '../menu.tsx';
 import { navigate, queryParam } from '../router.ts';
+import { flashPane } from '../split.ts';
 import { MAX_PANES, ZOOM_MAX, ZOOM_MIN, convZoomNow, setConvZoom, splitAvailable, useConvZoom } from '../split.ts';
 import { SplitPicker } from './SplitPicker.tsx';
 import { directOtherId, Avatar, ConvAvatar, Modal, OrgMark, conversationSubtitle, conversationTitle, dayLabel, isGgChat, isSelfChat, orgById, personById, personColor, personInk } from '../ui.tsx';
@@ -321,7 +322,7 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
       const base = import.meta.env.BASE_URL.replace(/\/$/, '');
       if (location.pathname !== `${base}/c/${id}`) return;
       const target = Number(new URLSearchParams(location.search).get('m'));
-      if (target > 0) jumpRef.current(target);
+      if (target > 0) { jumpRef.current(target); flashPane(id); }
     };
     window.addEventListener('chaggu:navigate', onNav);
     window.addEventListener('popstate', onNav);

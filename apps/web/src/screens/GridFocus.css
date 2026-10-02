@@ -1,0 +1,26 @@
+/* ---------- Cuál panel es cuál (2-oct-2026) ----------
+   El activo lleva borde de luz (antes 2 px iguales a todo); el recién abierto brilla 1,6 s (flashPane en split.ts);
+   mientras se arrastra algo que va a un chat, los chats donde se puede soltar se marcan con su nombre. */
+.split:not(.n1) > .split-cell.is-active::after {
+  border-width: 2px; box-shadow: inset 0 0 0 1px var(--accent), inset 0 0 16px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.split-cell.is-flash::after {
+  content: ""; position: absolute; inset: 0; border-radius: 8px; pointer-events: none; z-index: 5;
+  border: 3px solid var(--accent); animation: pane-flash 1.6s ease-out forwards;
+}
+@keyframes pane-flash {
+  0% { box-shadow: inset 0 0 0 0 var(--accent), inset 0 0 0 color-mix(in srgb, var(--accent) 0%, transparent); opacity: 1; }
+  20% { box-shadow: inset 0 0 0 3px var(--accent), inset 0 0 38px color-mix(in srgb, var(--accent) 45%, transparent); }
+  100% { box-shadow: inset 0 0 0 0 var(--accent), inset 0 0 0 transparent; opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) { .split-cell.is-flash::after { animation-duration: .01s; } }
+.split-cell.is-drop-candidate::before {
+  content: attr(data-drop-label); position: absolute; inset: 6px; z-index: 6; pointer-events: none; display: flex; align-items: center; justify-content: center;
+  padding: 16px; text-align: center; font-weight: 700; color: var(--accent); border: 2px dashed var(--accent); border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 10%, var(--paper) 86%); backdrop-filter: blur(2px);
+}
+.split-cell.is-drop-candidate.is-target::before { background: color-mix(in srgb, var(--accent) 22%, var(--paper) 74%); border-style: solid; }
+/* Con los chats marcados uno a uno, el recuadro general de la cuadrícula sobra: queda solo su etiqueta. */
+.split-root:has(.is-drop-candidate) > .split-drop { border-color: transparent !important; background: transparent !important; }
+.wa-msg[draggable="true"] { cursor: grab; }
+.wa-msg[draggable="true"]:active { cursor: grabbing; }

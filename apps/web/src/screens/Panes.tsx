@@ -313,6 +313,8 @@ function WaChatView({ accountId, jid, name, isGroup, gg, active = true }: { acco
           const bring = () => openWaDialog({ accountId, jid }, (close) => <WaShareDialog accountId={accountId} jid={jid} chatName={name} isGroup={isGroup} message={m} onClose={close} />);
           return (
             <div key={m.id} className={`wa-msg ${m.fromMe ? 'me' : ''} ${gg?.selected.has(m.id) ? 'is-selected' : ''}`}
+              // 2-oct-2026: se arrastra la burbuja entera (antes solo el ⠿, que casi no se encontraba). Copiar sigue en el menú.
+              {...(mailOn ? { draggable: true, title: t('grid.carryMsgHint'), onDragStart: (e: React.DragEvent) => { setDrag(e, 'wamsg', { accountId, jid, messageId: m.id, chatName: name, text: m.body }, m.body.slice(0, 80)); e.dataTransfer.setDragImage(e.currentTarget as HTMLElement, 12, 12); } } : {})}
               {...waMenuProps({ accountId, jid }, () => [
                 ...(mailOn ? [{ label: t('wa.bring'), icon: '⤴', onSelect: bring }] : []),
                 { label: t('common.copy'), icon: '⧉', onSelect: () => void copyText(m.body).then(() => toast(t('common.copied'))) },

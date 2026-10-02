@@ -70,8 +70,8 @@ android {
         applicationId = "com.chaggu.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 50
-        versionName = "1.7.10"
+        versionCode = 51
+        versionName = "1.7.11"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "DEFAULT_API_URL", "\"https://app.chaggu.com\"")
         buildConfigField("String", "CONTRACT_VERSION", "\"2026-09-29.1\"")

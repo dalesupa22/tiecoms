@@ -279,7 +279,7 @@ ${input.tone ? TONES[input.tone] : ''}\n\n${dataBlock(msgs, me)}${mine.length ? 
   const { raw } = await ask(sys, `Redacta las 3 respuestas${quoted.length ? ' a los mensajes citados' : ' al último mensaje que espera respuesta'}.${quotedBlock(quoted)}`);
   const d = drafts(parseJson(raw)?.drafts);
   if (!d.length) throw new ApiError(502, 'assistant_failed', 'gg no pudo redactar respuestas; intenta de nuevo');
-  await save(userId, s.key, st.session, 'gg', 'Te propongo estas respuestas. Elige una y edítala antes de enviar.', quoted.length ? quoted : null, { drafts: d, followUps: ['Más corto', 'Más formal', 'Como yo'] });
+  await save(userId, s.key, st.session, 'gg', 'Te propongo estas respuestas. Elige una y edítala antes de enviar.', quoted.length ? quoted : null, { drafts: d });
   return { drafts: d };
 }
 

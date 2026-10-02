@@ -22,7 +22,7 @@ export function usePath() {
 export type Route =
   | { name: 'today' } | { name: 'inbox' } | { name: 'people' } | { name: 'settings' } | { name: 'spaces' } | { name: 'issues' } | { name: 'trazo' } | { name: 'agenda' } | { name: 'share' } | { name: 'whatsapp' } | { name: 'files' } | { name: 'groups' } | { name: 'dms' } | { name: 'saved' } | { name: 'scheduled' } | { name: 'signed' } | { name: 'calls' } | { name: 'mail' } | { name: 'grid' } | { name: 'notes' } | { name: 'alerts' } | { name: 'community' } | { name: 'organize' }
   | { name: 'oversight'; id: string } | { name: 'readonly'; id: string }
-  | { name: 'conversation'; id: string } | { name: 'workspace'; id: string }
+  | { name: 'conversation'; id: string } | { name: 'workspace'; id: string } | { name: 'waChat'; accountId: string; jid: string }
   | { name: 'login' } | { name: 'signup' } | { name: 'sso' } | { name: 'invite'; token: string } | { name: 'guestCall'; token: string } | { name: 'room'; code: string } | { name: 'booking'; slug: string } | { name: 'bookingManage'; token: string } | { name: 'bookingHome' } | { name: 'confirmSignup'; token: string };
 
 /** cita.chaggu.com (o book.): la ruta es directa, /<nombre> abre la página de citas y /r/<clave> administra una cita. */
@@ -58,6 +58,8 @@ export function parse(path: string): Route {
   if (a === 'trazo') return { name: 'trazo' };
   if (a === 'agenda') return { name: 'agenda' };
   if (a === 'share') return { name: 'share' };
+  // Un chat de WhatsApp a pantalla completa (desde la bandeja): /whatsapp/:accountId/:jid.
+  if (a === 'whatsapp' && b && c) return { name: 'waChat', accountId: b, jid: decodeURIComponent(c) };
   if (a === 'whatsapp') return { name: 'whatsapp' };
   if (a === 'archivos') return { name: 'files' };
   if (a === 'ver-despues') return { name: 'saved' };

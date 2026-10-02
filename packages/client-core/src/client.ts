@@ -630,6 +630,8 @@ export class TieComsClient {
     if (e.type === 'reminders.changed') void this.loadReminders().catch(() => {});
     if (e.type === 'scheduled.updated') this.putScheduled(e.scheduled);
     if (e.type === 'whatsapp.updated') this.set({ waRevision: this.state.waRevision + 1 });
+    // WhatsApp en la bandeja: la fila se reemplaza al vuelo (se movió, fijó, sacó o le entró un mensaje).
+    if (e.type === 'wa.inbox') this.putWaInbox(e.chat);
     if (e.type === 'drive.updated') this.set({ driveRevision: this.state.driveRevision + 1 });
     if (e.type === 'reminder.due') {
       this.set({ reminders: [...this.state.reminders.filter((r) => r.id !== e.reminder.id), e.reminder].sort((a, b) => a.remindAt.localeCompare(b.remindAt)) });
@@ -1260,6 +1262,45 @@ export class TieComsClient {
   replyLiveMail(provider: import('@tiecoms/contracts').MailProvider, id: string, input: { body: string; cc?: string[] }) {
     return this.request<{ ok: true; to: import('@tiecoms/contracts').MailAddressDTO[] }>(`/mail/messages/${provider}/${encodeURIComponent(id)}/reply`, { method: 'POST', json: input });
   }
+  /** Pone o quita una fila de WhatsApp de la bandeja (bootstrap.waInbox). Sale si inboxPlace es null o está oculto. */
+  putWaInbox(chat: import('@tiecoms/contracts').WaChatDTO) {
+    const d = this.state.data;
+    if (!d) return;
+    const same = (x: import('@tiecoms/contracts').WaChatDTO) => x.accountId === chat.accountId && x.jid === chat.jid;
+    const rest = (d.waInbox ?? []).filter((x) => !same(x));
+    this.set({ data: { ...d, waInbox: chat.inboxPlace && !chat.hidden ? [...rest, chat] : rest } });
+  }
+  /**
+   * WhatsApp en la bandeja (docs/WA-BANDEJA-GG-CHAT.md): mover a Grupos/DMs ('auto' = la sugerida), sacar (null)
+   * o fijar arriba. No es el fijado dentro de WhatsApp (pinned).
+   */
+  async setWaInbox(accountId: string, jid: string, patch: { inboxPlace?: 'groups' | 'dms' | 'auto' | null; inboxPinned?: boolean }) {
+    const chat = await this.request<import('@tiecoms/contracts').WaChatDTO>(`/whatsapp/chats/${accountId}/${encodeURIComponent(jid)}`, { method: 'PATCH', json: patch });
+    this.putWaInbox(chat);
+    return chat;
+  }
+  /** Leí un chat de WhatsApp de la bandeja: su contador se apaga aquí sin esperar el aviso. */
+  markWaInboxRead(accountId: string, jid: string) {
+    const c = this.state.data?.waInbox?.find((x) => x.accountId === accountId && x.jid === jid);
+    if (c && c.unread) this.putWaInbox({ ...c, unread: 0 });
+  }
+
+  // ---------- «gg de este chat» (docs/WA-BANDEJA-GG-CHAT.md) ----------
+  ggSide(source: string) { return this.request<import('@tiecoms/contracts').GgSideThreadDTO>(`/gg/side?source=${encodeURIComponent(source)}`); }
+  ggSideOpen(source: string) { return this.request<{ message: import('@tiecoms/contracts').GgSideMessageDTO }>('/gg/side/open', { method: 'POST', json: { source } }); }
+  ggSideAsk(source: string, text: string, quotedMessageIds?: string[]) {
+    return this.request<{ message: import('@tiecoms/contracts').GgSideMessageDTO }>('/gg/side', { method: 'POST', json: { source, text, ...(quotedMessageIds?.length ? { quotedMessageIds } : {}) } });
+  }
+  ggSideReply(source: string, tone?: 'me' | 'shorter' | 'formal' | 'more', quotedMessageIds?: string[]) {
+    return this.request<{ drafts: import('@tiecoms/contracts').GgSideDraft[] }>('/gg/side/reply-for-me', { method: 'POST', json: { source, ...(tone ? { tone } : {}), ...(quotedMessageIds?.length ? { quotedMessageIds } : {}) } });
+  }
+  ggSideSuggest(source: string, messageIds: string[]) {
+    return this.request<{ suggestions: import('@tiecoms/contracts').GgSideSuggestion[] }>('/gg/side/suggest', { method: 'POST', json: { source, messageIds } });
+  }
+  ggSideNew(source: string) { return this.request<{ session: number }>('/gg/side/new', { method: 'POST', json: { source } }); }
+  ggSidePending(sources: string[]) { return this.request<Record<string, number>>(`/gg/side/pending?sources=${encodeURIComponent(sources.join(','))}`); }
+  ggSidePendingRefresh(source: string) { return this.request<{ source: string; pending: number; recalculated: boolean }>('/gg/side/pending/refresh', { method: 'POST', json: { source } }); }
+
   /** Responder un chat de WhatsApp desde chaggu. Solo si esa cuenta tiene «Responder desde chaggu» activado. */
   sendWhatsApp(accountId: string, jid: string, text: string) {
     return this.request<{ id: string; status: 'sent' | 'queued' | 'failed'; error?: string }>(`/whatsapp/chats/${accountId}/${encodeURIComponent(jid)}/send`, { method: 'POST', json: { text } });

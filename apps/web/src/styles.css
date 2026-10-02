@@ -2154,3 +2154,72 @@ button.slot:disabled { opacity: .5; cursor: not-allowed; }
   --line: hsl(var(--th) 15% 27%); --line-2: hsl(var(--th) 14% 32%); --scroll: hsl(var(--th) 13% 31%);
 }
 .split-cell[data-tint] .pane-head, .split-cell[data-tint] .conv-head { background: var(--paper-soft); }
+
+/* ---------- WhatsApp en la bandeja (docs/WA-BANDEJA-GG-CHAT.md) ---------- */
+.wa-inbox-av { position: relative; flex: none; display: inline-grid; place-items: center; border-radius: 99px; background: var(--green-bg); color: var(--green-ink); font-weight: 700; }
+.wa-inbox-badge { position: absolute; right: -3px; bottom: -3px; display: inline-flex; border-radius: 99px; box-shadow: 0 0 0 2px var(--paper); line-height: 0; }
+.pill.wa-pill { background: #25d366; color: #fff; }
+.wa-inbox-row.is-off { opacity: .55; }
+.wa-inbox-row.is-off .conv-org { color: var(--danger); }
+.wa-chat-screen { height: 100%; }
+.wa-gg-body { flex: 1; min-height: 0; display: flex; }
+.wa-gg-chat { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; position: relative; }
+.wa-gg-body > .gg-side { width: min(360px, 46%); flex: none; }
+.wa-msg { position: relative; }
+.wa-msg.is-selected { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* ---------- «gg de este chat» ---------- */
+.gg-dot { display: inline-grid; place-items: center; border-radius: 99px; background: #17161F; flex: none; box-shadow: 0 0 0 1px var(--line-strong); }
+.gg-head-btn { position: relative; display: inline-flex; align-items: center; border: 0; background: transparent; padding: 2px; border-radius: 99px; cursor: pointer; flex: none; }
+.gg-head-btn:hover .gg-dot, .gg-head-btn.is-on .gg-dot { box-shadow: 0 0 0 3px var(--accent-soft); }
+.gg-head-count { position: absolute; top: -4px; right: -6px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 99px; background: var(--accent); color: var(--on-accent); font-size: 10px; font-weight: 800; line-height: 16px; text-align: center; box-shadow: 0 0 0 2px var(--paper); }
+.conv-head .conv-head-title { min-width: 0; }
+.conv.has-gg { grid-template-columns: minmax(0, 1fr) minmax(320px, 36%); }
+.panel.gg-side { padding: 0; gap: 0; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+.gg-side-head { padding: calc(12px + var(--safe-t)) 12px 8px; gap: 8px; border-bottom: 1px solid var(--line); }
+.gg-side-scope { padding: 6px 12px; color: var(--muted); background: var(--paper-3); }
+.gg-side-msgs { flex: 1; min-height: 0; overflow: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+.gg-b { align-self: flex-start; max-width: 92%; background: var(--card); border: 1px solid var(--line); border-radius: 12px 12px 12px 4px; padding: 8px 10px; display: flex; flex-direction: column; gap: 8px; font-size: 14px; }
+.gg-b.me { align-self: flex-end; background: var(--accent-soft); border-color: var(--accent-line); border-radius: 12px 12px 4px 12px; }
+.gg-b-quoted { border-left: 3px solid var(--accent-line); padding-left: 8px; color: var(--ink-2); }
+.gg-pending { display: flex; flex-direction: column; gap: 2px; }
+.gg-pending-item { border: 0; background: transparent; text-align: left; padding: 2px 0; color: var(--ink); font-size: 13px; }
+.gg-pending-item:not(:disabled):hover { color: var(--accent-ink); text-decoration: underline; }
+.gg-drafts { display: flex; flex-direction: column; gap: 8px; }
+.gg-draft { border: 1px solid var(--line); border-radius: 10px; padding: 8px; display: flex; flex-direction: column; gap: 6px; background: var(--paper); }
+.gg-draft-text { white-space: pre-wrap; font-size: 13.5px; }
+.gg-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.gg-chip { border: 1px solid var(--line); background: var(--card); border-radius: 99px; padding: 4px 10px; font-size: 12.5px; font-weight: 600; color: var(--ink-2); cursor: pointer; }
+.gg-chip:hover:not(:disabled) { border-color: var(--accent); color: var(--accent-ink); }
+.gg-sugs { display: flex; flex-direction: column; gap: 6px; }
+.gg-sug { display: flex; gap: 8px; align-items: flex-start; border: 1px solid var(--line); border-radius: 10px; padding: 8px; background: var(--paper); cursor: pointer; font-size: 13px; }
+.gg-side-thinking { padding: 0 2px; }
+.gg-side-foot { border-top: 1px solid var(--line); padding: 8px 12px calc(10px + var(--safe-b)); display: flex; flex-direction: column; gap: 8px; background: var(--paper-2); }
+.gg-quotes { display: flex; flex-direction: column; gap: 4px; }
+.gg-quote { display: flex; align-items: center; gap: 6px; font-size: 12.5px; background: var(--card); border-left: 3px solid var(--accent); border-radius: 6px; padding: 2px 2px 2px 8px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.gg-quote .icon-btn { margin-left: auto; flex: none; }
+.gg-ask { display: flex; gap: 8px; align-items: flex-end; }
+.gg-ask .input { flex: 1; min-width: 0; resize: none; }
+.gg-compose-row { gap: 8px; padding: 0 2px 6px; align-items: center; }
+.gg-draft-tag { background: var(--accent-soft); color: var(--accent-ink); }
+.gg-reply-wrap { position: relative; }
+.gg-reply-pop { position: absolute; right: 0; bottom: calc(100% + 6px); width: min(420px, 86vw); max-height: 60vh; overflow: auto; z-index: 30; padding: 12px; display: flex; flex-direction: column; gap: 8px; box-shadow: var(--shadow); }
+.gg-reply-btn.is-on { border-color: var(--accent); color: var(--accent-ink); }
+.gg-sel-bar { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); z-index: 20; display: flex; align-items: center; gap: 4px; background: var(--card); border: 1px solid var(--line); border-radius: 99px; padding: 4px 4px 4px 6px; box-shadow: var(--shadow); }
+.msg-gutter { position: relative; }
+.msg-sel { position: absolute; left: -2px; top: 38px; width: 18px; height: 18px; border-radius: 99px; border: 1.5px solid var(--line-strong); background: var(--card); color: var(--on-accent); font-size: 11px; line-height: 14px; padding: 0; display: none; cursor: pointer; }
+.msg:not(.cont) .msg-sel { top: 38px; }
+.msg.cont .msg-sel { top: 4px; left: 8px; }
+.msg:hover .msg-sel, .msgs:has(.msg.is-selected) .msg-sel { display: block; }
+.msg-sel.on { display: block; background: var(--accent); border-color: var(--accent); }
+.msg.is-selected { background: var(--accent-soft); }
+.wa-sel { left: auto; right: -8px; top: -6px; }
+.wa-msg:hover .wa-sel, .wa-msgs:has(.wa-msg.is-selected) .wa-sel { display: block; }
+@media (max-width: 860px) {
+  .conv.has-gg { grid-template-columns: minmax(0, 1fr); }
+  .panel.gg-side { position: fixed; left: 0; right: 0; bottom: 0; top: calc(28px + var(--safe-t)); z-index: 45; border: 0; border-radius: 16px 16px 0 0; box-shadow: 0 -10px 40px rgba(0, 0, 0, .25); }
+  .wa-gg-body > .gg-side { width: auto; }
+}
+/* Con el panel de gg abierto, la cabecera deja sitio al nombre: fuera las marcas de empresa y el zoom. */
+.conv.has-gg .head-orgs, .conv.has-gg .zoom-pill, .conv.has-gg .head-space { display: none; }
+.conv-head .gg-head-btn { margin: 0 2px; }

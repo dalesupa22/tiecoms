@@ -10,7 +10,8 @@ import { ForwardToChatsDialog, Linkify, StackedAvatars } from './Chats.tsx';
 import { QUICK_REACTIONS } from '@tiecoms/contracts';
 import { ReactionBar, isJumbo, openEmojiPicker, toggleReaction, useEmojiAutocomplete } from './Reactions.tsx';
 import { LinkGroup, LinksPane, MessageLinks, isLinkOnly } from './Links.tsx';
-import { conversationMenu, forwardMenu, messageLink, muteMenu, muteOptions, mutedText, openDialog, remindMenu, soundMenu, soundName, unmute, useExpiry } from '../actions.tsx';
+import { ReminderDialog, conversationMenu, forwardMenu, messageLink, muteMenu, muteOptions, mutedText, openDialog, remindMenu, soundMenu, soundName, unmute, useExpiry } from '../actions.tsx';
+import { GgButton, GgSidePanel, ReplyForMe, SelectionBar, SuggestDialog, convSource, type GgHost, type Quote } from './GgSide.tsx';
 import { errorText, locale, systemText, t, tn } from '../i18n.ts';
 import { contextHandler, copyText, menuProps, openMenuAt, toast, type MenuItem } from '../menu.tsx';
 import { navigate, queryParam } from '../router.ts';
@@ -89,7 +90,15 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [deriving, setDeriving] = useState<MessageDTO | null>(null);
-  const [newIssue, setNewIssue] = useState<{ origin?: MessageDTO; title?: string } | null>(null);
+  const [newIssue, setNewIssue] = useState<{ origin?: MessageDTO; title?: string; assigneeName?: string | null; due?: string | null } | null>(null);
+  // «gg de este chat» (docs/WA-BANDEJA-GG-CHAT.md): panel privado, citas, selección múltiple y borrador en la caja.
+  const [ggOpen, setGgOpen] = useState(false);
+  const [ggUsed, setGgUsed] = useState(false);
+  const [ggQuotes, setGgQuotes] = useState<Quote[]>([]);
+  const [ggRequest, setGgRequest] = useState<{ key: number; kind: 'reply' | 'ask'; text?: string; ids?: string[] } | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(() => new Set());
+  const [suggestFor, setSuggestFor] = useState<string[] | null>(null);
+  const [ggDraft, setGgDraft] = useState(false);
   // ?issue=<id>: se abre directo el asunto (desde el árbol de Grupos).
   const [openIssue, setOpenIssue] = useState<string | null>(() => queryParam('issue'));
   const [highlight, setHighlight] = useState<number | null>(null);
@@ -304,6 +313,9 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
 
   // Borrador local por conversación: sobrevive recargas y cambios de conversación.
   useEffect(() => { try { if (text) localStorage.setItem(draftKey(id), text); else localStorage.removeItem(draftKey(id)); } catch {} }, [id, text]);
+  // El rótulo «Borrador de gg» se va cuando la caja queda vacía (se envió o se borró).
+  useEffect(() => { if (!text.trim()) setGgDraft(false); }, [text]);
+  useEffect(() => { setSelected(new Set()); setGgQuotes([]); setGgOpen(false); }, [id]);
 
   useEffect(() => { if (local?.loaded && liveFrom.current == null) liveFrom.current = conv?.lastMessageSeq ?? 0; }, [local?.loaded]);
   // Medición: desde que se monta el chat hasta que sus mensajes están a la vista (perf.ts).
@@ -677,6 +689,11 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
         ],
       }] : []),
       ...(conv.canPost ? [{ label: t('menu.reply'), icon: '↩', onSelect: () => { setReplyTo(m); input.current?.focus(); } }] : []),
+      // gg de este chat: no se quita nada del menú, se agrega.
+      ...(!embedded && !ggDm && m.kind === 'text' && m.body ? [
+        { label: t('ggs.ask'), onSelect: () => askGg(m) },
+        { label: selected.has(m.id) ? t('ggs.clearSel') : t('ggs.select'), icon: '◯', hint: t('ggs.selectHint'), onSelect: () => toggleSel(m) },
+      ] : []),
       // Responder en privado: por DM al autor. Es distinto del sidechat (un hilo privado con quien elijas).
       ...(!mine && conv.kind !== 'direct' ? [{ label: t('preply.action'), icon: '✉', hint: t('menu.hintDm', { name: personById(d, m.authorId)?.name.split(' ')[0] ?? '' }), onSelect: () => void replyPrivately(m) }] : []),
       { divider: true },
@@ -707,8 +724,28 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
     ];
   };
 
+  // ---------- gg de este chat ----------
+  const ggSource = convSource(id);
+  const quoteOf = (m: MessageDTO): Quote => ({ id: m.id, author: m.authorId === d.me.id ? t('common.youShort') : personById(d, m.authorId)?.name ?? '', text: m.body.slice(0, 1000) });
+  const openGg = () => { setGgOpen(true); setGgUsed(true); };
+  const askGg = (m: MessageDTO) => { setGgQuotes((q) => (q.some((x) => x.id === m.id) ? q : [...q, quoteOf(m)])); openGg(); };
+  const toggleSel = (m: MessageDTO) => setSelected((x) => { const n = new Set(x); if (n.has(m.id)) n.delete(m.id); else n.add(m.id); return n; });
+  const ggHost: GgHost = {
+    // Elegir no es enviar: el texto cae en la caja como «Borrador de gg».
+    useDraft: (x) => { setText(x); setGgDraft(true); requestAnimationFrame(() => input.current?.focus()); },
+    task: (p) => setNewIssue({ title: p.title, assigneeName: p.assigneeName, due: p.due, origin: p.messageId ? byId.get(p.messageId) : undefined }),
+    reminder: (p) => openDialog((close) => <ReminderDialog conv={conv} message={p.messageId ? byId.get(p.messageId) : undefined} defaultNote={p.title} defaultDate={p.due} onClose={close} />),
+    messagePerson: (name, draft) => {
+      const fold = (x: string) => x.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase().trim();
+      const who = d.people.find((p) => p.id !== d.me.id && p.kind === 'human' && (fold(p.name) === fold(name) || fold(p.name).split(' ')[0] === fold(name).split(' ')[0]));
+      if (!who) { toast(t('ggs.personMissing', { name })); return; }
+      void client.openDirect(who.id).then((r) => { try { if (draft) localStorage.setItem(draftKey(r.id), draft); } catch {} navigate(`/c/${r.id}`); }).catch((e) => toast(errorText(e)));
+    },
+  };
+  const ggShown = ggOpen && !embedded && !sideConv;
+
   return (
-    <div ref={setHost} style={zoom !== 1 && !embedded ? { zoom } : undefined} className={`conv ${panel || sideConv ? '' : 'no-panel'} ${sideConv ? 'has-side' : ''} ${embedded ? 'is-embedded' : ''}`}>
+    <div ref={setHost} style={zoom !== 1 && !embedded ? { zoom } : undefined} className={`conv ${panel || sideConv || ggShown ? '' : 'no-panel'} ${sideConv ? 'has-side' : ''} ${ggShown ? 'has-gg' : ''} ${embedded ? 'is-embedded' : ''}`}>
       {sideConv && <SideConnector host={host} anchorId={sideConv.parentMessageId} color={personColor(sideAnchor?.authorId ?? sideConv.memberIds[0])} />}
       <section className={`conv-main ${dropping ? 'is-dropping' : ''}`}
         // Archivos del sistema soltados en cualquier parte del chat: mismo flujo que «+» (drafts.add).
@@ -736,6 +773,7 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
               ? <div className="small muted ellipsis side-head-people"><StackedAvatars c={conv} size={18} /> 🔒 {t('side.privateN', { n: conv.memberIds.length })}</div>
               : <div className="small muted ellipsis">{conversationSubtitle(d, conv)}{conv.kind !== 'direct' ? ` · ${tn(conv.memberIds.length, 'n.participant', 'n.participants')}` : ''}</div>}
           </div>
+          {!embedded && !ggDm && <GgButton source={ggSource} on={ggShown} onClick={() => (ggShown ? setGgOpen(false) : openGg())} />}
           <div className="row only-desktop head-orgs">{orgsHere.map((o) => o && <OrgMark key={o.id} org={o} size={22} />)}</div>
           {embedded && pinned.size > 0 && <button className="btn ghost small" onClick={() => setShowPins(true)} title={t('pins.title')}>📌 {pinned.size}</button>}
           {embedded && conv.canManage && conv.kind !== 'direct' && <button className="btn ghost small" onClick={() => openDialog((close) => <AddMembersDialog conversationId={id} onClose={close} />)} title={t('bar.addPeople')}>＋ {t('bar.people')}</button>}
@@ -812,8 +850,16 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
             const isEditing = editing?.id === m.id;
             const menu = m.deletedAt ? null : menuProps(() => messageMenu(m));
             return (
-              <div key={r.key} id={`msg-${id}-${m.seq}`} data-mid={m.id} className={`msg ${r.cont ? 'cont' : ''} ${highlight === m.seq ? 'is-highlight' : ''} ${pinned.has(m.id) ? 'is-pinned' : ''} ${sideConv?.parentMessageId === m.id ? 'is-anchor' : ''} ${mentionsMe(d, m) ? 'mentions-me' : ''}`} {...(menu ?? {})}>
-                <div>{!r.cont && <Avatar person={author} org={org} size={34} />}</div>
+              <div key={r.key} id={`msg-${id}-${m.seq}`} data-mid={m.id} className={`msg ${r.cont ? 'cont' : ''} ${selected.has(m.id) ? 'is-selected' : ''} ${highlight === m.seq ? 'is-highlight' : ''} ${pinned.has(m.id) ? 'is-pinned' : ''} ${sideConv?.parentMessageId === m.id ? 'is-anchor' : ''} ${mentionsMe(d, m) ? 'mentions-me' : ''}`} {...(menu ?? {})}
+                // Shift+clic marca varios mensajes para «✨ Pedir a gg (N)».
+                {...(!embedded && !ggDm && m.kind === 'text' && !m.deletedAt ? {
+                  onMouseDown: (e: React.MouseEvent) => { if (e.shiftKey) e.preventDefault(); },
+                  onClickCapture: (e: React.MouseEvent) => { if (e.shiftKey || (selected.size > 0 && (e.target as HTMLElement).closest('.msg-sel'))) { e.preventDefault(); e.stopPropagation(); toggleSel(m); } },
+                } : {})}>
+                <div className="msg-gutter">{!r.cont && <Avatar person={author} org={org} size={34} />}
+                  {!embedded && !ggDm && m.kind === 'text' && !m.deletedAt && <button className={`msg-sel ${selected.has(m.id) ? 'on' : ''}`} aria-pressed={selected.has(m.id)} aria-label={t('ggs.select')} title={t('ggs.selectHint')}
+                    onClick={(e) => { e.stopPropagation(); if (!selected.size) toggleSel(m); }}>{selected.has(m.id) ? '✓' : ''}</button>}
+                </div>
                 <div style={{ minWidth: 0 }}>
                   {!r.cont && (
                     <div className="msg-meta">
@@ -883,6 +929,7 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
             )}
           </div>
         )}
+        <SelectionBar n={selected.size} onAsk={() => setSuggestFor([...selected])} onClear={() => setSelected(new Set())} />
         </div>
         {isSide && local?.loaded && !(local.messages ?? []).some((m) => m.kind === 'text') && <div className="side-empty">💬 {t('side.emptyChat')}</div>}
         {isSide && conv.canPost && !text.trim() && lastText && lastText.authorId !== d.me.id && (
@@ -908,6 +955,14 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
           {conv.canPost && <ScheduledStrip conversationId={id} />}
           {conv.canPost ? (
             <>
+            {!embedded && !ggDm && (ggDraft || (lastText && lastText.authorId !== d.me.id) || (ggUsed && !ggShown)) && (
+              <div className="row gg-compose-row">
+                {ggDraft && text.trim() && <span className="tag gg-draft-tag">✨ {t('ggs.draftLabel')}</span>}
+                <span className="grow" />
+                {ggUsed && !ggShown && <button className="link-btn small" onClick={openGg}>{t('ggs.continue')}</button>}
+                {lastText && lastText.authorId !== d.me.id && <ReplyForMe source={ggSource} host={ggHost} />}
+              </div>
+            )}
             <DraftTray drafts={drafts.drafts} onRemove={drafts.remove} onRetry={drafts.retry} />
             <div className="composer-box">
               <button className="bring-btn" title={t('bar.plus')} aria-label={t('bar.plus')} onClick={(e) => {
@@ -961,7 +1016,11 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
           <ConversationScreen key={sideConv.id} id={sideConv.id} embedded={{ onClose: () => setSideId(null), anchor: sideAnchor, onSeeAnchor: sideAnchor ? () => jumpTo(sideAnchor.seq) : undefined }} />
         </aside>
       )}
-      {panel && !sideConv && (
+      {ggShown && (
+        <GgSidePanel source={ggSource} chatName={title} quoted={ggQuotes} onClearQuote={(qid) => setGgQuotes((q) => (qid ? q.filter((x) => x.id !== qid) : []))}
+          host={ggHost} onClose={() => setGgOpen(false)} request={ggRequest} onJump={(mid) => { const x = byId.get(mid); if (x) jumpTo(x.seq); }} />
+      )}
+      {panel && !sideConv && !ggShown && (
         <aside className="panel">
           <div className="row"><span className="eyebrow grow">{t('chat.details')}</span><button className="icon-btn" onClick={() => setPanel(false)} aria-label={t('common.close')}>×</button></div>
           <div className="row" style={{ gap: 12, alignItems: 'center' }}>
@@ -1060,11 +1119,14 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
       {deriving && <DeriveDialog conv={conv} message={deriving} onClose={() => setDeriving(null)} onOpened={setSideId} />}
       {newIssue && (
         <NewIssueDialog conversationId={id} originMessageId={newIssue.origin?.id} topicId={activeFilter}
-          defaultTitle={newIssue.title ?? (newIssue.origin ? excerpt(newIssue.origin.body) : '')}
+          defaultTitle={newIssue.title ?? (newIssue.origin ? excerpt(newIssue.origin.body) : '')} defaultAssigneeName={newIssue.assigneeName} defaultDue={newIssue.due}
           onClose={() => setNewIssue(null)} onCreated={(i) => setOpenIssue(i.id)} />
       )}
       {openIssue && <IssueDrawer id={openIssue} onClose={() => setOpenIssue(null)} />}
       {showLinks && <LinksPane conv={conv} onJump={jumpTo} onClose={() => setShowLinks(false)} />}
+      {suggestFor && <SuggestDialog source={ggSource} messageIds={suggestFor} host={ggHost}
+        onAsk={(q, ids) => { openGg(); setGgRequest({ key: Date.now(), kind: 'ask', text: q, ids }); }}
+        onClose={() => { setSuggestFor(null); setSelected(new Set()); }} />}
       {showPins && <PinsDialog conv={conv} onJump={(seq) => { setShowPins(false); jumpTo(seq); }} onClose={() => setShowPins(false)} />}
     </div>
   );

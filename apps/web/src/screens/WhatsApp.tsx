@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { WaAccountDTO, WaCategory, WaChatDTO, WaKind, WaMessageDTO } from '@tiecoms/contracts';
 import { client, useClient } from '../app-client.ts';
 import { errorText, locale, t } from '../i18n.ts';
-import { copyText, menuProps, toast } from '../menu.tsx';
+import { copyText, menuProps, openMenuAt, toast } from '../menu.tsx';
+import { waMainListMenu } from './WaInbox.tsx';
 import { openDialog } from '../actions.tsx';
 import { WaShareDialog } from './Mail.tsx';
 import { navigate } from '../router.ts';
@@ -91,6 +92,11 @@ export function WhatsAppScreen() {
   async function organize() {
     try { const r = await api.organize(); toast(t('wa.organized', { n: r.changed })); void loadChats(); } catch (e) { toast(errorText(e)); }
   }
+  /** Una fila cambió fuera de patch (p. ej. «Mover a mi lista principal»): se reemplaza en la lista y en el detalle. */
+  const replace = (up: WaChatDTO) => {
+    setChats((list) => list.map((x) => (x.accountId === up.accountId && x.jid === up.jid ? up : x)));
+    setOpen((o) => (o && o.jid === up.jid && o.accountId === up.accountId ? up : o));
+  };
   async function patch(c: WaChatDTO, p: Record<string, unknown>) {
     try {
       const up = await api.patchChat(c, p);
@@ -157,10 +163,10 @@ export function WhatsAppScreen() {
               {chats.length === 0 && <div className="empty">{connected.length ? t('wa.noChats') : t('wa.syncing')}</div>}
               {chats.map((c) => (
                 <ChatRow key={`${c.accountId}|${c.jid}`} c={c} active={open?.jid === c.jid && open.accountId === c.accountId}
-                  multi={(accounts?.length ?? 0) > 1} onOpen={() => setOpen(c)} onPatch={(p) => patch(c, p)} />
+                  multi={(accounts?.length ?? 0) > 1} onOpen={() => setOpen(c)} onPatch={(p) => patch(c, p)} onChanged={replace} />
               ))}
             </div>
-            {open && <ChatPanel key={`${open.accountId}|${open.jid}`} c={open} revision={revision} onClose={() => setOpen(null)} onPatch={(p) => patch(open, p)} />}
+            {open && <ChatPanel key={`${open.accountId}|${open.jid}`} c={open} revision={revision} onClose={() => setOpen(null)} onPatch={(p) => patch(open, p)} onChanged={replace} />}
           </div>
         </>
       )}
@@ -279,9 +285,10 @@ function ConnectDialog({ existing, onClose, onDone }: { existing: WaAccountDTO[]
   );
 }
 
-function ChatRow({ c, active, multi, onOpen, onPatch }: { c: WaChatDTO; active: boolean; multi: boolean; onOpen: () => void; onPatch: (p: Record<string, unknown>) => void }) {
+function ChatRow({ c, active, multi, onOpen, onPatch, onChanged }: { c: WaChatDTO; active: boolean; multi: boolean; onOpen: () => void; onPatch: (p: Record<string, unknown>) => void; onChanged: (c: WaChatDTO) => void }) {
+  // Clic derecho o pulsación larga: «Mover a mi lista principal», «📌 Fijar arriba» o «Sacar de mi lista principal».
   return (
-    <div className={`card wa-chat ${active ? 'active' : ''} ${c.unread ? 'unread' : ''}`} draggable
+    <div className={`card wa-chat ${active ? 'active' : ''} ${c.unread ? 'unread' : ''}`} draggable {...menuProps(() => waMainListMenu(c, onChanged))}
       onDragStart={(e) => setDrag(e, 'wa', { accountId: c.accountId, jid: c.jid, name: c.name, isGroup: c.isGroup }, c.name)}>
       <button className="wa-chat-main" onClick={onOpen}>
         <span className="wa-av" aria-hidden>{c.isGroup ? '👥' : CAT_ICON[c.category]}</span>
@@ -295,11 +302,13 @@ function ChatRow({ c, active, multi, onOpen, onPatch }: { c: WaChatDTO; active: 
             {multi && <span className="tag">{c.accountLabel}</span>}
             {c.isGroup && c.participants ? <span className="tag">{t('wa.members', { n: c.participants })}</span> : null}
             {c.linkedConversationId && <span className="tag wa-linked">⇄ chaggu</span>}
+            {c.inboxPlace && <span className="tag wa-linked">{c.inboxPinnedAt ? '📌 ' : '⤴ '}{c.inboxPlace === 'groups' ? t('nav.groups') : t('nav.dms')}</span>}
           </span>
         </span>
         {c.unread > 0 && <span className="pill">{c.unread}</span>}
       </button>
       <PinToGrid payload={{ kind: 'wa', accountId: c.accountId, jid: c.jid, name: c.name, isGroup: c.isGroup }} name={c.name} />
+      <button className="icon-btn" aria-label={t('menu.open')} title={t('wa.moveToInbox')} onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); openMenuAt(r.left, r.bottom + 4, waMainListMenu(c, onChanged)); }}>⋯</button>
       <select className="wa-cat-select" value={c.category} onChange={(e) => onPatch({ category: e.target.value })} aria-label={t('wa.category')}
         title={c.categoryManual ? t('wa.manual') : t('wa.suggested')}>
         {CATEGORIES.map((k) => <option key={k} value={k}>{CAT_ICON[k]} {t(`wa.cat.${k}`)}</option>)}
@@ -308,7 +317,7 @@ function ChatRow({ c, active, multi, onOpen, onPatch }: { c: WaChatDTO; active: 
   );
 }
 
-function ChatPanel({ c, revision, onClose, onPatch }: { c: WaChatDTO; revision: number; onClose: () => void; onPatch: (p: Record<string, unknown>) => void }) {
+function ChatPanel({ c, revision, onClose, onPatch, onChanged }: { c: WaChatDTO; revision: number; onClose: () => void; onPatch: (p: Record<string, unknown>) => void; onChanged: (c: WaChatDTO) => void }) {
   const d = useClient((s) => s.data)!;
   const [messages, setMessages] = useState<WaMessageDTO[] | null>(null);
   const box = useRef<HTMLDivElement>(null);
@@ -321,6 +330,7 @@ function ChatPanel({ c, revision, onClose, onPatch }: { c: WaChatDTO; revision: 
     <aside className="card wa-panel">
       <div className="row" style={{ padding: '12px 14px', borderBottom: '1px solid var(--line)' }}>
         <b className="grow ellipsis">{c.name}</b>
+        <button className="icon-btn" aria-label={t('wa.openFull')} title={t('wa.openFull')} onClick={() => navigate(`/whatsapp/${c.accountId}/${encodeURIComponent(c.jid)}`)}>⤢</button>
         <PinToGrid payload={{ kind: 'wa', accountId: c.accountId, jid: c.jid, name: c.name, isGroup: c.isGroup }} name={c.name} />
         <button className="icon-btn" onClick={onClose} aria-label={t('common.close')}>×</button>
       </div>
@@ -354,6 +364,15 @@ function ChatPanel({ c, revision, onClose, onPatch }: { c: WaChatDTO; revision: 
         })}
       </div>
       <div className="wa-panel-foot">
+        {/* Bandeja de chaggu: mover a Grupos/DMs, fijar arriba o sacar (no es el fijado dentro de WhatsApp). */}
+        <div className="row" style={{ flexWrap: 'wrap', marginBottom: 8 }}>
+          {waMainListMenu(c, onChanged).map((it) => (
+            <button key={it.label} className={`btn small ${it.danger ? 'ghost' : ''}`}
+              onClick={(e) => { if (it.items) { const r = e.currentTarget.getBoundingClientRect(); openMenuAt(r.left, r.bottom + 4, it.items); } else it.onSelect?.(); }}>
+              {it.icon && !it.label?.startsWith('📌') ? `${it.icon} ` : ''}{it.label}{it.items ? ' ▾' : ''}
+            </button>
+          ))}
+        </div>
         <div className="row" style={{ flexWrap: 'wrap' }}>
           <button className="btn small" onClick={() => onPatch({ pinned: !c.pinned })}>{c.pinned ? t('wa.unpin') : t('wa.pin')}</button>
           <button className="btn small" onClick={() => onPatch({ hidden: !c.hidden })}>{c.hidden ? t('wa.unhide') : t('wa.hide')}</button>

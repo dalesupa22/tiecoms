@@ -20,6 +20,7 @@ import { TrazoScreen } from './screens/Lineage.tsx';
 import { AgendaScreen } from './screens/Calendar.tsx';
 import { ShareScreen } from './screens/Bring.tsx';
 import { WhatsAppScreen } from './screens/WhatsApp.tsx';
+import { WaChatScreen } from './screens/Panes.tsx';
 import { MailScreen } from './screens/Mail.tsx';
 import { FilesScreen } from './screens/Files.tsx';
 import { DmsScreen, GroupsScreen, OversightScreen, ReadOnlyConversationScreen } from './screens/Groups.tsx';
@@ -98,6 +99,7 @@ export function App() {
       {route.name === 'agenda' && <AgendaScreen />}
       {route.name === 'share' && <ShareScreen />}
       {route.name === 'whatsapp' && <WhatsAppScreen />}
+      {route.name === 'waChat' && <WaChatScreen key={`${route.accountId}|${route.jid}`} accountId={route.accountId} jid={route.jid} />}
       {route.name === 'files' && <FilesScreen />}
       {route.name === 'saved' && <SavedLinksScreen />}
       {route.name === 'scheduled' && <ScheduledScreen />}

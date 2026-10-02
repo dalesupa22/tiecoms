@@ -166,7 +166,7 @@ export function Rail({ route }: { route: Route }) {
       </button>
       <RailItem icon="groups" label={t('nav.groups')} on={mode === 'groups'} count={groups} onClick={() => pick(mode === 'groups' ? 'all' : 'groups')} />
       <RailItem icon="dms" label={t('nav.dms')} on={mode === 'dms'} count={dms} onClick={() => pick(mode === 'dms' ? 'all' : 'dms')} />
-      <RailItem icon="whatsapp" label={t('nav.whatsapp')} on={route.name === 'whatsapp'} count={wa} tone="wa" drag="wachats" onClick={() => navigate('/whatsapp')} />
+      <RailItem icon="whatsapp" label={t('nav.whatsapp')} on={route.name === 'whatsapp' || route.name === 'waChat'} count={wa} tone="wa" drag="wachats" onClick={() => navigate('/whatsapp')} />
       {mailOn && <RailItem icon="mail" label={t('nav.mail')} on={route.name === 'mail'} count={mail} tone="mail" drag="inbox" onClick={() => navigate('/correo')} />}
       <span className="rail-sep" aria-hidden />
       <RailItem icon="agenda" label={t('nav.agenda')} on={route.name === 'agenda'} dot={soon} onClick={() => navigate('/agenda')} />

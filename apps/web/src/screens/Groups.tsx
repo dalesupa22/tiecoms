@@ -20,7 +20,9 @@ import { StackedAvatars } from './Chats.tsx';
 import { companyLine } from '../quick-search.ts';
 import { QuickActions, QuickSearchField, QuickSearchSections, openNewMessage } from './Quick.tsx';
 import { matchesTab, type HomeTab } from './Shell.tsx';
-import { activityOf, compareConversations, pendingOf, treeOnlyPending, withSeparators, withTree } from '../home-order.ts';
+import { activityOf, compareConversations, pendingOf, treeOnlyPending, waAsConversation, waInboxFor, withSeparators, withTree } from '../home-order.ts';
+import { WaRow } from './WaInbox.tsx';
+import type { WaChatDTO } from '@tiecoms/contracts';
 
 // ---------- Árbol de Grupos (mismas reglas en web, iOS y Android: docs/GRUPOS.md) ----------
 /** label: el nombre a mostrar; si dos grupos de la misma empresa se llaman igual, lleva delante el espacio de donde viene. */
@@ -190,9 +192,18 @@ export function GroupsTree({ tab = 'all', activeConv = null }: { tab?: HomeTab; 
   const { folded, toggle } = useFolded();
   const issuesOpen = useIssuesOpen();
   const treeMenu = treeControls(sections);
+  // En el Árbol los chats de WhatsApp movidos a Grupos van en su propio bloque arriba (no son de ninguna empresa).
+  const waAll = useWaRows('groups', tab);
+  const wa = useMemo(() => [...waAll].sort((a, b) => compareConversations(a.c, b.c)), [waAll]);
 
   return (
     <div className="groups-tree">
+      {wa.length > 0 && (
+        <section className="groups-section">
+          <div className="row groups-section-head"><span className="eyebrow grow">WhatsApp</span></div>
+          <Separated items={wa} convOf={(x) => x.c} render={(x) => <WaRow key={x.c.id} w={x.wa!} preview={false} active={activeConv === x.c.id} />} />
+        </section>
+      )}
       {sections.map((s) => {
         const title = s.kind === 'org' ? t('groups.yourOrg', { org: s.org?.name ?? '' }) : s.kind === 'relations' ? t('groups.relations') : t('groups.guestIn');
         const plus = s.kind === 'org' ? () => openCreateGroup({ kind: 'org', orgId: s.org?.id }) : s.kind === 'relations' ? () => openCreateGroup({ kind: 'company' }) : null;
@@ -411,16 +422,29 @@ function Separated<T>({ items, convOf, render, sepMenu }: { items: T[]; convOf: 
   ))}</>;
 }
 
+/** Fila mezclada: conversación de chaggu o chat de WhatsApp de la bandeja (con su conversación sintética para ordenar). */
+type MixItem = { c: ConversationDTO; wa?: WaChatDTO };
+/** Filas de WhatsApp de la bandeja para una sección, ya vistas como conversación y filtradas por el chip (Sin leer, etc.). */
+function useWaRows(place: 'groups' | 'dms' | 'all', tab: HomeTab): MixItem[] {
+  const list = useClient((s) => s.data?.waInbox);
+  return useMemo(() => waInboxFor(list, place).map((wa) => ({ c: waAsConversation(wa), wa })).filter((x) => matchesTab(x.c, tab)), [list, place, tab]);
+}
+
 export function DmsList({ tab = 'all', activeConv = null }: { tab?: HomeTab; activeConv?: string | null }) {
   const raw = useClient((s) => s.data)!;
   const personal = usePersonalPreferences();
   const d = useMemo(() => ({ ...raw, conversations: raw.conversations.filter((c) => !personal.conversations[c.id]?.archived) }), [raw, personal]);
   // gg y «Tú» van fijos arriba (docs/GG-CHAT.md), no en la lista.
   const list = dmConversations(d, tab).filter((c) => !isGgChat(c) && !isSelfChat(d, c));
+  // Los chats de WhatsApp movidos a DMs se mezclan con el mismo orden (docs/WA-BANDEJA-GG-CHAT.md).
+  const wa = useWaRows('dms', tab);
+  const items = useMemo<MixItem[]>(() => [...list.map((c) => ({ c })), ...wa].sort((a, b) => compareConversations(a.c, b.c)), [list, wa]);
   return (
     <>
       {tab === 'all' && <AssistantRows activeConv={activeConv} />}
-      <Separated items={list} convOf={(c) => c} render={(c) => <ConvItem key={c.id} c={c} showOrg active={activeConv === c.id} />} />
+      <Separated items={items} convOf={(x) => x.c} render={(x) => x.wa
+        ? <WaRow key={x.c.id} w={x.wa} preview={false} active={activeConv === x.c.id} />
+        : <ConvItem key={x.c.id} c={x.c} showOrg active={activeConv === x.c.id} />} />
     </>
   );
 }
@@ -465,12 +489,17 @@ export function GroupsList({ tab = 'all', activeConv = null }: { tab?: HomeTab; 
   const issues = useClient((s) => s.issues);
   const items = useMemo(() => groupListItems(buildGroupTree(d, issues, tab)), [d, issues, tab]);
   const issuesOpen = useIssuesOpen();
-  if (!items.length) return <div className="hint" style={{ padding: '8px 10px' }}>{tab === 'all' ? t('groups.emptyOrg') : t('inbox.nothing')}</div>;
+  // Los chats de WhatsApp movidos a Grupos se mezclan con el mismo orden y separadores.
+  const wa = useWaRows('groups', tab);
+  const mixed = useMemo(() => [...items.map((x) => ({ c: withTree(x.g.conv, x.g.derived), x, wa: undefined as WaChatDTO | undefined })), ...wa.map((w) => ({ ...w, x: undefined }))]
+    .sort((a, b) => compareConversations(a.c, b.c)), [items, wa]);
+  if (!mixed.length) return <div className="hint" style={{ padding: '8px 10px' }}>{tab === 'all' ? t('groups.emptyOrg') : t('inbox.nothing')}</div>;
   return (
     <div className="groups-list">
       {/* Menú de sección (clic derecho o pulsación larga en un separador): mostrar o contraer todos los asuntos. */}
-      <Separated items={items} convOf={(x) => withTree(x.g.conv, x.g.derived)} sepMenu={() => treeMenuItems(treeControls(buildGroupTree(d, issues, tab))).slice(0, 2)}
-        render={(x) => <GroupEntry key={x.g.conv.id} g={x.g} ws={x.ws} label={x.label} preview showOrg issuesOpen={issuesOpen} active={activeConv === x.g.conv.id} />} />
+      <Separated items={mixed} convOf={(m) => m.c} sepMenu={() => treeMenuItems(treeControls(buildGroupTree(d, issues, tab))).slice(0, 2)}
+        render={(m) => m.wa ? <WaRow key={m.c.id} w={m.wa} active={activeConv === m.c.id} />
+          : <GroupEntry key={m.x!.g.conv.id} g={m.x!.g} ws={m.x!.ws} label={m.x!.label} preview showOrg issuesOpen={issuesOpen} active={activeConv === m.x!.g.conv.id} />} />
     </div>
   );
 }
@@ -482,14 +511,17 @@ export function AllList({ tab = 'all', activeConv = null }: { tab?: HomeTab; act
   const d = useMemo(() => ({ ...raw, conversations: raw.conversations.filter((c) => !personal.conversations[c.id]?.archived) }), [raw, personal]);
   const issues = useClient((s) => s.issues);
   const issuesOpen = useIssuesOpen();
-  type Item = { c: ConversationDTO; group?: GroupListItem };
+  type Item = { c: ConversationDTO; group?: GroupListItem; wa?: WaChatDTO };
+  const wa = useWaRows('all', tab);
   const items = useMemo<Item[]>(() => [
     ...groupListItems(buildGroupTree(d, issues, tab)).map((group) => ({ c: group.g.conv, group })),
     ...dmConversations(d, tab).map((c) => ({ c })),
-  ].sort((a, b) => compareConversations(a.c, b.c)), [d, issues, tab]);
+    ...wa,
+  ].sort((a, b) => compareConversations(a.c, b.c)), [d, issues, tab, wa]);
   if (!items.length) return <div className="hint" style={{ padding: '8px 10px' }}>{t('inbox.nothing')}</div>;
   return <Separated items={items} convOf={(x) => x.c}
-    render={(x) => x.group
+    render={(x) => x.wa ? <WaRow key={x.c.id} w={x.wa} active={activeConv === x.c.id} />
+      : x.group
       ? <GroupEntry key={x.c.id} g={x.group.g} ws={x.group.ws} label={x.group.label} preview showOrg issuesOpen={issuesOpen} active={activeConv === x.c.id} />
       : <ConvItem key={x.c.id} c={x.c} preview showOrg active={activeConv === x.c.id} />} />;
 }

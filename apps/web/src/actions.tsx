@@ -44,12 +44,13 @@ export async function remind(conversationId: string, date: Date, messageId?: str
   } catch (e) { toast(errorText(e)); }
 }
 
-function ReminderDialog({ conv, message, onClose }: { conv: ConversationDTO; message?: MessageDTO; onClose: () => void }) {
+/** defaultNote y defaultDate (YYYY-MM-DD, a las 9:00) los usa «gg de este chat» para abrirlo ya lleno. */
+export function ReminderDialog({ conv, message, defaultNote, defaultDate, onClose }: { conv: ConversationDTO; message?: MessageDTO; defaultNote?: string; defaultDate?: string | null; onClose: () => void }) {
   const d = client.getState().data!;
-  const def = new Date(Date.now() + 3600_000);
+  const def = defaultDate && /^\d{4}-\d{2}-\d{2}$/.test(defaultDate) ? new Date(`${defaultDate}T09:00`) : new Date(Date.now() + 3600_000);
   const pad = (n: number) => String(n).padStart(2, '0');
   const [when, setWhen] = useState(`${def.getFullYear()}-${pad(def.getMonth() + 1)}-${pad(def.getDate())}T${pad(def.getHours())}:${pad(def.getMinutes())}`);
-  const [note, setNote] = useState(message ? message.body.slice(0, 120) : '');
+  const [note, setNote] = useState(defaultNote?.slice(0, 300) ?? (message ? message.body.slice(0, 120) : ''));
   const submit = async (e: FormEvent) => { e.preventDefault(); await remind(conv.id, new Date(when), message?.id, note || null); onClose(); };
   return (
     <Modal title={t('rem.custom')} onClose={onClose}>

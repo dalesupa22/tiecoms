@@ -266,16 +266,23 @@ export function byUrgency(a: IssueDTO, b: IssueDTO) {
 }
 
 /** Sin conversationId (desde «＋ Crear») se elige el grupo o chat: donde escribo y no soy tercero, el más reciente primero. */
-export function NewIssueDialog({ conversationId, originMessageId, defaultTitle = '', topicId, onClose, onCreated }: {
+export function NewIssueDialog({ conversationId, originMessageId, defaultTitle = '', defaultAssigneeName, defaultDue, topicId, onClose, onCreated }: {
   conversationId?: string; originMessageId?: string; defaultTitle?: string; topicId?: string | null; onClose: () => void; onCreated?: (i: IssueDTO) => void;
+  /** Lo que propuso «gg de este chat»: el responsable por nombre (si está en el chat) y la fecha YYYY-MM-DD. */
+  defaultAssigneeName?: string | null; defaultDue?: string | null;
 }) {
   const d = useClient((s) => s.data)!;
   const destinations = useMemo(() => (conversationId ? [] : issueDestinations(d)), [d, conversationId]);
   const [conv, setConv] = useState(conversationId ?? PERSONAL_DEST);
   const members = membersOf(d, conv);
   const [title, setTitle] = useState(defaultTitle);
-  const [assigneeIds, setAssigneeIds] = useState<string[]>([d.me.id]);
-  const [due, setDue] = useState('');
+  const [assigneeIds, setAssigneeIds] = useState<string[]>(() => {
+    const fold = (x: string) => x.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase().trim();
+    const want = defaultAssigneeName ? fold(defaultAssigneeName) : '';
+    const hit = want ? members.find((p) => fold(p.name) === want || fold(p.name).split(' ')[0] === want.split(' ')[0]) : null;
+    return [hit?.id ?? d.me.id];
+  });
+  const [due, setDue] = useState(defaultDue && /^\d{4}-\d{2}-\d{2}$/.test(defaultDue) ? defaultDue : '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   async function submit(e: FormEvent) {

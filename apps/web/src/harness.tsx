@@ -183,7 +183,18 @@ const waChats = [
   waChat('g5@g.us', 'Conjunto Torres del Parque', 'comunidad', { lastPreview: 'Administración: corte de agua mañana', lastMessageAt: iso(D), participants: 180 }),
   waChat('g6@g.us', 'Estudio Norte · lanzamiento', 'trabajo', { lastPreview: 'Mateo: seguimos el viernes', lastMessageAt: iso(26 * H), participants: 6 }),
   waChat('g7@g.us', 'Viaje Cartagena 2026', 'amigos', { lastPreview: 'Tú: reservé el hotel', lastMessageAt: iso(3 * D), participants: 5 }),
+  waChat('573005550001@s.whatsapp.net', 'Carla Rojas', 'clientes', { isGroup: false, participants: null, unread: 1, lastPreview: '¿Nos vemos mañana a las 10?', lastMessageAt: iso(10 * 60_000) }),
 ];
+// WhatsApp en la bandeja (docs/WA-BANDEJA-GG-CHAT.md): uno fijado y otro sin leer en Grupos, uno en DMs.
+Object.assign(waChats[0]!, { inboxPlace: 'groups', inboxPinnedAt: iso(D), accountStatus: 'connected' });
+Object.assign(waChats[1]!, { inboxPlace: 'groups', inboxPinnedAt: null, accountStatus: 'connected' });
+Object.assign(waChats[7]!, { inboxPlace: 'dms', inboxPinnedAt: null, accountStatus: q.get('waoff') ? 'logged_out' : 'connected' });
+data.waInbox = waChats.filter((c: any) => c.inboxPlace) as any;
+// «gg de este chat» sin backend: un hilo por fuente y respuestas fijas (?consent=0 para ver el permiso).
+if (q.get('consent') !== '0') data.me.aiConsent = true;
+const ggThreads: Record<string, any[]> = {};
+const ggMsg = (role: 'user' | 'gg', body: string, extra: any = null, quoted: any = null) => ({ id: `gs-${Math.random().toString(36).slice(2)}`, role, body, extra, quoted, createdAt: new Date().toISOString() });
+const ggConsent = () => { if (!client.getState().data?.me.aiConsent) throw Object.assign(new Error('Autoriza el uso de IA'), { status: 403, code: 'ai_consent_required' }); };
 const waMsgs = [
   { id: 'a', fromMe: false, author: 'Laura Gómez', kind: 'text', body: '¿Quién revisa el PR de firmas?', sentAt: iso(3 * H) },
   { id: 'b', fromMe: true, author: null, kind: 'text', body: 'Yo lo miro después del almuerzo', sentAt: iso(2 * H) },
@@ -243,11 +254,42 @@ const memeItems = [['#444', 'Drake', 2], ['#555', 'Distracted', 3], ['#666', 'Su
   if (/\/whatsapp\/chats\/.+\/messages/.test(path)) return { messages: waMsgs };
   if (path.startsWith('/whatsapp/chats/') && init.method === 'PATCH') {
     const jid = decodeURIComponent(path.split('/')[4]!);
-    const c = waChats.find((x) => x.jid === jid)!;
-    Object.assign(c, init.json, init.json.category !== undefined ? { categoryManual: init.json.category !== null } : {});
-    return c;
+    const c = waChats.find((x) => x.jid === jid)! as any;
+    const { inboxPlace, inboxPinned, ...rest } = init.json;
+    Object.assign(c, rest, rest.category !== undefined ? { categoryManual: rest.category !== null } : {});
+    // Igual que el API: 'auto' según sea grupo; fijar sin mover lo mueve; sacar también desfija.
+    if (inboxPlace !== undefined) c.inboxPlace = inboxPlace === 'auto' ? (c.isGroup ? 'groups' : 'dms') : inboxPlace;
+    if (inboxPinned === true) { c.inboxPinnedAt ??= new Date().toISOString(); c.inboxPlace ??= c.isGroup ? 'groups' : 'dms'; }
+    if (inboxPinned === false) c.inboxPinnedAt = null;
+    if (!c.inboxPlace) { c.inboxPlace = null; c.inboxPinnedAt = null; }
+    c.accountStatus ??= 'connected';
+    return { ...c };
   }
   if (path === '/whatsapp/organize') return { reviewed: 7, changed: 0 };
+  if (path === '/gg/side/pending/refresh') return { source: init.json.source, pending: 2, recalculated: false };
+  if (path.startsWith('/gg/side/pending')) { const src = decodeURIComponent(path.split('sources=')[1] ?? ''); return Object.fromEntries(src.split(',').map((x) => [x, 2])); }
+  if (path.startsWith('/gg/side?')) { const src = decodeURIComponent(path.split('source=')[1]!); return { session: 1, messages: ggThreads[src] ?? [], pending: 2 }; }
+  if (path === '/gg/side/open') { ggConsent(); const m = ggMsg('gg', 'Leí este chat. Hay 2 cosas que esperan algo de ti:', { pending: [{ text: 'Mateo pregunta si la integración queda para el viernes' }, { text: 'Confirmar el formato de los certificados con Ana' }], followUps: ['¿Qué acordamos?', 'Resúmeme'] }); (ggThreads[init.json.source] ??= []).push(m); return { message: m }; }
+  if (path === '/gg/side/new') { ggThreads[init.json.source] = []; return { session: 2 }; }
+  if (path === '/gg/side' && init.method === 'POST') { ggConsent(); await new Promise((r) => setTimeout(r, 500)); const th = (ggThreads[init.json.source] ??= []); th.push(ggMsg('user', init.json.text)); const m = ggMsg('gg', 'Acordaron tener la integración el viernes; falta validar el formato con Ana.', { followUps: ['¿Quién valida el formato?', '¿Para cuándo?', 'Responder por mí'] }); th.push(m); return { message: m }; }
+  if (path === '/gg/side/reply-for-me') {
+    ggConsent(); await new Promise((r) => setTimeout(r, 500));
+    const drafts = [{ style: 'short', text: 'Sí, queda para el viernes.' }, { style: 'warm', text: '¡Claro, Mateo! El viernes la tenemos lista; hoy valido el formato con Ana.' }, { style: 'action', text: 'Queda para el viernes. Me anoto validar el formato con Ana mañana.', action: { kind: 'task', title: 'Validar formato con Ana', assigneeName: 'Danny', due: new Date(now + D).toISOString().slice(0, 10) } }];
+    (ggThreads[init.json.source] ??= []).push(ggMsg('gg', 'Te propongo estas respuestas. Elige una y edítala antes de enviar.', { drafts }));
+    return { drafts };
+  }
+  if (path === '/gg/side/suggest') {
+    ggConsent(); await new Promise((r) => setTimeout(r, 400));
+    const ids = init.json.messageIds;
+    const suggestions = [
+      { id: 's1', kind: 'task', title: 'Crear tarea: validar formato con Ana', params: { assigneeName: 'Danny', due: new Date(now + D).toISOString().slice(0, 10) }, forMessageIds: ids },
+      { id: 's2', kind: 'reply', title: 'Responder por mí', draft: 'Sí, el viernes queda lista.', forMessageIds: ids },
+      { id: 's3', kind: 'reminder', title: 'Recordatorio: revisar la integración', params: { due: new Date(now + D).toISOString().slice(0, 10) }, forMessageIds: ids },
+      { id: 's4', kind: 'summary', title: 'Resumir', forMessageIds: ids },
+    ];
+    (ggThreads[init.json.source] ??= []).push(ggMsg('gg', `Esto puedo hacer con estos ${ids.length} mensajes:`, { suggestions }));
+    return { suggestions };
+  }
   if (path === '/blocks') return { userIds: [] };
   // Temas: llegan tarde a propósito (?lento=ms), como en un teléfono con mala señal; así se prueba que abrir en el
   // tema del mensaje no depende de que ya estén cargados.

@@ -1,4 +1,4 @@
-import type { ConversationDTO } from '@tiecoms/contracts';
+import type { ConversationDTO, WaChatDTO } from '@tiecoms/contracts';
 
 // ---------- Orden de Inicio (mismas reglas en web, iOS y Android) ----------
 // Módulo puro (sin React ni cliente) para poder probarlo y usarlo desde la búsqueda rápida.
@@ -74,3 +74,21 @@ export function companyUnder(company: string | null | undefined, title: string):
   if (fold(title).startsWith(fold(c))) return null;
   return c;
 }
+
+// ---------- WhatsApp en la bandeja (docs/WA-BANDEJA-GG-CHAT.md) ----------
+/** Clave de un chat de WhatsApp en la bandeja y en la cuadrícula: wa:<accountId>:<jid>. */
+export const waKey = (w: Pick<WaChatDTO, 'accountId' | 'jid'>) => `wa:${w.accountId}:${w.jid}`;
+/**
+ * Un chat de WhatsApp movido a la bandeja visto como conversación, solo con lo que usan el orden y los separadores:
+ * inboxPinnedAt hace de pinnedAt; no tiene menciones ni silencio. Así pasa por compareConversations sin tocarlo.
+ */
+export function waAsConversation(w: WaChatDTO): ConversationDTO {
+  return {
+    id: waKey(w), kind: w.isGroup ? 'group' : 'direct', name: w.name, workspaceId: null, memberIds: [],
+    pinnedAt: w.inboxPinnedAt ?? null, unread: w.unread, unreadMentions: 0, mutedUntil: null, openIssues: 0,
+    lastMessageAt: w.lastMessageAt, lastHumanPreview: null, parentId: null, deriveKind: null,
+  } as unknown as ConversationDTO;
+}
+/** Las filas de WhatsApp de una sección: 'groups', 'dms' o todas (Todo/Hoy). */
+export const waInboxFor = (list: WaChatDTO[] | undefined, place: 'groups' | 'dms' | 'all') =>
+  (list ?? []).filter((w) => !w.hidden && w.inboxPlace && (place === 'all' || w.inboxPlace === place));

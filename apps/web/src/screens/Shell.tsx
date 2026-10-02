@@ -136,7 +136,7 @@ function Sidebar({ route }: { route: Route }) {
   }, [route.name]);
   const setFilter = (v: HomeTab) => { setFilterState(v); try { localStorage.setItem(TAB_KEY, v); } catch {} };
   const dms = dmConversations(d, filter);
-  const activeConv = route.name === 'conversation' ? route.id : null;
+  const activeConv = route.name === 'conversation' ? route.id : route.name === 'waChat' ? `wa:${route.accountId}:${route.jid}` : null;
   return (
     <aside className="side">
       <QuickChat />

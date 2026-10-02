@@ -14,18 +14,23 @@ import { rememberMeta, useMetas } from '../split.ts';
 import { setDrag } from '../grid-actions.ts';
 import { ConnectCards, MailBrowser, MailHtml, MailMeta, ProviderIcon, ShareStep, WaIcon, WaShareDialog, kb, liveHtmlOf, previewOf, useMailConnections } from './Mail.tsx';
 import { setWaSend } from './WhatsApp.tsx';
-import { IssuesBody } from './Issues.tsx';
+import { IssuesBody, NewIssueDialog } from './Issues.tsx';
+import { GgButton, GgSidePanel, ReplyForMe, SelectionBar, SuggestDialog, waSource, type GgHost, type Quote } from './GgSide.tsx';
+import { WaAvatar, waInboxMenu, waMainListMenu, useWaInboxRow } from './WaInbox.tsx';
+import { ReminderDialog } from '../actions.tsx';
+import { isSelfChat } from '../ui.tsx';
 import { navigate } from '../router.ts';
-import { toast } from '../menu.tsx';
+import { copyText, menuProps, openMenuAt, toast } from '../menu.tsx';
 
 export interface PaneFrame { active: boolean; count: number; pinned: boolean; onClose: () => void; onOnly: () => void; onPin: () => void; onTint: (anchor: HTMLElement) => void }
 
 /** Cabecera común de un panel: qué es, cómo se llama, fijar, dejar solo este y cerrar. */
-function PaneHead({ icon, title, sub, frame }: { icon: ReactNode; title: string; sub?: string; frame: PaneFrame }) {
+function PaneHead({ icon, title, sub, frame, extra }: { icon: ReactNode; title: string; sub?: string; frame: PaneFrame; extra?: ReactNode }) {
   return (
     <div className="pane-head">
       <span className="pane-ico" aria-hidden>{icon}</span>
       <div className="pane-title"><b className="ellipsis">{title}</b>{sub && <span className="small muted ellipsis">{sub}</span>}</div>
+      {extra}
       <button className="icon-btn head-keep" aria-label={t('tint.title')} title={t('tint.title')} onClick={(e) => frame.onTint(e.currentTarget)}>🎨</button>
       <button className={`icon-btn head-keep ${frame.pinned ? 'is-on' : ''}`} aria-pressed={frame.pinned} aria-label={t(frame.pinned ? 'grid.unpin' : 'grid.pin')} title={t(frame.pinned ? 'grid.unpin' : 'grid.pin')} onClick={frame.onPin}>📌</button>
       {frame.count > 1 && <button className="icon-btn head-keep" aria-label={t('split.only')} title={t('split.only')} onClick={frame.onOnly}>⤢</button>}
@@ -150,10 +155,12 @@ function useWaAccount(accountId: string) {
 }
 
 /** Responder el chat. Solo si la cuenta tiene «Responder desde chaggu»; si no, lo ofrece (con el aviso de lo que implica). */
-function WaReply({ accountId, jid, onSent }: { accountId: string; jid: string; onSent: () => void }) {
+function WaReply({ accountId, jid, onSent, draft }: { accountId: string; jid: string; onSent: () => void; draft?: { text: string; key: number } | null }) {
   const { acc, reload } = useWaAccount(accountId);
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
+  // Borrador de gg: cae en la caja para editarlo; nunca se envía solo.
+  useEffect(() => { if (draft) setText(draft.text); }, [draft?.key]);
   if (!acc) return null;
   if (!acc.sendEnabled) {
     return (
@@ -184,7 +191,9 @@ function WaReply({ accountId, jid, onSent }: { accountId: string; jid: string; o
 }
 
 /** Los mensajes de una conversación de WhatsApp (con el ⠿ de cada uno) y la caja para responder. */
-function WaChatView({ accountId, jid, name, isGroup }: { accountId: string; jid: string; name: string; isGroup: boolean }) {
+/** Lo que «gg de este chat» le pide a la vista: citar, marcar varios y el borrador para la caja. */
+interface WaGg { source: string; host: GgHost; selected: Set<string>; toggle: (m: WaMessageDTO) => void; ask: (m: WaMessageDTO) => void; draft: { text: string; key: number } | null; onSelectAsk: () => void; onClear: () => void }
+function WaChatView({ accountId, jid, name, isGroup, gg }: { accountId: string; jid: string; name: string; isGroup: boolean; gg?: WaGg }) {
   const d = useClient((s) => s.data)!;
   const revision = useClient((s) => s.waRevision);
   const mailOn = d.features?.mail === true;
@@ -196,6 +205,7 @@ function WaChatView({ accountId, jid, name, isGroup }: { accountId: string; jid:
   }, [accountId, jid]);
   useEffect(() => { setMessages(null); load(); }, [load, revision]);
   useEffect(() => { box.current?.scrollTo({ top: box.current.scrollHeight }); }, [messages]);
+  const last = messages?.[messages.length - 1] ?? null;
   return (
     <>
       <div className="wa-msgs pane-wa" ref={box}>
@@ -204,7 +214,14 @@ function WaChatView({ accountId, jid, name, isGroup }: { accountId: string; jid:
         {messages?.map((m) => {
           const bring = () => openDialog((close) => <WaShareDialog accountId={accountId} jid={jid} chatName={name} isGroup={isGroup} message={m} onClose={close} />);
           return (
-            <div key={m.id} className={`wa-msg ${m.fromMe ? 'me' : ''}`}>
+            <div key={m.id} className={`wa-msg ${m.fromMe ? 'me' : ''} ${gg?.selected.has(m.id) ? 'is-selected' : ''}`}
+              {...menuProps(() => [
+                ...(mailOn ? [{ label: t('wa.bring'), icon: '⤴', onSelect: bring }] : []),
+                { label: t('common.copy'), icon: '⧉', onSelect: () => void copyText(m.body).then(() => toast(t('common.copied'))) },
+                ...(gg ? [{ divider: true }, { label: t('ggs.ask'), onSelect: () => gg.ask(m) }, { label: gg.selected.has(m.id) ? t('ggs.clearSel') : t('ggs.select'), icon: '◯', hint: t('ggs.selectHint'), onSelect: () => gg.toggle(m) }] : []),
+              ])}
+              {...(gg ? { onMouseDown: (e: React.MouseEvent) => { if (e.shiftKey) e.preventDefault(); }, onClickCapture: (e: React.MouseEvent) => { if (e.shiftKey) { e.preventDefault(); e.stopPropagation(); gg.toggle(m); } } } : {})}>
+              {gg && <button className={`msg-sel wa-sel ${gg.selected.has(m.id) ? 'on' : ''}`} aria-pressed={gg.selected.has(m.id)} aria-label={t('ggs.select')} title={t('ggs.selectHint')} onClick={(e) => { e.stopPropagation(); gg.toggle(m); }}>{gg.selected.has(m.id) ? '✓' : ''}</button>}
               {!m.fromMe && isGroup && <div className={m.author ? 'wa-author' : 'wa-author unknown'}>{m.author ?? t('wa.someone')}</div>}
               <div style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{m.body}</div>
               <div className="wa-time">{new Date(m.sentAt).toLocaleString(locale(), { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</div>
@@ -220,7 +237,9 @@ function WaChatView({ accountId, jid, name, isGroup }: { accountId: string; jid:
           );
         })}
       </div>
-      <WaReply accountId={accountId} jid={jid} onSent={() => window.setTimeout(load, 1500)} />
+      {gg && <SelectionBar n={gg.selected.size} onAsk={gg.onSelectAsk} onClear={gg.onClear} />}
+      {gg && last && !last.fromMe && <div className="row gg-compose-row"><span className="grow" /><ReplyForMe source={gg.source} host={gg.host} /></div>}
+      <WaReply accountId={accountId} jid={jid} onSent={() => window.setTimeout(load, 1500)} draft={gg?.draft} />
       <div className="pane-foot small muted">{t('grid.waFoot')}</div>
     </>
   );
@@ -231,8 +250,85 @@ export function WaPane({ paneKey, accountId, jid, frame }: { paneKey: string; ac
   const name = meta?.title ?? jid.split('@')[0]!;
   return (
     <div className={`pane-typed ${frame.active ? 'is-active' : ''}`}>
-      <PaneHead icon={<WaIcon size={20} />} title={name} sub={meta?.sub ?? 'WhatsApp'} frame={frame} />
-      <WaChatView accountId={accountId} jid={jid} name={name} isGroup={jid.endsWith('@g.us')} />
+      <WaGgChat accountId={accountId} jid={jid} name={name} isGroup={jid.endsWith('@g.us')}
+        head={(gg) => <PaneHead icon={<WaIcon size={20} />} title={name} sub={meta?.sub ?? 'WhatsApp'} frame={frame} extra={gg} />} />
+    </div>
+  );
+}
+
+/** «Tú» (notas para ti): ahí cuelgan los recordatorios de un chat de WhatsApp, que no es una conversación de chaggu. */
+async function selfConversation() {
+  const r = await client.request<{ id: string }>('/me/notes', { method: 'POST', json: {} });
+  const find = () => client.getState().data?.conversations.find((c) => c.id === r.id || isSelfChat(client.getState().data!, c));
+  if (!find()) await client.loadBootstrap();
+  return find() ?? null;
+}
+
+/**
+ * Un chat de WhatsApp con «gg de este chat»: el botón va en la cabecera (head), el panel a la derecha. Lo usan el
+ * panel de la cuadrícula y la pantalla /whatsapp/:accountId/:jid. Fuente wa:<acc>:<jid>.
+ */
+function WaGgChat({ accountId, jid, name, isGroup, head }: { accountId: string; jid: string; name: string; isGroup: boolean; head: (gg: ReactNode) => ReactNode }) {
+  const source = waSource(accountId, jid);
+  const { acc } = useWaAccount(accountId);
+  const [open, setOpen] = useState(false);
+  const [quotes, setQuotes] = useState<Quote[]>([]);
+  const [request, setRequest] = useState<{ key: number; kind: 'reply' | 'ask'; text?: string; ids?: string[] } | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(() => new Set());
+  const [suggestFor, setSuggestFor] = useState<string[] | null>(null);
+  const [draft, setDraft] = useState<{ text: string; key: number } | null>(null);
+  const canSend = !!acc?.sendEnabled && acc.status === 'connected';
+  const host: GgHost = {
+    // Solo cae en la caja si la cuenta puede responder desde chaggu; si no, se copia para pegarlo en WhatsApp.
+    useDraft: (text) => { if (canSend) setDraft({ text, key: Date.now() }); else void copyText(text).then(() => toast(t('wa.copiedDraft'))); },
+    task: (p) => openDialog((close) => <NewIssueDialog defaultTitle={p.title} defaultDue={p.due} onClose={close} />),
+    reminder: (p) => void selfConversation().then((conv) => { if (conv) openDialog((close) => <ReminderDialog conv={conv} defaultNote={`${name}: ${p.title}`} defaultDate={p.due} onClose={close} />); }).catch((e) => toast(errorText(e))),
+  };
+  const ask = (m: WaMessageDTO) => { setQuotes((q) => (q.some((x) => x.id === m.id) ? q : [...q, { id: m.id, author: m.fromMe ? t('common.youShort') : m.author ?? t('wa.someone'), text: m.body.slice(0, 1000) }])); setOpen(true); };
+  const toggle = (m: WaMessageDTO) => setSelected((x) => { const n = new Set(x); if (n.has(m.id)) n.delete(m.id); else n.add(m.id); return n; });
+  const btn = <GgButton source={source} on={open} onClick={() => setOpen((v) => !v)} />;
+  return (
+    <>
+      {head(btn)}
+      <div className={`wa-gg-body ${open ? 'has-gg' : ''}`}>
+        <div className="wa-gg-chat">
+          <WaChatView accountId={accountId} jid={jid} name={name} isGroup={isGroup}
+            gg={{ source, host, selected, toggle, ask, draft, onSelectAsk: () => setSuggestFor([...selected]), onClear: () => setSelected(new Set()) }} />
+        </div>
+        {open && <GgSidePanel source={source} chatName={name} quoted={quotes} onClearQuote={(id) => setQuotes((q) => (id ? q.filter((x) => x.id !== id) : []))}
+          host={host} onClose={() => setOpen(false)} request={request} />}
+      </div>
+      {suggestFor && <SuggestDialog source={source} messageIds={suggestFor} host={host}
+        onAsk={(q, ids) => { setOpen(true); setRequest({ key: Date.now(), kind: 'ask', text: q, ids }); }}
+        onClose={() => { setSuggestFor(null); setSelected(new Set()); }} />}
+    </>
+  );
+}
+
+/** Un chat de WhatsApp a pantalla completa (desde la fila de Grupos/DMs): /whatsapp/:accountId/:jid. */
+export function WaChatScreen({ accountId, jid }: { accountId: string; jid: string }) {
+  const row = useWaInboxRow(accountId, jid);
+  const [fetched, setFetched] = useState<WaChatDTO | null>(null);
+  useEffect(() => {
+    if (row) return;
+    // Abierto por enlace y fuera de la bandeja: se busca en la lista de esa cuenta.
+    client.request<{ chats: WaChatDTO[] }>(`/whatsapp/chats?accountId=${accountId}&limit=1000`).then((r) => setFetched(r.chats.find((c) => c.jid === jid) ?? null)).catch(() => {});
+  }, [accountId, jid, !!row]);
+  const chat = row ?? fetched;
+  const name = chat?.name ?? jid.split('@')[0]!;
+  const isGroup = chat?.isGroup ?? jid.endsWith('@g.us');
+  const off = !!chat?.accountStatus && chat.accountStatus !== 'connected';
+  return (
+    <div className="pane-typed wa-chat-screen">
+      <WaGgChat key={`${accountId}|${jid}`} accountId={accountId} jid={jid} name={name} isGroup={isGroup} head={(gg) => (
+        <div className="pane-head conv-head">
+          <button className="icon-btn" aria-label={t('common.back')} onClick={() => (history.length > 1 ? history.back() : navigate('/whatsapp'))}>‹</button>
+          <WaAvatar w={{ name, isGroup }} size={30} />
+          <div className="pane-title"><b className="ellipsis">{name}</b><span className="small muted ellipsis">{off ? t('wa.disconnected') : `WhatsApp${chat ? ` · ${chat.accountLabel}` : ''}`}</span></div>
+          {gg}
+          {chat && <button className="icon-btn" aria-label={t('menu.open')} onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); openMenuAt(r.left, r.bottom + 4, chat.inboxPlace ? waInboxMenu(chat) : waMainListMenu(chat, setFetched)); }}>⋯</button>}
+        </div>
+      )} />
     </div>
   );
 }

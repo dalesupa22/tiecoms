@@ -68,6 +68,20 @@ describe.skipIf(!process.env.DATABASE_URL)('nocturna compatible: API and canonic
     await db.pool.query('UPDATE conversation_memberships SET history_from_seq=$3 WHERE conversation_id=$1 AND user_id=$2',[cid,c.id,seq]);expect((await req('GET',`/conversations/${cid}/messages/around?seq=${seq}`,c.token)).status).toBe(404);
     expect((await req('GET',`/conversations/${cid}/messages/around?seq=${seq}`,d.token)).status).toBe(404);
   });
+  it('own-message automatic reads get private revisions, while unread gaps stay unread',async()=>{
+    const last=(await db.pool.query('SELECT last_message_seq FROM conversations WHERE id=$1',[cid])).rows[0].last_message_seq;
+    const delayed=await req('POST',`/conversations/${cid}/read`,a.token,{seq:Number(last)});expect(delayed.status).toBe(200);
+    const sent=await req('POST',`/conversations/${cid}/messages`,a.token,{clientMessageId:randomUUID(),body:'own cursor race'});expect(sent.status).toBe(201);
+    const seq=sent.json.message.seq;
+    const cursor=(await db.pool.query('SELECT last_read_seq,revision FROM read_cursors WHERE conversation_id=$1 AND user_id=$2',[cid,a.id])).rows[0];
+    expect(Number(cursor.last_read_seq)).toBe(seq);expect(Number(cursor.revision)).toBeGreaterThan(delayed.json.readRevision);
+    const event=(await db.pool.query("SELECT payload FROM outbox WHERE topic='account.event' AND payload->'event'->>'conversationId'=$1 AND payload->'event'->>'type'='read.updated' AND (payload->'event'->>'readRevision')::bigint=$2 AND payload->'userIds' @> $3::jsonb",[cid,cursor.revision,JSON.stringify([a.id])])).rows.at(-1).payload;
+    expect(event.userIds).toEqual([a.id]);expect(event.event).toMatchObject({seq,readRevision:Number(cursor.revision)});
+    const unread=await req('POST',`/conversations/${cid}/unread`,a.token,{seq});expect(unread.status).toBe(200);
+    await req('POST',`/conversations/${cid}/messages`,a.token,{clientMessageId:randomUUID(),body:'own message with unread gap'});
+    const behind=(await db.pool.query('SELECT last_read_seq,revision FROM read_cursors WHERE conversation_id=$1 AND user_id=$2',[cid,a.id])).rows[0];
+    expect(Number(behind.last_read_seq)).toBe(unread.json.lastReadSeq);expect(Number(behind.revision)).toBe(unread.json.readRevision);
+  });
   it('WA pages have stable ties, null-last and signed account/filter scoped cursors beyond old caps',async()=>{
     await db.pool.query(`INSERT INTO wa_chats(account_id,jid,name,is_group,last_message_at,pinned) SELECT $1,'fixture-'||n||'@s.whatsapp.net','fixture'||n,false,CASE WHEN n=1003 THEN NULL ELSE '2026-10-01T12:00:00Z'::timestamptz END,n=1 FROM generate_series(1,1003)n`,[account]);
     const all:string[]=[];let cursor='';for(let i=0;i<5;i++){const r=await req('GET','/whatsapp/chats?limit=300'+(cursor?'&cursor='+encodeURIComponent(cursor):''),a.token);expect(r.status).toBe(200);all.push(...r.json.chats.map((x:any)=>x.jid));cursor=r.json.next;if(!cursor)break;}
@@ -92,7 +106,7 @@ describe.skipIf(!process.env.DATABASE_URL)('nocturna compatible: API and canonic
     const prefs=await import('../src/modules/prefs.ts');const n=await prefs.expireAvailability();expect(n).toBeGreaterThan(0);const boot=(await req('GET','/bootstrap',a.token)).json;expect(boot.me.availability.mode).toBeNull();expect(boot.me.availability.silent).toBe(false);expect(boot.me.dndUntil).toBeNull();expect(await prefs.expireAvailability()).toBe(0);
   });
   it('WA voice shares canonical original bytes with opt-out AI, local AAC rendition, and temporal content stays restricted',async()=>{
-    const sync=await import('../src/modules/wa-sync.ts'),media=await import('../src/modules/wa-media.ts'),voice=await import('../src/modules/voice.ts');const jid='fixture-1@s.whatsapp.net';
+    const sync=await import('../src/modules/wa-sync.ts'),media=await import('../src/modules/wa-media-bridge.ts'),voice=await import('../src/modules/voice.ts');const jid='fixture-1@s.whatsapp.net';
     const session:any={id:account,userId:a.id,kind:'personal',me:'fixture@s.whatsapp.net'};
     const source:any={key:{id:'voice-'+run,remoteJid:jid},messageTimestamp:Math.floor(Date.now()/1000),message:{audioMessage:{mimetype:'audio/ogg;codecs=opus',ptt:true,seconds:2,mediaKey:Buffer.alloc(32),url:'https://fixture.invalid/voice'}}};
     const before=mock.body;mock.body=Buffer.from('OggS'+String.fromCharCode(0,0)+'fixture-opus');
@@ -107,7 +121,7 @@ describe.skipIf(!process.env.DATABASE_URL)('nocturna compatible: API and canonic
     await db.pool.query('UPDATE wa_messages SET media_envelope=NULL,media_state=NULL WHERE account_id=$1 AND id=$2',[account,wrapped.key.id]);expect(await sync.storeMessages(session,[restricted],true)).toHaveLength(0);expect((await db.pool.query('SELECT media_state FROM wa_messages WHERE account_id=$1 AND id=$2',[account,wrapped.key.id])).rows[0].media_state).toBe('restricted');
   });
   it('WA original is encrypted/private, shared image copy opens for recipient without WA and survives origin disconnect',async()=>{
-    const sync=await import('../src/modules/wa-sync.ts');const media=await import('../src/modules/wa-media.ts');const jid='fixture-1@s.whatsapp.net',id='photo-'+run;
+    const sync=await import('../src/modules/wa-sync.ts');const media=await import('../src/modules/wa-media-bridge.ts');const jid='fixture-1@s.whatsapp.net',id='photo-'+run;
     const session:any={id:account,userId:a.id,kind:'personal',me:'fixture@s.whatsapp.net'};
     const row=sync.msgRow(session,{key:{id,remoteJid:jid,fromMe:false},messageTimestamp:Math.floor(Date.now()/1000),message:{imageMessage:{mimetype:'image/gif',mediaKey:Buffer.alloc(32),url:'https://fixture.invalid/photo',fileLength:mock.body.length}}} as any)!;
     expect(row.mediaState).toBe('pending');await sync.storeMessages(session,[row],false);await media.downloadPendingWaMedia(account,{updateMediaMessage:async(m:any)=>m} as any);

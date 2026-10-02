@@ -1,14 +1,12 @@
 /** Original WA media is private to the linked-account owner. Shared copies use canonical destination ACL. */
 import { createHash, randomUUID } from 'node:crypto';
-import { downloadMediaMessage, normalizeMessageContent, type WASocket, type WAMessage } from 'baileys';
-import { MAX_ATTACHMENT_BYTES, MAX_VOICE_MS, type AttachmentDTO, type WaMediaDTO } from '@tiecoms/contracts';
+import { type AttachmentDTO, type WaMediaDTO } from '@tiecoms/contracts';
 import { pool, type Tx } from '../db.ts';
 import { ApiError, notFound } from '../errors.ts';
 import { getObject, objectKey, putObject, deleteObject } from '../storage.ts';
-import { imageSize, sniffAudio, sniffImage, toDTO } from './attachments.ts';
-import { openWa } from './wa-sync.ts';
+import { toDTO } from './attachments.ts';
 
-type MediaInfo = { key: string; name: string; contentType: string; sizeBytes: number; width: number | null; height: number | null; kind: 'voice'|'file'; durationMs: number | null; sha256: string };
+export type MediaInfo = { key: string; name: string; contentType: string; sizeBytes: number; width: number | null; height: number | null; kind: 'voice'|'file'; durationMs: number | null; sha256: string };
 export function waMediaDTO(row: any): WaMediaDTO | undefined {
   if (!row.media_state && !['image','audio','video','document','sticker'].includes(row.kind)) return undefined;
   const status: WaMediaDTO['status']=row.media_state ?? 'unavailable';
@@ -31,39 +29,6 @@ export async function retryWaMedia(userId:string,accountId:string,jid:string,mes
   if (!row.media_envelope) throw new ApiError(409,'wa_media_unavailable','Original no disponible. Comparte el archivo de nuevo.');
   if (row.media_state!=='ready') await pool.query("UPDATE wa_messages SET media_state='pending' WHERE account_id=$1 AND chat_jid=$2 AND id=$3",[accountId,jid,messageId]);
   await pool.query("SELECT pg_notify('tiecoms_wa',$1)",[accountId]); return {status:row.media_state==='ready' ? 'ready' : 'pending'};
-}
-
-const logger:any={level:'silent',trace(){},debug(){},info(){},warn(){},error(){},child(){return this;}};
-/** One bounded download at a time in the leased bridge; retries are explicit, never an unbounded loop. */
-export async function downloadPendingWaMedia(accountId:string,sock:WASocket,isCurrent=()=>true) {
-  const rows=await pool.query(`SELECT m.* FROM wa_messages m JOIN wa_accounts a ON a.id=m.account_id WHERE m.account_id=$1 AND a.removed_at IS NULL AND m.media_state='pending' ORDER BY m.sent_at DESC LIMIT 2`,[accountId]);
-  for(const row of rows.rows) {
-    if(!isCurrent()) break;
-    try {
-      const original=openWa(row.media_envelope) as WAMessage;
-      const content=normalizeMessageContent(original.message);
-      const node:any=content?.imageMessage ?? content?.audioMessage ?? content?.videoMessage ?? content?.documentMessage ?? content?.stickerMessage;
-      if (!node || Number(node.fileLength ?? 0)>MAX_ATTACHMENT_BYTES) throw new Error('size');
-      const stream=await downloadMediaMessage(original,'stream',{options:{signal:AbortSignal.timeout(15_000)}},{logger,reuploadRequest:sock.updateMediaMessage.bind(sock)});
-      let bytes=0;const chunks:Buffer[]=[];
-      const timer=setTimeout(()=>stream.destroy(new Error('timeout')),20_000);
-      try { for await(const chunk of stream) {const b=Buffer.from(chunk);bytes+=b.length;if(bytes>MAX_ATTACHMENT_BYTES) {stream.destroy();throw new Error('size');} chunks.push(b);} } finally {clearTimeout(timer);stream.destroy();}
-      const body=Buffer.concat(chunks), image=sniffImage(body), audio=content?.audioMessage ? sniffAudio(body) : null;
-      const type=image ?? audio ?? (body.length>12 && body.toString('ascii',4,8)==='ftyp' ? 'video/mp4' : body.subarray(0,5).toString()==='%PDF-' ? 'application/pdf' : null);
-      if (!type || !body.length) throw new Error('type');
-      const ptt=!!content?.audioMessage?.ptt;
-      const durationMs=Number(node.seconds)>0 ? Math.round(Number(node.seconds)*1000) : null;
-      if(ptt && (!audio || !durationMs || durationMs>MAX_VOICE_MS)) throw new Error('duration');
-      const dims=image ? imageSize(body) ?? {width:null,height:null} : {width:null,height:null};
-      const key=objectKey(`wa-originals/${accountId}/${randomUUID()}`);
-      const info:MediaInfo={key,name:String(node.fileName ?? (ptt ? 'nota-de-voz.ogg' : image ? `foto.${type.split('/')[1]}` : `archivo.${type.split('/')[1]}`)).slice(0,200),contentType:type,sizeBytes:body.length,width:dims.width,height:dims.height,kind:ptt ? 'voice' : 'file',durationMs,sha256:createHash('sha256').update(body).digest('hex')};
-      if(!isCurrent()) break;
-      await putObject(key,body,type);
-      const updated=await pool.query(`UPDATE wa_messages m SET media_state='ready',media_info=$4 FROM wa_accounts a WHERE m.account_id=$1 AND m.chat_jid=$2 AND m.id=$3 AND a.id=m.account_id AND a.removed_at IS NULL AND m.media_state='pending'`,[accountId,row.chat_jid,row.id,JSON.stringify(info)]);
-      if(!updated.rowCount) await deleteObject(key).catch(()=>{});
-    } catch { await pool.query("UPDATE wa_messages SET media_state='failed' WHERE account_id=$1 AND chat_jid=$2 AND id=$3 AND media_state='pending'",[accountId,row.chat_jid,row.id]); }
-  }
-  return rows.rowCount ?? 0;
 }
 
 /** External I/O happens before the sharing transaction; the independent key remains owned by the target copy. */

@@ -7,6 +7,20 @@ describe('nocturna core',()=>{
     const c:any=new TieComsClient(options);c.state={...c.state,data:{me:{id:'fixture'},conversations:[{id:'chat',lastMessageSeq:10,lastReadSeq:10,readRevision:2,historyFromSeq:0,unread:0}]}};
     c.applyConfirmedRead('chat',6,3);expect(c.getState().data.conversations[0].unread).toBe(4);c.applyConfirmedRead('chat',10,2);expect(c.getState().data.conversations[0].lastReadSeq).toBe(6);expect(c.getState().data.conversations[0].readRevision).toBe(3);
   });
+  it('an own-message canonical read event wins over a delayed preceding HTTP read ACK',()=>{
+    const c:any=new TieComsClient(options);c.state={...c.state,data:{me:{id:'fixture'},conversations:[{id:'chat',lastMessageSeq:11,lastReadSeq:10,readRevision:4,historyFromSeq:0,unread:1}]}};
+    c.applyConfirmedRead('chat',11,6);c.applyConfirmedRead('chat',10,5);
+    expect(c.getState().data.conversations[0]).toMatchObject({lastReadSeq:11,readRevision:6,unread:0});
+  });
+  it('a held bootstrap cannot replace a newer socket unread revision or preserve revoked conversations',async()=>{
+    const c:any=new TieComsClient(options);const chat={id:'chat',lastMessageSeq:12,lastReadSeq:12,readRevision:4,historyFromSeq:0,unread:0,unreadMentions:0};
+    c.state={...c.state,data:{me:{id:'fixture',dndUntil:null},conversations:[chat,{...chat,id:'revoked'}]}};
+    let resolve:any;c.request=vi.fn(()=>new Promise(r=>resolve=r));c.schedulePersist=()=>{};
+    const boot=c.loadBootstrap();c.applyConfirmedRead('chat',7,5);
+    resolve({me:{id:'fixture',dndUntil:null},conversations:[{...chat}]});await boot;
+    expect(c.getState().data.conversations).toHaveLength(1);
+    expect(c.getState().data.conversations[0]).toMatchObject({lastReadSeq:7,readRevision:5,unread:5});
+  });
   it('legacy DND and effective silence remain compatible; expired state and busy do not suppress notices',()=>{
     expect(dndActive({data:{me:{dndUntil:new Date(Date.now()+60000).toISOString(),availability:{mode:'busy',silent:false}}}} as any)).toBe(true);
     expect(dndActive({data:{me:{availability:{mode:'focus',silent:true,until:new Date(Date.now()-1).toISOString()}}}} as any)).toBe(false);

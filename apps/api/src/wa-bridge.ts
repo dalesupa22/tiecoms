@@ -1,4 +1,4 @@
-import { downloadPendingWaMedia } from './modules/wa-media.ts';
+import { downloadPendingWaMedia } from './modules/wa-media-bridge.ts';
 /**
  * Puente de WhatsApp: mantiene vivas las cuentas que cada persona conectó.
  *

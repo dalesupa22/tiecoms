@@ -535,6 +535,18 @@ export class TieComsClient {
       data.me.dndUntil = isActiveUntil(local) ? local : null;
     }
     this.assertSession(generation);
+    // A socket update can arrive while the snapshot is in flight. Preserve its
+    // newer cursor, including intentional unread, without retaining lost access.
+    if (this.state.data?.me.id === data.me.id) {
+      const current = new Map(this.state.data.conversations.map((c) => [c.id, c]));
+      data.conversations = data.conversations.map((c) => {
+        const newer = current.get(c.id);
+        if (!newer || (newer.readRevision ?? 0) <= (c.readRevision ?? 0)) return c;
+        return { ...c, lastReadSeq: newer.lastReadSeq, readRevision: newer.readRevision,
+          unreadMentions: newer.unreadMentions,
+          unread: Math.max(0, c.lastMessageSeq - Math.max(newer.lastReadSeq, c.historyFromSeq)) };
+      });
+    }
     this.lastBootstrapAt = Date.now();
     this.set({ data, dndLocalOnly });
     if (data.myActiveCall) this.putCall(data.myActiveCall);

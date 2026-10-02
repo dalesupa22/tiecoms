@@ -53,7 +53,7 @@ TIECOMS_RELEASE=$REL docker compose -f compose.yml up -d --remove-orphans
 
 ok=0
 for i in $(seq 1 30); do
-  if curl -fsS http://127.0.0.1:3020/api/health/ready >/dev/null 2>&1; then ok=1; break; fi
+  if curl --connect-timeout 2 --max-time 4 -fsS http://127.0.0.1:3020/api/health/ready >/dev/null 2>&1; then ok=1; break; fi
   sleep 2
 done
 if [ "$ok" != 1 ]; then

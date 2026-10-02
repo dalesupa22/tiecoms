@@ -1,0 +1,10 @@
+/* ---------- Barra de acciones del mensaje (2-oct-2026: «esos iconos me tapan» y «copiar siempre visible») ----------
+   Una sola fila (nunca se parte en dos encima del texto) y más arriba, sobre el borde superior del mensaje.
+   En chats angostos (panel de la cuadrícula) solo íconos, con su nombre al pasar el mouse. */
+.conv-main { container-type: inline-size; }
+.msg .msg-actions { flex-wrap: nowrap; top: -24px; max-width: none; gap: 2px; padding: 2px; }
+.msg .msg-actions .msg-act { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+@container (max-width: 760px) {
+  .msg .msg-actions .msg-act-label { display: none; }
+  .msg .msg-actions .msg-act { padding: 2px 8px; font-size: 14px; }
+}

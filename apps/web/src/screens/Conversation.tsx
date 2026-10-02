@@ -20,6 +20,7 @@ import { errorText, locale, systemText, t, tn } from '../i18n.ts';
 import { contextHandler, copyText, menuProps, openMenuAt, toast, type MenuItem } from '../menu.tsx';
 import { navigate, queryParam } from '../router.ts';
 import { flashPane } from '../split.ts';
+import './MsgActions.css';
 import { MAX_PANES, ZOOM_MAX, ZOOM_MIN, convZoomNow, setConvZoom, splitAvailable, useConvZoom } from '../split.ts';
 import { SplitPicker } from './SplitPicker.tsx';
 import { directOtherId, Avatar, ConvAvatar, Modal, OrgMark, conversationSubtitle, conversationTitle, dayLabel, isGgChat, isSelfChat, orgById, personById, personColor, personInk } from '../ui.tsx';
@@ -956,14 +957,16 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
                   {issueOf(m.id) && <button className="msg-issue" onClick={() => setOpenIssue(issueOf(m.id)!.id)}>◆ {issueOf(m.id)!.title}</button>}
                   {!m.deletedAt && !isEditing && (
                     <div className="msg-actions">
+                      {/* Una sola fila, encima del mensaje: con poco espacio solo íconos (GridFocus/MsgActions.css). Copiar siempre a la vista. */}
                       {conv.canPost && <button className="msg-act-react" aria-label={t('react.add')} title={t('react.add')} onClick={(e) => { const rr = (e.currentTarget as HTMLElement).getBoundingClientRect(); pickReaction(m, rr.left, rr.bottom + 6); }}>☺</button>}
                       {conv.canPost && QUICK_REACTIONS.slice(0, 3).map((e) => <button key={e} className="msg-act-quick" aria-label={e} onClick={() => react(m, e)}>{e}</button>)}
-                      {conv.canPost && <button onClick={() => { setReplyTo(m); input.current?.focus(); }}>↩ {t('menu.reply')}</button>}
-                      {!m.viewOnce && <button onClick={() => openDialog((close) => <ForwardToChatsDialog source={m} onClose={close} />)}>↪ {t('menu.forward')}</button>}
-                      {canDerive && myWsRole !== 'guest' && !m.viewOnce && <button onClick={() => setDeriving(m)}>{t('derive.action')}</button>}
-                      {canOpenIssues && !m.viewOnce && <button onClick={() => setNewIssue({ origin: m })}>{t('issue.fromMessage')}</button>}
-                      {conv.canPost && !embedded && m.kind === 'text' && !m.viewOnce && <button onClick={(e) => openTopicMenu(e.currentTarget as HTMLElement, m, topics)}>🏷 {t('topic.set')}</button>}
-                      <button aria-label={t('menu.open')} onClick={(e) => { const rr = (e.currentTarget as HTMLElement).getBoundingClientRect(); openMenuAt(rr.left, rr.bottom + 4, messageMenu(m)); }}>⋯</button>
+                      {!m.viewOnce && <button className="msg-act" title={t('common.copy')} aria-label={t('common.copy')} onClick={async () => { const ok = await copyText((m.displayBody ?? m.body) + (m.attachments?.length ? '\n' + m.attachments.map((a) => `📎 ${a.name}`).join('\n') : '')); toast(ok ? t('toast.copied') : (locale().startsWith('en') ? 'Could not copy' : 'No se pudo copiar')); }}><span aria-hidden>⧉</span><span className="msg-act-label">{t('common.copy')}</span></button>}
+                      {conv.canPost && <button className="msg-act" title={t('menu.reply')} aria-label={t('menu.reply')} onClick={() => { setReplyTo(m); input.current?.focus(); }}><span aria-hidden>↩</span><span className="msg-act-label">{t('menu.reply')}</span></button>}
+                      {!m.viewOnce && <button className="msg-act" title={t('menu.forward')} aria-label={t('menu.forward')} onClick={() => openDialog((close) => <ForwardToChatsDialog source={m} onClose={close} />)}><span aria-hidden>↪</span><span className="msg-act-label">{t('menu.forward')}</span></button>}
+                      {canDerive && myWsRole !== 'guest' && !m.viewOnce && <button className="msg-act" title={t('derive.action').replace(/^\S+\s/, '')} aria-label={t('derive.action').replace(/^\S+\s/, '')} onClick={() => setDeriving(m)}><span aria-hidden>💬</span><span className="msg-act-label">{t('derive.action').replace(/^\S+\s/, '')}</span></button>}
+                      {canOpenIssues && !m.viewOnce && <button className="msg-act" title={t('issue.fromMessage').replace(/^\S+\s/, '')} aria-label={t('issue.fromMessage').replace(/^\S+\s/, '')} onClick={() => setNewIssue({ origin: m })}><span aria-hidden>＋</span><span className="msg-act-label">{t('issue.fromMessage').replace(/^\S+\s/, '')}</span></button>}
+                      {conv.canPost && !embedded && m.kind === 'text' && !m.viewOnce && <button className="msg-act" title={t('topic.set')} aria-label={t('topic.set')} onClick={(e) => openTopicMenu(e.currentTarget as HTMLElement, m, topics)}><span aria-hidden>🏷</span><span className="msg-act-label">{t('topic.set')}</span></button>}
+                      <button className="msg-act" title={t('menu.open')} aria-label={t('menu.open')} onClick={(e) => { const rr = (e.currentTarget as HTMLElement).getBoundingClientRect(); openMenuAt(rr.left, rr.bottom + 4, messageMenu(m)); }}>⋯</button>
                     </div>
                   )}
                 </div>

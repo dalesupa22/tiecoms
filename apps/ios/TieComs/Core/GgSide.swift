@@ -345,3 +345,97 @@ struct GgPrefill: Equatable, Hashable, Identifiable, Sendable {
         return nil
     }
 }
+
+// MARK: - gg propone, la persona confirma: reunión y correo (API gg-actions.ts, 2-oct-2026)
+//
+// POST /gg/meeting-draft y /gg/mail-draft solo devuelven borradores; nada se agenda ni se envía desde ahí. La reunión se
+// crea con /gg/calendar/confirm y el correo sale con /gg/mail-send, siempre tras el toque y la confirmación de la persona.
+
+/// Persona del chat de chaggu que gg propone invitar (se invita por id, nunca por un correo que chaggu revele).
+struct GgInvitee: Codable, Equatable, Hashable, Identifiable, Sendable {
+    var id: String
+    var name: String
+    init(id: String, name: String) { self.id = id; self.name = name }
+    init(from decoder: Decoder) throws {
+        let c = try container(decoder)
+        id = c.v("id", ""); name = c.v("name", "")
+    }
+}
+
+/// POST /gg/meeting-draft.
+struct GgMeetingDraft: Decodable, Equatable, Sendable {
+    var title: String
+    var durationMin: Int
+    var attendeeEmails: [String]
+    var invitees: [GgInvitee]
+    var missingPeople: [String]
+    var links: [String]
+    var description: String
+    init(from decoder: Decoder) throws {
+        let c = try container(decoder)
+        title = c.v("title", "")
+        let d = c.int("durationMin", 30)
+        durationMin = (15...240).contains(d) ? d : 30
+        attendeeEmails = c.v("attendeeEmails", [String]())
+        invitees = c.v("invitees", [GgInvitee]()).filter { !$0.id.isEmpty }
+        missingPeople = c.v("missingPeople", [String]())
+        links = c.v("links", [String]())
+        description = c.v("description", "")
+    }
+}
+
+/// POST /gg/mail-draft. `status` = `ready` (hay buzón conectado) o `needs_connect`.
+struct GgMailDraft: Decodable, Equatable, Sendable {
+    var provider: String?
+    var from: String?
+    var status: String
+    var to: [String]
+    var cc: [String]
+    var missingPeople: [String]
+    var subject: String
+    var body: String
+    init(from decoder: Decoder) throws {
+        let c = try container(decoder)
+        let p: String? = c.o("provider")
+        provider = ["google", "microsoft"].contains(p ?? "") ? p : nil
+        from = c.o("from")
+        let s = c.v("status", "needs_connect")
+        status = s == "ready" && provider != nil ? "ready" : "needs_connect"
+        to = c.v("to", [String]()); cc = c.v("cc", [String]())
+        missingPeople = c.v("missingPeople", [String]())
+        subject = c.v("subject", ""); body = c.v("body", "")
+    }
+    var ready: Bool { status == "ready" && provider != nil }
+    /// «Desde»: la cuenta conectada o, si el API no la dice, el nombre del servicio.
+    var fromLabel: String { from.flatMap { $0.isEmpty ? nil : $0 } ?? (provider == "microsoft" ? "Outlook" : "Gmail") }
+}
+
+/// POST /gg/mail-send → `{ok, already}` (`already`: esa clave ya se había enviado; no sale dos veces).
+struct GgMailSendResult: Decodable, Equatable, Sendable {
+    var ok: Bool
+    var already: Bool
+    init(from decoder: Decoder) throws {
+        let c = try container(decoder)
+        ok = c.v("ok", false); already = c.v("already", false)
+    }
+}
+
+/// Listas de correos como las escribe la persona («a@x.co, b@y.co; c@z.co»).
+enum GgEmails {
+    static func parse(_ s: String) -> [String] {
+        var seen = Set<String>(), out: [String] = []
+        for raw in s.split(whereSeparator: { $0 == "," || $0 == ";" || $0.isWhitespace }) {
+            let e = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if !e.isEmpty && seen.insert(e).inserted { out.append(e) }
+        }
+        return out
+    }
+    /// Misma regla que la web y el API (algo@algo.algo, sin espacios ni dos @).
+    static func valid(_ e: String) -> Bool {
+        let parts = e.split(separator: "@", omittingEmptySubsequences: false)
+        guard parts.count == 2, !parts[0].isEmpty, !e.contains(where: \.isWhitespace) else { return false }
+        let domain = parts[1].split(separator: ".", omittingEmptySubsequences: false)
+        return domain.count >= 2 && domain.allSatisfy { !$0.isEmpty } && e.count <= 254
+    }
+    static func invalid(_ list: [String]) -> [String] { list.filter { !valid($0) } }
+}

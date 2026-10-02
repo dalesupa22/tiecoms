@@ -159,6 +159,7 @@ struct GgSideSheet: View {
     @State private var askConsent = false
     @State private var loading = true
     @State private var calendar = false
+    @State private var mail = false
     @FocusState private var focused: Bool
 
     private var thread: GgSideThread? { store.ggSide.threads[source] }
@@ -218,7 +219,12 @@ struct GgSideSheet: View {
                 }
                 ToolbarItem(placement: .primaryAction) {
                     Menu {
-                        Button { calendar = true } label: { Label(L("gg.calendar.title"), systemImage: "calendar") }
+                        Button { calendar = true } label: { Label(L("gg.meeting.action"), systemImage: "calendar") }
+                            .accessibilityIdentifier("gg.meeting.open")
+                        if store.mailEnabled {
+                            Button { mail = true } label: { Label(L("gg.mail.action"), systemImage: "envelope") }
+                                .accessibilityIdentifier("gg.mail.open")
+                        }
                         Button { run { try await store.ggSideNew(source) } } label: { Label(L("ggs.new"), systemImage: "plus.bubble") }
                             .accessibilityIdentifier("gg.new")
                         Button {
@@ -234,9 +240,10 @@ struct GgSideSheet: View {
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
         .sheet(isPresented: $calendar) { GgCalendarSheet(source: source, messageIds: quotes.map(\.id), suggestedTitle: quotes.first?.text ?? chatTitle) }
+        .sheet(isPresented: $mail) { GgMailSheet(source: source, messageIds: quotes.map(\.id)) }
         .onDisappear { focused = false; UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil) }
         .waPrivateSource(source)
-        .onChange(of: store.waPrivacy.token(source)) { _, _ in quotes = []; text = ""; retry = nil; calendar = false; dismiss() }
+        .onChange(of: store.waPrivacy.token(source)) { _, _ in quotes = []; text = ""; retry = nil; calendar = false; mail = false; dismiss() }
         .task(id: source) { await open() }
         .alert(L("ai.consentTitle"), isPresented: $askConsent) {
             Button(L("common.cancel"), role: .cancel) { retry = nil }
@@ -345,6 +352,9 @@ struct GgSideSheet: View {
                     chip(L("ggs.whatsLeft"), id: "gg.chip.left") { ask(L("ggs.whatsLeft")) }
                     chip(L("ggs.agreed"), id: "gg.chip.agreed") { ask(L("ggs.agreed")) }
                 }
+                // Agendar y redactar correo: gg prepara, la persona revisa y confirma en su hoja.
+                chip(L("gg.meeting.action"), id: "gg.chip.meeting") { calendar = true }
+                if store.mailEnabled { chip(L("gg.mail.action"), id: "gg.chip.mail") { mail = true } }
                 // Sin repetir los de arranque; «Responder por mí» como sugerencia pide los 3 borradores.
                 let starters = Set([L("ggs.replyForMe"), L("ggs.summarize"), L("ggs.whatsLeft"), L("ggs.agreed"), "Responder por mí", "Reply for me"].map(Self.fold))
                 ForEach(follow.prefix(4).filter { !(greeting || follow.isEmpty) || !starters.contains(Self.fold($0)) }, id: \.self) { f in
@@ -495,6 +505,8 @@ struct GgSuggestSheet: View {
     @State private var free = ""
     @State private var error: String?
     @State private var askConsent = false
+    @State private var calendar = false
+    @State private var mail = false
 
     static func outcome(_ s: GgSuggestion) -> GgOutcome {
         switch s.kind {
@@ -533,6 +545,15 @@ struct GgSuggestSheet: View {
                     .accessibilityAddTraits(picked.contains(s.id) ? .isSelected : [])
                     .accessibilityIdentifier("gg.suggest.\(s.kind)")
                 }
+                // Con los mensajes elegidos: agendar o redactar un correo (cada uno con su hoja y su confirmación).
+                Section {
+                    Button { calendar = true } label: { Label(L("gg.meeting.action"), systemImage: "calendar") }
+                        .accessibilityIdentifier("gg.suggest.meeting")
+                    if store.mailEnabled {
+                        Button { mail = true } label: { Label(L("gg.mail.action"), systemImage: "envelope") }
+                            .accessibilityIdentifier("gg.suggest.mail")
+                    }
+                }
                 Section {
                     HStack {
                         TextField(L("ggs.free"), text: $free, axis: .vertical).lineLimit(1...3).accessibilityIdentifier("gg.suggest.free")
@@ -563,8 +584,10 @@ struct GgSuggestSheet: View {
             } message: { Text(L("ai.consentBody")) }
         }
         .presentationDetents([.medium, .large])
+        .sheet(isPresented: $calendar) { GgCalendarSheet(source: source, messageIds: messageIds, suggestedTitle: "") }
+        .sheet(isPresented: $mail) { GgMailSheet(source: source, messageIds: messageIds) }
         .waPrivateSource(source)
-        .onChange(of: store.waPrivacy.token(source)) { _, _ in list = []; picked = []; free = ""; dismiss() }
+        .onChange(of: store.waPrivacy.token(source)) { _, _ in list = []; picked = []; free = ""; calendar = false; mail = false; dismiss() }
     }
 
     private func load() async {

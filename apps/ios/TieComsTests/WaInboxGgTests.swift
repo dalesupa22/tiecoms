@@ -127,9 +127,14 @@ final class WaInboxGgTests: XCTestCase {
 
     func testGgSidePending404HidesButtonAndConsentFlag() async throws {
         let s = try ControlledURLProtocol.store()
+        // Un 404 de UN chat (bloqueado o borrado) no esconde gg en todos los chats (012a9ff); solo «Ruta no encontrada».
         ControlledURLProtocol.handler = { req in Task { @MainActor in req.respond(404, #"{"error":{"code":"not_found","message":"Not found"}}"#) } }
         await s.ggSidePending(["c:c1"])
-        XCTAssertEqual(s.ggSide.available, false, "API sin gg en el chat: el botón no sale")
+        XCTAssertNil(s.ggSide.available, "404 de un chat: el botón no se esconde")
+        let r = try ControlledURLProtocol.store()
+        ControlledURLProtocol.handler = { req in Task { @MainActor in req.respond(404, #"{"error":{"code":"route_not_found","message":"Ruta no encontrada"}}"#) } }
+        await r.ggSidePending(["c:c1"])
+        XCTAssertEqual(r.ggSide.available, false, "API sin gg en el chat: el botón no sale")
         let t = try ControlledURLProtocol.store()
         var url = ""
         ControlledURLProtocol.handler = { req in Task { @MainActor in url = req.request.url?.absoluteString ?? ""; req.respond(#"{"c:c1":3}"#) } }
@@ -372,4 +377,45 @@ extension WaInboxGgTests {
         XCTAssertFalse(VoicePlayer.shared.playing)
     }
 
+
+    // MARK: gg propone, la persona confirma: reunión y correo (gg-actions.ts, 2-oct-2026)
+
+    func testMeetingDraftDecodesAndToleratesOldOrBadFields() throws {
+        let d = try dec(GgMeetingDraft.self, #"{"title":"Revisión del contrato","durationMin":45,"attendeeEmails":["ana@cliente.co"],"invitees":[{"id":"u-1","name":"Luis Pérez"},{"name":"sin id"}],"missingPeople":["Marta"],"links":["https://docs.example.com/x"],"description":"Cerrar cláusulas\n\nEnlaces:\n- https://docs.example.com/x"}"#)
+        XCTAssertEqual(d.title, "Revisión del contrato")
+        XCTAssertEqual(d.durationMin, 45)
+        XCTAssertEqual(d.attendeeEmails, ["ana@cliente.co"])
+        XCTAssertEqual(d.invitees, [GgInvitee(id: "u-1", name: "Luis Pérez")], "sin id no se puede invitar")
+        XCTAssertEqual(d.missingPeople, ["Marta"])
+        XCTAssertEqual(d.links.count, 1)
+        XCTAssertTrue(d.description.contains("Enlaces"))
+        let empty = try dec(GgMeetingDraft.self, #"{"durationMin":"900","invitees":null}"#)
+        XCTAssertEqual(empty.durationMin, 30, "fuera de 15…240 → 30")
+        XCTAssertTrue(empty.invitees.isEmpty && empty.attendeeEmails.isEmpty && empty.title.isEmpty)
+        XCTAssertEqual(try dec(GgMeetingDraft.self, #"{"durationMin":90.0}"#).durationMin, 90)
+    }
+
+    func testMailDraftReadyAndNeedsConnect() throws {
+        let d = try dec(GgMailDraft.self, #"{"provider":"google","from":"yo@empresa.co","status":"ready","to":["ana@cliente.co"],"cc":[],"missingPeople":["Luis"],"subject":"Propuesta","body":"Hola Ana"}"#)
+        XCTAssertTrue(d.ready)
+        XCTAssertEqual(d.fromLabel, "yo@empresa.co")
+        XCTAssertEqual(d.to, ["ana@cliente.co"]); XCTAssertEqual(d.missingPeople, ["Luis"])
+        XCTAssertEqual(d.subject, "Propuesta"); XCTAssertEqual(d.body, "Hola Ana")
+        let none = try dec(GgMailDraft.self, #"{"provider":null,"from":null,"status":"needs_connect","to":[],"cc":[],"missingPeople":[],"subject":"x","body":""}"#)
+        XCTAssertFalse(none.ready); XCTAssertEqual(none.status, "needs_connect")
+        // «ready» sin proveedor conocido no deja enviar.
+        XCTAssertFalse(try dec(GgMailDraft.self, #"{"provider":"yahoo","status":"ready"}"#).ready)
+        XCTAssertEqual(try dec(GgMailDraft.self, #"{"provider":"microsoft","status":"ready","from":""}"#).fromLabel, "Outlook")
+        let sent = try dec(GgMailSendResult.self, #"{"ok":true,"already":true}"#)
+        XCTAssertTrue(sent.ok && sent.already)
+        XCTAssertFalse(try dec(GgMailSendResult.self, #"{}"#).ok)
+    }
+
+    func testEmailListParsingAndValidation() {
+        XCTAssertEqual(GgEmails.parse(" Ana@Cliente.co, luis@x.co;ana@cliente.co\nmarta@y.co "), ["ana@cliente.co", "luis@x.co", "marta@y.co"])
+        XCTAssertTrue(GgEmails.parse(" , ; ").isEmpty)
+        XCTAssertTrue(GgEmails.valid("a@b.co"))
+        for bad in ["luis", "a@b", "a@@b.co", "@b.co", "a@b.", "a@.co"] { XCTAssertFalse(GgEmails.valid(bad), bad) }
+        XCTAssertEqual(GgEmails.invalid(["a@b.co", "luis"]), ["luis"])
+    }
 }

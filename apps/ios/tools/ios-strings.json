@@ -5718,5 +5718,121 @@
   "gg.calendar.workHours": [
     "Opciones entre 09:00 y 18:00, en tu zona horaria.",
     "Options between 09:00 and 18:00 in your time zone."
+  ],
+  "gg.meeting.action": [
+    "📅 Agendar",
+    "📅 Schedule"
+  ],
+  "gg.meeting.preparing": [
+    "✨ gg está preparando la reunión con lo que se habló…",
+    "✨ gg is preparing the meeting from the chat…"
+  ],
+  "gg.meeting.prepared": [
+    "✨ gg lo preparó con el chat. Revisa todo: nada se agenda hasta que confirmes.",
+    "✨ gg prepared this from the chat. Review everything: nothing is scheduled until you confirm."
+  ],
+  "gg.meeting.missing": [
+    "No encontré en el chat a {names}. Escribe su correo en invitados si quieres incluirlos.",
+    "Not found in the chat: {names}. Type their email under guests to include them."
+  ],
+  "gg.meeting.links": [
+    "{n} enlace(s) del chat en la descripción.",
+    "{n} link(s) from the chat in the description."
+  ],
+  "gg.meeting.fromChat": [
+    "Del chat (reciben la invitación en chaggu)",
+    "From the chat (invited in chaggu)"
+  ],
+  "gg.meeting.removeInvitee": [
+    "Quitar a {name}",
+    "Remove {name}"
+  ],
+  "gg.meeting.confirm": [
+    "Confirmar y agendar",
+    "Confirm and schedule"
+  ],
+  "gg.meeting.with": [
+    "Con: {who}",
+    "With: {who}"
+  ],
+  "gg.mail.action": [
+    "✉ Redactar correo",
+    "✉ Draft email"
+  ],
+  "gg.mail.title": [
+    "Correo con gg",
+    "Email with gg"
+  ],
+  "gg.mail.preparing": [
+    "✨ gg está redactando el correo con lo que se habló…",
+    "✨ gg is drafting the email from the chat…"
+  ],
+  "gg.mail.prepared": [
+    "✨ gg lo redactó con el chat. Revísalo y edítalo: no se envía hasta que toques «Enviar» y confirmes.",
+    "✨ gg drafted this from the chat. Review and edit it: nothing is sent until you tap “Send” and confirm."
+  ],
+  "gg.mail.missing": [
+    "No veo el correo de {names}. Escríbelo si quieres incluirlos.",
+    "No email visible for {names}. Type it to include them."
+  ],
+  "gg.mail.needsConnect": [
+    "Conecta tu Gmail u Outlook para enviar correos desde chaggu.",
+    "Connect Gmail or Outlook to send email from chaggu."
+  ],
+  "gg.mail.connect": [
+    "Conectar correo",
+    "Connect email"
+  ],
+  "gg.mail.from": [
+    "Desde",
+    "From"
+  ],
+  "gg.mail.to": [
+    "Para (correos separados por coma)",
+    "To (comma-separated emails)"
+  ],
+  "gg.mail.cc": [
+    "Copia (opcional)",
+    "Cc (optional)"
+  ],
+  "gg.mail.subject": [
+    "Asunto",
+    "Subject"
+  ],
+  "gg.mail.body": [
+    "Mensaje",
+    "Message"
+  ],
+  "gg.mail.send": [
+    "Enviar",
+    "Send"
+  ],
+  "gg.mail.confirmTitle": [
+    "¿Enviar este correo?",
+    "Send this email?"
+  ],
+  "gg.mail.confirmBody": [
+    "¿Enviar este correo desde {from} a {to}?",
+    "Send this email from {from} to {to}?"
+  ],
+  "gg.mail.confirmCc": [
+    "Copia: {cc}",
+    "Cc: {cc}"
+  ],
+  "gg.mail.sent": [
+    "✓ Enviado. Queda en tus Enviados.",
+    "✓ Sent. It is in your Sent folder."
+  ],
+  "gg.mail.checkEmails": [
+    "Revisa estos correos: {list}",
+    "Check these emails: {list}"
+  ],
+  "gg.mail.incomplete": [
+    "Falta destinatario, asunto o texto.",
+    "Missing recipient, subject or text."
+  ],
+  "gg.mail.tooMany": [
+    "Máximo 20 correos en Para y 20 en Copia.",
+    "Up to 20 emails in To and 20 in Cc."
   ]
 }

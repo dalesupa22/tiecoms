@@ -143,7 +143,7 @@ fun rememberCallLauncher(): CallLauncher {
 // ---------- Encabezado del chat y franja ----------
 /** 📞 y 🎥 del encabezado (solo con las llamadas prendidas en el servidor y si puedo escribir). */
 @Composable
-fun CallHeaderButtons(conv: ConversationDTO, data: BootstrapDTO) {
+fun CallHeaderButtons(conv: ConversationDTO, data: BootstrapDTO, compact: Boolean = false) {
     val client = LocalClient.current
     val container = LocalContainer.current
     val st by client.state.collectAsStateWithLifecycle()
@@ -151,6 +151,20 @@ fun CallHeaderButtons(conv: ConversationDTO, data: BootstrapDTO) {
     LaunchedEffect(data.callsEnabled, conv.id, known) { if (data.callsEnabled && !known) runCatching { client.loadCall(conv.id) } }
     if (!data.callsEnabled || !conv.canPost) return
     val launcher = rememberCallLauncher()
+    // En la cabecera del chat: un solo 📞 que pregunta voz o video, para que quepan el nombre y gg (2-oct-2026).
+    if (compact) {
+        var open by remember { mutableStateOf(false) }
+        Box {
+            IconButton(onClick = { open = true }, modifier = Modifier.testTag("callStart")) { Icon(Icons.Filled.Call, stringResource(R.string.call_audio)) }
+            DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+                DropdownMenuItem(text = { Text(stringResource(R.string.call_audio)) }, leadingIcon = { Icon(Icons.Filled.Call, null) }, modifier = Modifier.testTag("callAudio"),
+                    onClick = { open = false; launcher.launch(false) { container.calls.start(conv.id, "audio") } })
+                DropdownMenuItem(text = { Text(stringResource(R.string.call_video)) }, leadingIcon = { Icon(Icons.Filled.Videocam, null) }, modifier = Modifier.testTag("callVideo"),
+                    onClick = { open = false; launcher.launch(true) { cam -> container.calls.start(conv.id, if (cam) "video" else "audio") } })
+            }
+        }
+        return
+    }
     IconButton(onClick = { launcher.launch(false) { container.calls.start(conv.id, "audio") } }, modifier = Modifier.testTag("callAudio")) {
         Icon(Icons.Filled.Call, stringResource(R.string.call_audio))
     }

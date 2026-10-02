@@ -809,7 +809,7 @@ fun ConversationScreen(
                 navigationIcon = { IconButton(onClick = leaveChat, modifier = Modifier.testTag("back")) { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.back)) } },
                 title = {
                     Column {
-                        Column(Modifier.clickable(onClick = onDetails).semantics(mergeDescendants = true) { heading() }) {
+                        Column(Modifier.clickable(onClick = onDetails).semantics(mergeDescendants = true) { heading() }.testTag("details")) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             if (meta.kind == "internal") { Icon(Icons.Filled.Lock, stringResource(R.string.internal_cd), Modifier.size(16.dp)); Spacer(Modifier.width(4.dp)) }
                             if (meta.level == "directivo") Text("◆ ", color = Brand.Orange)
@@ -843,16 +843,16 @@ fun ConversationScreen(
                     }
                 },
                 actions = {
-                    // gg de este chat: entre el nombre y la píldora de llamadas/buscar/⋯ (el nombre se corta con «…»).
+                    // gg · 📞 · 🔎 · ⋯ (2-oct-2026): 📞 pregunta voz o video y ⓘ salió (tocar el nombre abre los detalles, y
+                    // también está en ⋯), así el nombre tiene sitio y termina en «…» sin cambiar el alto.
                     if (gg != null && gg.available != false) GgButton(gg.pending, onClick = { gg.show() })
+                    // 📞 (docs/LLAMADAS.md): solo con features.calls y si puedo escribir.
+                    if (!meta.isSide && !blockedDirect) CallHeaderButtons(meta, data, compact = true)
                     // 🔎 Buscar en el chat (tanda 1.7).
                     IconButton(onClick = { searchOpen = !searchOpen; if (!searchOpen) searchQ = "" }, modifier = Modifier.testTag("chatSearch")) {
                         Icon(Icons.Filled.Search, stringResource(R.string.cs_open))
                     }
-                    // 📞 y 🎥 (docs/LLAMADAS.md): solo con features.calls y si puedo escribir.
-                    if (!meta.isSide && !blockedDirect) CallHeaderButtons(meta, data)
                     IconButton(onClick = { convMenu = true }, modifier = Modifier.testTag("convMenu")) { Icon(Icons.Filled.MoreVert, stringResource(R.string.menu_more)) }
-                    IconButton(onClick = onDetails, modifier = Modifier.testTag("details")) { Icon(Icons.Filled.Info, stringResource(R.string.details)) }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
             )
@@ -1146,7 +1146,8 @@ fun ConversationScreen(
         val mineSet = live.reactions.filter { data.me.id in it.userIds }.map { it.emoji }.toSet()
         EmojiPickerSheet(mineSet, reactionActions, onPick = { e -> react(live, e, e !in mineSet) }, onClose = { pickerFor = null })
     }
-    if (convMenu) ActionSheet(title, listOf(SheetItem(ctx.getString(R.string.cs_open), "🔎", tag = "menuSearch") { searchOpen = true }) +
+    if (convMenu) ActionSheet(title, listOf(SheetItem(ctx.getString(R.string.cs_open), "🔎", tag = "menuSearch") { searchOpen = true },
+        SheetItem(ctx.getString(R.string.details), "ⓘ", tag = "menuDetails") { onDetails() }) +
         conversationMenu(ctx, meta, data, onMeeting = { meeting = true to null }, onRemindCustom = { reminderCustom = true to null }, onLeave = { confirmLeave = true })) { convMenu = false }
     viewer?.let { (list, i) -> MediaViewer(list, i) { viewer = null } }
     pdfViewer?.let { (a, sign) -> PdfSheet(a, startSigning = sign && meta.canPost, onClose = { pdfViewer = null; pdfSaved = null }) }

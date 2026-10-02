@@ -13,6 +13,22 @@ import { dismissIncomingCall, showIncomingCall } from './screens/Call.tsx';
 import { onCallTranscriptEvent } from './call.ts';
 import { showMessageBubble } from './bubbles.tsx';
 
+/**
+ * En la app de escritorio (Tauri) el clic en la notificación del sistema no llega a la página: solo trae la ventana
+ * al frente. Si la ventana vuelve al frente poco después de un aviso, se abre el chat y el tema de ese último mensaje.
+ */
+const isDesktopApp = () => typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+let lastDesktopNotice: { path: string; at: number } | null = null;
+function rememberDesktopNotice(conversationId: string, seq: number) {
+  if (!isDesktopApp()) return;
+  lastDesktopNotice = { path: `/c/${conversationId}?m=${seq}`, at: Date.now() };
+}
+if (typeof window !== 'undefined') window.addEventListener('focus', () => {
+  const n = lastDesktopNotice;
+  lastDesktopNotice = null;
+  if (n && Date.now() - n.at < 90_000) navigate(n.path);
+});
+
 /** En el chat abierto, ¿la vista está arriba, lejos del final (más de una pantalla)? */
 function farFromEnd(conversationId: string) {
   const el = document.querySelector<HTMLElement>(`.msgs[data-conv-id="${conversationId}"]`);
@@ -63,6 +79,7 @@ export function handleNotice(n: ClientNotice) {
         ? new Notification(group, { body: `${who}: ${body}`, tag: n.conversationId, icon: `${BASE}/icon-192.png` })
         : new Notification(`${who} · ${conv ? conversationTitle(d, conv) : 'chaggu'}`, { body, tag: n.conversationId, icon: `${BASE}/icon-192.png` });
       note.onclick = () => { window.focus(); navigate(`/c/${n.conversationId}?m=${n.message.seq}`); note.close(); };
+      rememberDesktopNotice(n.conversationId, n.message.seq);
     } else if (!current) {
       // En otra pantalla (o con la pestaña oculta y sin permiso de avisos): burbuja con quién, dónde y el mensaje; un clic abre el chat.
       const group = conv ? groupNoticeTitle(d, conv) : null;

@@ -46,3 +46,11 @@ Arrastrar una tarea suelta a un chat; adjuntos al responder un correo en vivo; l
 ## Recoger paneles (2-oct-2026)
 
 Botón **▁** en la cabecera de cada panel (aparece con 2 o más a la vista): el panel sale del dibujo pero sigue abierto (no pierde lugar, color ni fijado) y queda como pestaña en la barra **Recogidos** de arriba, con sus no leídos. Un clic en la pestaña lo devuelve; **Mostrar todos** devuelve todos; **Recoger los demás** (en la barra de Diseño) deja solo el activo. Siempre queda uno a la vista, y abrir un chat recogido desde la lista lo devuelve. En «Paneles a tu medida», mientras haya recogidos los demás se reacomodan y el que queda solo en su columna crece a lo alto (solo el dibujo: las posiciones guardadas vuelven al devolverlos). Código: `apps/web/src/grid-collapse.ts` (aparte de split.ts), `GridDock` en `screens/Split.tsx`, estilos en `screens/GridDock.css`. Se guarda en `localStorage` (`chaggu:split-collapsed`).
+
+## Alto completo a la izquierda, al centro o a la derecha (2-oct-2026)
+
+En **Tamaño** de cada panel, además de filas/columnas: *Alto completo a la izquierda / al centro / a la derecha*. El panel toma esa columna de arriba a abajo; los que estaban ahí pasan a la columna que dejó (o al primer hueco libre). También se puede arrastrar el borde de abajo del panel.
+
+## Abrir el tema del mensaje (2-oct-2026)
+
+Burbuja, notificación o mención con `?m=` sobre un chat que **ya estaba abierto** no saltaba (el router solo avisa cuando cambia la ruta, no el `?m=`) y el chat se quedaba en el tema de antes, p. ej. General. Ahora `Conversation.tsx` escucha `chaggu:navigate`/`popstate`. En la app de escritorio el clic en la notificación del sistema no llega a la página: si la ventana vuelve al frente en los 90 s siguientes a un aviso, se abre ese mensaje en su tema (`notices.ts`).

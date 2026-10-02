@@ -148,6 +148,24 @@ export function GridArea({ id, search = '', side }: { id: string | null; search?
     }
     return { positions, tall, wide, widths: columns };
   };
+  /** Alto completo a la izquierda, al centro o a la derecha: quienes estaban en esa columna pasan a la del panel. */
+  const placeSide = (key: string, where: 'left' | 'center' | 'right') => {
+    const visual = captureVisualLayout();
+    const from = visual.positions[key];
+    const columns = Math.max(1, visual.widths.length);
+    const column = where === 'left' ? 1 : where === 'right' ? columns : Math.max(1, Math.ceil(columns / 2));
+    const positions = { ...visual.positions };
+    for (const [k, at] of Object.entries(positions)) {
+      if (k === key || at.column !== column) continue;
+      // Ceden su columna: pasan a la que deja el panel, o (si ya estaba ahí) se acomodan en el primer hueco libre.
+      if (from && from.column !== column) positions[k] = { column: from.column, row: at.row }; else delete positions[k];
+    }
+    positions[key] = { column, row: 1 };
+    const tall = [...new Set([...visual.tall, key])];
+    // El que deja su columna y no tiene pareja abajo también queda de alto completo (sin huecos).
+    for (const [k, at] of Object.entries(positions)) if (k !== key && at.column === from?.column && !Object.entries(positions).some(([o, p]) => o !== k && p.column === at.column)) { if (!tall.includes(k)) tall.push(k); positions[k] = { column: at.column, row: 1 }; }
+    placeGridPane(key, { column, row: 1 }, positions, tall, visual.wide.filter((k) => k !== key), [...new Set(sizingOrder)], visual.widths);
+  };
   const resizeTracks = (widths: number[], row: number) => {
     const { positions, tall, wide } = captureVisualLayout();
     setGridGeometry(positions, tall, wide, [...new Set(sizingOrder)], widths, row);
@@ -214,7 +232,7 @@ export function GridArea({ id, search = '', side }: { id: string | null; search?
   };
   const cell = (x: string) => {
     const ref = parseKey(x);
-    const size = wide && !side && !expanded ? { rows: (currentTall.includes(x) ? 2 : 1) as 1 | 2, columns: (currentWide.includes(x) ? 2 : 1) as 1 | 2, set: (rows: 1 | 2, columns: 1 | 2) => resizePane(x, rows, columns) } : undefined;
+    const size = wide && !side && !expanded ? { rows: (currentTall.includes(x) ? 2 : 1) as 1 | 2, columns: (currentWide.includes(x) ? 2 : 1) as 1 | 2, set: (rows: 1 | 2, columns: 1 | 2) => resizePane(x, rows, columns), place: list.length > 1 ? (where: 'left' | 'center' | 'right') => placeSide(x, where) : undefined } : undefined;
     const frame = { size, onCollapse: canCollapse && list.length > 1 ? () => collapseToDock(x) : undefined, visible: expanded ? expanded === x : visible.includes(x), active: x === active, count: list.length, pinned: pinned.has(x), onClose: () => closePane(x, id), onOnly: () => onlyPane(x), onPin: () => togglePin(x), onTint: (el: HTMLElement) => openTintMenu(el, x) };
     return (
       <div key={x} data-pane={x} data-tint={tints[x]} hidden={expanded ? expanded !== x : !visible.includes(x)}

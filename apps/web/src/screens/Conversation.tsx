@@ -311,12 +311,22 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
     if (target > 0) jumpTo(target);
   }, [id]);
   // Con varios paneles el chat ya abierto no se vuelve a montar: un ?m= nuevo (burbuja, notificación, mención) salta aquí.
-  const firstSearch = useRef(true);
+  // Se escucha la navegación y no solo `search`: el router solo avisa cuando cambia la ruta, así que un ?m= nuevo
+  // sobre el mismo chat (burbuja o notificación del chat que ya tienes abierto) no saltaba y se quedaba en el tema de antes.
+  const jumpRef = useRef(jumpTo);
+  jumpRef.current = jumpTo;
   useEffect(() => {
-    if (firstSearch.current) { firstSearch.current = false; return; }
-    const target = Number(new URLSearchParams(search ?? '').get('m'));
-    if (pane?.active && target > 0) jumpTo(target);
-  }, [search]);
+    if (embedded) return;
+    const onNav = () => {
+      const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+      if (location.pathname !== `${base}/c/${id}`) return;
+      const target = Number(new URLSearchParams(location.search).get('m'));
+      if (target > 0) jumpRef.current(target);
+    };
+    window.addEventListener('chaggu:navigate', onNav);
+    window.addEventListener('popstate', onNav);
+    return () => { window.removeEventListener('chaggu:navigate', onNav); window.removeEventListener('popstate', onNav); };
+  }, [id, !!embedded]);
 
   // Borrador local por conversación: sobrevive recargas y cambios de conversación.
   useEffect(() => { try { if (text) localStorage.setItem(draftKey(id), text); else localStorage.removeItem(draftKey(id)); } catch {} }, [id, text]);

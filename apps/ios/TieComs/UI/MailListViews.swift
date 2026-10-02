@@ -753,6 +753,8 @@ struct WaShareSheet: View {
                 ToolbarItem(placement: .cancellationAction) { Button(L("common.cancel")) { dismiss() } }
             }
         }
+        .waPrivateSource(chat.inboxKey)
+        .onChange(of: store.waPrivacy.token(chat.inboxKey)) { _, _ in picked = []; comment = ""; dismiss() }
     }
 
     private func share() {

@@ -140,11 +140,24 @@ final class APIClient {
     private var refreshing: Task<RefreshOutcome, Never>?
     /// Se llama cuando el servidor da la sesión por terminada.
     var onSignedOut: (() -> Void)?
+    nonisolated static func waSource(_ path: String, json: [String: Any]? = nil) -> String? {
+        if let source = json?["source"] as? String, source.hasPrefix("wa:") { return source }
+        let url = URLComponents(string: path)
+        if let source = url?.queryItems?.first(where: { $0.name == "source" })?.value, source.hasPrefix("wa:") { return source }
+        let parts = (url?.percentEncodedPath ?? path).split(separator: "/").map { String($0).removingPercentEncoding ?? String($0) }
+        if let i = parts.firstIndex(of: "whatsapp"), parts.count > i + 3, ["chats", "media"].contains(parts[i + 1]) {
+            return "wa:\(parts[i + 2]):\(parts[i + 3])"
+        }
+        if parts.contains("whatsapp"), let a = json?["accountId"] as? String, let j = json?["jid"] as? String { return "wa:\(a):\(j)" }
+        return nil
+    }
+    var waPrivacyCheck: ((String) throws -> Int)?
+    var waPrivacyDenied: ((String) -> Void)?
 
     init(baseURL: URL, secrets: SecretStore, session: URLSession? = nil, uncachedSession: URLSession? = nil) {
         self.baseURL = baseURL
         self.secrets = secrets
-        self.uncachedSession = uncachedSession ?? URLSession(configuration: Self.uncachedConfiguration())
+        self.uncachedSession = uncachedSession ?? session ?? URLSession(configuration: Self.uncachedConfiguration())
         MediaURL.base = baseURL
         if let session { self.session = session } else {
             let cfg = URLSessionConfiguration.default
@@ -175,6 +188,7 @@ final class APIClient {
     }
 
     private func raw(_ path: String, method: String = "GET", json: [String: Any]? = nil, body: RawBody? = nil, auth: Bool = true, uncached: Bool = false) async throws -> (Data, HTTPURLResponse) {
+        let uncached = uncached || path.contains("/whatsapp/") || path.contains("/gg/side") || path == "/bootstrap"
         var req = URLRequest(url: url(path))
         if uncached { req.cachePolicy = .reloadIgnoringLocalCacheData; req.setValue("no-store", forHTTPHeaderField: "cache-control") }
         req.httpMethod = method
@@ -235,13 +249,22 @@ final class APIClient {
     @discardableResult
     func requestData(_ path: String, method: String = "GET", json: [String: Any]? = nil, body: RawBody? = nil, uncached: Bool = false) async throws -> Data {
         let generation = requestGeneration
+        let privacySource = Self.waSource(path, json: json)
+        let privacyToken = try privacySource.map { try waPrivacyCheck?($0) ?? 0 }
+        func requirePrivacy() throws {
+            if let source = privacySource, let privacyToken {
+                guard try (waPrivacyCheck?(source) ?? 0) == privacyToken else { throw CancellationError() }
+            }
+        }
         if accessToken == nil || Date() > accessExp.addingTimeInterval(-30) { _ = await refresh() }
         try requireGeneration(generation)
+        try requirePrivacy()
         var (data, res) = try await raw(path, method: method, json: json, body: body, uncached: uncached)
         try requireGeneration(generation)
         if res.statusCode == 401 {
             let r = await refresh()
             try requireGeneration(generation)
+            try requirePrivacy()
             if r == .ok { (data, res) = try await raw(path, method: method, json: json, body: body, uncached: uncached) }
             // Solo se cierra la sesión si el servidor rechaza el refresh; un fallo de red o un 5xx
             // (API reiniciándose) no la borra.
@@ -251,6 +274,10 @@ final class APIClient {
         if res.statusCode == 401 {
             signedOut()
             throw APIClient.parseError(data, status: 401)
+        }
+        if let source = privacySource, let privacyToken {
+            guard try (waPrivacyCheck?(source) ?? 0) == privacyToken else { throw CancellationError() }
+            if [403, 404].contains(res.statusCode), APIClient.parseError(data, status: res.statusCode).code != "ai_consent_required" { waPrivacyDenied?(source) }
         }
         guard (200..<300).contains(res.statusCode) else { throw APIClient.parseError(data, status: res.statusCode) }
         return data

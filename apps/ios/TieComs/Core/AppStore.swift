@@ -101,6 +101,7 @@ final class AppStore {
     var waRevision = 0
     /// Chats de WhatsApp en la bandeja (bootstrap.waInbox + evento wa.inbox), mezclados en Grupos o DMs.
     var waInbox: [WaChatDTO] = []
+    var waPrivacy = WaPrivacy()
     /// gg dentro del chat (contrato 1-oct-2026, parte B): historial por fuente, pendientes y si el API lo tiene.
     let ggSide = GgSideCenter()
     /// Accesos con logo de Grupos/DMs: WhatsApp y correo conectados y sus no leídos (caché de 60 s).
@@ -220,6 +221,10 @@ final class AppStore {
     /// Every asynchronous account-scoped result must still belong to this login, including a login to the same account.
     struct SessionStamp: Equatable { let generation: UUID; let userId: String? }
     private var sessionGeneration = UUID()
+    func purgeWaBootstrap(where affected: (String) -> Bool) {
+        data?.waInbox?.removeAll { affected($0.inboxKey) }
+    }
+
     var sessionStamp: SessionStamp { SessionStamp(generation: sessionGeneration, userId: me?.id) }
     var foregroundOwner: String { "\(sessionGeneration.uuidString)|\(me?.id ?? "")" }
     var foregroundSilenced: Bool { dndActive || sleepActive || me?.availability?.effectiveSilent == true }
@@ -230,6 +235,7 @@ final class AppStore {
     private func invalidateSessionWork() {
         readRevisions = [:]
         VoicePlayer.shared.resetScope()
+        AttachmentCache.shared.purgeWhatsApp { _ in true }
         sessionGeneration = UUID()
         feedback?.cancelPendingMessages()
         api.invalidateRequests()
@@ -284,6 +290,7 @@ final class AppStore {
     func restoreSnapshot() -> Bool {
         guard let user = Prefs.lastUserId, let host = api.baseURL.host, let s = SnapshotCache.load(userId: user, apiHost: host) else { return false }
         var d = s.bootstrap
+        d.waInbox = [] // WhatsApp must be validated online, including snapshots from older builds.
         d.conversations.sort { ($0.lastMessageAt ?? "") > ($1.lastMessageAt ?? "") }
         data = d
         VoicePlayer.shared.setScope(server: api.baseURL.absoluteString, account: d.me.id)
@@ -421,6 +428,8 @@ final class AppStore {
         self.outbox = outbox
         self.feedback = feedback
         api.onSignedOut = { [weak self] in self?.handleSignedOut() }
+        api.waPrivacyCheck = { [weak self] source in guard let self else { throw CancellationError() }; return try self.requireWaSource(source) }
+        api.waPrivacyDenied = { [weak self] source in self?.denyWaSource(source) }
         socket.tokenProvider = { [weak self] in await self?.api.freshAccessToken() }
         socket.onStateChange = { [weak self] s in
             guard let self else { return }
@@ -605,7 +614,7 @@ final class AppStore {
         localDndUntil = nil; dndLocalOnly = false; dndExpiryTask?.cancel(); dndExpiryTask = nil
         homePath = []; dmsPath = []; issuesPath = []; agendaPath = []; settingsPath = []; callsPath = []
         callCenter.reset(); liveCalls = [:]; callsChecked = []; missedCalls = 0
-        waInbox = []; ggSide.reset(); channels.reset()
+        waInbox = []; waPrivacy = WaPrivacy(); ggSide.reset(); channels.reset()
         tab = .home
         workspaceFilter = nil
         openConversationId = nil
@@ -616,6 +625,7 @@ final class AppStore {
 
     func loadBootstrap() async throws {
         let stamp = sessionStamp
+        let privacyRevision = waPrivacy.revision
         // Bloqueos y bootstrap en paralelo (antes, uno tras otro: un viaje de red más al abrir).
         async let blocked: Void = loadBlockedUsers()
         var d: BootstrapDTO = try await api.request("/bootstrap")
@@ -635,6 +645,9 @@ final class AppStore {
                 d.conversations[index].unreadMentions = current.unreadMentions
             }
         }
+        if privacyRevision == waPrivacy.revision { waPrivacy.accept(d.waInbox ?? []) }
+        else { d.waInbox = waInbox } // Never restore a response started before an invalidation.
+        d.waInbox = d.waInbox?.filter { waPrivacy.allows($0.inboxKey) }
         data = d
         VoicePlayer.shared.setScope(server: api.baseURL.absoluteString, account: d.me.id)
         restoreMeetingAttempts()
@@ -730,8 +743,10 @@ final class AppStore {
         let stamp = sessionStamp
         do {
             try requireSession(stamp)
-            // El socket conecta justo después de entrar: si el bootstrap es de hace un momento, no se pide otra vez.
-            if Date().timeIntervalSince(lastBootstrapAt) > 3 { try await loadBootstrap() }
+            invalidateKnownWaPrivacy()
+            _ = try? await waAccounts()
+            try requireSession(stamp)
+            if !waPrivacy.knownAccounts.isEmpty || Date().timeIntervalSince(lastBootstrapAt) > 3 { try await loadBootstrap() }
             try requireSession(stamp)
             Task { await loadOpenIssues() }
             Task { await loadScheduled() }
@@ -777,7 +792,9 @@ final class AppStore {
                                       subtitle: conv.flatMap { $0.kind == .direct ? nil : Naming.notificationTitle(d, $0) },
                                       body: e.start.formatted(date: .omitted, time: .shortened))
         case .prefsUpdated: scheduleBootstrap()
-        case .whatsappUpdated: waRevision += 1
+        case .whatsappUpdated:
+            waRevision += 1
+            Task { [weak self] in guard let self else { return }; _ = try? await self.waAccounts(); self.scheduleBootstrap() }
         case .driveUpdated: driveRevision += 1
         case .remindersChanged: Task { try? await loadReminders() }
         case .availabilityChanged(let id, let availability):
@@ -819,8 +836,13 @@ final class AppStore {
             // Una perdida nueva también entra al historial (la pestaña lo vuelve a pedir).
             if n > 0 { callsRevision += 1 }
             applyMissedCalls(n)
+        case .waPrivacy(let accountId, let jids, let reset):
+            revokeWaPrivacy(accountId: accountId, jids: jids, reset: reset)
         case .waInbox(let chat):
-            if let chat { upsertWaInbox(chat) } else { scheduleBootstrap() }
+            if let chat {
+                if chat.hidden { revokeWaPrivacy(accountId: chat.accountId, jids: [chat.jid]) }
+                upsertWaInbox(chat)
+            } else { scheduleBootstrap() }
         case .other: break
         }
     }
@@ -1626,7 +1648,7 @@ final class AppStore {
         Task { await resync() }
     }
 
-    func enteredBackground() { appActive = false; saveSnapshotNow() }
+    func enteredBackground() { appActive = false; invalidateKnownWaPrivacy(); saveSnapshotNow() }
 
     private func startPathMonitor() {
         guard pathMonitor == nil else { return }

@@ -233,3 +233,22 @@ struct DueRemindersChip: View {
         .accessibilityIdentifier("home.dueReminders")
     }
 }
+
+
+private struct WaPrivateSourceModifier: ViewModifier {
+    @Environment(AppStore.self) private var store
+    @Environment(\.dismiss) private var dismiss
+    let source: String
+    @State private var openedToken: Int?
+    func body(content: Content) -> some View {
+        let current = store.waPrivacy.token(source)
+        let allowed = store.waPrivacy.allows(source) && (openedToken == nil || openedToken == current)
+        Group { if allowed { content } else { Color.clear } }
+            .onAppear { if openedToken == nil { openedToken = current }; if !allowed { dismiss() } }
+            .onChange(of: current) { _, value in if let openedToken, openedToken != value { dismiss() } }
+            .onChange(of: allowed) { _, value in if !value { dismiss() } }
+    }
+}
+extension View {
+    func waPrivateSource(_ source: String) -> some View { modifier(WaPrivateSourceModifier(source: source)) }
+}

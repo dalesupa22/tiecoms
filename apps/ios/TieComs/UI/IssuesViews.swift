@@ -1121,6 +1121,7 @@ struct HubShortcuts: View {
         .accessibilityLabel(L("hub.shortcuts"))
         .accessibilityIdentifier("hub.shortcuts")
         .task(id: store.waRevision) {
+            waUnread = 0
             guard let r = try? await store.waChats(accountId: nil, category: nil, onlyGroups: false, showHidden: false, query: "") else { return }
             waUnread = r.categories.values.reduce(0) { $0 + $1.unread }
         }

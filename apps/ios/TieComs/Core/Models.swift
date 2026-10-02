@@ -882,6 +882,7 @@ enum AccountEvent: Decodable, Equatable, Sendable {
     case callsMissed(callId: String?, missedCalls: Int)
     /// Un chat de WhatsApp de la bandeja cambió (se movió, se fijó, se sacó o le llegó un mensaje). Sin `chat`: recargar.
     case waInbox(WaChatDTO?)
+    case waPrivacy(accountId: String, jids: [String], reset: Bool)
     case other(type: String)
 
     init(from decoder: Decoder) throws {
@@ -922,6 +923,7 @@ enum AccountEvent: Decodable, Equatable, Sendable {
             self = .callTranscript(callId: c.v("callId", ""), userId: c.v("userId", ""), segId: c.v("segId", ""),
                                    segments: c.lossyArray("segments"), failed: c.v("failed", false))
         case "wa.inbox": self = .waInbox(c.o("chat"))
+        case "wa.privacy": self = .waPrivacy(accountId: c.v("accountId", ""), jids: c.v("jids", []), reset: c.v("reset", false))
         case "calls.missed":
             self = .callsMissed(callId: c.o("callId"), missedCalls: max(0, c.int("missedCalls")))
         case "call.ringing":

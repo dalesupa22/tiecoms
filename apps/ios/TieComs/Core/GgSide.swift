@@ -156,6 +156,11 @@ final class GgSideCenter {
     var openGeneral = 0
     @ObservationIgnored private var pendingAt: [String: Date] = [:]
 
+    func purge(where affected: (String) -> Bool) {
+        pending = pending.filter { !affected($0.key) }; threads = threads.filter { !affected($0.key) }
+        used = used.filter { !affected($0) }; pendingAt = pendingAt.filter { !affected($0.key) }
+    }
+
     func reset() { available = nil; pending = [:]; threads = [:]; used = []; consented = false; pendingAt = [:] }
 
     /// ¿Se piden de nuevo los pendientes? (como mucho cada 2 min por fuente, salvo `force`).
@@ -210,7 +215,8 @@ extension AppStore {
 
     /// Número del botón (GET /gg/side/pending, sin IA). Un 404 esconde el botón.
     func ggSidePending(_ sources: [String], force: Bool = false) async {
-        let want = sources.filter { ggSide.shouldRefreshPending($0, force: force) }
+        let revision = waPrivacy.revision
+        let want = sources.filter { waPrivacy.allows($0) && ggSide.shouldRefreshPending($0, force: force) }
         guard !want.isEmpty, ggSide.available != false else { return }
         want.forEach(ggSide.markPending)
         struct R: Decodable {
@@ -224,7 +230,7 @@ extension AppStore {
         }
         do {
             let r: R = try await ggGuard { try await api.request("/gg/side/pending?sources=\(want.map(GgSource.query).joined(separator: ","))") }
-            for s in want { ggSide.pending[s] = max(0, r.map[s] ?? 0) }
+            for s in want where !s.hasPrefix("wa:") || (revision == waPrivacy.revision && waPrivacy.allows(s)) { ggSide.pending[s] = max(0, r.map[s] ?? 0) }
         } catch let e as ApiRequestError where e.status == 404 {
             if ggSide.available == nil { ggSide.available = false }
         } catch {}
@@ -251,6 +257,7 @@ extension AppStore {
 
     /// Pregunta a gg (con los mensajes citados como contexto). La respuesta trae 2–4 siguientes preguntas.
     func ggSideAsk(_ source: String, text: String, quotes: [GgQuote]) async throws {
+        _ = try requireWaSource(source)
         let mine = GgSideMessageDTO(role: "user", body: text, quoted: quotes.isEmpty ? nil : quotes)
         appendGg(source, mine)
         do {
@@ -294,6 +301,7 @@ extension AppStore {
     }
 
     private func appendGg(_ source: String, _ m: GgSideMessageDTO) {
+        guard waPrivacy.allows(source) else { return }
         var t = ggSide.threads[source] ?? GgSideThread(loaded: true)
         if !t.messages.contains(where: { $0.id == m.id }) { t.messages.append(m) }
         ggSide.threads[source] = t

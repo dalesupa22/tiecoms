@@ -235,6 +235,8 @@ struct GgSideSheet: View {
         .presentationDragIndicator(.visible)
         .sheet(isPresented: $calendar) { GgCalendarSheet(source: source, messageIds: quotes.map(\.id), suggestedTitle: quotes.first?.text ?? chatTitle) }
         .onDisappear { focused = false; UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil) }
+        .waPrivateSource(source)
+        .onChange(of: store.waPrivacy.token(source)) { _, _ in quotes = []; text = ""; retry = nil; calendar = false; dismiss() }
         .task(id: source) { await open() }
         .alert(L("ai.consentTitle"), isPresented: $askConsent) {
             Button(L("common.cancel"), role: .cancel) { retry = nil }
@@ -561,6 +563,8 @@ struct GgSuggestSheet: View {
             } message: { Text(L("ai.consentBody")) }
         }
         .presentationDetents([.medium, .large])
+        .waPrivateSource(source)
+        .onChange(of: store.waPrivacy.token(source)) { _, _ in list = []; picked = []; free = ""; dismiss() }
     }
 
     private func load() async {

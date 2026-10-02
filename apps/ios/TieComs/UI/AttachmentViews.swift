@@ -12,6 +12,12 @@ final class AttachmentCache {
     static let shared = AttachmentCache()
     private let memory: NSCache<NSString, NSData> = { let c = NSCache<NSString, NSData>(); c.totalCostLimit = 32 * 1024 * 1024; c.countLimit = 64; return c }()
     private var inflight: [String: Task<Data, Error>] = [:]
+    private var waFiles: [String: Set<URL>] = [:]
+    func purgeWhatsApp(where affected: (String) -> Bool) {
+        for source in Array(waFiles.keys) where affected(source) {
+            for file in waFiles.removeValue(forKey: source) ?? [] { try? FileManager.default.removeItem(at: file) }
+        }
+    }
     private let dir: URL = {
         let d = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("TieComsAttachments", isDirectory: true)
         try? FileManager.default.createDirectory(at: d, withIntermediateDirectories: true)
@@ -25,6 +31,11 @@ final class AttachmentCache {
 
     func data(_ path: String, api: APIClient) async throws -> Data {
         let k = key(path, api: api)
+        if WaPrivacy.requestSource(path) != nil {
+            memory.removeObject(forKey: k as NSString)
+            try? FileManager.default.removeItem(at: dir.appendingPathComponent(k))
+            return try await api.download(path) // Private WA media is revalidated, never read from disk/memory.
+        }
         if let d = memory.object(forKey: k as NSString) { return d as Data }
         let file = dir.appendingPathComponent(k)
         if let d = try? Data(contentsOf: file) { memory.setObject(d as NSData, forKey: k as NSString, cost: d.count); return d }
@@ -40,12 +51,16 @@ final class AttachmentCache {
 
     /// Archivo local con su nombre (Quick Look y video necesitan una URL de archivo).
     func fileURL(_ att: AttachmentDTO, api: APIClient) async throws -> URL {
+        let source = WaPrivacy.requestSource(att.url)
+        let token = try source.map { try api.waPrivacyCheck?($0) ?? 0 }
         let d = try await data(att.url, api: api)
+        if let source, let token { guard try (api.waPrivacyCheck?(source) ?? 0) == token else { throw CancellationError() } }
         let folder = dir.appendingPathComponent(att.id, isDirectory: true)
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let safe = att.name.replacingOccurrences(of: "/", with: "-")
         let url = folder.appendingPathComponent(safe.isEmpty ? "archivo" : safe)
-        if !FileManager.default.fileExists(atPath: url.path) { try d.write(to: url, options: .atomic) }
+        if source != nil || !FileManager.default.fileExists(atPath: url.path) { try d.write(to: url, options: .atomic) }
+        if let source { waFiles[source, default: []].insert(url) }
         return url
     }
 }

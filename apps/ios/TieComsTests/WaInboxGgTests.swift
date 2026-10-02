@@ -180,3 +180,196 @@ final class WaInboxGgTests: XCTestCase {
         XCTAssertNil(GgPrefill.parseDue(nil))
     }
 }
+
+
+extension WaInboxGgTests {
+    func testPrivacyLedgerPreservesOtherAccountsAndRequiresFreshAcceptance() throws {
+        var p = WaPrivacy()
+        let c = try dec(WaChatDTO.self, wa("57300@s.whatsapp.net"))
+        let original = p.token(c.inboxKey)
+        p.revoke(account: "acc1", jids: [c.jid, "alias@lid"], reset: false)
+        XCTAssertFalse(p.allows(c.inboxKey)); XCTAssertFalse(p.allows("wa:acc1:alias@lid"))
+        XCTAssertTrue(p.allows("wa:other:57300@s.whatsapp.net")); XCTAssertTrue(p.allows("wa:acc1:public@g.us"))
+        XCTAssertNotEqual(original, p.token(c.inboxKey))
+        p.accept([c]); XCTAssertTrue(p.allows(c.inboxKey)); XCTAssertFalse(p.allows("wa:acc1:alias@lid"))
+        p.revoke(account: "acc1", jids: [], reset: true)
+        p.accept([c]); XCTAssertFalse(p.allows(c.inboxKey), "list cannot bypass account revalidation")
+        p.ready("acc1"); p.accept([c]); XCTAssertTrue(p.allows(c.inboxKey))
+    }
+    func testPrivacyEventPurgesOnlyAffectedInboxAndGgAndIgnoresLateTombstones() throws {
+        let s = try ControlledURLProtocol.store()
+        let c = try dec(WaChatDTO.self, wa("locked@lid"))
+        var other = c; other.accountId = "other"
+        s.applyWaInbox([c, other])
+        s.ggSide.threads[c.inboxKey] = GgSideThread(messages: [.init(role: "gg", body: "private")], loaded: true)
+        s.ggSide.threads[other.inboxKey] = GgSideThread(messages: [.init(role: "gg", body: "other")], loaded: true)
+        s.socketEventForTesting("account.event", #"{"type":"wa.privacy","accountId":"acc1","jids":["locked@lid"]}"#)
+        XCTAssertEqual(s.waInbox.map(\.accountId), ["other"])
+        XCTAssertNil(s.ggSide.threads[c.inboxKey]); XCTAssertNotNil(s.ggSide.threads[other.inboxKey])
+        s.upsertWaInbox(c); XCTAssertEqual(s.waInbox.count, 1, "stale inbox update cannot resurrect")
+    }
+    func testHeldWaListAndMessagesCannotResurrectRevokedSource() async throws {
+        for list in [true, false] {
+            let s = try ControlledURLProtocol.store()
+            let c = try dec(WaChatDTO.self, wa("locked@lid"))
+            let started = expectation(description: "WA held")
+            var held: ControlledURLProtocol?
+            ControlledURLProtocol.handler = { request in Task { @MainActor in held = request; started.fulfill() } }
+            let request = Task { () throws -> Void in
+                if list { _ = try await s.waChats(accountId: nil, category: nil, onlyGroups: false, showHidden: true, query: "") }
+                else { _ = try await s.waMessages(c) }
+            }
+            await fulfillment(of: [started], timeout: 2)
+            s.revokeWaPrivacy(accountId: c.accountId, jids: [c.jid])
+            held?.respond(list ? "{\"chats\":[\(wa(c.jid))]}" : #"{"messages":[{"id":"private","body":"secret"}]}"#)
+            do { try await request.value; XCTFail("revoked response must fail") } catch {}
+            XCTAssertTrue(s.waInbox.isEmpty)
+        }
+    }
+    func testFailedOptimisticWaMutationCannotRollbackPrivacy() async throws {
+        let s = try ControlledURLProtocol.store()
+        let c = try dec(WaChatDTO.self, wa("locked@lid"))
+        s.applyWaInbox([c])
+        let started = expectation(description: "WA mutation held")
+        var held: ControlledURLProtocol?
+        ControlledURLProtocol.handler = { request in Task { @MainActor in held = request; started.fulfill() } }
+        let request = Task { try await s.waSetInboxPinned(c, true) }
+        await fulfillment(of: [started], timeout: 2)
+        s.revokeWaPrivacy(accountId: c.accountId, reset: true)
+        held?.respond(500, #"{"error":{"code":"failure","message":"failed"}}"#)
+        do { _ = try await request.value; XCTFail() } catch {}
+        XCTAssertTrue(s.waInbox.isEmpty)
+    }
+    func testFreshWaListCanRestoreExplicitlyUnlockedChat() async throws {
+        let s = try ControlledURLProtocol.store()
+        s.revokeWaPrivacy(accountId: "acc1", jids: ["locked@lid"])
+        ControlledURLProtocol.handler = { req in req.respond("{\"chats\":[\(wa("locked@lid"))]}") }
+        let page = try await s.waChats(accountId: nil, category: nil, onlyGroups: false, showHidden: false, query: "")
+        XCTAssertEqual(page.chats.count, 1); XCTAssertTrue(s.waPrivacy.allows("wa:acc1:locked@lid"))
+    }
+    func testDeniedWaMessagesFailClosedAndPrivacySourcesParseEncodedJids() async throws {
+        let s = try ControlledURLProtocol.store()
+        let c = try dec(WaChatDTO.self, wa("locked@lid")); s.applyWaInbox([c])
+        ControlledURLProtocol.handler = { req in req.respond(404, #"{"error":{"code":"not_found","message":"unavailable"}}"#) }
+        do { _ = try await s.waMessages(c); XCTFail() } catch {}
+        XCTAssertTrue(s.waInbox.isEmpty); XCTAssertFalse(s.waPrivacy.allows(c.inboxKey))
+        XCTAssertEqual(WaPrivacy.requestSource("/api/v1/whatsapp/media/acc1/locked%40lid/msg"), c.inboxKey)
+        XCTAssertEqual(WaPrivacy.requestSource("/gg/side?source=wa%3Aacc1%3Alocked%40lid"), c.inboxKey)
+    }
+    func testSnapshotOmitsPrivateWaWithoutDeletingChagguData() throws {
+        var d = try ControlledURLProtocol.boot("a")
+        d.waInbox = [try dec(WaChatDTO.self, wa("locked@lid"))]
+        let snapshot = SnapshotCache.make(d, blocked: [], conversations: [:])
+        XCTAssertTrue(snapshot.bootstrap.waInbox?.isEmpty == true)
+        XCTAssertEqual(snapshot.bootstrap.me.id, "a")
+        XCTAssertEqual(snapshot.bootstrap.conversations, d.conversations)
+    }
+    func testHeldBootstrapCannotRestoreRevokedWa() async throws {
+        let store = try ControlledURLProtocol.store()
+        let started = expectation(description: "bootstrap held")
+        var held: ControlledURLProtocol?
+        ControlledURLProtocol.handler = { request in Task { @MainActor in
+            if request.request.url?.path.hasSuffix("/bootstrap") == true { held = request; started.fulfill() }
+            else { request.respond(#"{"userIds":[]}"#) }
+        } }
+        let pending = Task { try await store.loadBootstrap() }
+        await fulfillment(of: [started], timeout: 2)
+        store.revokeWaPrivacy(accountId: "acc1", jids: ["locked@lid"])
+        held?.respond("{\"me\":{\"id\":\"a\"},\"conversations\":[],\"waInbox\":[\(wa("locked@lid"))]}")
+        try await pending.value
+        XCTAssertTrue(store.waInbox.isEmpty)
+        XCTAssertTrue(store.data?.waInbox?.isEmpty == true)
+    }
+    func testHeldGgResponseAndBackgroundInvalidatePrivateSource() async throws {
+        let store = try ControlledURLProtocol.store()
+        let source = "wa:acc1:locked@lid"
+        let started = expectation(description: "gg held")
+        var held: ControlledURLProtocol?
+        ControlledURLProtocol.handler = { request in Task { @MainActor in held = request; started.fulfill() } }
+        let pending = Task { try await store.ggSideAsk(source, text: "synthetic", quotes: []) }
+        await fulfillment(of: [started], timeout: 2)
+        store.enteredBackground()
+        held?.respond(#"{"message":{"id":"secret","role":"gg","body":"synthetic private"}}"#)
+        do { try await pending.value; XCTFail("old gg response must fail") } catch {}
+        XCTAssertNil(store.ggSide.threads[source])
+        XCTAssertFalse(store.waPrivacy.allows(source))
+    }
+
+    func testReadyAccountRefreshesListAfterConcurrentEmptyResponse() async throws {
+        let store = try ControlledURLProtocol.store()
+        store.revokeWaPrivacy(accountId: "acc1", reset: true)
+        let revision = store.waRevision
+        ControlledURLProtocol.handler = { request in request.respond(#"{"accounts":[{"id":"acc1","privacyReady":true}]}"#) }
+        _ = try await store.waAccounts()
+        XCTAssertTrue(store.waPrivacy.allows("wa:acc1:synthetic@lid"))
+        XCTAssertGreaterThan(store.waRevision, revision)
+    }
+
+    func testHeldRefreshCannotDispatchPrivateRequestAfterLockOrResetEvenIfUnlocked() async throws {
+        for retry in [false, true] {
+            for reset in [false, true] {
+                for unlock in [false, true] {
+                    for media in [false, true] {
+                        let config = URLSessionConfiguration.ephemeral
+                        config.protocolClasses = [ControlledURLProtocol.self]
+                        let api = APIClient(baseURL: URL(string: "https://synthetic.invalid")!, secrets: MemorySecretStore("synthetic-refresh"), session: URLSession(configuration: config))
+                        var privacy = WaPrivacy()
+                        let source = "wa:acc1:locked@lid"
+                        api.waPrivacyCheck = { source in
+                            guard privacy.allows(source) else { throw CancellationError() }
+                            return privacy.token(source)
+                        }
+                        let auth = #"{"accessToken":"synthetic-access","accessExpiresAt":"2199-01-01T00:00:00Z","refreshToken":"synthetic-refresh","user":{"id":"a","kind":"human"}}"#
+                        if retry {
+                            ControlledURLProtocol.handler = { request in request.respond(auth) }
+                            _ = await api.refresh()
+                        }
+                        let started = expectation(description: "refresh held")
+                        var held: ControlledURLProtocol?
+                        var privateCalls = 0
+                        ControlledURLProtocol.handler = { request in Task { @MainActor in
+                            if request.request.url?.path.hasSuffix("/refresh") == true {
+                                held = request; started.fulfill()
+                            } else {
+                                privateCalls += 1
+                                request.respond(retry && privateCalls == 1 ? 401 : 200, "{}")
+                            }
+                        } }
+                        let pending = Task { try await api.download(media ? "/whatsapp/media/acc1/locked%40lid/m1" : "/whatsapp/chats/acc1/locked%40lid/messages") }
+                        await fulfillment(of: [started], timeout: 2)
+                        privacy.revoke(account: "acc1", jids: reset ? [] : ["locked@lid"], reset: reset)
+                        if unlock {
+                            privacy.ready("acc1")
+                            privacy.accept([try dec(WaChatDTO.self, wa("locked@lid"))])
+                            XCTAssertTrue(privacy.allows(source))
+                        }
+                        held?.respond(auth)
+                        do { _ = try await pending.value; XCTFail("old private request must not dispatch") } catch {}
+                        XCTAssertEqual(privateCalls, retry ? 1 : 0, "No private HTTP after held refresh: retry=\(retry), reset=\(reset), unlock=\(unlock), media=\(media)")
+                    }
+                }
+            }
+        }
+    }
+
+    func testSignoutPurgesWhatsAppFilesAndResetsVoiceWithoutDeletingCanonicalFiles() async throws {
+        let store = try ControlledURLProtocol.store()
+        ControlledURLProtocol.handler = { request in request.respond("synthetic") }
+        let id = UUID().uuidString
+        let privateAttachment = try dec(AttachmentDTO.self, """
+            {"id":"wa-\(id)","name":"private.txt","contentType":"text/plain","sizeBytes":9,"url":"/whatsapp/media/acc1/locked%40lid/m1"}
+            """)
+        let canonicalAttachment = try dec(AttachmentDTO.self, """
+            {"id":"canonical-\(id)","name":"keep.txt","contentType":"text/plain","sizeBytes":9,"url":"/attachments/\(id)"}
+            """)
+        let privateURL = try await AttachmentCache.shared.fileURL(privateAttachment, api: store.api)
+        let canonicalURL = try await AttachmentCache.shared.fileURL(canonicalAttachment, api: store.api)
+        defer { try? FileManager.default.removeItem(at: canonicalURL.deletingLastPathComponent()) }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: privateURL.path))
+        await store.signOutLocally()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: privateURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: canonicalURL.path))
+        XCTAssertFalse(VoicePlayer.shared.playing)
+    }
+
+}

@@ -246,6 +246,8 @@ final class VoicePlayer: NSObject, AVAudioPlayerDelegate {
     private var timer: Timer?
     private var api: APIClient?
     private var playAttempt = UUID()
+    private var waSource: String?
+    func stopWhatsApp(where affected: (String) -> Bool) { if let waSource, affected(waSource) { stop() } }
     private var heardKey: String?
     /// Reproducción continua: la nota que sigue a esta (en el mensaje siguiente), si la hay.
     var nextProvider: ((String) -> AttachmentDTO?)?
@@ -273,6 +275,7 @@ final class VoicePlayer: NSObject, AVAudioPlayerDelegate {
         }
         stop()
         currentId = att.id
+        waSource = WaPrivacy.requestSource(att.url)
         let attempt = playAttempt
         self.api = api
         do {
@@ -315,7 +318,7 @@ final class VoicePlayer: NSObject, AVAudioPlayerDelegate {
         playAttempt = UUID()
         timer?.invalidate(); timer = nil
         player?.stop(); player = nil
-        playing = false; progress = 0; currentId = nil
+        playing = false; progress = 0; currentId = nil; waSource = nil
     }
 
     func markHeard(_ id: String) {

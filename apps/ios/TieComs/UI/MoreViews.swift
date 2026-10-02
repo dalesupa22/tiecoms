@@ -118,6 +118,7 @@ struct WhatsAppScreen: View {
     @State private var accounts: [WaAccountDTO]?
     @State private var max = 5
     @State private var chats: [WaChatDTO] = []
+    @State private var chatTokens: [String: Int] = [:]
     @State private var counts: [String: WaChatsPage.Count] = [:]
     @State private var category: WaCategory?
     @State private var onlyGroups = false
@@ -169,7 +170,7 @@ struct WhatsAppScreen: View {
                 }
                 Section {
                     if chats.isEmpty { Text(connected.isEmpty ? L("wa.syncing") : L("wa.noChats")).foregroundStyle(Theme.textSecondary) }
-                    ForEach(chats.sorted(by: WaRecency.before)) { c in
+                    ForEach(chats.filter { store.waPrivacy.allows($0.inboxKey) && chatTokens[$0.inboxKey] == store.waPrivacy.token($0.inboxKey) }.sorted(by: WaRecency.before)) { c in
                         Button { open = c } label: { WaChatRow(chat: c, multi: (accounts?.count ?? 0) > 1) }
                             .contextMenu {
                                 ForEach(WaCategory.allCases, id: \.self) { k in
@@ -200,6 +201,10 @@ struct WhatsAppScreen: View {
         }
         .sheet(isPresented: $connecting) { WaConnectSheet(existing: accounts ?? []) { Task { await loadAccounts() } } }
         .sheet(item: $open) { c in WaChatSheet(chat: c) { patched in replace(patched) } }
+        .onChange(of: store.waPrivacy.revision) { _, _ in
+            chats.removeAll { chatTokens[$0.inboxKey] != store.waPrivacy.token($0.inboxKey) || !store.waPrivacy.allows($0.inboxKey) }
+            counts = [:]; loadGeneration = UUID(); nextPage = nil; hasMore = false
+        }
         .task(id: store.waRevision) { await loadAccounts(); await loadChats() }
         .task(id: "\(category?.rawValue ?? "all")|\(onlyGroups)|\(showHidden)|\(query)") {
             if !query.isEmpty { try? await Task.sleep(nanoseconds: 250_000_000) }
@@ -233,6 +238,7 @@ struct WhatsAppScreen: View {
         do {
             let r = try await store.waChats(accountId: nil, category: category, onlyGroups: onlyGroups, showHidden: showHidden, query: query)
             guard !Task.isCancelled, stamp == store.sessionStamp, generation == loadGeneration else { return }
+            chatTokens = Dictionary(uniqueKeysWithValues: r.chats.map { ($0.inboxKey, store.waPrivacy.token($0.inboxKey)) })
             chats = r.chats; counts = r.categories; nextPage = r.next; hasMore = r.hasMore; syncPartial = r.syncPartial; error = nil
         } catch { if generation == loadGeneration, stamp == store.sessionStamp, !Task.isCancelled { self.error = L10n.errorText(error) } }
     }
@@ -245,6 +251,7 @@ struct WhatsAppScreen: View {
             let page = try await store.waChats(accountId: nil, category: category, onlyGroups: onlyGroups, showHidden: showHidden, query: query, cursor: cursor)
             guard !Task.isCancelled, generation == loadGeneration, stamp == store.sessionStamp else { return }
             let old = Set(chats.map(\.id)); chats += page.chats.filter { !old.contains($0.id) }
+            for c in page.chats { chatTokens[c.inboxKey] = store.waPrivacy.token(c.inboxKey) }
             nextPage = page.next; hasMore = page.hasMore && page.next != cursor; syncPartial = page.syncPartial
         } catch { if generation == loadGeneration, stamp == store.sessionStamp { self.error = L10n.errorText(error) } }
     }
@@ -513,7 +520,11 @@ struct WaChatSheet: View {
                     GgContinueBar { ggOpen = true }.padding(.bottom, 6).background(Theme.background.opacity(0.9))
                 }
             }
-            .task(id: store.waRevision) { messages = (try? await store.waMessages(chat)) ?? [] }
+            .task(id: store.waRevision) {
+                messages = nil
+                do { let result = try await store.waMessages(chat); guard !Task.isCancelled else { return }; messages = result }
+                catch { messages = []; if !store.waPrivacy.allows(source) { clearPrivateState(); dismiss() } }
+            }
             .sheet(item: $sharing) { m in WaShareSheet(chat: chat, message: m) }
             .sheet(isPresented: $ggOpen, onDismiss: { ggAsk = nil; runQueue() }) {
                 GgSideSheet(source: source, chatTitle: chat.name, quotes: $ggQuotes, initialAsk: ggAsk) { ggQueue = [$0] }
@@ -534,6 +545,13 @@ struct WaChatSheet: View {
                 else { NewIssueSheet(conversationId: nil, origin: nil, prefill: p) }
             }
         }
+        .waPrivateSource(source)
+        .onChange(of: store.waPrivacy.token(source)) { _, _ in clearPrivateState(); dismiss() }
+    }
+
+    private func clearPrivateState() {
+        messages = []; sharing = nil; ggOpen = false; ggQuotes = []; ggAsk = nil
+        selecting = false; selected = []; suggesting = false; ggQueue = []; taskPrefill = nil; reminderPrefill = nil
     }
 
     private func quote(_ m: WaMessageDTO) -> GgQuote {
@@ -548,9 +566,11 @@ struct WaChatSheet: View {
     /// Lo que se eligió de gg, uno por uno: cada diálogo se abre al cerrar el anterior. Aquí no hay compositor de
     /// WhatsApp: los borradores se copian para pegarlos en WhatsApp (nada se envía solo).
     private func runQueue() {
-        guard !ggQueue.isEmpty else { return }
+        guard !ggQueue.isEmpty, store.waPrivacy.allows(source) else { return }
+        let token = store.waPrivacy.token(source)
         let next = ggQueue.removeFirst()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            guard store.waPrivacy.allows(source), token == store.waPrivacy.token(source) else { return }
             switch next {
             case .draft(let t):
                 UIPasteboard.general.string = t

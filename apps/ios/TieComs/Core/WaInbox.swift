@@ -102,40 +102,42 @@ enum WaInbox {
 extension AppStore {
     /// Bandeja de WhatsApp del bootstrap (solo los que tienen sección; los ocultos no salen).
     func applyWaInbox(_ list: [WaChatDTO]) {
-        let next = list.filter { $0.inInbox && !$0.hidden }
+        let next = list.filter { $0.inInbox && !$0.hidden && waPrivacy.allows($0.inboxKey) }
         if next != waInbox { waInbox = next }
     }
 
     /// Evento wa.inbox o respuesta del PATCH: actualiza, agrega o saca la fila sin recargar el bootstrap.
     func upsertWaInbox(_ c: WaChatDTO) {
         var next = waInbox.filter { $0.id != c.id }
-        if c.inInbox && !c.hidden { next.append(c) }
+        if c.inInbox && !c.hidden && waPrivacy.allows(c.inboxKey) { next.append(c) }
         if next != waInbox { waInbox = next }
     }
 
     /// «Mover a Grupos/DMs», «Mover a mi lista principal» (con 'auto' si no se elige) y «Sacar de mi lista principal» (nil).
     @discardableResult
     func waSetInboxPlace(_ c: WaChatDTO, _ place: String?) async throws -> WaChatDTO {
-        let before = waInbox
+        let before = waInbox, revision = waPrivacy.revision, stamp = sessionStamp
+        _ = try requireWaSource(c.inboxKey)
         upsertWaInbox(WaInbox.applying(c, place: .some(place)))
         do {
             let up = try await waPatchChat(c, WaInbox.placePatch(place))
             upsertWaInbox(place != nil && up.inboxPlace == nil ? WaInbox.applying(up, place: .some(place)) : up)
             return up
-        } catch { waInbox = before; throw error }
+        } catch { if revision == waPrivacy.revision && stamp == sessionStamp { applyWaInbox(before) }; throw error }
     }
 
     /// «Fijar» / «Quitar de fijados» en la bandeja (fijar sin haberlo movido lo mueve a la sección sugerida).
     @discardableResult
     func waSetInboxPinned(_ c: WaChatDTO, _ pinned: Bool) async throws -> WaChatDTO {
-        let before = waInbox
+        let before = waInbox, revision = waPrivacy.revision, stamp = sessionStamp
+        _ = try requireWaSource(c.inboxKey)
         upsertWaInbox(WaInbox.applying(c, pinned: pinned))
         do {
             let up = try await waPatchChat(c, WaInbox.pinPatch(pinned))
             // Un servidor sin la migración 081 no devuelve los campos: se deja el cambio local.
             upsertWaInbox(up.inInbox || !pinned ? up : WaInbox.applying(up, pinned: pinned))
             return up
-        } catch { waInbox = before; throw error }
+        } catch { if revision == waPrivacy.revision && stamp == sessionStamp { applyWaInbox(before) }; throw error }
     }
 }
 
@@ -157,6 +159,8 @@ final class ChannelAccess {
 
     var activeMail: [MailConnectionDTO] { mail.filter(\.isActive) }
     var hasAny: Bool { waConnected || !activeMail.isEmpty }
+
+    func invalidateWhatsApp() { waUnread = 0; lastWa = nil; waRevisionSeen = -1 }
 
     func reset() { waConnected = false; waUnread = 0; mail = []; mailUnread = 0; lastWa = nil; lastMail = nil; waRevisionSeen = -1 }
 
@@ -188,4 +192,73 @@ enum MailLastProvider {
     static let key = "tc.mail.lastProvider"
     static func load(_ defaults: UserDefaults = .standard) -> MailProvider? { defaults.string(forKey: key).flatMap(MailProvider.init(rawValue:)) }
     static func save(_ p: MailProvider, _ defaults: UserDefaults = .standard) { defaults.set(p.rawValue, forKey: key) }
+}
+
+
+/// Session privacy ledger. Only a new authoritative list can restore a revoked chat.
+struct WaPrivacy {
+    private(set) var revision = 0
+    var knownAccounts: Set<String> = []
+    private(set) var accounts: Set<String> = []
+    private(set) var sources: Set<String> = []
+    private var accountEpoch: [String: Int] = [:]
+    private var sourceEpoch: [String: Int] = [:]
+    static func source(_ account: String, _ jid: String) -> String { "wa:\(account):\(jid)" }
+    static func account(_ source: String) -> String? {
+        guard source.hasPrefix("wa:") else { return nil }
+        return source.dropFirst(3).split(separator: ":", maxSplits: 1).first.map(String.init)
+    }
+    static func requestSource(_ path: String, json: [String: Any]? = nil) -> String? { APIClient.waSource(path, json: json) }
+    func allows(_ source: String) -> Bool {
+        guard let a = Self.account(source) else { return true }
+        return !accounts.contains(a) && !sources.contains(source)
+    }
+    func token(_ source: String) -> Int {
+        (Self.account(source).flatMap { accountEpoch[$0] } ?? 0) + (sourceEpoch[source] ?? 0)
+    }
+    mutating func revoke(account: String, jids: [String], reset: Bool) {
+        guard !account.isEmpty, reset || !jids.isEmpty else { return }
+        knownAccounts.insert(account)
+        revision += 1
+        if reset { accounts.insert(account); accountEpoch[account] = revision }
+        for jid in jids where !jid.isEmpty { let s = Self.source(account, jid); sources.insert(s); sourceEpoch[s] = revision }
+    }
+    mutating func ready(_ account: String) { knownAccounts.insert(account); accounts.remove(account) }
+    mutating func accept(_ chats: [WaChatDTO]) {
+        knownAccounts.formUnion(chats.map(\.accountId))
+        for c in chats where !accounts.contains(c.accountId) { sources.remove(c.inboxKey) }
+    }
+}
+
+extension AppStore {
+    func requireWaSource(_ source: String) throws -> Int {
+        if let account = WaPrivacy.account(source) { waPrivacy.knownAccounts.insert(account) }
+        guard waPrivacy.allows(source) else { throw ApiRequestError(status: 404, code: "not_found", message: L("wa.noMessages")) }
+        return waPrivacy.token(source)
+    }
+    func revokeWaPrivacy(accountId: String, jids: [String] = [], reset: Bool = false) {
+        guard !accountId.isEmpty, reset || !jids.isEmpty else { return }
+        waPrivacy.revoke(account: accountId, jids: jids, reset: reset)
+        func affected(_ s: String) -> Bool { WaPrivacy.account(s) == accountId && (reset || jids.contains(where: { WaPrivacy.source(accountId, $0) == s })) }
+        waInbox.removeAll { affected($0.inboxKey) }
+        purgeWaBootstrap(where: affected)
+        ggSide.purge(where: affected)
+        AttachmentCache.shared.purgeWhatsApp(where: affected)
+        VoicePlayer.shared.stopWhatsApp(where: affected)
+        channels.invalidateWhatsApp()
+        waRevision += 1
+        scheduleSnapshot()
+    }
+    func invalidateKnownWaPrivacy() {
+        for account in waPrivacy.knownAccounts.union(waInbox.map(\.accountId)) { revokeWaPrivacy(accountId: account, reset: true) }
+    }
+    func denyWaListing(accountId: String? = nil) {
+        let accounts = accountId.map { Set([$0]) } ?? waPrivacy.knownAccounts.union(waInbox.map(\.accountId))
+        for account in accounts where !waPrivacy.accounts.contains(account) { revokeWaPrivacy(accountId: account, reset: true) }
+    }
+    func denyWaSource(_ source: String) {
+        guard let a = WaPrivacy.account(source) else { return }
+        let prefix = "wa:\(a):"
+        revokeWaPrivacy(accountId: a, jids: [String(source.dropFirst(prefix.count))])
+    }
 }

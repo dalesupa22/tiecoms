@@ -305,6 +305,7 @@ enum WaCategory: String, Codable, CaseIterable, Sendable {
 }
 
 struct WaAccountDTO: Codable, Equatable, Identifiable, Sendable {
+    var privacyReady: Bool?
     var id: String
     var label: String
     var kind: String
@@ -327,6 +328,7 @@ struct WaAccountDTO: Codable, Equatable, Identifiable, Sendable {
     init(from decoder: Decoder) throws {
         let c = try container(decoder)
         id = try c.decode(String.self, forKey: AnyKey("id"))
+        privacyReady = c.o("privacyReady")
         label = c.v("label", "")
         kind = c.v("kind", "personal")
         status = c.v("status", "pending")

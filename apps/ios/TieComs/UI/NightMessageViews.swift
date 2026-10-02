@@ -193,7 +193,7 @@ struct WaNativeMedia: View {
                     }
                 }
             }
-        }.accessibilityIdentifier("wa.media.\(messageId)")
+        }.waPrivateSource(WaPrivacy.source(accountId, jid)).accessibilityIdentifier("wa.media.\(messageId)")
     }
     private func pathEncode(_ s: String) -> String { s.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? "" }
     private func retry() {

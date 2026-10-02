@@ -49,13 +49,15 @@ enum SnapshotCache {
             // Si se recorta, ya no es la historia completa: hay más atrás.
             out[id] = CachedConversation(messages: tail, lastEventSeq: s.lastEventSeq, hasMore: s.hasMore || tail.count < s.messages.count)
         }
-        return AppSnapshot(savedAt: ISODate.string(), bootstrap: d, blocked: Array(blocked).sorted(), conversations: out)
+        var safe = d; safe.waInbox = [] // Private WA inbox is never restored without online validation.
+        return AppSnapshot(savedAt: ISODate.string(), bootstrap: safe, blocked: Array(blocked).sorted(), conversations: out)
     }
 
     static func load(userId: String, apiHost: String) -> AppSnapshot? {
         guard let data = try? Data(contentsOf: file(userId, apiHost: apiHost)),
-              let s = try? JSONDecoder().decode(AppSnapshot.self, from: data),
+              var s = try? JSONDecoder().decode(AppSnapshot.self, from: data),
               s.version == AppSnapshot.version, s.contract == Contract.version, s.bootstrap.me.id == userId else { return nil }
+        if s.bootstrap.waInbox?.isEmpty == false { s.bootstrap.waInbox = []; save(s, apiHost: apiHost) }
         return s
     }
 

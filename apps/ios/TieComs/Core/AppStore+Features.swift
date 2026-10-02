@@ -745,7 +745,17 @@ extension AppStore {
     // MARK: WhatsApp
 
     func waAccounts() async throws -> (accounts: [WaAccountDTO], max: Int) {
-        let r: ListOf<WaAccountDTO> = try await api.request("/whatsapp/accounts")
+        let stamp = sessionStamp, revision = waPrivacy.revision
+        let r: ListOf<WaAccountDTO>
+        do { r = try await api.request("/whatsapp/accounts") }
+        catch { if let e = error as? ApiRequestError, [403, 404].contains(e.status) { denyWaListing() }; throw error }
+        try requireSession(stamp)
+        guard revision == waPrivacy.revision else { throw CancellationError() }
+        for a in r.items {
+            waPrivacy.knownAccounts.insert(a.id)
+            if a.privacyReady == false, !waPrivacy.accounts.contains(a.id) { revokeWaPrivacy(accountId: a.id, reset: true) }
+            else if a.privacyReady == true { let wasBlocked = waPrivacy.accounts.contains(a.id); waPrivacy.ready(a.id); if wasBlocked { waRevision += 1 } }
+        }
         return (r.items, r.max ?? 5)
     }
 
@@ -771,7 +781,15 @@ extension AppStore {
         if showHidden { q.append("hidden=1") }
         let t = query.trimmingCharacters(in: .whitespaces)
         if !t.isEmpty { q.append("q=\(t.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? "")") }
-        return try await api.request("/whatsapp/chats?\(q.joined(separator: "&"))")
+        let stamp = sessionStamp, revision = waPrivacy.revision
+        var page: WaChatsPage
+        do { page = try await api.request("/whatsapp/chats?\(q.joined(separator: "&"))") }
+        catch { if let e = error as? ApiRequestError, [403, 404].contains(e.status) { denyWaListing(accountId: accountId) }; throw error }
+        try requireSession(stamp)
+        guard revision == waPrivacy.revision else { throw CancellationError() }
+        waPrivacy.accept(page.chats)
+        page.chats = page.chats.filter { waPrivacy.allows($0.inboxKey) }
+        return page
     }
 
     func waPatchChat(_ c: WaChatDTO, _ patch: [String: Any]) async throws -> WaChatDTO {

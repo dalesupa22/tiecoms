@@ -22,6 +22,7 @@ como «+N que no ves») y sus tareas: abiertas, resueltas y las 5 más recientes
 
     node ops.js create-agent <correo dueño> "<nombre>" <conversationId,...> ["<empresa>"] ["<cargo>"] > agente.json
     node ops.js agent-token <correo dueño> "<nombre>" ["<empresa>"]     # token nuevo (rotar)
+    node ops.js agent-webhook <correo dueño> "<nombre>" <https://…|off>  # aviso al instante (abajo)
     node ops.js agents                                                   # listado
 
 - Idempotente por nombre dentro de la empresa: correrlo otra vez solo suma los grupos nuevos (no emite token).
@@ -31,10 +32,35 @@ como «+N que no ves») y sus tareas: abiertas, resueltas y las 5 más recientes
 
 ## Hablar con el agente
 
-Cualquiera de su empresa le escribe por directo o lo menciona en un grupo. El agente lee con
-`unread_summary` / `read_messages` y responde con `send_message` / `send_direct_message` (y puede usar tareas y agenda).
-Hoy el agente consulta cada N minutos; falta un webhook de salida por agente (cuando lo mencionan o le escriben) para
-que responda al instante.
+Cualquiera de su empresa le escribe por directo, lo menciona en un grupo (con el selector de @ o escribiendo
+`@nombre`) o responde uno de sus mensajes. El agente contesta por el MCP con `send_message` / `send_direct_message`
+(y puede usar tareas y agenda).
+
+### Webhook: que responda al instante
+
+    node ops.js agent-webhook <correo dueño> "<nombre>" https://su-servidor/chaggu [--all] [--rotate] ["<empresa>"] > webhook.json
+    node ops.js agent-webhook <correo dueño> "<nombre>" off
+
+Imprime el secreto de firma (`whsec_…`) UNA vez si es nuevo o con `--rotate`. chaggu hace `POST` JSON a esa URL (HTTPS,
+sin IPs privadas) con reintentos y backoff hasta 10 veces, y estas cabeceras:
+
+- `X-Chaggu-Event`: `message.direct` | `message.mention` | `message.reply` | `message.created` (solo con `--all`)
+- `X-Chaggu-Delivery`: id único (sirve para deduplicar reintentos)
+- `X-Chaggu-Signature`: `t=<unix>,v1=<hex(hmac_sha256(secreto, "<t>.<cuerpo>"))>` (igual que las integraciones)
+
+```json
+{ "id": "…", "type": "message.mention", "createdAt": "…",
+  "agent": { "id": "…", "name": "semillero" },
+  "conversation": { "id": "…", "kind": "group", "name": "ventas" },
+  "message": { "id": "…", "seq": 42, "body": "@semillero pospón UCatólica al martes", "replyTo": null, "topicId": null,
+               "attachments": [], "author": { "id": "…", "name": "Liliana", "org": "Xertify" } },
+  "reply": { "tool": "send_message", "arguments": { "chat": "…", "reply_to": "…" } } }
+```
+
+Reglas: lo que escribe un agente (o un bot de integración) nunca dispara webhooks de agentes, así no hay bucles; los
+mensajes de una sola vista no se avisan; antes de cada entrega se revisa que el agente siga pudiendo leer ese chat.
+Responder con 2xx en menos de 10 s y hacer el trabajo después (el agente contesta por el MCP cuando termine).
+Prueba: `apps/api/test/agents-webhook.test.ts`.
 
 ## Agentes en producción
 

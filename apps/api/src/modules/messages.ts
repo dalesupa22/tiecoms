@@ -5,6 +5,7 @@ import { badRequest, conflict, forbidden, notFound, viewOnceConflict } from '../
 import { sha256 } from '../security.ts';
 import { claimForMessage, hideForMessage, linkToMessage } from './attachments.ts';
 import { maybeQueue as ggQueue } from './gg.ts';
+import { queueAgentEvents } from './agents.ts';
 import { markMentionsRead, normalizeMentions, saveMentions } from './mentions.ts';
 import { dropLinks, indexLinks } from './links.ts';
 import { normalizeRefs } from './refs.ts';
@@ -212,6 +213,8 @@ export async function sendMessage(userId: string, conversationId: string, input:
       if (afterCreate) await afterCreate(c, m);
       // gg: su chat o @gg en cualquier chat (el worker responde; aquí solo se encola).
       await ggQueue(c, m);
+      // Agentes miembro con webhook a quienes va dirigido (docs/AGENTES.md).
+      await queueAgentEvents(c, m);
       return m;
     });
     return { message: forViewer(message, userId), duplicate: false, ...(dropped.length ? { droppedMentions: dropped } : {}) };

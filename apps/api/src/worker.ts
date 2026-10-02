@@ -25,6 +25,7 @@ import { fireDueMailReplies } from './modules/mailbox.ts';
 import { cleanupPending as cleanupAttachments } from './modules/attachments.ts';
 import { transcribeAttachment } from './modules/voice.ts';
 import { deliverIntegrationEvent } from './modules/integration-events.ts';
+import { deliverAgentEvent } from './modules/agents.ts';
 import { reapCalls, summarizeCall } from './modules/calls.ts';
 
 const WORKER_ID = `${hostname()}:${process.pid}`;
@@ -56,6 +57,8 @@ const handlers: Record<string, Handler> = {
   async 'push.event_soon'(p) { await pushEventSoon(p.eventId, p.userIds, soonMinutes()); },
   /** Webhook de salida de una integración (firmado; reintenta con backoff hasta max_attempts). */
   async 'integration.deliver'(p) { await deliverIntegrationEvent(p.deliveryId); },
+  /** Webhook de un agente miembro: le escribieron, lo mencionaron o le respondieron (docs/AGENTES.md). */
+  async 'agent.deliver'(p) { await deliverAgentEvent(p.deliveryId); },
   /** Llamada entrante: push para las apps cerradas. */
   async 'push.call'(p) { await pushCall(p); },
   /** «Llamada perdida» (reemplaza el aviso de la llamada entrante). */

@@ -33,7 +33,7 @@ const MAX_ATTEMPTS = 10;
 
 export const issueUrl = (id: string) => `${config.publicOrigin}/asuntos?issue=${id}`;
 
-async function botCanRead(db: Tx | typeof pool, userId: string, conversationId: string): Promise<boolean> {
+export async function botCanRead(db: Tx | typeof pool, userId: string, conversationId: string): Promise<boolean> {
   try { await conversationAccess(db, userId, conversationId, 'read'); return true; } catch (error) {
     if (error instanceof ApiError && [403, 404].includes(error.status)) return false;
     throw error;
@@ -84,7 +84,7 @@ export function validateOutgoingUrl(value: string, allowLocal = ALLOW_LOCAL): UR
   return url;
 }
 
-function post(url: URL, body: string, headers: Record<string, string>): Promise<{ status: number; text: string }> {
+export function post(url: URL, body: string, headers: Record<string, string>): Promise<{ status: number; text: string }> {
   return new Promise((resolve, reject) => {
     try { validateOutgoingUrl(url.toString()); } catch (e) { reject(e); return; }
     const local = ALLOW_LOCAL && url.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(url.hostname);

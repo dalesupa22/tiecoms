@@ -13,7 +13,7 @@
 import type { z } from 'zod';
 import type {
   CreateIntegrationInput, IncomingWebhookInput, IntegrationCommentInput, IntegrationCreateIssueInput, IntegrationDTO,
-  IntegrationSecretDTO, IntegrationUpdateIssueInput, UpdateIntegrationInput,
+  IntegrationSecretDTO, IntegrationUpdateIssueInput, UpdateIntegrationInput, WebhookTaskInput,
 } from '@tiecoms/contracts';
 import { conversationAccess } from '../access.ts';
 import { config } from '../config.ts';
@@ -271,28 +271,60 @@ async function issueOf(c: Db, integ: IntegrationAuth, issueId: string) {
   if (!rows[0]) throw taskNotFound();
 }
 
-/** Un asunto por ticket. El mismo externalId devuelve el mismo asunto (idempotente). */
-export async function createIssue(integ: IntegrationAuth, input: z.infer<typeof IntegrationCreateIssueInput>) {
-  return tx(async (c) => {
+/** Correos → personas que participan en el grupo (solo a ellas se les puede asignar una tarea de todo el chat). */
+async function membersByEmail(c: Db, conversationId: string, emails: string[] | undefined) {
+  if (!emails?.length) return { ids: [] as string[], ignored: [] as string[] };
+  const { rows } = await c.query(
+    `SELECT lower(u.email) AS email, u.id FROM users u JOIN conversation_memberships cm ON cm.user_id = u.id AND cm.conversation_id = $1 AND cm.removed_at IS NULL
+      WHERE lower(u.email) = ANY($2) AND u.disabled_at IS NULL`, [conversationId, emails]);
+  const found = new Map(rows.map((r) => [r.email as string, r.id as string]));
+  return { ids: [...new Set(emails.flatMap((e) => found.get(e) ?? []))], ignored: emails.filter((e) => !found.has(e)) };
+}
+
+const fieldLines = (f: Record<string, unknown> | null | undefined) => Object.entries(f ?? {}).filter(([, v]) => v !== null && v !== '')
+  .map(([k, v]) => `${k}: ${typeof v === 'boolean' ? (v ? 'sí' : 'no') : v}`);
+
+/** Un asunto por ticket. El mismo externalId devuelve el mismo asunto (idempotente). Sin externalId, siempre crea. */
+export async function createIssue(integ: IntegrationAuth, input: Omit<z.infer<typeof IntegrationCreateIssueInput>, 'externalId'> & { externalId?: string | null }, existing?: Tx) {
+  const run = async (c: Tx) => {
     // Candado por (integración, externalId): dos reintentos simultáneos no crean dos asuntos.
-    await c.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [`${integ.id}:${input.externalId}`]);
-    const prev = await c.query('SELECT id FROM issues WHERE integration_id = $1 AND external_id = $2', [integ.id, input.externalId]);
-    if (prev.rows[0]) return { issue: (await issues.getIssue(integ.botUserId, prev.rows[0].id, c)).issue, created: false };
-    const dto = await issues.createIssue(integ.botUserId, integ.conversationId, { title: input.title, ownerId: null, visibility: 'all' } as any, c);
+    if (input.externalId) {
+      await c.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [`${integ.id}:${input.externalId}`]);
+      const prev = await c.query('SELECT id FROM issues WHERE integration_id = $1 AND external_id = $2', [integ.id, input.externalId]);
+      if (prev.rows[0]) return { issue: (await issues.getIssue(integ.botUserId, prev.rows[0].id, c)).issue, created: false };
+    }
+    const who = await membersByEmail(c, integ.conversationId, input.assigneeEmails);
+    const dto = await issues.createIssue(integ.botUserId, integ.conversationId, {
+      title: input.title, ownerId: null, visibility: 'all', ...(who.ids.length ? { assigneeIds: who.ids } : {}),
+      ...(input.dueDate ? { dueDate: input.dueDate } : {}), ...(input.fields ? { fields: input.fields } : {}),
+    } as any, c);
     // The issue, source binding, comments, announcement and outbox are one atomic import.
-    await c.query('UPDATE issues SET integration_id = $2, external_id = $3, external_meta = $4 WHERE id = $1', [dto.id, integ.id, input.externalId, input.externalMeta ? JSON.stringify(input.externalMeta) : null]);
+    await c.query('UPDATE issues SET integration_id = $2, external_id = $3, external_meta = $4 WHERE id = $1', [dto.id, integ.id, input.externalId ?? null, input.externalMeta ? JSON.stringify(input.externalMeta) : null]);
     if (input.description) await issues.commentIssue(integ.botUserId, dto.id, input.description, {}, c);
     for (const h of input.history ?? []) {
       await issues.commentIssue(integ.botUserId, dto.id, `${h.author}${h.at ? ` · ${h.at}` : ''}\n${h.body}`, { author: h.author, ...(h.at ? { at: h.at } : {}) }, c);
     }
     if (input.status && input.status !== 'open') await issues.updateIssue(integ.botUserId, dto.id, { status: input.status }, c);
     if (input.announce) {
-      const meta = Object.entries(input.externalMeta ?? {}).map(([k, v]) => `${k}: ${v}`).join('\n');
+      const meta = [...fieldLines(input.externalMeta), ...fieldLines(dto.fields)].join('\n');
       const excerpt = input.description ? `\n\n${input.description.slice(0, 600)}${input.description.length > 600 ? '…' : ''}` : '';
       await appendMessage(c, { conversationId: integ.conversationId, authorId: integ.botUserId, body: `${input.title}${meta ? `\n${meta}` : ''}${excerpt}` });
     }
-    return { issue: (await issues.getIssue(integ.botUserId, dto.id, c)).issue, created: true };
-  });
+    return { issue: (await issues.getIssue(integ.botUserId, dto.id, c)).issue, created: true, ...(who.ignored.length ? { ignoredAssignees: who.ignored } : {}) };
+  };
+  return existing ? run(existing) : tx(run);
+}
+
+/**
+ * Webhook de tareas (`/api/hooks/{id}/{token}/tasks`): un sistema avisa algo que no pudo hacer (o cualquier pendiente)
+ * y queda como tarea del grupo, con sus campos como columnas. Con `externalId` es idempotente por ticket; sin él,
+ * la `Idempotency-Key` evita duplicar reintentos.
+ */
+export async function createTaskFromHook(integ: IntegrationAuth, input: z.infer<typeof WebhookTaskInput>, key?: string) {
+  const { body, text, ...rest } = input;
+  const task = { ...rest, description: rest.description ?? body ?? text };
+  if (task.externalId || !key) return createIssue(integ, task);
+  return idempotent(integ, key, 'task', task, (c) => createIssue(integ, task, c));
 }
 
 export async function findIssue(integ: IntegrationAuth, externalId: string) {
@@ -318,6 +350,7 @@ export async function updateIssue(integ: IntegrationAuth, issueId: string, input
     const patch: Record<string, unknown> = {};
     if (input.status) patch.status = input.status;
     if (input.title) patch.title = input.title;
+    if (input.fields) patch.fields = input.fields;
     // Permission check and metadata update belong to the same transaction as the status/title.
     await issues.updateIssue(integ.botUserId, issueId, patch as any, c);
     if (input.externalMeta) await c.query('UPDATE issues SET external_meta = $2 WHERE id = $1', [issueId, JSON.stringify(input.externalMeta)]);

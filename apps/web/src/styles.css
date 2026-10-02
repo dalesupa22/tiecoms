@@ -2377,3 +2377,30 @@ body.is-pane-resizing, body.is-pane-resizing * { user-select: none !important; }
 .grid-track-handle.is-row::after { height: 3px; width: 36px; top: 1px; left: calc(50% - 18px); }
 .grid-track-handle:hover, .grid-track-handle:focus-visible { background: color-mix(in srgb, var(--accent) 25%, transparent); }
 .grid-track-handle:focus-visible::after, .grid-track-handle:hover::after { background: var(--accent); }
+
+/* Campos dinámicos de las tareas (columnas propias, docs/TAREAS-CAMPOS.md) */
+.issue-fields-inline { display: flex; gap: 6px; margin-top: 3px; flex-wrap: nowrap; overflow: hidden; }
+.issue-field-chip { font-size: 11.5px; padding: 1px 7px; border-radius: 999px; background: color-mix(in srgb, var(--accent) 9%, transparent); white-space: nowrap; max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+.issue-fields { display: grid; gap: 6px; margin: 0 0 8px; }
+.issue-field { display: grid; grid-template-columns: minmax(90px, 30%) 1fr auto; gap: 8px; align-items: start; }
+.issue-field dt { font-size: 12.5px; color: var(--muted); padding-top: 7px; overflow-wrap: anywhere; }
+.issue-field dd { margin: 0; min-width: 0; }
+.issue-field-input { width: 100%; resize: vertical; min-height: 32px; font: inherit; }
+.issue-field-x { font-size: 18px; line-height: 1; padding: 6px 4px; }
+.issue-field-add { display: flex; gap: 6px; flex-wrap: wrap; }
+.issue-field-add .input:first-child { width: 180px; }
+.issue-table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; margin-bottom: 18px; }
+.issue-table { border-collapse: collapse; width: 100%; font-size: 13px; }
+.issue-table th, .issue-table td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; max-width: 260px; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; }
+.issue-table th { position: sticky; top: 0; background: var(--card); font-weight: 600; font-size: 12px; color: var(--muted); }
+.issue-table tbody tr { cursor: pointer; }
+.issue-table tbody tr:hover, .issue-table tbody tr:focus-visible { background: color-mix(in srgb, var(--accent) 7%, transparent); outline: none; }
+.issue-table tr.is-done .issue-table-title span { text-decoration: line-through; opacity: .6; }
+.issue-table-title { display: flex; align-items: center; gap: 6px; max-width: 360px; }
+.issue-table-title span { overflow: hidden; text-overflow: ellipsis; }
+.issue-field-select { max-width: 100%; padding: 4px 8px; min-height: 30px; }
+.issue-table .issue-field-select { min-width: 140px; min-height: 26px; padding: 2px 6px; font-size: 12.5px; }
+.task-columns-edit { display: grid; gap: 8px; margin: 10px 0; }
+.task-column-row { display: grid; grid-template-columns: minmax(120px, 1fr) 150px auto; gap: 6px; align-items: center; }
+.task-column-row:has(.task-column-options) { grid-template-columns: minmax(120px, 1fr) 150px minmax(160px, 2fr) auto; }
+@media (max-width: 640px) { .task-column-row, .task-column-row:has(.task-column-options) { grid-template-columns: 1fr auto; } }

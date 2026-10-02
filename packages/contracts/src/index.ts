@@ -949,14 +949,17 @@ export interface IssueDTO {
   externalId?: string | null;
   /** Datos del sistema externo para mostrar (cliente, correo, prioridad, categoría…): pares texto→texto. */
   externalMeta?: Record<string, string> | null;
+  /** Campos dinámicos (columnas propias de la tarea): nombre → texto, número o sí/no. Ausente = sin campos o servidor anterior. */
+  fields?: Record<string, IssueFieldValue> | null;
 }
+export type IssueFieldValue = string | number | boolean;
 export type IssueVisibility = 'all' | 'org' | 'private';
 
 export interface IssueEventDTO {
   id: number;
   issueId: string;
   actorId: string;
-  kind: 'created' | 'status' | 'owner' | 'due' | 'title' | 'comment' | 'waiting' | 'visibility' | 'assignees' | 'attachments' | 'moved';
+  kind: 'created' | 'status' | 'owner' | 'due' | 'title' | 'comment' | 'waiting' | 'visibility' | 'assignees' | 'attachments' | 'moved' | 'fields';
   payload: Record<string, unknown>;
   createdAt: string;
 }
@@ -1183,6 +1186,29 @@ export const IncomingWebhookInput = z.object({
   mrkdwn: z.boolean().optional(),
 }).passthrough();
 
+/**
+ * Campos dinámicos de una tarea: hasta 30 columnas nombre → valor. Al editar, `null` borra el campo y los que no
+ * vienen se conservan (se mezclan). Los nombres se guardan tal cual («Servicios», «Motivo», «Ambiente»…).
+ */
+export const IssueFieldKey = z.string().trim().min(1).max(60);
+export const IssueFieldsInput = z.record(IssueFieldKey, z.union([z.string().max(2000), z.number().finite(), z.boolean(), z.null()]))
+  .refine((m) => Object.keys(m).length <= 30, 'Máximo 30 campos');
+export const ISSUE_FIELDS_MAX = 30;
+
+/**
+ * Columnas de las tareas de un grupo (las define un admin). `select` es una lista desplegable con opciones fijas
+ * (p. ej. «Tipo»: Bug, Funcionalidad nueva, Mejora): un valor fuera de la lista se rechaza. Una tarea puede traer
+ * además campos libres que no estén aquí.
+ */
+export type TaskColumnType = 'text' | 'select' | 'number' | 'checkbox';
+export interface TaskColumnDTO { name: string; type: TaskColumnType; options?: string[] }
+export const TaskColumnInput = z.object({
+  name: IssueFieldKey,
+  type: z.enum(['text', 'select', 'number', 'checkbox']),
+  options: z.array(z.string().trim().min(1).max(80)).max(50).optional(),
+}).refine((c) => c.type !== 'select' || (c.options?.length ?? 0) > 0, 'Una lista desplegable necesita opciones');
+export const TaskColumnsInput = z.object({ columns: z.array(TaskColumnInput).max(ISSUE_FIELDS_MAX) });
+
 const ExternalMeta = z.record(z.string().max(60), z.string().max(500)).refine((m) => Object.keys(m).length <= 20, 'Máximo 20 campos');
 
 /** API de asuntos para integraciones (token del grupo). */
@@ -1197,11 +1223,29 @@ export const IntegrationCreateIssueInput = z.object({
   announce: z.boolean().default(true),
   /** Comentarios anteriores (migración): se guardan en orden con su autor y fecha como texto. */
   history: z.array(z.object({ author: z.string().max(120), body: z.string().max(20_000), at: z.string().max(40).optional() })).max(200).optional(),
+  /** Campos dinámicos de la tarea (columnas). */
+  fields: IssueFieldsInput.optional(),
+  /** Responsables por correo: solo los que participan en el grupo (los demás se ignoran y se devuelven en `ignoredAssignees`). */
+  assigneeEmails: z.array(z.string().trim().toLowerCase().max(200)).max(20).optional(),
+  dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+});
+/**
+ * Webhook de tareas: `POST /api/hooks/{id}/{token}/tasks` (o `/api/hooks/{id}/tasks` con Bearer). Igual que crear un
+ * asunto por la API, pero `externalId` es opcional (sin él, cada llamada crea una tarea; con `Idempotency-Key` no se duplica).
+ * Acepta `description`, `body` o `text` como descripción, y cualquier otra llave de primer nivel que no sea del contrato
+ * se ignora: los datos extra van en `fields`.
+ */
+export const WebhookTaskInput = IntegrationCreateIssueInput.extend({
+  externalId: z.string().trim().min(1).max(120).optional(),
+  body: z.string().max(20_000).optional(),
+  text: z.string().max(20_000).optional(),
 });
 export const IntegrationUpdateIssueInput = z.object({
   status: z.enum(['open', 'in_progress', 'waiting', 'done', 'cancelled']).optional(),
   title: z.string().trim().min(2).max(200).optional(),
   externalMeta: ExternalMeta.optional(),
+  /** Se mezclan con los que ya tiene; `null` borra un campo. */
+  fields: IssueFieldsInput.optional(),
 });
 export const IntegrationCommentInput = z.object({
   body: z.string().trim().min(1).max(20_000),
@@ -1298,6 +1342,8 @@ export const CreateIssueInput = z.object({
   parentIssueId: z.uuid().nullable().optional(),
   /** Tema activo del chat. Si no llega y la tarea sale de un mensaje con tema, hereda ese tema. */
   topicId: z.uuid().nullable().optional(),
+  /** Campos dinámicos (columnas propias). */
+  fields: IssueFieldsInput.optional(),
 });
 /** POST /issues/:id/children: tarea derivada. Por defecto la ve solo mi empresa si en el chat hay más de una. */
 /** POST /issues: asunto personal (sin conversación, solo para mí). */
@@ -1326,6 +1372,8 @@ export const UpdateIssueInput = z.object({
   dueDate: isoDate.nullable().optional(),
   waitingOnOrgId: z.uuid().nullable().optional(),
   topicId: z.uuid().nullable().optional(),
+  /** Se mezclan con los que ya tiene; `null` borra un campo. */
+  fields: IssueFieldsInput.optional(),
 });
 export const IssueCommentInput = z.object({ body: z.string().trim().min(1).max(4000) });
 

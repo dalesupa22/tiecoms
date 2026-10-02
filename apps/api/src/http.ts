@@ -13,7 +13,7 @@ import {
   UpdateProfileInput, DndInput, MeetingProvider, MeetingConnectInput, MeetingConfirmInput, CreateMeetingInput, SleepInput, CreateChatInput, DriveTreeQuery, CreateDriveDocumentInput, CreateFolderInput, UpdateFolderInput, UpdateFileInput, UploadFileQuery, CreateWaAccountInput, UpdateWaAccountInput, RelinkWaAccountInput, WaChatsQuery, UpdateWaChatInput, WaMessagesQuery, WaSendInput, MailLiveReplyInput,
   SideConversationInput, PushTokenInput, ReactInput, LinksQuery, SavedLinksQuery, LinkStateInput, ReactionActionsInput,
   SignPdfInput, MAX_SIGNATURE_BYTES, SigningHistoryQuery,
-  CreateIntegrationInput, IncomingWebhookInput, IntegrationCommentInput, IntegrationCreateIssueInput, IntegrationUpdateIssueInput,
+  CreateIntegrationInput, IncomingWebhookInput, IntegrationCommentInput, IntegrationCreateIssueInput, IntegrationUpdateIssueInput, WebhookTaskInput, TaskColumnsInput,
   ChatSearchQuery, GlobalSearchQuery, EventCommentInput, MailProvider, MailListQuery, ShareMailInput, MailReplyInput, MailTaskInput, ShareWaInput, ForwardSharedInput,
   GgSideQuery, GgSideSourceInput, GgSideAskInput, GgSideReplyInput, GgSideSuggestInput, GgSidePendingQuery,
   SetAdminInput, UpdateIntegrationInput, StartCallInput, CallDeviceInput, SoundsInput, CallTranscriptionInput, CallTranscriptInput, CallHistoryQuery, CallShareInput, CallInviteInput, GuestJoinInput, GuestSecretInput, CreateRoomInput, BookingCreateInput, BookingRescheduleInput, BookingPageInput, BookingPagePatch, SignupConfirmInput, ReorderTopicsInput,
@@ -233,6 +233,15 @@ export async function buildHttp() {
   };
   app.post<{ Params: { id: string } }>('/api/hooks/:id', hookLimit, hook);
   app.post<{ Params: { id: string; token: string } }>('/api/hooks/:id/:token', hookLimit, hook);
+  // Webhook de tareas: crea una tarea en el grupo con campos dinámicos (docs/TAREAS-CAMPOS.md).
+  const taskHook = async (req: FastifyRequest<{ Params: { id: string; token?: string } }>) => {
+    const id = z.uuid().safeParse(req.params.id);
+    if (!id.success) throw unauthorized('Token de integración inválido');
+    const integ = await integrations.authenticate(req.params.token ?? bearer(req), id.data);
+    return integrations.createTaskFromHook(integ, WebhookTaskInput.parse(req.body ?? {}), idemKey(req));
+  };
+  app.post<{ Params: { id: string } }>('/api/hooks/:id/tasks', hookLimit, taskHook);
+  app.post<{ Params: { id: string; token: string } }>('/api/hooks/:id/:token/tasks', hookLimit, taskHook);
 
   app.register(async (api) => {
     api.addHook('onRequest', async (req) => { (req as any).integration = await integrations.authenticate(bearer(req)); });
@@ -241,6 +250,7 @@ export async function buildHttp() {
     api.get('/api/integration/v1/me', limit, async (req) => integrations.describe(integ(req)));
     api.post('/api/integration/v1/messages', limit, async (req) => integrations.postMessage(integ(req), IncomingWebhookInput.parse(req.body ?? {}), idemKey(req)));
     api.post('/api/integration/v1/issues', limit, async (req) => integrations.createIssue(integ(req), IntegrationCreateIssueInput.parse(req.body)));
+    api.post('/api/integration/v1/tasks', limit, async (req) => integrations.createTaskFromHook(integ(req), WebhookTaskInput.parse(req.body ?? {}), idemKey(req)));
     api.get<{ Querystring: { externalId?: string } }>('/api/integration/v1/issues', limit, async (req) =>
       integrations.findIssue(integ(req), z.string().min(1).max(120).parse(req.query.externalId)));
     api.get<{ Params: { id: string } }>('/api/integration/v1/issues/:id', limit, async (req) => integrations.getIssue(integ(req), z.uuid().parse(req.params.id)));
@@ -764,6 +774,8 @@ export async function buildHttp() {
     priv.get('/api/v1/issues/report', async (req) => ({ issues: await issues.listIssueReport(req.userId) }));
     priv.get<{ Params: { id: string } }>('/api/v1/issues/:id', async (req) => issues.getIssue(req.userId, req.params.id));
     priv.patch<{ Params: { id: string } }>('/api/v1/issues/:id', async (req) => issues.updateIssue(req.userId, req.params.id, UpdateIssueInput.parse(req.body)));
+    priv.get<{ Params: { id: string } }>('/api/v1/conversations/:id/task-columns', async (req) => issues.getTaskColumns(req.userId, req.params.id));
+    priv.put<{ Params: { id: string } }>('/api/v1/conversations/:id/task-columns', async (req) => issues.setTaskColumns(req.userId, req.params.id, TaskColumnsInput.parse(req.body)));
     priv.post<{ Params: { id: string } }>('/api/v1/issues/:id/children', async (req) => issues.createChildIssue(req.userId, req.params.id, CreateChildIssueInput.parse(req.body)));
     priv.post<{ Params: { id: string } }>('/api/v1/issues/:id/comments', async (req) => issues.commentIssue(req.userId, req.params.id, IssueCommentInput.parse(req.body).body));
 

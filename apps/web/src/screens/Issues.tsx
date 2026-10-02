@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import type { BootstrapDTO, IssueDTO, IssueEventDTO, IssueStatus, IssueVisibility } from '@tiecoms/contracts';
+import type { BootstrapDTO, IssueDTO, IssueEventDTO, IssueFieldValue, IssueStatus, IssueVisibility } from '@tiecoms/contracts';
 import { client, useClient } from '../app-client.ts';
 import { updateIssuePreferences, usePersonalPreferences } from '../personal-prefs.ts';
 import { PinToGrid } from './Tray.tsx';
@@ -15,6 +15,7 @@ import { IssueTopicTag, issueTopicMenu } from './Topics.tsx';
 import { assignedTo, taskAssignees } from '../task-report.ts';
 import { TaskReportButton, taskText } from './TaskReports.tsx';
 import { TaskAttachments } from './TaskAttachments.tsx';
+import { FieldControl, TaskColumnsDialog, columnsOf, useTaskColumns } from './TaskColumns.tsx';
 
 /** Destino «Personal · solo tú» en los selectores de «¿Dónde?». */
 export const PERSONAL_DEST = '__personal';
@@ -44,6 +45,20 @@ export function dueLabel(i: IssueDTO) {
 
 export function StatusPill({ status }: { status: IssueStatus }) {
   return <span className={`ist ist-${status}`}>{t(`issue.st.${status}`)}</span>;
+}
+
+/** Valor de un campo dinámico para mostrar: sí/no en los booleanos. */
+export function fieldText(v: IssueFieldValue | undefined) {
+  if (v === undefined) return '';
+  if (typeof v === 'boolean') return v ? taskText('Sí', 'Yes') : taskText('No', 'No');
+  return String(v);
+}
+
+/** Columnas dinámicas de una lista: la unión de los campos de sus tareas, en el orden en que aparecen. */
+export function fieldColumns(list: IssueDTO[]) {
+  const cols: string[] = [];
+  for (const i of list) for (const k of Object.keys(i.fields ?? {})) if (!cols.includes(k)) cols.push(k);
+  return cols;
 }
 
 function membersOf(d: BootstrapDTO, conversationId: string | null) {
@@ -112,7 +127,7 @@ export function IssueCheck({ i, size = 20 }: { i: IssueDTO; size?: number }) {
   );
 }
 
-export function IssueRow({ i, showWhere = true, showOwner = true, child = false, onOpen }: { i: IssueDTO; showWhere?: boolean; showOwner?: boolean; child?: boolean; onOpen: (id: string) => void }) {
+export function IssueRow({ i, showWhere = true, showOwner = true, child = false, hideFields = false, onOpen }: { i: IssueDTO; showWhere?: boolean; showOwner?: boolean; child?: boolean; hideFields?: boolean; onOpen: (id: string) => void }) {
   const d = useClient((s) => s.data)!;
   const all = useClient((s) => s.issues);
   const owner = personById(d, i.ownerId);
@@ -145,6 +160,7 @@ export function IssueRow({ i, showWhere = true, showOwner = true, child = false,
         {(meta.length > 0 || i.topicId) && <span className="small muted ellipsis issue-meta" style={{ display: 'block' }}>
           <IssueTopicTag issueId={i.id} conversationId={i.conversationId} topicId={i.topicId} canEdit={!!conv?.canPost} />{meta.join(' · ')}
         </span>}
+        {!hideFields && i.fields && <span className="issue-fields-inline ellipsis">{Object.entries(i.fields).slice(0, 4).map(([k, v]) => <span key={k} className="issue-field-chip"><span className="muted">{k}</span> {fieldText(v)}</span>)}</span>}
       </span>
       {kids.length > 0 && <span className={`kids-badge ${kidsDone === kids.length ? 'all-done' : ''}`} title={t('task.progress', { done: kidsDone, n: kids.length })}>☑ {kidsDone}/{kids.length}</span>}
       {f.stalledDays > 0 && <span className="jam-badge" title={t('issue.bottleneck')}>⏱ {f.stalledDays === 1 ? t('issue.stalledOne') : t('issue.stalled', { n: f.stalledDays })}</span>}
@@ -336,6 +352,7 @@ function eventText(d: BootstrapDTO, e: IssueEventDTO) {
     case 'due': return t('issue.ev.due', { to: p.to ? new Date(`${p.to}T12:00:00`).toLocaleDateString(locale(), { day: 'numeric', month: 'short' }) : t('issue.noDue') });
     case 'title': return `${t('issue.ev.title')} → «${p.to}»`;
     case 'waiting': return `${t('issue.ev.waiting')}${p.to ? `: ${orgById(d, p.to)?.name ?? ''}` : ''}`;
+    case 'fields': return `${taskText('Campos', 'Fields')}: ${[...(p.changed ?? []), ...(p.removed ?? []).map((k: string) => `−${k}`)].join(', ')}`;
     case 'visibility': return `${t('task.evVis')} → ${p.to === 'all' ? t('task.visAll') : p.to === 'org' ? t('task.visOrgShort') : t('task.visPrivate')}`;
     default: return '';
   }
@@ -463,6 +480,8 @@ export function IssueDrawer({ id: startId, onClose }: { id: string; onClose: () 
         </div>
       )}
 
+      <IssueFields issue={i} disabled={saving} onSave={(fields) => update({ fields })} />
+
       <div className="issue-q">
         <div className="issue-q-label">{taskText('Imágenes y documentos', 'Images and documents')} · {i.attachments?.length ?? 0}</div>
         <TaskAttachments files={i.attachments ?? []} disabled={uploading} onRemove={(fileId) => void update({ attachmentIds: (i.attachments ?? []).filter((a) => a.id !== fileId).map((a) => a.id) })} />
@@ -521,6 +540,109 @@ export function IssueDrawer({ id: startId, onClose }: { id: string; onClose: () 
   );
 }
 
+/**
+ * Campos dinámicos de la tarea (columnas propias): los trae un webhook, el MCP o se agregan a mano.
+ * Editar un valor guarda al salir del campo; vaciarlo o tocar × lo borra.
+ */
+function IssueFields({ issue, disabled, onSave }: { issue: IssueDTO; disabled: boolean; onSave: (fields: Record<string, IssueFieldValue | null>) => Promise<void> }) {
+  const defined = useTaskColumns([issue.conversationId]);
+  const canEditColumns = !!columnsOf(issue.conversationId)?.canEdit;
+  const isDefined = (k: string) => defined.some((c) => c.name.toLowerCase() === k.toLowerCase());
+  const entries = Object.entries(issue.fields ?? {}).filter(([k]) => !isDefined(k));
+  const [adding, setAdding] = useState(false);
+  const [name, setName] = useState('');
+  const [value, setValue] = useState('');
+  const add = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!name.trim() || !value.trim()) return;
+    await onSave({ [name.trim()]: value.trim() });
+    setName(''); setValue(''); setAdding(false);
+  };
+  return (
+    <div className="issue-q">
+      <div className="issue-q-label">{taskText('Campos', 'Fields')}{entries.length ? ` · ${entries.length}` : ''}
+        {canEditColumns && <button className="link-btn small" style={{ marginLeft: 8 }} onClick={() => openDialog((close) => <TaskColumnsDialog conversationId={issue.conversationId} onClose={close} />)}>⚙ {taskText('Columnas del grupo', 'Group columns')}</button>}
+      </div>
+      {defined.length > 0 && <dl className="issue-fields">
+        {defined.map((col) => (
+          <div key={col.name} className="issue-field">
+            <dt>{col.name}</dt>
+            <dd><FieldControl column={col} value={Object.entries(issue.fields ?? {}).find(([k]) => k.toLowerCase() === col.name.toLowerCase())?.[1]} disabled={disabled} onChange={(v) => void onSave({ [col.name]: v })} /></dd>
+            <span />
+          </div>
+        ))}
+      </dl>}
+      {entries.length > 0 && <dl className="issue-fields">
+        {entries.map(([k, v]) => (
+          <div key={k} className="issue-field">
+            <dt>{k}</dt>
+            <dd>{typeof v === 'boolean'
+              ? <button className={`chip ${v ? 'on' : ''}`} disabled={disabled} aria-pressed={v} onClick={() => void onSave({ [k]: !v })}>{fieldText(v)}</button>
+              : <textarea key={String(v)} className="input issue-field-input" rows={String(v).length > 60 || String(v).includes('\n') ? 3 : 1} defaultValue={String(v)} disabled={disabled} aria-label={k}
+                  onBlur={(e) => { const next = e.currentTarget.value.trim(); if (next === String(v)) return; void onSave({ [k]: next === '' ? null : typeof v === 'number' && next !== '' && !Number.isNaN(Number(next)) ? Number(next) : next }); }} />}
+            </dd>
+            <button className="link-btn muted issue-field-x" disabled={disabled} title={taskText('Quitar campo', 'Remove field')} aria-label={taskText(`Quitar ${k}`, `Remove ${k}`)} onClick={() => void onSave({ [k]: null })}>×</button>
+          </div>
+        ))}
+      </dl>}
+      {adding
+        ? <form className="issue-field-add" onSubmit={add}>
+            <input className="input" autoFocus placeholder={taskText('Nombre (p. ej. Servicios)', 'Name (e.g. Services)')} maxLength={60} value={name} onChange={(e) => setName(e.target.value)} />
+            <input className="input grow" placeholder={taskText('Valor', 'Value')} maxLength={2000} value={value} onChange={(e) => setValue(e.target.value)} />
+            <button className="btn small primary" disabled={disabled || !name.trim() || !value.trim()}>{taskText('Agregar', 'Add')}</button>
+            <button type="button" className="btn small ghost" onClick={() => setAdding(false)}>{taskText('Cancelar', 'Cancel')}</button>
+          </form>
+        : <button className="btn small" disabled={disabled || entries.length >= 30} onClick={() => setAdding(true)}>＋ {taskText('Agregar campo', 'Add field')}</button>}
+    </div>
+  );
+}
+
+/** Tabla de tareas: columnas fijas + una por cada campo dinámico que traen las tareas de la lista. */
+function IssueTable({ list, onOpen }: { list: IssueDTO[]; onOpen: (id: string) => void }) {
+  const d = useClient((s) => s.data)!;
+  const defined = useTaskColumns(list.map((i) => i.conversationId));
+  const cols = [...defined.map((c) => c.name), ...fieldColumns(list).filter((k) => !defined.some((c) => c.name.toLowerCase() === k.toLowerCase()))];
+  const [error, setError] = useState<string | null>(null);
+  const valueOf = (i: IssueDTO, c: string) => Object.entries(i.fields ?? {}).find(([k]) => k.toLowerCase() === c.toLowerCase())?.[1];
+  // Una lista desplegable o casilla se cambia en la misma celda si la columna es del grupo de esa tarea.
+  const cell = (i: IssueDTO, c: string) => {
+    const col = columnsOf(i.conversationId)?.columns.find((x) => x.name.toLowerCase() === c.toLowerCase());
+    const v = valueOf(i, c);
+    if (col && (col.type === 'select' || col.type === 'checkbox') && !isClosed(i)) {
+      return <FieldControl column={col} value={v} onChange={(next) => { setError(null); client.updateIssue(i.id, { fields: { [col.name]: next } }).catch((e) => setError(errorText(e))); }} />;
+    }
+    return v !== undefined ? fieldText(v) : <span className="muted">—</span>;
+  };
+  return (
+    <div className="issue-table-wrap">
+      <table className="issue-table">
+        <thead><tr>
+          <th>{t('issue.title')}</th><th>{taskText('Estado', 'Status')}</th><th>{taskText('Responsables', 'Assignees')}</th><th>{taskText('Fecha', 'Due')}</th>
+          {cols.map((c) => <th key={c}>{c}</th>)}
+          <th>{taskText('Chat', 'Chat')}</th>
+        </tr></thead>
+        <tbody>{list.map((i) => {
+          const conv = d.conversations.find((c) => c.id === i.conversationId);
+          return (
+            <tr key={i.id} tabIndex={0} className={isClosed(i) ? 'is-done' : ''} onClick={() => onOpen(i.id)} onKeyDown={(e) => { if (e.key === 'Enter') onOpen(i.id); }} {...menuProps(() => issueQuickMenu(i))}>
+              <td className="issue-table-title"><IssueCheck i={i} size={18} /> <span>{i.title}</span></td>
+              <td><StatusPill status={i.status} /></td>
+              <td>{taskAssignees(i).map((uid) => personById(d, uid)?.name.split(' ')[0] ?? t('common.participant')).join(', ') || <span className="muted">—</span>}</td>
+              <td className={issueFlags(i).overdue ? 'error' : ''}>{i.dueDate ? dueLabel(i) : <span className="muted">—</span>}</td>
+              {cols.map((c) => <td key={c} title={fieldText(valueOf(i, c))} onClick={(e) => { if ((e.target as HTMLElement).closest('select, input')) e.stopPropagation(); }}>{cell(i, c)}</td>)}
+              <td className="muted">{conv ? conversationTitle(d, conv) : isPersonal(i) ? '🔒' : ''}</td>
+            </tr>
+          );
+        })}</tbody>
+      </table>
+      {error && <div className="error" style={{ padding: 8 }}>{error}</div>}
+    </div>
+  );
+}
+
+const TABLE_KEY = 'chaggu.issues.table';
+function readTablePref() { try { return localStorage.getItem(TABLE_KEY) === '1'; } catch { return false; } }
+
 /** Fechas de un toque en la hora local: hoy, mañana, el viernes y el lunes que viene. */
 function dateShortcuts(): ['issue.dToday' | 'issue.dTomorrow' | 'issue.dFriday' | 'issue.dNextWeek', string][] {
   const local = localIso;
@@ -541,7 +663,9 @@ export function IssuesBody() {
   const preferences = usePersonalPreferences();
   const [scope, setScope] = useState<'mine' | 'all'>('mine');
   const [stateFilter, setStateFilter] = useState<'all' | 'open' | 'closed'>('all');
-  const view = preferences.issues?.view ?? 'list';
+  const [table, setTableState] = useState(readTablePref);
+  const setTable = (on: boolean) => { setTableState(on); try { localStorage.setItem(TABLE_KEY, on ? '1' : '0'); } catch { /* sin almacenamiento */ } };
+  const view = table ? 'table' : preferences.issues?.view ?? 'list';
   const groupBy = preferences.issues?.grouping === 'assignee' ? 'person' : 'group';
   const [pendingMoves, setPendingMoves] = useState<Set<string>>(() => new Set());
   const [query, setQuery] = useState('');
@@ -555,7 +679,7 @@ export function IssuesBody() {
     .filter((i) => !i.conversationId || visibleConvs.has(i.conversationId) || isRestricted(i))
     .filter((i) => scope === 'all' || assignedTo(i, d.me.id))
     .filter((i) => stateFilter === 'all' || (stateFilter === 'closed' ? isClosed(i) : !isClosed(i)))
-    .filter((i) => !query.trim() || i.title.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()))
+    .filter((i) => !query.trim() || `${i.title} ${Object.entries(i.fields ?? {}).map(([k, v]) => `${k} ${fieldText(v)}`).join(' ')}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()))
     .sort(stateFilter === 'closed' ? (a, b) => (b.closedAt ?? '').localeCompare(a.closedAt ?? '') : byUrgency);
   // Por grupo: la conversación con su espacio. Por persona: el responsable, yo primero y «Sin responsable» al final.
   const NONE = '__none';
@@ -597,14 +721,16 @@ export function IssuesBody() {
         <div className="seg" role="radiogroup" aria-label={t('issue.groupBy')}>
           {(['group', 'person'] as const).map((g) => <button key={g} role="radio" aria-checked={groupBy === g} className={groupBy === g ? 'on' : ''} onClick={() => { void updateIssuePreferences({ grouping: g === 'person' ? 'assignee' : 'group' }).catch(() => {}); }}>{g === 'group' ? t('issue.byGroup') : t('issue.byPerson')}</button>)}
         </div>
-        <div className="seg" role="radiogroup" aria-label={taskText('Vista de tareas', 'Task view')}>{(['list', 'cards', 'board'] as const).map((v) => <button key={v} role="radio" aria-checked={view === v} className={view === v ? 'on' : ''} onClick={() => { void updateIssuePreferences({ view: v }).catch(() => {}); }}>{v === 'list' ? taskText('Lista', 'List') : v === 'cards' ? taskText('Tarjetas', 'Cards') : taskText('Tablero', 'Board')}</button>)}</div>
+        <div className="seg" role="radiogroup" aria-label={taskText('Vista de tareas', 'Task view')}>{(['list', 'cards', 'board'] as const).map((v) => <button key={v} role="radio" aria-checked={view === v} className={view === v ? 'on' : ''} onClick={() => { setTable(false); void updateIssuePreferences({ view: v }).catch(() => {}); }}>{v === 'list' ? taskText('Lista', 'List') : v === 'cards' ? taskText('Tarjetas', 'Cards') : taskText('Tablero', 'Board')}</button>)}<button role="radio" aria-checked={view === 'table'} className={view === 'table' ? 'on' : ''} title={taskText('Una columna por cada campo de las tareas', 'One column per task field')} onClick={() => setTable(true)}>{taskText('Tabla', 'Table')}</button></div>
+        {view === 'table' && d.conversations.some((c) => c.canManage && c.kind !== 'direct') && <button className="btn small" onClick={() => openDialog((close) => <TaskColumnsDialog onClose={close} />)}>⚙ {taskText('Columnas', 'Columns')}</button>}
         <TaskReportButton />
       </div>
       {stateFilter !== 'closed' && <QuickAddIssue />}
       {error && <div className="error">{error}</div>}
       {list.length === 0 && <div className="empty">{t('issue.empty')}</div>}
       {view === 'board' && <div className="task-board">{ISSUE_STATUSES.map((status) => <section key={status} className="task-board-column" aria-busy={pendingMoves.size > 0} onDragOver={(e) => { if (e.dataTransfer.types.includes('application/x-chaggu-issue-id')) { e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'move'; } }} onDrop={(e) => { e.preventDefault(); e.stopPropagation(); const taskId = e.dataTransfer.getData('application/x-chaggu-issue-id'); void move(taskId, status); }}><h3>{t(`issue.st.${status}`)} · {list.filter((i) => i.status === status).length}</h3>{list.filter((i) => i.status === status).map((i) => <IssueRow key={i.id} i={i} showWhere onOpen={setOpen} />)}</section>)}</div>}
-      {view !== 'board' && sections.map(([k, items]) => (
+      {view === 'table' && list.length > 0 && <IssueTable list={list} onOpen={setOpen} />}
+      {view !== 'board' && view !== 'table' && sections.map(([k, items]) => (
         <section key={k} style={{ marginBottom: 18 }}>
           <div className="eyebrow" style={{ marginBottom: 8 }}>{sectionTitle(k)} · {items.length}</div>
           <div className={view === 'cards' ? 'task-cards' : 'list'} style={{ gap: 6 }}>{items.map((i) => groupBy === 'group'

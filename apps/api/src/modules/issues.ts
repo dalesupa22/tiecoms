@@ -1,5 +1,5 @@
 import type { z } from 'zod';
-import type { CreateIssueInput, IssueDTO, IssueEventDTO, IssueVisibility, UpdateIssueInput } from '@tiecoms/contracts';
+import { ISSUE_FIELDS_MAX, type TaskColumnDTO, type TaskColumnsInput, type CreateIssueInput, type IssueDTO, type IssueFieldValue, type IssueEventDTO, type IssueVisibility, type UpdateIssueInput } from '@tiecoms/contracts';
 import { conversationAccess } from '../access.ts';
 import { audit, enqueueOutbox, pool, tx, type Db, type Tx } from '../db.ts';
 import { badRequest, forbidden, notFound, taskNotFound } from '../errors.ts';
@@ -44,6 +44,24 @@ const VISIBLE = `
   )`;
 
 const iso = (d: any) => (d ? new Date(d).toISOString() : null);
+
+type Fields = Record<string, IssueFieldValue>;
+/**
+ * Campos dinámicos: los nuevos se mezclan con los actuales, `null` borra y un texto vacío también.
+ * Devuelve null si no queda ninguno.
+ */
+export function mergeFields(cur: Fields | null | undefined, patch: Record<string, IssueFieldValue | null> | undefined): Fields | null {
+  const out: Fields = { ...(cur ?? {}) };
+  for (const [rawKey, v] of Object.entries(patch ?? {})) {
+    const k = rawKey.trim();
+    if (!k) continue;
+    if (v === null || (typeof v === 'string' && !v.trim())) delete out[k];
+    else out[k] = typeof v === 'string' ? v.trim() : v;
+  }
+  if (Object.keys(out).length > ISSUE_FIELDS_MAX) throw badRequest(`Máximo ${ISSUE_FIELDS_MAX} campos por tarea`);
+  return Object.keys(out).length ? out : null;
+}
+
 function toDTO(r: any): IssueDTO {
   return {
     id: r.id, workspaceId: r.workspace_id, conversationId: r.conversation_id,
@@ -55,6 +73,7 @@ function toDTO(r: any): IssueDTO {
     parentIssueId: r.parent_issue_id ?? null, topicId: r.topic_id ?? null, visibility: r.visibility ?? 'all', visibleOrgId: r.visible_org_id ?? null,
     ...(r.visibility && r.visibility !== 'all' ? { viewerIds: r.viewer_ids ?? [] } : {}),
     ...(r.integration_id ? { integrationId: r.integration_id, externalId: r.external_id ?? null, externalMeta: r.external_meta ?? null } : {}),
+    ...(r.fields && Object.keys(r.fields).length ? { fields: r.fields } : {}),
   };
 }
 
@@ -203,9 +222,9 @@ export async function createIssue(userId: string, conversationId: string, input:
     for (const uid of assignees) { if (visibility === 'all') await assertMember(c, conversationId, uid); else await assertContact(c, userId, uid); }
     for (const v of input.viewerIds ?? []) await assertContact(c, userId, v);
     const { rows } = await c.query(
-      `INSERT INTO issues (workspace_id, conversation_id, origin_message_id, title, owner_id, requested_by, due_date, created_by, parent_issue_id, visibility, visible_org_id, topic_id, assignee_ids)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id`,
-      [a.workspaceId, conversationId, input.originMessageId ?? null, input.title, owner, requestedBy, input.dueDate ?? null, userId, parentId, visibility, visibleOrg, topicId, assignees],
+      `INSERT INTO issues (workspace_id, conversation_id, origin_message_id, title, owner_id, requested_by, due_date, created_by, parent_issue_id, visibility, visible_org_id, topic_id, assignee_ids, fields)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING id`,
+      [a.workspaceId, conversationId, input.originMessageId ?? null, input.title, owner, requestedBy, input.dueDate ?? null, userId, parentId, visibility, visibleOrg, topicId, assignees, fieldsJson(mergeFields(null, applyColumns(await loadColumns(c, conversationId), input.fields)))],
     );
     const id: string = rows[0].id;
     if (input.attachmentIds) await setTaskAttachments(c, userId, id, conversationId, input.attachmentIds);
@@ -340,6 +359,16 @@ export async function updateIssue(userId: string, issueId: string, input: z.infe
       if (input.status !== 'waiting') add('waiting_on_org_id', null);
       events.push(['status', { from: cur.status, to: input.status }]);
     }
+    if (input.fields !== undefined) {
+      const next = mergeFields(cur.fields, applyColumns(await loadColumns(c, destination), input.fields));
+      if (JSON.stringify(next) !== JSON.stringify(cur.fields ?? null)) {
+        add('fields', fieldsJson(next));
+        const before = (cur.fields ?? {}) as Fields;
+        const changed = Object.keys(next ?? {}).filter((k) => before[k] !== next![k]);
+        const removed = Object.keys(before).filter((k) => !next || !(k in next));
+        events.push(['fields', { changed, removed }]);
+      }
+    }
     let topicChanged = false;
     if (input.topicId !== undefined && input.topicId !== cur.topic_id) {
       if (!cur.conversation_id) throw badRequest('Una tarea personal no lleva tema');
@@ -377,6 +406,68 @@ export async function updateIssue(userId: string, issueId: string, input: z.infe
     for (const uid of assignees.filter((uid) => !previousAssignees.includes(uid))) await queueAssignedPush(c, issueId, uid, userId);
     await audit(c, userId, 'issue.updated', { type: 'issue', id: issueId, workspaceId: cur.workspace_id }, { changes: events.map(([k]) => k) });
     return dto;
+  });
+}
+
+const fieldsJson = (f: Fields | null) => (f ? JSON.stringify(f) : null);
+
+// ---------- Columnas del grupo (texto, lista desplegable, número, casilla) ----------
+
+const fold = (s: string) => s.normalize('NFD').replace(/\p{M}/gu, '').trim().toLocaleLowerCase();
+
+async function loadColumns(c: Db, conversationId: string | null): Promise<TaskColumnDTO[]> {
+  if (!conversationId) return [];
+  const { rows } = await c.query('SELECT task_columns FROM conversations WHERE id = $1', [conversationId]);
+  return (rows[0]?.task_columns ?? []) as TaskColumnDTO[];
+}
+
+/**
+ * Ajusta los valores a las columnas del grupo: una lista desplegable solo acepta sus opciones (sin importar
+ * mayúsculas ni tildes, y se guarda la opción tal cual), un número debe ser número y una casilla sí/no.
+ * El nombre del campo también se ajusta al de la columna («tipo» → «Tipo»).
+ */
+export function applyColumns(columns: TaskColumnDTO[], patch: Record<string, IssueFieldValue | null> | undefined) {
+  if (!patch || !columns.length) return patch;
+  const out: Record<string, IssueFieldValue | null> = {};
+  for (const [k, v] of Object.entries(patch)) {
+    const col = columns.find((x) => fold(x.name) === fold(k));
+    if (!col || v === null || (typeof v === 'string' && !v.trim())) { out[col?.name ?? k] = v; continue; }
+    if (col.type === 'select') {
+      const opt = col.options?.find((o) => fold(o) === fold(String(v)));
+      if (!opt) throw badRequest(`«${String(v)}» no es una opción de ${col.name}. Opciones: ${(col.options ?? []).join(', ')}`);
+      out[col.name] = opt;
+    } else if (col.type === 'number') {
+      const n = typeof v === 'number' ? v : Number(String(v).replace(',', '.'));
+      if (!Number.isFinite(n)) throw badRequest(`${col.name} debe ser un número`);
+      out[col.name] = n;
+    } else if (col.type === 'checkbox') {
+      out[col.name] = typeof v === 'boolean' ? v : ['si', 'sí', 'true', '1', 'yes', 'x'].includes(fold(String(v)));
+    } else out[col.name] = String(v);
+  }
+  return out;
+}
+
+/** Columnas del grupo. Las cambia quien administra el grupo o el espacio. */
+export async function getTaskColumns(userId: string, conversationId: string) {
+  const a = await conversationAccess(pool, userId, conversationId, 'read');
+  return { columns: await loadColumns(pool, conversationId), canEdit: !!a.canManage };
+}
+
+export async function setTaskColumns(userId: string, conversationId: string, input: z.infer<typeof TaskColumnsInput>) {
+  return tx(async (c) => {
+    const a = await conversationAccess(c, userId, conversationId, 'read');
+    if (!a.canManage) throw forbidden('Solo quien administra el grupo cambia sus columnas');
+    const seen = new Set<string>();
+    const columns: TaskColumnDTO[] = [];
+    for (const col of input.columns) {
+      const key = fold(col.name);
+      if (seen.has(key)) throw badRequest(`La columna «${col.name}» está repetida`);
+      seen.add(key);
+      columns.push({ name: col.name.trim(), type: col.type, ...(col.type === 'select' ? { options: [...new Map((col.options ?? []).map((o) => [fold(o), o.trim()])).values()] } : {}) });
+    }
+    await c.query('UPDATE conversations SET task_columns = $2 WHERE id = $1', [conversationId, columns.length ? JSON.stringify(columns) : null]);
+    await audit(c, userId, 'task_columns.updated', { type: 'conversation', id: conversationId, workspaceId: a.workspaceId }, { columns: columns.map((x) => x.name) });
+    return { columns, canEdit: true };
   });
 }
 

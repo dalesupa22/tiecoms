@@ -14,7 +14,9 @@ echo "▸ verificando tipos"
 npm run -s typecheck
 echo "▸ compilando $REL"
 npm -w @tiecoms/api run -s build
-npm -w @tiecoms/web run -s build
+# Desktop builds use apps/web/dist with a native API origin. Keep the deploy
+# output isolated so concurrent packaging cannot mix the two artifacts.
+npm -w @tiecoms/web run -s build -- --outDir "$STAGE/web-build" --emptyOutDir
 echo "▸ landing"
 python3 apps/landing/build.py >/dev/null
 
@@ -23,7 +25,7 @@ cp -R apps/api/dist "$STAGE/$REL/api"
 # web/site = landing (www.chaggu.com) · web/app = app (app.chaggu.com).
 mkdir -p "$STAGE/$REL/web"
 cp -R apps/landing/dist "$STAGE/$REL/web/site"
-cp -R apps/web/dist "$STAGE/$REL/web/app"
+cp -R "$STAGE/web-build" "$STAGE/$REL/web/app"
 cp infra/Dockerfile.api infra/compose.yml infra/tiecoms-cert.sh "$STAGE/$REL/"
 cp -R infra/nginx "$STAGE/$REL/nginx"
 COPYFILE_DISABLE=1 tar --no-xattrs -C "$STAGE" -czf "$STAGE/$REL.tgz" "$REL"

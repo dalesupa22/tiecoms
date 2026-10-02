@@ -10,7 +10,7 @@ Especificación común: `SPEC.md`, `SPEC-v2.md` y `SPEC-v3.md` (feedback de Test
 | Bundle ID | `com.chaggu.app` (app) · `com.chaggu.app.share` (Compartir) · `com.chaggu.app.notifications` (Notification Service Extension) · pruebas `com.chaggu.app.tests` / `com.chaggu.app.uitests` |
 | Team | `B76US7H3L3` (CERTILABOR SAS), firma automática |
 | App Group | `group.com.chaggu.app`: Keychain compartido (servicio `com.chaggu.app.session`) y lista de conversaciones para la extensión |
-| Versión | 1.6.7 (build 24), en `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` de `project.yml` |
+| Versión | 1.7.7 (build 47), en `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` de `project.yml` |
 | Idiomas | es, en (inglés si el sistema no está en español) |
 | API | `https://app.chaggu.com` por defecto (web: `https://www.chaggu.com`); `-TCApiURL <url>` al lanzar (pruebas) |
 

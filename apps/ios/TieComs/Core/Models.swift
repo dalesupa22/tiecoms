@@ -509,6 +509,8 @@ struct BootstrapDTO: Codable, Equatable, Sendable {
     var myActiveCall: CallDTO?
     /// Llamadas perdidas que no he visto (se quita al abrir Llamadas). Ausente = servidor anterior (0).
     var missedCalls: Int?
+    /// Chats de WhatsApp movidos a la bandeja (contrato 1-oct-2026). nil = servidor anterior.
+    var waInbox: [WaChatDTO]?
 
     /// Llamadas de voz y video (docs/LLAMADAS.md): sin esto no hay botones, franja ni pestaña.
     var callsEnabled: Bool { features?.calls == true }
@@ -520,6 +522,7 @@ struct BootstrapDTO: Codable, Equatable, Sendable {
         features = c.o("features")
         myActiveCall = c.o("myActiveCall")
         missedCalls = c.intOpt("missedCalls")
+        waInbox = c.contains(AnyKey("waInbox")) ? c.lossyArray("waInbox") : nil
         contract = c.v("contract", "")
         serverTime = c.v("serverTime", "")
         me = try c.decode(UserDTO.self, forKey: AnyKey("me"))
@@ -855,6 +858,8 @@ enum AccountEvent: Decodable, Equatable, Sendable {
     /// Cambió mi número de llamadas perdidas sin ver: al colgar una que me perdí (con callId) o 0 al abrir Llamadas
     /// en otro dispositivo (callId null). Siempre reemplaza el número, no lo suma.
     case callsMissed(callId: String?, missedCalls: Int)
+    /// Un chat de WhatsApp de la bandeja cambió (se movió, se fijó, se sacó o le llegó un mensaje). Sin `chat`: recargar.
+    case waInbox(WaChatDTO?)
     case other(type: String)
 
     init(from decoder: Decoder) throws {
@@ -892,6 +897,7 @@ enum AccountEvent: Decodable, Equatable, Sendable {
         case "call.transcript":
             self = .callTranscript(callId: c.v("callId", ""), userId: c.v("userId", ""), segId: c.v("segId", ""),
                                    segments: c.lossyArray("segments"), failed: c.v("failed", false))
+        case "wa.inbox": self = .waInbox(c.o("chat"))
         case "calls.missed":
             self = .callsMissed(callId: c.o("callId"), missedCalls: max(0, c.int("missedCalls")))
         case "call.ringing":

@@ -209,6 +209,8 @@ struct NewIssueSheet: View {
     let origin: MessageDTO?
     /// Tema de la banderita elegida en el chat (docs/TEMAS.md).
     var topicId: String? = nil
+    /// gg (Responder por mí › «Con acción», o «Pedir a gg»): título, responsable y fecha ya puestos; la persona confirma.
+    var prefill: GgPrefill? = nil
     @State private var conv = ""
     @State private var title = ""
     @State private var ownerId: String = ""
@@ -250,6 +252,11 @@ struct NewIssueSheet: View {
         .onAppear {
             if conv.isEmpty { conv = conversationId ?? IssueTasks.personalKey }
             if ownerId.isEmpty { ownerId = d?.me.id ?? "" }
+            if title.isEmpty, let p = prefill {
+                title = String(p.title.prefix(200))
+                if let due = p.dueDate { hasDue = true; self.due = due }
+                if let d, let who = GgPeople.find(d, name: p.assigneeName, among: humans(d, conv).map(\.id)) { ownerId = who.id }
+            }
             if title.isEmpty, let o = origin { title = excerpt(o.body, 200) }
         }
     }

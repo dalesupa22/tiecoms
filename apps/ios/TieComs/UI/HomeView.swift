@@ -29,6 +29,8 @@ struct HomeView: View {
     @State private var viewMode = GroupsViewMode.load()
     /// Grupo por archivar (confirmación).
     @State private var archiving: ConversationDTO?
+    /// Chat de WhatsApp de la bandeja abierto (su hoja).
+    @State private var waOpen: WaChatDTO?
 
     /// Asuntos abiertos por conversación (sin los personales), en orden de urgencia.
     static func openByConversation(_ all: [String: IssueDTO]) -> [String: [IssueDTO]] {
@@ -53,6 +55,10 @@ struct HomeView: View {
                 // Las tareas de un asunto que veo no van sueltas: se cuentan en su chapita «☑ 1/3».
                 // Los personales no tienen grupo: no van bajo ninguna fila.
                 let open = Self.openByConversation(store.issues)
+                // WhatsApp movido a Grupos: mismas reglas de orden y separadores (sin espacio elegido ni en Menciones/Tareas).
+                let wa = store.workspaceFilter == nil ? WaInbox.rows(store.waInbox, place: WaInbox.groups, query: query, filter: tab) : []
+                // Recordatorios vencidos: chip «🔔 N» al final de los filtros (antes, una fila propia).
+                let due = store.reminders.filter { (ISODate.parse($0.remindAt) ?? .distantFuture) <= Date() }.count
                 List {
                     if store.dndActive {
                         DndBanner()
@@ -60,15 +66,12 @@ struct HomeView: View {
                             .listRowSeparator(.hidden)
                             .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
                     }
-                    Picker(L("grp.view"), selection: $viewMode) {
-                        ForEach(GroupsViewMode.allCases) { m in Text(L(m.labelKey)).tag(m) }
-                    }
-                    .pickerStyle(.segmented)
-                    .accessibilityIdentifier("grp.viewMode")
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
-                    .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 4, trailing: 16))
-                    HomeTabs(d: d, selected: $tab, cases: HomeFilter.groupCases, groupsOnly: true)
+                    // Cabecera compacta (contrato 1-oct): Lista/Árbol es un ícono junto a ≡ y una sola fila de chips con los
+                    // accesos con logo al inicio y «🔔 N» al final.
+                    HomeTabs(d: d, selected: $tab, cases: HomeFilter.groupCases, groupsOnly: true,
+                             leading: store.channels.hasAny ? AnyView(ChannelAccessChips()) : nil,
+                             trailing: due > 0 ? AnyView(DueRemindersChip(due: due)) : nil,
+                             extraCount: { t in WaInbox.rows(store.waInbox, place: WaInbox.groups, filter: t).count })
                         .listRowBackground(Color.clear)
                         .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
                     // Correo en el chat: «Comenta tus correos con el equipo · Conectar» (como Hoy en la web).
@@ -93,33 +96,40 @@ struct HomeView: View {
                         }
                         .listRowBackground(Color.clear)
                     }
-                    // Recordatorios vencidos: antes avisaba la campanita del menú «…»; ahora una fila arriba.
-                    let due = store.reminders.filter { (ISODate.parse($0.remindAt) ?? .distantFuture) <= Date() }.count
-                    if due > 0 {
-                        Button { store.homePath.append(.reminders) } label: {
-                            Label("\(L("rem.title")) (\(due))", systemImage: "bell.badge").font(.subheadline.weight(.semibold))
-                        }
-                        .accessibilityIdentifier("home.dueReminders")
-                    }
                     if tab == .mentions {
                         MentionsInboxSection()
                     } else if viewMode == .list {
-                        if !hasGroups && !searching && tab == .all && store.workspaceFilter == nil { emptyState }
+                        if !hasGroups && wa.isEmpty && !searching && tab == .all && store.workspaceFilter == nil { emptyState }
                         // Lista: una sola lista con el orden único y separadores discretos Fijados · Sin leer · Recientes.
-                        ForEach(InboxBucket.split(flat, conv: \.conv, extraUnread: { $0.tree.derivedUnread + $0.tree.derivedMentions }), id: \.bucket) { b in
+                        // Los chats de WhatsApp movidos a Grupos se intercalan en el mismo orden.
+                        let split = InboxBucket.split(flat, conv: \.conv, extraUnread: { $0.tree.derivedUnread + $0.tree.derivedMentions })
+                        ForEach(WaInbox.mix(split, wa: wa, activity: { HomeOrder.activity($0.conv) }, urgent: { $0.conv.unreadMentions > 0 }), id: \.bucket) { b in
                             Section {
-                                ForEach(b.items) { n in
-                                    groupRows(d, n, indent: 0, color: companyColor(d, n.conv), guest: Naming.isGuest(d, n.conv), open: open, searching: searching, flat: true)
+                                ForEach(b.items) { item in
+                                    switch item {
+                                    case .chaggu(let n):
+                                        groupRows(d, n, indent: 0, color: companyColor(d, n.conv), guest: Naming.isGuest(d, n.conv), open: open, searching: searching, flat: true)
+                                    case .wa(let w): waRow(w)
+                                    }
                                 }
                             } header: { HomeHeader(title: L(b.bucket.labelKey), identifier: "grp.bucket.\(b.bucket.rawValue)") }
                         }
                         if searching { QuickSearchSections(d: d, query: query, showGroups: false) }
                     } else {
                         if !tree.hasGroups && !searching && tab == .all && store.workspaceFilter == nil { emptyState }
-                        if !tree.pinned.isEmpty {
+                        let waPinned = wa.filter { $0.inboxPinnedAt != nil }
+                        if !tree.pinned.isEmpty || !waPinned.isEmpty {
                             Section {
                                 ForEach(tree.pinned) { c in convLink(d, c, indent: 0, showWs: true) }
+                                ForEach(waPinned) { w in waRow(w) }
                             } header: { HomeHeader(title: "📌 " + L("side.pinned")) }
+                        }
+                        // En el Árbol, los de WhatsApp sin fijar van juntos en su sección (no tienen empresa).
+                        let waRest = wa.filter { $0.inboxPinnedAt == nil }
+                        if !waRest.isEmpty {
+                            Section {
+                                ForEach(waRest) { w in waRow(w) }
+                            } header: { HomeHeader(title: "WhatsApp", identifier: "grp.section.whatsapp") }
                         }
                         ForEach(tree.sections) { s in section(d, s, tree: tree, open: open, searching: searching) }
                         // Al buscar: también personas (tocar = escribirle) y chats; los grupos ya salen arriba.
@@ -130,17 +140,23 @@ struct HomeView: View {
                 // Las sub-filas de asuntos miden lo que su texto (no 44 pt).
                 .environment(\.defaultMinListRowHeight, 1)
                 .scrollContentBackground(.hidden)
-                .animation(.spring(response: 0.45, dampingFraction: 0.9), value: viewMode == .list ? flat.map(\.id) : tree.orderSignature)
+                .animation(.spring(response: 0.45, dampingFraction: 0.9), value: (viewMode == .list ? flat.map(\.id) : [tree.orderSignature].map { "\($0)" }) + wa.map(\.inboxKey))
                 .onChange(of: viewMode) { _, m in GroupsViewMode.save(m) }
                 .overlay {
-                    if (viewMode == .list ? flat.isEmpty : tree.isEmpty) && searching && QuickSearch.run(d, query: query).isEmpty { ContentUnavailableView.search(text: query) }
-                    else if !hasGroups && tab != .all && tab != .mentions {
+                    if (viewMode == .list ? flat.isEmpty : tree.isEmpty) && wa.isEmpty && searching && QuickSearch.run(d, query: query).isEmpty { ContentUnavailableView.search(text: query) }
+                    else if !hasGroups && wa.isEmpty && tab != .all && tab != .mentions {
                         ContentUnavailableView(L("home.empty.\(tab.rawValue)"), systemImage: tab == .unread ? "checkmark.seal" : "tray")
                             .accessibilityIdentifier("home.tab.emptyState")
                     }
                 }
                 .refreshable { await store.refreshAll() }
                 .task(id: "\(store.mailEnabled)|\(store.mailRevision)|\(store.me?.id ?? "")") { await MailConnectNudge.refresh(store) }
+                // Accesos con logo: lo conectado y sus no leídos (caché de 60 s; WhatsApp también al cambiar).
+                .task(id: "\(store.mailEnabled)|\(store.mailRevision)|\(store.waRevision)|\(store.me?.id ?? "")|\(store.tab == .home)") {
+                    guard store.tab == .home else { return }
+                    await store.channels.refresh(store)
+                }
+                .sheet(item: $waOpen) { w in WaChatSheet(chat: w) { store.upsertWaInbox($0) } }
             } else {
                 ProgressView()
             }
@@ -157,9 +173,20 @@ struct HomeView: View {
             ToolbarItem(placement: .topBarLeading) {
                 Menu {
                     if let d = store.data { foldMenu(treeMemo.tree ?? Naming.groupsTree(d, filterWorkspace: store.workspaceFilter, tab: tab), issuesOnly: viewMode == .list) }
-                } label: { Image(systemName: "list.bullet.indent") }
+                } label: { Image(systemName: "line.3.horizontal") }
                 .accessibilityLabel(L("grp.foldMenu"))
                 .accessibilityIdentifier("home.fold")
+            }
+            // Lista ↔ Árbol (antes, un segmentado que ocupaba un renglón): un ícono que alterna, junto a ≡.
+            ToolbarItem(placement: .topBarLeading) {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) { viewMode = viewMode == .list ? .tree : .list }
+                    Haptics.tap()
+                } label: { Image(systemName: viewMode == .list ? "list.bullet" : "list.bullet.indent") }
+                .accessibilityLabel(L("grp.view"))
+                .accessibilityValue(L(viewMode.labelKey))
+                .accessibilityHint(L(viewMode == .list ? "grp.viewToggle.tree" : "grp.viewToggle.list"))
+                .accessibilityIdentifier("grp.viewMode")
             }
         }
         .quickActions()
@@ -398,6 +425,16 @@ struct HomeView: View {
         HomeCollapse.save(collapsed)
     }
 
+    /// Fila de un chat de WhatsApp en Grupos: abre su hoja; pulsación larga y deslizar para fijar, mover o sacar.
+    private func waRow(_ w: WaChatDTO) -> some View {
+        Button { waOpen = w } label: { WaInboxRow(chat: w).contentShape(Rectangle()) }
+            .buttonStyle(RowPressStyle())
+            .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 12))
+            .accessibilityIdentifier("wa.row.\(w.inboxKey)")
+            .contextMenu { WaInboxMenuItems(chat: w, onOpen: { waOpen = w }) }
+            .pinSwipe(pinned: w.inboxPinnedAt != nil, id: w.inboxKey) { store.toggleWaPin(w) }
+    }
+
     @ViewBuilder
     private func convLink(_ d: BootstrapDTO, _ c: ConversationDTO, indent: Int, showWs: Bool = false) -> some View {
         convButton(d, c, showWs: showWs)
@@ -417,6 +454,7 @@ struct HomeView: View {
         }
         .buttonStyle(RowPressStyle())
         .accessibilityIdentifier("conv.row.\(c.id)")
+        .pinSwipe(pinned: c.pinnedAt != nil, id: c.id) { store.togglePin(c) }
         .contextMenu {
             ConversationMenuItems(conv: c)
             // Los terceros participan en los asuntos pero no los crean, ni invitan.
@@ -927,11 +965,21 @@ struct HomeTabs: View {
     var cases: [HomeFilter] = HomeFilter.allCases
     /// Grupos: los contadores cuentan solo grupos.
     var groupsOnly = false
+    /// Accesos con logo (WhatsApp, correo) al inicio de la fila.
+    var leading: AnyView? = nil
+    /// «🔔 N» al final de la fila.
+    var trailing: AnyView? = nil
+    /// Filas que no son de chaggu y también cuentan (WhatsApp en la bandeja).
+    var extraCount: ((HomeFilter) -> Int)? = nil
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
+                if let leading {
+                    leading
+                    Rectangle().fill(Theme.textSecondary.opacity(0.25)).frame(width: 1, height: 22).accessibilityHidden(true)
+                }
                 ForEach(cases) { t in
-                    let n = groupsOnly ? t.groupCount(d) : t.count(d)
+                    let n = (groupsOnly ? t.groupCount(d) : t.count(d)) + (extraCount?(t) ?? 0)
                     let on = selected == t
                     Button {
                         withAnimation(.easeInOut(duration: 0.15)) { selected = t }
@@ -955,6 +1003,7 @@ struct HomeTabs: View {
                     .accessibilityAddTraits(on ? .isSelected : [])
                     .accessibilityIdentifier("home.tab.\(t.rawValue)")
                 }
+                if let trailing { trailing }
             }
             .padding(.horizontal, 16).padding(.vertical, 6)
         }

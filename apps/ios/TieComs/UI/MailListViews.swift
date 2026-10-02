@@ -167,7 +167,8 @@ struct MailBrowser: View {
     enum TextFilter: String, Identifiable { case from, to, label; var id: String { rawValue } }
 
     private var ready: [MailConnectionDTO] { connections.filter(\.isActive) }
-    private var p: MailProvider { provider ?? ready.first?.provider ?? .google }
+    /// Sin elegir: la última cuenta usada (accesos con logo de Grupos/DMs), o la primera conectada.
+    private var p: MailProvider { provider ?? MailLastProvider.load().flatMap { l in ready.first { $0.provider == l }?.provider } ?? ready.first?.provider ?? .google }
     private var cacheKey: String { f.path(p) }
 
     var body: some View {
@@ -221,7 +222,7 @@ struct MailBrowser: View {
             guard !Task.isCancelled else { return }
             f.q = t
         }
-        .onChange(of: provider) { _, _ in f.category = nil }
+        .onChange(of: provider) { _, v in f.category = nil; if let v { MailLastProvider.save(v) } }
         .alert(textFilterTitle, isPresented: Binding(get: { textFilter != nil }, set: { if !$0 { textFilter = nil } })) {
             TextField(textFilterTitle, text: $textValue).textInputAutocapitalization(.never).autocorrectionDisabled()
             Button(L("mail.apply")) { applyText(textValue) }

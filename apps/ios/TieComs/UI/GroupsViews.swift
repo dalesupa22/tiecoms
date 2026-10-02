@@ -596,11 +596,15 @@ struct DMsView: View {
     @State private var query = ""
     @State private var newChat = false
     @State private var issuesFor: String?
+    /// Chat de WhatsApp de la bandeja abierto (su hoja).
+    @State private var waOpen: WaChatDTO?
 
     var body: some View {
         Group {
             if let d = store.data {
                 let list = Naming.dms(d, query: query)
+                // WhatsApp movido a DMs: se mezcla con el mismo orden y separadores.
+                let wa = WaInbox.rows(store.waInbox, place: WaInbox.dms, query: query)
                 let searching = !query.trimmingCharacters(in: .whitespaces).isEmpty
                 let threadUnread = Naming.chatThreadUnread(d)
                 List {
@@ -615,15 +619,31 @@ struct DMsView: View {
                             .listRowBackground(Color.clear)
                             .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
                     }
+                    // Accesos con logo (WhatsApp, correo): un toque desde DMs, como en Grupos.
+                    if store.channels.hasAny && !searching {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            ChannelAccessChips().padding(.horizontal, 16).padding(.vertical, 6)
+                        }
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                        .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+                    }
                     if searching {
                         Section {
                             ForEach(list) { c in dmRow(d, c, threadUnread: threadUnread[c.id] ?? 0) }
-                        } header: { if !list.isEmpty { HomeHeader(title: L("search.chats")) } }
+                            ForEach(wa) { w in waRow(w) }
+                        } header: { if !list.isEmpty || !wa.isEmpty { HomeHeader(title: L("search.chats")) } }
                     } else {
                         // Orden único con separadores discretos Fijados · Sin leer · Recientes (1.6.4).
-                        ForEach(InboxBucket.split(list, conv: { $0 }, extraUnread: { threadUnread[$0.id] ?? 0 }), id: \.bucket) { b in
+                        let split = InboxBucket.split(list, conv: { $0 }, extraUnread: { threadUnread[$0.id] ?? 0 })
+                        ForEach(WaInbox.mix(split, wa: wa, activity: HomeOrder.activity, urgent: { $0.unreadMentions > 0 }), id: \.bucket) { b in
                             Section {
-                                ForEach(b.items) { c in dmRow(d, c, threadUnread: threadUnread[c.id] ?? 0) }
+                                ForEach(b.items) { item in
+                                    switch item {
+                                    case .chaggu(let c): dmRow(d, c, threadUnread: threadUnread[c.id] ?? 0)
+                                    case .wa(let w): waRow(w)
+                                    }
+                                }
                             } header: { HomeHeader(title: L(b.bucket.labelKey), identifier: "dm.bucket.\(b.bucket.rawValue)") }
                         }
                     }
@@ -635,9 +655,9 @@ struct DMsView: View {
                 }
                 .listStyle(.insetGrouped)
                 .scrollContentBackground(.hidden)
-                .animation(.spring(response: 0.45, dampingFraction: 0.9), value: list.map(\.id))
+                .animation(.spring(response: 0.45, dampingFraction: 0.9), value: list.map(\.id) + wa.map(\.inboxKey))
                 .overlay {
-                    if list.isEmpty && (!searching || QuickSearch.run(d, query: query).isEmpty) {
+                    if list.isEmpty && wa.isEmpty && (!searching || QuickSearch.run(d, query: query).isEmpty) {
                         if !searching {
                             ContentUnavailableView {
                                 Label(L("dm.empty"), systemImage: "bubble.left.and.bubble.right")
@@ -648,6 +668,11 @@ struct DMsView: View {
                     }
                 }
                 .refreshable { await store.refreshAll() }
+                .task(id: "\(store.mailEnabled)|\(store.mailRevision)|\(store.waRevision)|\(store.me?.id ?? "")|\(store.tab == .dms)") {
+                    guard store.tab == .dms else { return }
+                    await store.channels.refresh(store)
+                }
+                .sheet(item: $waOpen) { w in WaChatSheet(chat: w) { store.upsertWaInbox($0) } }
             } else {
                 ProgressView()
             }
@@ -668,7 +693,18 @@ struct DMsView: View {
         }
         .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 12))
         .accessibilityIdentifier("conv.row.\(c.id)")
+        .pinSwipe(pinned: c.pinnedAt != nil, id: c.id) { store.togglePin(c) }
         .contextMenu { ConversationMenuItems(conv: c) }
+    }
+
+    /// Fila de un chat de WhatsApp en DMs: abre su hoja; pulsación larga y deslizar para fijar, mover o sacar.
+    private func waRow(_ w: WaChatDTO) -> some View {
+        Button { waOpen = w } label: { WaInboxRow(chat: w).contentShape(Rectangle()) }
+            .buttonStyle(RowPressStyle())
+            .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 12))
+            .accessibilityIdentifier("wa.row.\(w.inboxKey)")
+            .contextMenu { WaInboxMenuItems(chat: w, onOpen: { waOpen = w }) }
+            .pinSwipe(pinned: w.inboxPinnedAt != nil, id: w.inboxKey) { store.toggleWaPin(w) }
     }
 }
 

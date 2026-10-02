@@ -71,11 +71,12 @@ final class GroupsUITests: XCTestCase {
         for label in ["Cancelar", "Cerrar", "Close", "Cancel"] where app.buttons[label].exists { app.buttons[label].firstMatch.tap(); return }
     }
 
-    /// Vista de Grupos (1.6.4): «Lista» o «Árbol».
+    /// Vista de Grupos: «Lista» o «Árbol» (1.7.7: un ícono junto a ≡ que alterna; su valor dice la vista actual).
     private func setView(_ app: XCUIApplication, _ label: String) {
-        let seg = app.segmentedControls["grp.viewMode"]
-        XCTAssertTrue(seg.waitForExistence(timeout: 5), "selector Lista / Árbol")
-        seg.buttons[label].tap()
+        let toggle = app.buttons["grp.viewMode"]
+        XCTAssertTrue(toggle.waitForExistence(timeout: 5), "alternar Lista / Árbol")
+        if (toggle.value as? String) != label { toggle.tap() }
+        XCTAssertEqual(toggle.value as? String, label)
     }
 
     /// Plegar/desplegar: botón de vista arriba a la izquierda (ya no hay «…»).
@@ -197,7 +198,7 @@ final class GroupsUITests: XCTestCase {
         shot("08-solo-lectura")
         // Deja la vista por defecto para las demás pruebas (el segundo toque vuelve a la raíz de Grupos).
         app.tabBars.buttons["Grupos"].tap()
-        if !app.segmentedControls["grp.viewMode"].waitForExistence(timeout: 2) { app.tabBars.buttons["Grupos"].tap() }
+        if !app.buttons["grp.viewMode"].waitForExistence(timeout: 2) { app.tabBars.buttons["Grupos"].tap() }
         setView(app, "Lista")
     }
 
@@ -614,7 +615,7 @@ final class GroupsUITests: XCTestCase {
         }
         func groupsShot(_ name: String) {
             app.tabBars.buttons["Grupos"].tap()
-            if !app.segmentedControls["grp.viewMode"].waitForExistence(timeout: 2) { app.tabBars.buttons["Grupos"].tap() }
+            if !app.buttons["grp.viewMode"].waitForExistence(timeout: 2) { app.tabBars.buttons["Grupos"].tap() }
             for _ in 0..<3 { app.swipeDown() }
             sleep(1)
             shot(name)

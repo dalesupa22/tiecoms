@@ -166,6 +166,12 @@ struct MainView: View {
         }
         .animation(.spring(duration: 0.3), value: assistant.open)
         .onDisappear { assistant.close() }
+        // gg de un chat › «Abrir en gg»: pasa al asistente general.
+        .onChange(of: store.ggSide.openGeneral) { _, _ in
+            if let me = d?.me.id { assistant.bind(me) }
+            assistant.apiRef = store.api
+            assistant.present(listen: false)
+        }
         .overlay(alignment: .bottom) { ToastView() }
         // Llamadas: aviso de llamada entrante y la llamada minimizada, encima de todo.
         .overlay(alignment: .top) {

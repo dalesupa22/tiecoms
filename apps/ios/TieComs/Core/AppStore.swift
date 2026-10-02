@@ -99,6 +99,12 @@ final class AppStore {
     var blockedUserIds: Set<String> = []
     /// Sube cuando WhatsApp trae novedades: la pantalla vuelve a pedir la lista.
     var waRevision = 0
+    /// Chats de WhatsApp en la bandeja (bootstrap.waInbox + evento wa.inbox), mezclados en Grupos o DMs.
+    var waInbox: [WaChatDTO] = []
+    /// gg dentro del chat (contrato 1-oct-2026, parte B): historial por fuente, pendientes y si el API lo tiene.
+    let ggSide = GgSideCenter()
+    /// Accesos con logo de Grupos/DMs: WhatsApp y correo conectados y sus no leídos (caché de 60 s).
+    let channels = ChannelAccess()
     /// Sube cuando cambia algún árbol de archivos visible (drive.updated).
     var driveRevision = 0
     /// Cambió una conexión de reuniones (Meet/Teams/Zoom): el diálogo y Ajustes vuelven a pedir el estado.
@@ -595,6 +601,7 @@ final class AppStore {
         localDndUntil = nil; dndLocalOnly = false; dndExpiryTask?.cancel(); dndExpiryTask = nil
         homePath = []; dmsPath = []; issuesPath = []; agendaPath = []; settingsPath = []; callsPath = []
         callCenter.reset(); liveCalls = [:]; callsChecked = []; missedCalls = 0
+        waInbox = []; ggSide.reset(); channels.reset()
         tab = .home
         workspaceFilter = nil
         openConversationId = nil
@@ -639,6 +646,8 @@ final class AppStore {
         ChatSounds.shareRingtone(d.me.ringtone)
         if let c = d.myActiveCall { putCall(c) }
         applyMissedCalls(d.callsEnabled ? (d.missedCalls ?? 0) : 0)
+        // Servidor anterior (sin waInbox): la bandeja queda como estaba.
+        if let wa = d.waInbox { applyWaInbox(wa) }
     }
 
     func scheduleBootstrap(signal: String? = nil) {
@@ -792,6 +801,8 @@ final class AppStore {
             // Una perdida nueva también entra al historial (la pestaña lo vuelve a pedir).
             if n > 0 { callsRevision += 1 }
             applyMissedCalls(n)
+        case .waInbox(let chat):
+            if let chat { upsertWaInbox(chat) } else { scheduleBootstrap() }
         case .other: break
         }
     }

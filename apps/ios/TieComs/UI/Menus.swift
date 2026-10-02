@@ -111,6 +111,8 @@ struct ReminderSheet: View {
     @Environment(\.dismiss) private var dismiss
     let conversationId: String
     let message: MessageDTO?
+    /// gg: nota y hora ya puestas (la persona confirma con «Guardar»).
+    var prefill: GgPrefill? = nil
     @State private var when = Date().addingTimeInterval(3600)
     @State private var note = ""
     @State private var busy = false
@@ -142,7 +144,12 @@ struct ReminderSheet: View {
                     }.disabled(busy)
                 }
             }
-            .onAppear { if let m = message { note = String(m.body.prefix(120)) } }
+            .onAppear {
+                if let p = prefill {
+                    note = String(p.title.prefix(120))
+                    if let at = p.dueDate, at > Date() { when = at }
+                } else if let m = message { note = String(m.body.prefix(120)) }
+            }
         }
         .presentationDetents([.medium, .large])
     }

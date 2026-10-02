@@ -725,8 +725,9 @@ extension AppStore {
         try await api.requestData("/whatsapp/accounts/\(id)", method: "DELETE")
     }
 
-    func waChats(accountId: String?, category: WaCategory?, onlyGroups: Bool, showHidden: Bool, query: String) async throws -> WaChatsPage {
+    func waChats(accountId: String?, category: WaCategory?, onlyGroups: Bool, showHidden: Bool, query: String, limit: Int? = nil) async throws -> WaChatsPage {
         var q: [String] = []
+        if let limit { q.append("limit=\(limit)") }
         if let accountId { q.append("accountId=\(accountId)") }
         if let category { q.append("category=\(category.rawValue)") }
         if onlyGroups { q.append("groups=1") }

@@ -183,6 +183,8 @@ struct ConversationView: View {
     @State private var readPauseID: UUID?
     @State private var positioning = false
     @State private var positioningFailed = false
+    // gg dentro del chat (contrato 1-oct-2026, parte B).
+    @State private var gg = GgChatState()
 
     var body: some View {
         let _ = PerfCounters.bump("chat.body")
@@ -234,6 +236,10 @@ struct ConversationView: View {
             _ = try? await store.loadEvents(from: Date().addingTimeInterval(-30 * 86400), to: Date().addingTimeInterval(90 * 86400), conversationId: conversationId)
         }
         .sheet(item: $sheet) { s in sheetView(s) }
+        .modifier(GgChatSheets(gg: $gg, source: ggSource, conversationId: conversationId, chatTitle: store.data.flatMap { d in store.meta(conversationId).map { Naming.title(d, $0) } } ?? "",
+                               messages: store.conversations[conversationId]?.messages ?? [], onDraft: putGgDraft))
+        .task(id: conversationId) { await store.ggSidePending([ggSource]) }
+        .onChange(of: draft) { _, v in if v.isEmpty && gg.draftActive { gg.draftActive = false } }
         .sheet(item: Binding(get: { askSide }, set: { askSide = $0 })) { m in
             NewSideSheet(conversationId: conversationId, message: m, preselect: sideForPerson.map { [$0] } ?? []) { id in sidePanel = id; sideForPerson = nil }
         }
@@ -459,7 +465,9 @@ struct ConversationView: View {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity).accessibilityLabel(L("common.loading"))
             }
             typingLine
-            if c.kind == .direct && c.memberIds.contains(where: { store.blockedUserIds.contains($0) }) {
+            if gg.selecting {
+                GgSelectionBar(count: gg.selected.count, onCancel: { gg.selecting = false; gg.selected = [] }, onAsk: { gg.suggesting = true })
+            } else if c.kind == .direct && c.memberIds.contains(where: { store.blockedUserIds.contains($0) }) {
                 Text(L("safety.directBlocked")).font(.footnote).foregroundStyle(Theme.textSecondary).padding(14)
             } else if c.canPost { composer(d, c) } else {
                 Text(L("chat.readOnly"))
@@ -494,6 +502,10 @@ struct ConversationView: View {
                 .accessibilityLabel([Naming.title(d, c), headerSubtitle(d, c)].filter { !$0.isEmpty }.joined(separator: ", "))
                 .accessibilityHint(L("chat.details"))
                 .accessibilityIdentifier("chat.header")
+            }
+            // gg entre el nombre y la píldora de 📞/🎥/🔍/⋯ (sin mover nada; si no cabe, el nombre se corta).
+            if store.ggSide.available == true {
+                ToolbarItem(placement: .topBarTrailing) { GgHeaderButton(source: ggSource) { gg.open = true } }
             }
             ToolbarItem(placement: .topBarTrailing) { CallHeaderButtons(conv: c) }
             ToolbarItem(placement: .topBarTrailing) {
@@ -1166,9 +1178,21 @@ struct ConversationView: View {
                 } else { bubble }
             }
             .padding(.top, showAuthor ? 6 : 0)
-            .background(RoundedRectangle(cornerRadius: 12).fill(Theme.orange.opacity(highlighted == m.id ? 0.18 : 0)))
+            // «Seleccionar» (gg): círculo a la izquierda y tocar marca o desmarca el mensaje.
+            .padding(.leading, gg.selecting ? 30 : 0)
+            .overlay(alignment: .leading) { if gg.selecting { GgSelectCircle(on: gg.selected.contains(m.id)).padding(.leading, 2) } }
+            .overlay {
+                if gg.selecting {
+                    Color.clear.contentShape(Rectangle()).onTapGesture { toggleSelected(m.id) }
+                        .accessibilityElement()
+                        .accessibilityLabel(excerpt(m.body, 80))
+                        .accessibilityAddTraits(gg.selected.contains(m.id) ? [.isButton, .isSelected] : .isButton)
+                        .accessibilityIdentifier("gg.select.\(m.id)")
+                }
+            }
+            .background(RoundedRectangle(cornerRadius: 12).fill(Theme.orange.opacity(highlighted == m.id ? 0.18 : gg.selected.contains(m.id) && gg.selecting ? 0.1 : 0)))
             // Deslizar la burbuja a la derecha = responder con cita (1.7.1, como WhatsApp). El sidechat queda en el menú.
-            .modifier(SwipeToReply(enabled: canReply(c, m)) { startReply(m) })
+            .modifier(SwipeToReply(enabled: canReply(c, m) && !gg.selecting) { startReply(m) })
             .accessibilityIdentifier("msg.\(m.id)")
             if m.deletedAt == nil && !m.reactions.isEmpty {
                 ReactionChips(d: d, message: m, mine: mine, canReact: c.canPost, onToggle: { react(m, $0) }, onMore: { sheet = .react(m) })
@@ -1254,6 +1278,14 @@ struct ConversationView: View {
         // Asuntos y reuniones también en directos y multi (SPEC-v4 E); derivar sigue siendo de espacios.
         let canWork = c.canPost
         let myWsRole = d.workspaces.first { $0.id == c.workspaceId }?.myRole
+        // gg (contrato 1-oct): se agrega «✨ Preguntar a gg» y «Seleccionar»; no se quita nada del menú de siempre.
+        if store.ggSide.available == true && m.kind == "text" {
+            Button { gg.quotes = [ggQuote(d, m)]; gg.open = true } label: { Label("✨ " + L("ggs.ask"), systemImage: "sparkles") }
+                .accessibilityIdentifier("menu.askGg")
+            Button { gg.selecting = true; gg.selected = [m.id]; composerFocused = false } label: { Label(L("ggs.select"), systemImage: "checkmark.circle") }
+                .accessibilityIdentifier("menu.select")
+            Divider()
+        }
         // Bloque 1: responder aquí o por DM al autor. Bloque 2: responder aparte en un hilo o en un sidechat privado.
         // «Responder en privado» y el sidechat son opciones distintas (docs/GRUPOS.md).
         if c.canPost {
@@ -1396,6 +1428,12 @@ struct ConversationView: View {
                                   askSide = store.conversations[conversationId]?.messages.last { !$0.isSystem && $0.deletedAt == nil && $0.kind == "text" }
                               })
             }
+            if gg.draftActive { GgDraftBar { gg.draftActive = false } }
+            if let b = gg.bubbles, !b.isEmpty {
+                GgReplyBubbles(drafts: b, onPick: { putGgDraft($0.text); gg.bubbles = nil }, onClose: { gg.bubbles = nil })
+            } else if !embedded && !gg.draftActive && store.ggSide.used.contains(ggSource) {
+                GgContinueBar { gg.open = true }
+            }
             if showQuickReplies(d, c) {
                 SideQuickReplies(onSend: { store.send(conversationId, body: $0) }, onAskOther: { addingToSide = true })
             }
@@ -1433,6 +1471,18 @@ struct ConversationView: View {
                                  onWhatsApp: embedded || !store.mailEnabled || Naming.isGuest(d, c) ? nil : { store.push(.whatsapp) }) { store.show($0) }
                 }
                 if editing == nil && !commenting && !embedded { ViewOnceToggle(on: $viewOnceNext) }
+                // ✨: si el último mensaje es de la otra persona, 3 respuestas de gg sobre la caja (solo al tocarlo, no solas).
+                if editing == nil && !commenting && trimmed.isEmpty && store.ggSide.available == true && lastIsFromOther(d) {
+                    Button { loadReplyBubbles() } label: {
+                        Group {
+                            if gg.loadingBubbles { ProgressView().controlSize(.small) } else { Image(systemName: "sparkles").font(.system(size: 17, weight: .semibold)) }
+                        }
+                        .foregroundStyle(Theme.accentText).frame(width: 34, height: 40)
+                    }
+                    .disabled(gg.loadingBubbles)
+                    .accessibilityLabel(L("ggs.replyIdeas"))
+                    .accessibilityIdentifier("composer.ggReplies")
+                }
                 // UITextView: tokens resaltados, cursor real y retroceso que borra el token entero.
                 ComposerTextView(text: $draft, mentions: $draftMentions, cursor: $draftCursor, focused: $composerFocused,
                                  placeholder: composerPlaceholder(d, c), accessibilityLabel: L("chat.composerLabel"),
@@ -1531,6 +1581,44 @@ struct ConversationView: View {
                 failedVoice = voice
                 store.show(VoiceRules.uploadErrorText(error))
             }
+        }
+    }
+
+    // MARK: gg
+
+    private var ggSource: String { GgSource.conversation(conversationId) }
+
+    private func ggQuote(_ d: BootstrapDTO, _ m: MessageDTO) -> GgQuote {
+        GgQuote(id: m.id, author: Naming.person(d, m.authorId)?.name ?? "", text: excerpt(m.body, 200))
+    }
+
+    private func toggleSelected(_ id: String) {
+        if gg.selected.contains(id) { gg.selected.remove(id) } else { gg.selected.insert(id) }
+        Haptics.tap()
+    }
+
+    private func lastIsFromOther(_ d: BootstrapDTO) -> Bool {
+        guard let last = store.conversations[conversationId]?.messages.last(where: { !$0.isSystem && $0.deletedAt == nil }) else { return false }
+        return last.authorId != d.me.id
+    }
+
+    /// Elegir no es enviar: el texto cae en el compositor como «Borrador de gg».
+    private func putGgDraft(_ text: String) {
+        editing = nil
+        draft = text
+        draftMentions = []
+        draftCursor = (text as NSString).length
+        gg.draftActive = true
+        composerFocused = true
+    }
+
+    private func loadReplyBubbles() {
+        gg.loadingBubbles = true
+        Task {
+            defer { gg.loadingBubbles = false }
+            do { gg.bubbles = try await store.ggSideReplyForMe(ggSource, record: false) }
+            catch let e as ApiRequestError where e.needsAIConsent { gg.open = true }
+            catch { store.show(L("ggs.error")) }
         }
     }
 
@@ -2036,4 +2124,23 @@ struct LongTextSheet: View {
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button(L("common.close")) { dismiss() }.accessibilityIdentifier("longText.close") } }
         }
     }
+}
+
+
+/// Estado de gg en un chat: la hoja, lo citado, la selección de varios mensajes y la cola de «Hacer estas N».
+struct GgChatState {
+    var open = false
+    var quotes: [GgQuote] = []
+    var ask: String?
+    var selecting = false
+    var selected: Set<String> = []
+    var suggesting = false
+    var queue: [GgOutcome] = []
+    var task: GgPrefill?
+    var reminder: GgPrefill?
+    /// El texto del compositor lo puso gg (se edita y se envía a mano).
+    var draftActive = false
+    /// Las 3 burbujitas de respuesta (solo tras tocar ✨).
+    var bubbles: [GgDraft]?
+    var loadingBubbles = false
 }

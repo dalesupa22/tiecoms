@@ -169,6 +169,9 @@ struct WhatsAppScreen: View {
                                 ForEach(WaCategory.allCases, id: \.self) { k in
                                     Button("\(k.icon) \(L("wa.cat.\(k.rawValue)"))") { patch(c, ["category": k.rawValue]) }
                                 }
+                                Divider()
+                                // Bandeja de chaggu (contrato 1-oct): moverlo a Grupos o DMs, fijarlo arriba o sacarlo.
+                                WaMoveToInboxItems(chat: c) { replace($0) }
                             }
                     }
                 }
@@ -384,10 +387,24 @@ struct WaChatSheet: View {
     var onPatched: (WaChatDTO) -> Void
     @State private var messages: [WaMessageDTO]?
     @State private var sharing: WaMessageDTO?
+    // gg de este chat de WhatsApp (fuente wa:<cuenta>:<jid>).
+    @State private var ggOpen = false
+    @State private var ggQuotes: [GgQuote] = []
+    @State private var ggAsk: String?
+    @State private var selecting = false
+    @State private var selected: Set<String> = []
+    @State private var suggesting = false
+    @State private var ggQueue: [GgOutcome] = []
+    @State private var taskPrefill: GgPrefill?
+    @State private var reminderPrefill: GgPrefill?
+
+    private var source: String { GgSource.whatsapp(chat) }
 
     var body: some View {
         NavigationStack {
             List {
+                // Bandeja de chaggu: «Mover a mi lista principal», «📌 Fijar arriba» o «Sacar de mi lista principal».
+                Section { WaMoveToInboxItems(chat: chat) { up in chat = up; onPatched(up) } }
                 Section {
                     Picker(L("wa.category"), selection: Binding(get: { chat.category }, set: { patch(["category": $0.rawValue]) })) {
                         ForEach(WaCategory.allCases, id: \.self) { Text("\($0.icon) \(L("wa.cat.\($0.rawValue)"))").tag($0) }
@@ -412,18 +429,34 @@ struct WaChatSheet: View {
                     if messages == nil { ProgressView() }
                     if messages?.isEmpty == true { Text(L("wa.noMessages")).foregroundStyle(Theme.textSecondary) }
                     ForEach(messages ?? []) { m in
+                        HStack(spacing: 8) {
+                            if selecting { GgSelectCircle(on: selected.contains(m.id)) }
                         VStack(alignment: m.fromMe ? .trailing : .leading, spacing: 2) {
                             if !m.fromMe, chat.isGroup, let a = m.author { Text(a).font(.caption.weight(.semibold)) }
                             Text(m.body)
                             Text(L10n.dateTime(ISODate.parse(m.sentAt) ?? Date())).font(.caption2).foregroundStyle(Theme.textSecondary)
                         }
                         .frame(maxWidth: .infinity, alignment: m.fromMe ? .trailing : .leading)
+                        }
                         .accessibilityElement(children: .combine)
+                        .overlay {
+                            if selecting {
+                                Color.clear.contentShape(Rectangle()).onTapGesture { toggle(m.id) }
+                                    .accessibilityAddTraits(selected.contains(m.id) ? .isSelected : [])
+                            }
+                        }
                         // Correo y WhatsApp en el chat (docs/CORREO.md): pulsación larga › «Comentar en chaggu…».
+                        // gg: «✨ Preguntar a gg» y «Seleccionar», sin quitar nada de lo que ya había.
                         .contextMenu {
                             if store.mailEnabled && !m.body.isEmpty {
                                 Button { sharing = m } label: { Label(L("wa.bring"), systemImage: "arrowshape.turn.up.right") }
                                     .accessibilityIdentifier("wa.bring")
+                            }
+                            if store.ggSide.available == true && !m.body.isEmpty {
+                                Button { ggQuotes = [quote(m)]; ggOpen = true } label: { Label("✨ " + L("ggs.ask"), systemImage: "sparkles") }
+                                    .accessibilityIdentifier("menu.askGg")
+                                Button { selecting = true; selected = [m.id] } label: { Label(L("ggs.select"), systemImage: "checkmark.circle") }
+                                    .accessibilityIdentifier("menu.select")
                             }
                         }
                         // Botón a la vista, como «⤴ Llevar a un chat» de la web.
@@ -439,9 +472,76 @@ struct WaChatSheet: View {
             }
             .navigationTitle(chat.name)
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button(L("common.close")) { dismiss() } } }
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button(L("common.close")) { dismiss() } }
+                if store.ggSide.available == true {
+                    ToolbarItem(placement: .primaryAction) { GgHeaderButton(source: source) { ggOpen = true } }
+                }
+            }
+            .safeAreaInset(edge: .bottom) {
+                if selecting {
+                    GgSelectionBar(count: selected.count, onCancel: { selecting = false; selected = [] }, onAsk: { suggesting = true })
+                } else if store.ggSide.used.contains(source) {
+                    GgContinueBar { ggOpen = true }.padding(.bottom, 6).background(Theme.background.opacity(0.9))
+                }
+            }
             .task(id: store.waRevision) { messages = (try? await store.waMessages(chat)) ?? [] }
+            .task(id: source) { await store.ggSidePending([source]) }
             .sheet(item: $sharing) { m in WaShareSheet(chat: chat, message: m) }
+            .sheet(isPresented: $ggOpen, onDismiss: { ggAsk = nil; runQueue() }) {
+                GgSideSheet(source: source, chatTitle: chat.name, quotes: $ggQuotes, initialAsk: ggAsk) { ggQueue = [$0] }
+            }
+            .sheet(isPresented: $suggesting, onDismiss: runQueue) {
+                GgSuggestSheet(source: source, messageIds: Array(selected), onDo: { list in
+                    ggQueue = list; selecting = false; selected = []
+                }, onAsk: { text in
+                    ggQuotes = (messages ?? []).filter { selected.contains($0.id) }.map(quote)
+                    ggAsk = text; selecting = false; selected = []
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { ggOpen = true }
+                })
+            }
+            // Sin chat de chaggu, la tarea es personal (el diálogo deja elegir otro destino).
+            .sheet(item: $taskPrefill, onDismiss: runQueue) { p in NewIssueSheet(conversationId: nil, origin: nil, prefill: p) }
+            .sheet(item: $reminderPrefill, onDismiss: runQueue) { p in
+                if let linked = chat.linkedConversationId { ReminderSheet(conversationId: linked, message: nil, prefill: p) }
+                else { NewIssueSheet(conversationId: nil, origin: nil, prefill: p) }
+            }
+        }
+    }
+
+    private func quote(_ m: WaMessageDTO) -> GgQuote {
+        GgQuote(id: m.id, author: m.fromMe ? L("a11y.you") : (m.author ?? chat.name), text: excerpt(m.body, 200))
+    }
+
+    private func toggle(_ id: String) {
+        if selected.contains(id) { selected.remove(id) } else { selected.insert(id) }
+        Haptics.tap()
+    }
+
+    /// Lo que se eligió de gg, uno por uno: cada diálogo se abre al cerrar el anterior. Aquí no hay compositor de
+    /// WhatsApp: los borradores se copian para pegarlos en WhatsApp (nada se envía solo).
+    private func runQueue() {
+        guard !ggQueue.isEmpty else { return }
+        let next = ggQueue.removeFirst()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            switch next {
+            case .draft(let t):
+                UIPasteboard.general.string = t
+                store.show(L("ggs.copied"))
+                runQueue()
+            case .task(let p): taskPrefill = p
+            case .reminder(let p): reminderPrefill = p
+            case .messagePerson(let name, let draft):
+                if let draft { UIPasteboard.general.string = draft }
+                if let d = store.data, let person = GgPeople.find(d, name: name) {
+                    dismiss()
+                    if draft != nil { store.show(L("ggs.copied")) }
+                    Task { do { try await store.openDirect(with: person.id) } catch { store.show(L10n.errorText(error)) } }
+                } else {
+                    if draft != nil { store.show(L("ggs.copied")) }
+                    runQueue()
+                }
+            }
         }
     }
 

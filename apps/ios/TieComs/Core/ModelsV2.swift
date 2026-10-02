@@ -359,7 +359,19 @@ struct WaChatDTO: Codable, Equatable, Identifiable, Sendable {
     var hidden: Bool
     var archivedInWhatsApp: Bool
     var linkedConversationId: String?
+    /// Bandeja de chaggu (contrato 1-oct-2026, migr. 081): 'groups' | 'dms' | nil (solo en la pantalla WhatsApp).
+    var inboxPlace: String?
+    /// Fijado arriba en la bandeja (independiente de `pinned`, que es el fijado dentro de WhatsApp).
+    var inboxPinnedAt: String?
+    /// Estado de la cuenta (connected, logged_out…). Ausente en servidores anteriores.
+    var accountStatus: String?
     var id: String { "\(accountId)|\(jid)" }
+    /// Clave de la fila en la bandeja y fuente de gg: `wa:<accountId>:<jid>`.
+    var inboxKey: String { "wa:\(accountId):\(jid)" }
+    var inInbox: Bool { inboxPlace != nil }
+    /// La sección que sugiere el servidor con 'auto': un grupo a Grupos, un 1 a 1 a DMs.
+    var suggestedPlace: String { isGroup ? "groups" : "dms" }
+    var isDisconnected: Bool { accountStatus.map { $0 != "connected" } ?? false }
 
     init(from decoder: Decoder) throws {
         let c = try container(decoder)
@@ -380,6 +392,9 @@ struct WaChatDTO: Codable, Equatable, Identifiable, Sendable {
         hidden = c.v("hidden", false)
         archivedInWhatsApp = c.v("archivedInWhatsApp", false)
         linkedConversationId = c.o("linkedConversationId")
+        inboxPlace = c.o("inboxPlace").flatMap { (x: String) in ["groups", "dms"].contains(x) ? x : nil }
+        inboxPinnedAt = c.o("inboxPinnedAt")
+        accountStatus = c.o("accountStatus")
     }
 }
 

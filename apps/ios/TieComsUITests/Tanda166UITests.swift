@@ -92,8 +92,8 @@ final class Tanda166UITests: XCTestCase {
         let row = app.buttons["conv.row.\(f.generalId)"]
         XCTAssertTrue(waitFor(row, 20, app), "fila de General")
         if app.buttons["home.tab.all"].exists { app.buttons["home.tab.all"].tap() }
-        let seg = app.segmentedControls["grp.viewMode"]
-        if seg.exists { seg.buttons["Lista"].tap() }
+        let toggle = app.buttons["grp.viewMode"]
+        if toggle.exists && (toggle.value as? String) != "Lista" { toggle.tap() }
         // General está leído, pero sus dos derivadas suman 11: la fila lo dice con «⑂ 11».
         XCTAssertTrue(row.label.contains("11 sin leer en hilos y ramas"), row.label)
         XCTAssertTrue(app.buttons["home.tab.unread"].label.hasSuffix(", 2"), "«No leídos» ya no dice 0: \(app.buttons["home.tab.unread"].label)")

@@ -3606,5 +3606,229 @@
  "card.forwarded": [
   "Reenviado",
   "Forwarded"
+ ],
+ "wa.moveToInbox": [
+  "Mover a mi lista principal",
+  "Move to my main list"
+ ],
+ "wa.toGroups": [
+  "A Grupos",
+  "To Groups"
+ ],
+ "wa.toDms": [
+  "A DMs",
+  "To DMs"
+ ],
+ "wa.pinTop": [
+  "Fijar arriba",
+  "Pin to top"
+ ],
+ "wa.inboxPin": [
+  "Fijar",
+  "Pin"
+ ],
+ "wa.inboxUnpin": [
+  "Quitar de fijados",
+  "Unpin"
+ ],
+ "wa.removeFromInbox": [
+  "Sacar de mi lista principal",
+  "Remove from my main list"
+ ],
+ "wa.moveGroups": [
+  "Mover a Grupos",
+  "Move to Groups"
+ ],
+ "wa.moveDms": [
+  "Mover a DMs",
+  "Move to DMs"
+ ],
+ "wa.disconnected": [
+  "WhatsApp desconectado",
+  "WhatsApp disconnected"
+ ],
+ "wa.suggestedPlace": [
+  "sugerido",
+  "suggested"
+ ],
+ "wa.movedGroups": [
+  "Ahora está en Grupos",
+  "Now in Groups"
+ ],
+ "wa.movedDms": [
+  "Ahora está en DMs",
+  "Now in DMs"
+ ],
+ "wa.removedInbox": [
+  "Sacado de tu lista principal",
+  "Removed from your main list"
+ ],
+ "wa.openChat": [
+  "Abrir chat",
+  "Open chat"
+ ],
+ "grp.viewToggle.list": [
+  "Cambiar a lista",
+  "Switch to list"
+ ],
+ "grp.viewToggle.tree": [
+  "Cambiar a árbol",
+  "Switch to tree"
+ ],
+ "ggs.title": [
+  "gg de este chat",
+  "gg for this chat"
+ ],
+ "ggs.scope": [
+  "Solo ve este chat · Solo tú ves esta conversación",
+  "Only sees this chat · Only you see this conversation"
+ ],
+ "ggs.pendingA11y": [
+  "{n} cosas esperan algo de ti",
+  "{n} things are waiting on you"
+ ],
+ "ggs.pendingTitle": [
+  "Te esperan",
+  "Waiting on you"
+ ],
+ "ggs.replyForMe": [
+  "Responder por mí",
+  "Reply for me"
+ ],
+ "ggs.summarize": [
+  "Resúmeme",
+  "Summarize for me"
+ ],
+ "ggs.whatsLeft": [
+  "¿Qué me falta responder?",
+  "What do I still need to answer?"
+ ],
+ "ggs.agreed": [
+  "¿Qué acordamos?",
+  "What did we agree on?"
+ ],
+ "ggs.ask": [
+  "Preguntar a gg",
+  "Ask gg"
+ ],
+ "ggs.placeholder": [
+  "Pregúntale a gg sobre este chat…",
+  "Ask gg about this chat…"
+ ],
+ "ggs.continue": [
+  "Seguir con gg",
+  "Continue with gg"
+ ],
+ "ggs.new": [
+  "Nueva conversación",
+  "New conversation"
+ ],
+ "ggs.openAssistant": [
+  "Abrir en gg",
+  "Open in gg"
+ ],
+ "ggs.style.short": [
+  "Corta",
+  "Short"
+ ],
+ "ggs.style.warm": [
+  "Cálida",
+  "Warm"
+ ],
+ "ggs.style.action": [
+  "Con acción",
+  "With action"
+ ],
+ "ggs.tone.me": [
+  "Como yo",
+  "Like me"
+ ],
+ "ggs.tone.shorter": [
+  "Más corto",
+  "Shorter"
+ ],
+ "ggs.tone.formal": [
+  "Más formal",
+  "More formal"
+ ],
+ "ggs.tone.more": [
+  "Otras",
+  "Others"
+ ],
+ "ggs.useDraft": [
+  "Usar",
+  "Use"
+ ],
+ "ggs.taskAction": [
+  "Crear tarea",
+  "Create task"
+ ],
+ "ggs.remindAction": [
+  "Recordatorio",
+  "Reminder"
+ ],
+ "ggs.draftBar": [
+  "Borrador de gg",
+  "gg draft"
+ ],
+ "ggs.draftHint": [
+  "Revísalo y envíalo tú",
+  "Review it and send it yourself"
+ ],
+ "ggs.copied": [
+  "Copiado: pégalo donde lo vas a enviar",
+  "Copied: paste it where you'll send it"
+ ],
+ "ggs.select": [
+  "Seleccionar",
+  "Select"
+ ],
+ "ggs.selected": [
+  "{n} seleccionados",
+  "{n} selected"
+ ],
+ "ggs.askN": [
+  "✨ Pedir a gg ({n})",
+  "✨ Ask gg ({n})"
+ ],
+ "ggs.suggestTitle": [
+  "Pedir a gg",
+  "Ask gg"
+ ],
+ "ggs.doN": [
+  "Hacer estas {n}",
+  "Do these {n}"
+ ],
+ "ggs.doOne": [
+  "Hacer esta",
+  "Do this one"
+ ],
+ "ggs.free": [
+  "O pide lo que quieras…",
+  "Or ask for anything…"
+ ],
+ "ggs.quoting": [
+  "Sobre este mensaje",
+  "About this message"
+ ],
+ "ggs.quotingN": [
+  "Sobre {n} mensajes",
+  "About {n} messages"
+ ],
+ "ggs.thinking": [
+  "gg está pensando…",
+  "gg is thinking…"
+ ],
+ "ggs.error": [
+  "gg no pudo responder. Intenta otra vez.",
+  "gg couldn't answer. Try again."
+ ],
+ "ggs.replyIdeas": [
+  "Ideas de respuesta de gg",
+  "Reply ideas from gg"
+ ],
+ "ggs.nothingToSuggest": [
+  "gg no encontró nada que hacer con esto.",
+  "gg found nothing to do with this."
  ]
 }

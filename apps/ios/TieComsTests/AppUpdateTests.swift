@@ -46,7 +46,7 @@ final class AppUpdateTests: XCTestCase {
 
     func testInstalledBuildIsTheBundleBuild() {
         XCTAssertEqual(AppUpdate.installedBuild, Int(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as! String))
-        XCTAssertEqual(AppUpdate.installedBuild, 44, "1.7.5 (44)")
+        XCTAssertEqual(AppUpdate.installedBuild, 47, "1.7.7 (47)")
     }
 
     func testUpdateTargets() {

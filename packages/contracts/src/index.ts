@@ -755,6 +755,11 @@ export interface AgentDTO {
   tasks: { open: number; done: number; recent: AgentTaskDTO[] };
   /** Quien mira puede rotar el token o apagarlo (administración o dueño). */
   canManage: boolean;
+  /**
+   * Webhook de salida (responde al instante). null = no tiene: el agente consulta por MCP cada cierto tiempo.
+   * host y pending solo para quien lo administra; host nunca trae la ruta (puede llevar secretos).
+   */
+  webhook: { allMessages: boolean; host: string | null; pending: number | null; lastDeliveredAt: string | null } | null;
 }
 
 /** Resumen con IA bajo pedido. basis = de qué salió: el texto del artículo o solo la descripción (videos, redes). */

@@ -53,10 +53,14 @@ export async function listOrgAgents(viewerId: string, orgId: string): Promise<{ 
                JOIN conversation_memberships me ON me.conversation_id = cv.id AND me.user_id = $2 AND me.removed_at IS NULL
               WHERE m.user_id = u.id AND m.removed_at IS NULL) AS groups,
             (SELECT count(*)::int FROM conversation_memberships m JOIN conversations cv ON cv.id = m.conversation_id AND cv.archived_at IS NULL
-              WHERE m.user_id = u.id AND m.removed_at IS NULL) AS group_total
+              WHERE m.user_id = u.id AND m.removed_at IS NULL) AS group_total,
+            wh.url AS webhook_url, wh.all_messages AS webhook_all,
+            (SELECT count(*)::int FROM agent_deliveries ad WHERE ad.agent_user_id = u.id AND ad.delivered_at IS NULL) AS webhook_pending,
+            (SELECT max(ad.delivered_at) FROM agent_deliveries ad WHERE ad.agent_user_id = u.id) AS webhook_last
        FROM users u JOIN organization_memberships om ON om.user_id = u.id AND om.org_id = $1
        LEFT JOIN LATERAL (SELECT al.actor_id FROM audit_events al WHERE al.target_id = u.id AND al.action = 'agent.created' ORDER BY al.id LIMIT 1) al ON true
        LEFT JOIN users ow ON ow.id = al.actor_id
+       LEFT JOIN agent_webhooks wh ON wh.agent_user_id = u.id AND wh.revoked_at IS NULL
       WHERE u.kind = 'agent' AND u.disabled_at IS NULL
       ORDER BY lower(u.name)`,
     [orgId, viewerId],
@@ -75,6 +79,9 @@ export async function listOrgAgents(viewerId: string, orgId: string): Promise<{ 
   )).rows : [];
   const agents = rows.map((r): AgentDTO => {
     const mine = tasks.filter((t) => t.agent_id === r.id);
+    const manage = isAdmin(role) || r.owner_id === viewerId;
+    let host: string | null = null;
+    try { host = r.webhook_url ? new URL(r.webhook_url).host : null; } catch { host = null; }
     return {
       id: r.id,
       name: r.name,
@@ -92,7 +99,10 @@ export async function listOrgAgents(viewerId: string, orgId: string): Promise<{ 
         done: mine.filter((t) => t.status === 'done').length,
         recent: mine.slice(0, 5).map((t) => ({ id: t.id, title: t.title, status: t.status, chatId: t.conversation_id, chat: t.chat, updatedAt: iso(t.updated_at)! })),
       },
-      canManage: isAdmin(role) || r.owner_id === viewerId,
+      canManage: manage,
+      webhook: r.webhook_url
+        ? { allMessages: !!r.webhook_all, host: manage ? host : null, pending: manage ? r.webhook_pending : null, lastDeliveredAt: iso(r.webhook_last) }
+        : null,
     };
   });
   return { agents, canCreate: isAdmin(role) };

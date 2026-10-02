@@ -69,6 +69,7 @@ describe('pantalla Agentes', () => {
     expect(a.tasks.open).toBe(1);
     expect(a.tasks.recent[0].title).toBe(`Ticket ${run}`);
     expect(a.canManage).toBe(true);
+    expect(a.webhook).toBeNull();
     // Laura no está en el grupo privado de Danny: no lo ve por nombre, solo cuenta.
     const hers = (await call(`/api/v1/organizations/${danny.orgId}/agents`, { token: laura.token })).json;
     const b = hers.agents.find((x: any) => x.id === agentId);

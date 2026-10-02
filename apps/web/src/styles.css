@@ -2421,6 +2421,8 @@ body.is-pane-resizing, body.is-pane-resizing * { user-select: none !important; }
 .agent-name { font-size: 16px; }
 .agent-state { font-size: 12px; padding: 2px 8px; border-radius: 99px; background: var(--paper-3); color: var(--ink-2); }
 .agent-state.on { background: color-mix(in srgb, #2f9e6a 16%, transparent); color: #2f9e6a; }
+.agent-state.live { background: color-mix(in srgb, #4b3f9e 18%, transparent); color: #7d70e0; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .agent-state.on::before { content: '●'; margin-right: 4px; font-size: 9px; vertical-align: 1px; }
 .agent-meta { display: grid; grid-template-columns: 1fr auto; gap: 16px; }
 .agent-meta .eyebrow { margin-bottom: 6px; }

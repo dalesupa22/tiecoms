@@ -87,6 +87,11 @@ export function AgentsScreen() {
                   <span className={`agent-state ${a.connected ? (a.lastUsedAt && Date.now() - Date.parse(a.lastUsedAt) < 86400e3 ? 'on' : 'idle') : 'off'}`}>
                     {a.connected ? (a.lastUsedAt ? `${L('Conectado', 'Connected')} · ${L('usado', 'used')} ${ago(a.lastUsedAt)}` : L('Token listo · sin usar aún', 'Token ready · not used yet')) : L('Sin token', 'No token')}
                   </span>
+                  <span className={`agent-state ${a.webhook ? 'live' : ''}`} title={a.webhook
+                    ? L(`Le avisamos al instante cuando le escriben, lo mencionan o le responden${a.webhook.allMessages ? ', y ante todo mensaje de sus grupos' : ''}.`, `Notified instantly on direct messages, mentions and replies${a.webhook.allMessages ? ', and on every message in its groups' : ''}.`)
+                    : L('Sin webhook: revisa sus mensajes por MCP cada cierto tiempo.', 'No webhook: it checks its messages via MCP periodically.')}>
+                    {a.webhook ? `⚡ ${L('Responde al instante', 'Replies instantly')}${a.webhook.allMessages ? ` · ${L('todo', 'all')}` : ''}` : L('Sin aviso inmediato', 'No instant alerts')}
+                  </span>
                 </div>
                 <div className="small muted ellipsis">{[a.title, a.owner ? `${L('Dueño', 'Owner')}: ${a.owner.name}` : null, `${L('desde', 'since')} ${new Date(a.createdAt).toLocaleDateString(locale(), { day: 'numeric', month: 'short', year: 'numeric' })}`].filter(Boolean).join(' · ')}</div>
               </div>
@@ -96,6 +101,13 @@ export function AgentsScreen() {
                 {a.canManage && <button className="btn small ghost agent-off" onClick={() => disable(a)}>{L('Apagar', 'Turn off')}</button>}
               </div>
             </div>
+            {a.canManage && a.webhook && (
+              <div className="small muted">
+                Webhook: <span className="mono">{a.webhook.host ?? '—'}</span>
+                {' · '}{a.webhook.pending ? <b style={{ color: 'var(--danger)' }}>{a.webhook.pending} {L('avisos sin entregar', 'undelivered')}</b> : L('todo entregado', 'all delivered')}
+                {a.webhook.lastDeliveredAt ? ` · ${L('último aviso', 'last alert')} ${ago(a.webhook.lastDeliveredAt)}` : ''}
+              </div>
+            )}
             <div className="agent-meta">
               <div>
                 <div className="eyebrow">{L('Grupos', 'Groups')}</div>

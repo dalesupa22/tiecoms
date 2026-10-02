@@ -1,3 +1,4 @@
+import { scrollWithin } from '../scroll-within.ts';
 import { PaneSizeControl, type PaneSizing } from './PaneSizeControl.tsx';
 import { showDialogUntilClosed } from '../actions.tsx';
 import { LONG_TEXT_LIMIT, textFile } from '../rich-text.ts';
@@ -389,7 +390,7 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
     const el = document.getElementById(`msg-${id}-${seq}`);
     if (!el) return;
     scrollToSeq.current = null;
-    el.scrollIntoView({ block: 'center', behavior: 'instant' });
+    scrollWithin(scroller.current, el, 'vertical', 'center');
   });
 
   useEffect(() => {
@@ -434,7 +435,7 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
   useLayoutEffect(() => {
     if (!justPlaced.current || newLine == null) return;
     justPlaced.current = false;
-    document.getElementById(`new-${id}`)?.scrollIntoView({ block: 'start' });
+    scrollWithin(scroller.current, document.getElementById(`new-${id}`), 'vertical', 'start');
     updateNav();
   }, [newLine]);
 

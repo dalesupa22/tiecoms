@@ -10,7 +10,7 @@
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { navigate } from './router.ts';
 import { MAX_PANES_DEFAULT, TASKS_KEY, isChatKey, placeIntoGrid, replaceIndex, splitMain } from './grid-keys.ts';
-import { layoutAfterPlacement, sanitizePanePositions, type PanePosition } from './grid-span-layout.ts';
+import { gridSpanLayout, layoutAfterPlacement, sanitizePanePositions, type PanePosition } from './grid-span-layout.ts';
 
 export const MAX_PANES = MAX_PANES_DEFAULT;
 /** Desde qué ancho de ventana hay paneles (la app de Mac abre en ~1000 px: con 1100 no aparecían). */
@@ -157,9 +157,19 @@ function revealLayoutPane(key: string) {
   layoutOrder = order; saveLayout();
 }
 
+/** Closing/replacing panels releases whole empty columns, without erasing deliberate empty row cells. */
+function compactStoredPositions() {
+  panePositions = sanitizePanePositions(panePositions, panes);
+  if (layout !== 'custom') return;
+  const order = [...layoutOrder.filter((key) => panes.includes(key)), ...panes.filter((key) => !layoutOrder.includes(key))];
+  const packed = gridSpanLayout(order, new Set(tallPanes), new Set(widePanes), panePositions);
+  panePositions = Object.fromEntries(Object.entries(packed.cells).map(([key, cell]) => [key, { column: cell.column, row: cell.row }]));
+  if (columnSizes.length !== packed.columns) columnSizes = [];
+}
+
 function set(next: string[]) {
   panes = next.slice(0, MAX_STORED);
-  panePositions = sanitizePanePositions(panePositions, panes);
+  compactStoredPositions();
   saveLayout();
   // Lo que ya no está en la cuadrícula deja de estar fijado y de guardar su nombre.
   pinned = new Set([...pinned].filter((k) => panes.includes(k)));
@@ -293,8 +303,9 @@ export function removePanes(keys: readonly string[]) {
   layoutOrder = layoutOrder.filter((key) => !removed.has(key));
   tallPanes = tallPanes.filter((key) => !removed.has(key));
   widePanes = widePanes.filter((key) => !removed.has(key));
-  saveLayout();
   panes = panes.filter((key) => !removed.has(key));
+  compactStoredPositions();
+  saveLayout();
   pinned = new Set([...pinned].filter((key) => !removed.has(key)));
   metas = Object.fromEntries(Object.entries(metas).filter(([key]) => !removed.has(key)));
   if (activeKey && removed.has(activeKey)) activeKey = null;

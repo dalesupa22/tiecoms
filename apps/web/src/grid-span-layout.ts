@@ -39,6 +39,11 @@ export function gridSpanLayout(keys: readonly string[], tall: ReadonlySet<string
       placed = true; break;
     }
   }
+  // A deliberate empty row is useful; wholly empty columns after closing/replacing a pane are not.
+  const used = [...new Set(Object.values(cells).flatMap((cell) => Array.from({ length: cell.width }, (_, i) => cell.column + i)))].sort((a, b) => a - b);
+  const rebased = new Map(used.map((column, i) => [column, i + 1]));
+  for (const cell of Object.values(cells)) cell.column = rebased.get(cell.column)!;
+  columns = Math.max(1, used.length);
   return { cells, columns };
 }
 

@@ -5,7 +5,7 @@
  * 1 → pantalla completa · 2 → lado a lado · 3 → dos arriba y uno abajo · 4 → cuadrícula 2×2.
  * Vive en /c/:id (el chat del URL es el activo) y en /cuadricula, y también al lado de WhatsApp y Correo.
  */
-import { useEffect, useRef, useState, type CSSProperties, type DragEvent } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type DragEvent } from 'react';
 import { useClient } from '../app-client.ts';
 import { locale, t } from '../i18n.ts';
 import { navigate } from '../router.ts';
@@ -19,6 +19,7 @@ import {
   useTallPanes, useWidePanes, setPaneSize, setGridGeometry, placeGridPane, usePanePositions, useGridColumnSizes, useMetas,
 } from '../split.ts';
 import { gridSpanLayout } from '../grid-span-layout.ts';
+import { paneColumnTracks } from '../grid-track-sizing.ts';
 import { GridTrackHandles } from './GridTrackHandles.tsx';
 import { usePaneGestures } from './usePaneGestures.ts';
 import { ConversationScreen } from './Conversation.tsx';
@@ -93,6 +94,19 @@ export function GridArea({ id, search = '', side }: { id: string | null; search?
     : !customLayout && grid.length >= 4 ? [grid[0]!, grid[2]!, grid[1]!, grid[3]!, ...grid.slice(4), ...(withTasks ? [TASKS_KEY] : [])] : arranged;
   const resizePane = (key: string, rows: 1 | 2, columns: 1 | 2) => setPaneSize(key, rows, columns, currentTall, currentWide, [...new Set(sizingOrder)]);
   const gestureRoot = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const split = gestureRoot.current?.querySelector<HTMLElement>('.split'); if (!split) return;
+    // Wait for membership and active-key updates from the same operation to settle.
+    const frame = requestAnimationFrame(() => {
+      split.scrollLeft = 0;
+      const selected = split.querySelector<HTMLElement>(':scope > .split-cell.is-active:not([hidden])');
+      if (selected) {
+        const box = selected.getBoundingClientRect(), viewport = split.getBoundingClientRect();
+        if (box.right > viewport.right) split.scrollLeft += box.right - viewport.right;
+      }
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [list.join('|')]);
   const gesturesEnabled = wide && !side && !expanded && list.length > 1;
   usePaneGestures(gestureRoot, { enabled: gesturesEnabled, order: list, tall: currentTall, wide: currentWide, en: locale().startsWith('en'),
     onResize: resizePane, onMove: (source, target, position) => {
@@ -241,7 +255,7 @@ export function GridArea({ id, search = '', side }: { id: string | null; search?
     return (
       <div className={`split n${items.length} ${withTasks ? 'has-tasks-inline' : ''} ${mixedLayout || customLayout ? 'is-custom' : ''} ${customLayout && !expanded ? 'has-pane-spans' : ''} ${expanded ? 'is-expanded' : ''}`}
         style={withTasks ? { gridTemplateColumns: grid.length > 1 ? `${sizes.col}fr ${1 - sizes.col}fr clamp(300px, 28%, 440px)` : 'minmax(0, 1fr) clamp(300px, 28%, 440px)', gridTemplateRows: grid.length > 2 ? `${sizes.row}fr ${1 - sizes.row}fr` : 'minmax(0, 1fr)' }
-          : customLayout ? { gridTemplateColumns: Array.from({ length: spanLayout.columns }, (_, i) => `minmax(240px, ${columnSizes.length === spanLayout.columns ? columnSizes[i] : 1}fr)`).join(' '), gridTemplateRows: `${sizes.row}fr ${1 - sizes.row}fr` }
+          : customLayout ? { gridTemplateColumns: paneColumnTracks(spanLayout.columns, columnSizes, spanLayout.cells).map((track) => `minmax(${track.min}px, ${track.fraction}fr)`).join(' '), gridTemplateRows: `${sizes.row}fr ${1 - sizes.row}fr` }
           : mixedLayout ? { gridTemplateAreas: layout === 'tall-left' ? '"c a b" "d a b"' : layout === 'tall-right' ? '"a b c" "a b d"' : '"a c b" "a d b"', gridTemplateColumns: `${sizes.col * 2}fr 1fr ${(1 - sizes.col) * 2}fr`, gridTemplateRows: `${sizes.row}fr ${1 - sizes.row}fr` }
           : { gridTemplateColumns: `${sizes.col}fr ${1 - sizes.col}fr`, ...(items.length > 2 ? { gridTemplateRows: `${sizes.row}fr ${1 - sizes.row}fr` } : {}) }}>
         {items.map(cell)}

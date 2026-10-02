@@ -1,22 +1,34 @@
 import { useEffect, useRef, useState, type RefObject } from 'react';
+import { columnDragLimits, type PhysicalPaneColumns } from '../grid-track-sizing.ts';
 
-interface Tracks { widths: number[]; heights: number[]; gap: number; rowSegments: { left: number; width: number }[] }
+interface Tracks { widths: number[]; heights: number[]; gap: number; panes: PhysicalPaneColumns[]; columnSegments: { index: number; top: number; height: number }[]; rowSegments: { left: number; width: number }[] }
 const read = (el: HTMLElement): Tracks => {
   const style = getComputedStyle(el), r = el.getBoundingClientRect();
   const widths = style.gridTemplateColumns.split(' ').map(Number.parseFloat).filter(Number.isFinite);
   const heights = style.gridTemplateRows.split(' ').map(Number.parseFloat).filter(Number.isFinite);
   const gap = Number.parseFloat(style.gap) || 0;
   const boundary = r.top + (heights[0] ?? 0);
-  const rowSegments = Array.from(el.querySelectorAll<HTMLElement>(':scope > [data-pane]:not([hidden])')).flatMap((pane) => {
+  const elements = Array.from(el.querySelectorAll<HTMLElement>(':scope > [data-pane]:not([hidden])'));
+  const offsets = widths.map((_, i) => widths.slice(0, i).reduce((sum, w) => sum + w + gap, 0));
+  const closest = (x: number, points: number[]) => points.reduce((best, n, i) => Math.abs(n - x) < Math.abs(points[best]! - x) ? i : best, 0);
+  const panes = elements.map((pane) => { const box = pane.getBoundingClientRect(); return { start: closest(box.left - r.left + el.scrollLeft, offsets), end: closest(box.right - r.left + el.scrollLeft, offsets.map((x, i) => x + widths[i]!)), width: box.width }; });
+  const columnSegments = widths.slice(0, -1).flatMap((_, index) => {
+    const x = r.left + offsets[index]! + widths[index]! - el.scrollLeft;
+    const intervals = elements.flatMap((pane) => { const p = pane.getBoundingClientRect(); return Math.abs(p.right - x) < 2 || Math.abs(p.left - x - gap) < 2 ? [{ top: p.top - r.top, bottom: p.bottom - r.top }] : []; }).sort((a, b) => a.top - b.top);
+    const merged: { top: number; bottom: number }[] = [];
+    for (const interval of intervals) { const last = merged.at(-1); if (last && interval.top <= last.bottom + gap) last.bottom = Math.max(last.bottom, interval.bottom); else merged.push({ ...interval }); }
+    return merged.map((interval) => ({ index, top: interval.top, height: interval.bottom - interval.top }));
+  });
+  const rowSegments = elements.flatMap((pane) => {
     const p = pane.getBoundingClientRect();
     return heights.length === 2 && Math.abs(p.bottom - boundary) < 2 ? [{ left: p.left - r.left + el.scrollLeft, width: p.width }] : [];
   });
-  return { widths, heights, gap, rowSegments };
+  return { widths, heights, gap, panes, columnSegments, rowSegments };
 };
 
 /** Pixel preview touches only the local grid style; the saved layout is committed once on release. */
 export function GridTrackHandles({ root, revision, onCommit, en }: { root: RefObject<HTMLDivElement | null>; revision: string; onCommit: (widths: number[], row: number) => void; en: boolean }) {
-  const [tracks, setTracks] = useState<Tracks>({ widths: [], heights: [], gap: 6, rowSegments: [] });
+  const [tracks, setTracks] = useState<Tracks>({ widths: [], heights: [], gap: 6, panes: [], columnSegments: [], rowSegments: [] });
   const stop = useRef<(() => void) | null>(null);
   const commit = useRef(onCommit); commit.current = onCommit;
   useEffect(() => {
@@ -29,8 +41,8 @@ export function GridTrackHandles({ root, revision, onCommit, en }: { root: RefOb
     const widths = [...initial.widths], heights = [...initial.heights];
     if (axis === 'columns') {
       const total = widths[index]! + widths[index + 1]!;
-      const min = Math.min(240, total / 2);
-      widths[index] = Math.min(total - min, Math.max(min, widths[index]! + delta));
+      const limits = columnDragLimits(widths, initial.panes, index);
+      widths[index] = widths[index]! + Math.min(limits.max, Math.max(limits.min, delta));
       widths[index + 1] = total - widths[index]!;
       el.style.gridTemplateColumns = widths.map((w) => `${w}px`).join(' ');
     } else {
@@ -86,8 +98,8 @@ export function GridTrackHandles({ root, revision, onCommit, en }: { root: RefOb
     el.style.gridTemplateColumns = oldColumns; el.style.gridTemplateRows = oldRows;
   };
   return <>
-    {tracks.widths.slice(0, -1).map((_, i) => <div key={`c${i}`} className="grid-track-handle is-col" role="separator" tabIndex={0} aria-orientation="vertical" aria-valuenow={Math.round(tracks.widths[i]!)} aria-valuemin={240} aria-valuemax={Math.round(tracks.widths[i]! + tracks.widths[i + 1]! - 240)} aria-label={`${en ? 'Column width' : 'Ancho de columna'} ${i + 1}`} title={en ? 'Drag to set width · Arrow keys to adjust' : 'Arrastra para ajustar ancho · Flechas para ajustar'}
-      style={{ left: tracks.widths.slice(0, i + 1).reduce((a, b) => a + b, 0) + tracks.gap * i }} onPointerDown={(e) => start(e, 'columns', i)} onKeyDown={(e) => keyboard(e, 'columns', i)} />)}
+    {tracks.columnSegments.map((segment, at) => { const i = segment.index, limits = columnDragLimits(tracks.widths, tracks.panes, i); return <div key={`c${i}-${at}`} className="grid-track-handle is-col" role="separator" tabIndex={0} aria-orientation="vertical" aria-valuenow={Math.round(tracks.widths[i]!)} aria-valuemin={Math.round(tracks.widths[i]! + limits.min)} aria-valuemax={Math.round(tracks.widths[i]! + limits.max)} aria-label={`${en ? 'Column width' : 'Ancho de columna'} ${i + 1}`} title={en ? 'Drag to set width · Arrow keys to adjust' : 'Arrastra para ajustar ancho · Flechas para ajustar'}
+      style={{ left: tracks.widths.slice(0, i + 1).reduce((a, b) => a + b, 0) + tracks.gap * i, top: segment.top, height: segment.height, bottom: 'auto' }} onPointerDown={(e) => start(e, 'columns', i)} onKeyDown={(e) => keyboard(e, 'columns', i)} />; })}
     {tracks.rowSegments.map((segment, i) => <div key={`r${i}`} className="grid-track-handle is-row" role="separator" tabIndex={0} aria-orientation="horizontal" aria-valuenow={Math.round(tracks.heights[0]! / (tracks.heights[0]! + tracks.heights[1]!) * 100)} aria-valuemin={20} aria-valuemax={80} aria-label={en ? 'Row height' : 'Alto de filas'} title={en ? 'Drag to set height · Arrow keys to adjust' : 'Arrastra para ajustar alto · Flechas para ajustar'}
       style={{ top: tracks.heights[0], left: segment.left, width: segment.width }} onPointerDown={(e) => start(e, 'rows', 0)} onKeyDown={(e) => keyboard(e, 'rows', 0)} />)}
   </>;

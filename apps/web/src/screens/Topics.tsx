@@ -1,3 +1,4 @@
+import { scrollWithin } from '../scroll-within.ts';
 import { useEffect, useRef, useState } from 'react';
 import { TOPIC_COLORS, TOPIC_LIMIT, type ConversationDTO, type MessageDTO, type TopicColor, type TopicDTO } from '@tiecoms/contracts';
 import { client, useClient } from '../app-client.ts';
@@ -219,7 +220,7 @@ export function TopicDock({ conv, list, filter, onFilter, counts, unread = {} }:
   ];
   // La banderita elegida siempre queda a la vista (en el teléfono la fila es más ancha que la pantalla).
   const dock = useRef<HTMLDivElement>(null);
-  useEffect(() => { dock.current?.querySelector('.topic-flag.is-on')?.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' }); }, [filter, act.length]);
+  useEffect(() => { scrollWithin(dock.current, dock.current?.querySelector<HTMLElement>('.topic-flag.is-on') ?? null, 'horizontal', 'center', 'smooth'); }, [filter, act.length]);
   if (!act.length && !archived.length && !canEdit) return null;
   return (
     <div ref={dock} className="topic-dock" role="tablist" aria-label={t('topic.bar')}>

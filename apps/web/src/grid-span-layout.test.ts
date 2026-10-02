@@ -83,3 +83,16 @@ describe('saved position compatibility', () => {
     expect(sanitizePanePositions({ a: null, b: [], c: 'bad' }, ['a', 'b', 'c'])).toEqual({});
   });
 });
+
+describe('released grid columns', () => {
+  it('closes the middle wide pane without leaving whole blank columns', () => {
+    const result = gridSpanLayout(['adriana', 'tasks:'], new Set(['adriana', 'tasks:']), new Set(['adriana']), { adriana: { column: 1, row: 1 }, 'tasks:': { column: 5, row: 1 } });
+    expect(result.columns).toBe(3);
+    expect(result.cells['tasks:']!.column).toBe(3);
+    expect(result.cells.adriana!.width).toBe(2);
+  });
+  it('preserves an intentional empty upper cell while rebasing its whole column', () => {
+    const result = gridSpanLayout(['agenda:'], new Set(), new Set(), { 'agenda:': { column: 5, row: 2 } });
+    expect(result.cells['agenda:']).toEqual({ column: 1, row: 2, width: 1, span: 1 });
+  });
+});

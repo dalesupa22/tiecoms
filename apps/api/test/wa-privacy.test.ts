@@ -4,8 +4,29 @@ import {createRequire} from 'node:module';
 import {randomUUID} from 'node:crypto';
 import {afterAll,beforeAll,describe,expect,it,vi} from 'vitest';
 import {privacyAppState,PRIVACY_COLLECTIONS} from '../src/modules/wa-privacy-hydration.ts';
+import {privacyExceptionDetails,privacyWarningDetails} from '../src/modules/wa-privacy-diagnostics.ts';
 
 describe('privacy app-state reconstruction',()=>{
+  it('diagnostics expose only fixed labels and bounded counters, never key IDs or provider strings',()=>{
+    const secret='synthetic-private-key-and-jid';
+    const warning=privacyWarningDetails([{name:'regular',attempt:2,errorType:'Boom',statusCode:404,error:`Error: failed to find key "${secret}" to decode mutation`},'regular blocked on missing key']);
+    expect(warning).toEqual({collection:'regular',reason:'missing_app_state_key',attempt:2,errorType:'Boom',statusCode:404});
+    expect(JSON.stringify(warning)).not.toContain(secret);
+    expect(privacyWarningDetails([{name:secret,errorType:secret,attempt:999999,statusCode:999999,error:secret},secret])).toEqual({collection:null,reason:'unclassified',attempt:null,errorType:null,statusCode:null});
+    expect(privacyExceptionDetails({message:secret,name:secret,code:secret})).toEqual({reason:'unclassified',errorType:null,errorCode:null,statusCode:null});
+    expect(privacyExceptionDetails({message:secret,name:'error',code:'40001'})).toMatchObject({errorCode:'40001'});
+  });
+  it('diagnostics distinguish final warning before a complete receipt while retaining fail-closed behavior',()=>{
+    const state=privacyAppState({get:async()=>({}),set:async()=>{}});
+    state.recordFailure();state.acceptReceipt({completedCollections:[...PRIVACY_COLLECTIONS],failedCollections:[]});
+    expect(state.complete()).toBe(false);
+    expect(state.diagnostics()).toEqual({failureLatched:true,receiptReceived:true,completedCollections:[...PRIVACY_COLLECTIONS],failedCollections:[],missingCollections:[]});
+    const partial=privacyAppState({get:async()=>({}),set:async()=>{}});
+    partial.acceptReceipt({completedCollections:['regular','synthetic-private-key'],failedCollections:['critical_block','synthetic-private-key']});
+    expect(partial.diagnostics()).toMatchObject({completedCollections:['regular'],failedCollections:['critical_block']});
+    expect(JSON.stringify(partial.diagnostics())).not.toContain('synthetic-private-key');
+    expect(partial.complete()).toBe(false);
+  });
   it('shadows derived versions only, preserving credentials and encryption keys on failure',async()=>{
     const writes:any[]=[];const base={get:async(type:string)=>({saved:{type}}),set:async(data:any)=>{writes.push(data);}};
     const state=privacyAppState(base);

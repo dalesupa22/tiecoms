@@ -11,6 +11,9 @@ export function privacyAppState(base: {get: Function;set: Function}, reconstruct
   let checkpoint:Record<string,unknown> | null=null;
   const completed=new Set<string>();
   const loaded=new Set<string>();
+  let receiptReceived=false;
+  const receiptCompleted=new Set<string>();
+  const receiptFailed=new Set<string>();
   return {
     keys: {
       async get(type:string,ids:string[]) {
@@ -36,6 +39,12 @@ export function privacyAppState(base: {get: Function;set: Function}, reconstruct
     recordFailure() { failed=true; },
     acceptReceipt(receipt:unknown) {
       const r=receipt as {completedCollections?:unknown;failedCollections?:unknown} | null;
+      receiptReceived=true;
+      // Diagnostic metadata is allowlisted separately; it never changes readiness.
+      for(const name of PRIVACY_COLLECTIONS) {
+        if(Array.isArray(r?.completedCollections) && r.completedCollections.includes(name)) receiptCompleted.add(name);
+        if(Array.isArray(r?.failedCollections) && r.failedCollections.includes(name)) receiptFailed.add(name);
+      }
       if(!r || !Array.isArray(r.completedCollections) || !Array.isArray(r.failedCollections) || r.failedCollections.length) {failed=true;return;}
       for(const name of r.completedCollections) if(typeof name==='string') completed.add(name);
       // Freeze before awaiting lock persistence: subsequent live deltas must not
@@ -43,6 +52,7 @@ export function privacyAppState(base: {get: Function;set: Function}, reconstruct
       checkpoint=deserialize(serialize(Object.fromEntries(PRIVACY_COLLECTIONS.map(name=>[name,states.get(name) ?? null]))));
     },
     complete() { return !failed && PRIVACY_COLLECTIONS.every(name=>completed.has(name)); },
+    diagnostics() { return {failureLatched:failed,receiptReceived,completedCollections:[...receiptCompleted],failedCollections:[...receiptFailed],missingCollections:PRIVACY_COLLECTIONS.filter(name=>!receiptCompleted.has(name))}; },
     async commit() {
       if(failed || !PRIVACY_COLLECTIONS.every(name=>completed.has(name))) throw new Error('Estado de privacidad incompleto');
       await base.set({'app-state-sync-version':checkpoint});

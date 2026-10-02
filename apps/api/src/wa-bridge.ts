@@ -1,6 +1,7 @@
 import { startWaLeaseHeartbeat,waLeaseQuery } from './modules/wa-lease.ts';
 import { applyWaLocks, requireWaVisible, finishWaPrivacy, shutdownWaPrivacy,quarantineWaSession } from './modules/wa-privacy.ts';
 import { privacyAppState, PRIVACY_COLLECTIONS } from './modules/wa-privacy-hydration.ts';
+import { privacyExceptionDetails,privacyWarningDetails } from './modules/wa-privacy-diagnostics.ts';
 import { downloadPendingWaMedia } from './modules/wa-media-bridge.ts';
 /**
  * Puente de WhatsApp: mantiene vivas las cuentas que cada persona conectó.
@@ -97,6 +98,8 @@ async function connect(s: Session) {
   await quarantineSession(s);
   const auth = await dbAuthState(s.id,BRIDGE_ID);
   const hydration=privacyAppState(auth.state.keys,reconstruct);
+  const privacyStarted=Date.now();
+  let privacyPhase='connecting';
   let lockRevision=0;
   const snapshotLocks=new Map<string,boolean>();
   let lockWork: Promise<void> = Promise.resolve();
@@ -106,7 +109,11 @@ async function connect(s: Session) {
     if(prop==='child') return (...args:any[])=>watchLogger(target.child(...args));
     const value=target[prop];
     if((prop==='warn'||prop==='error') && typeof value==='function') return (...args:any[])=>{
-      if(args.some(v=>v && typeof v==='object' && PRIVACY_COLLECTIONS.includes(v.name)) || args.some(v=>typeof v==='string' && /(?:failed to sync|blocked on missing key|app.state.*(?:fail|error))/i.test(v))) {hydration.recordFailure();void quarantineSession(s).catch(()=>{});}
+      if(args.some(v=>v && typeof v==='object' && PRIVACY_COLLECTIONS.includes(v.name)) || args.some(v=>typeof v==='string' && /(?:failed to sync|blocked on missing key|app.state.*(?:fail|error))/i.test(v))) {
+        hydration.recordFailure();
+        console.error(JSON.stringify({event:'wa.privacy.warning',accountId:s.id,phase:privacyPhase,elapsedMs:Date.now()-privacyStarted,...privacyWarningDetails(args)}));
+        void quarantineSession(s).catch(()=>{});
+      }
       return value.apply(target,args);
     };
     return typeof value==='function' ? value.bind(target) : value;
@@ -169,16 +176,22 @@ async function connect(s: Session) {
         void (async()=>{
           try {
             // A newly linked device receives app-state encryption keys after open.
+            privacyPhase='wait_key';
             const keyDeadline=Date.now()+30_000;
             while(!auth.state.creds.myAppStateKeyId && !s.stopping && s.sock===sock && Date.now()<keyDeadline) await new Promise(r=>setTimeout(r,250));
             if(s.stopping || s.sock!==sock) return;
             if(!auth.state.creds.myAppStateKeyId) throw new Error('Falta clave de estado de privacidad');
+            privacyPhase='resync';
             let timeout:NodeJS.Timeout | undefined;
             try { hydration.acceptReceipt(await Promise.race([(sock.resyncAppState as any)([...PRIVACY_COLLECTIONS],false),new Promise<never>((_,reject)=>{timeout=setTimeout(()=>reject(new Error('privacy timeout')),60_000);})])); } finally {if(timeout) clearTimeout(timeout);}
+            privacyPhase='persist_locks';
             await lockWork;
+            privacyPhase='resolve_aliases';
             await resolveLockedAliases(s);
             if(s.stopping || s.sock!==sock || !hydration.complete()) throw new Error('Estado de privacidad incompleto');
+            privacyPhase='checkpoint';
             await hydration.commit();
+            privacyPhase='confirm';
             let done=false;
             for(let attempt=0;attempt<3 && !done;attempt++) {
               const revision=lockRevision;
@@ -187,14 +200,16 @@ async function connect(s: Session) {
                 await finishWaPrivacy(s.id,s.userId,()=>lockRevision===revision && !s.stopping && s.sock===sock && hydration.complete(),
                   reconstruct ? [...snapshotLocks].filter(([,locked])=>locked).map(([jid])=>jid) : undefined,BRIDGE_ID);
                 done=true;
-              } catch { if(lockRevision===revision) throw new Error('No se pudo confirmar privacidad'); }
+              } catch (error) { if(lockRevision===revision) throw error; }
             }
             if(!done) throw new Error('La privacidad sigue cambiando');
+            privacyPhase='ready';
+            console.log(JSON.stringify({event:'wa.privacy.ready',accountId:s.id,elapsedMs:Date.now()-privacyStarted,reconstruct,...hydration.diagnostics()}));
             notifyOwner(s);
-          } catch {
+          } catch (error) {
             if(s.stopping || s.sock!==sock) return;
+            console.error(JSON.stringify({event:'wa.privacy.pending',accountId:s.id,phase:privacyPhase,elapsedMs:Date.now()-privacyStarted,reconstruct,...privacyExceptionDetails(error),...hydration.diagnostics()}));
             await quarantineSession(s);
-            console.error(`[wa] ${s.id} privacidad pendiente: reconstrucción incompleta`);
           }
         })();
       }
@@ -237,7 +252,11 @@ async function connect(s: Session) {
       await applyWaLocks(s.id,s.userId,[{jid:jidNormalizedUser(id)||id,locked}],false,BRIDGE_ID);
       await resolveLockedAliases(s);
       notifyOwner(s);
-    }).catch(async()=>{hydration.recordFailure();await quarantineSession(s).catch(()=>{});});
+    }).catch(async(error)=>{
+      hydration.recordFailure();
+      console.error(JSON.stringify({event:'wa.privacy.lock_failed',accountId:s.id,phase:privacyPhase,...privacyExceptionDetails(error)}));
+      await quarantineSession(s).catch(()=>{});
+    });
   });
   sock.ev.on('messaging-history.set', async ({ chats, contacts, messages, lidPnMappings, isLatest }) => {
     try {

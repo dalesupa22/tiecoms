@@ -28,3 +28,14 @@ que responda al instante.
 | Agente | Empresa | Dueño | Grupos | Secreto |
 |---|---|---|---|---|
 | semillero (703253dd…) | Xertify | danny@xertify.co | ventas, marketing, Eventos | `.secrets/agente-semillero.json` |
+| claude (d1246189…) | Xertify | danny@xertify.co | tickets-xertify, xertify-dev, xertiflow-dev | `.secrets/agente-claude.json` |
+
+## Cómo se ven
+
+En la web, toda cuenta `kind = 'agent'` sale con un robotcito blanco sobre un cuadro redondeado con degradado tinta→violeta
+(`AgentAvatar` / `RobotGlyph` en `apps/web/src/ui.tsx`); si el agente tiene foto, el robot va de insignia en la esquina.
+
+## Trazabilidad de tickets (@claude)
+
+Cuando Claude (Claude Code con el MCP de la persona) toma o resuelve un ticket, cambia el responsable a `claude`
+(`update_task` con `assignees: ["claude"]` o su id) para que quede registrado que lo resolvió un agente.

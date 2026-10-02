@@ -68,14 +68,41 @@ export function Avatar({ person, org, size = 34 }: { person?: PersonDTO | null; 
   if (person?.id === GG_ID) return <span className="avatar gg-avatar" style={{ width: size, height: size }}><img src={asset('/gg-mark.svg')} alt="gg" draggable={false} /></span>;
   // Sin foto: iniciales sobre el color estable de la persona. Sin insignia de empresa: el nombre
   // de la empresa ya va escrito junto a la persona y la letra suelta («x») confundía.
-  const bg = person?.kind === 'agent' ? 'var(--ink)' : person ? personColor(person.id) : 'var(--paper-3)';
-  const fg = person?.kind === 'agent' ? 'var(--paper)' : person ? '#ffffff' : 'var(--ink-2)';
+  if (person?.kind === 'agent') return <AgentAvatar person={person} size={size} />;
+  const bg = person ? personColor(person.id) : 'var(--paper-3)';
+  const fg = person ? '#ffffff' : 'var(--ink-2)';
   return (
-    <span className="avatar" style={{ position: 'relative', overflow: 'visible', width: size, height: size, background: bg, color: fg, fontSize: size * 0.36, borderRadius: person?.kind === 'agent' ? 10 : 99 }}>
+    <span className="avatar" style={{ position: 'relative', overflow: 'visible', width: size, height: size, background: bg, color: fg, fontSize: size * 0.36 }}>
       {person?.avatarUrl
         ? <img src={apiUrl(person.avatarUrl)} alt="" loading="lazy" draggable={false} style={{ width: '100%', height: '100%', borderRadius: 'inherit', objectFit: 'cover' }} />
-        : person?.kind === 'agent' ? '◇' : initials(person?.name ?? '?')}
+        : initials(person?.name ?? '?')}
       {badge && <span className="availability-badge" role="img" title={badge[1]} aria-label={badge[1]}>{badge[0]}</span>}
+    </span>
+  );
+}
+
+/** Robotcito de los agentes de IA (kind='agent'): mismo dibujo en todos los tamaños. */
+export function RobotGlyph({ size }: { size: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M12 3.2v2.6" /><circle cx="12" cy="2.6" r="1" fill="currentColor" stroke="none" />
+      <rect x="4.5" y="6.5" width="15" height="11.5" rx="4" />
+      <circle cx="9.3" cy="12" r="1.35" fill="currentColor" stroke="none" /><circle cx="14.7" cy="12" r="1.35" fill="currentColor" stroke="none" />
+      <path d="M10 15.3h4" /><path d="M2.5 11v3M21.5 11v3" />
+    </svg>
+  );
+}
+
+/** Agente de IA: cuadro con degradado y robot; con foto propia, el robot va de insignia en la esquina. */
+function AgentAvatar({ person, size }: { person: PersonDTO; size: number }) {
+  const en = locale().startsWith('en');
+  const label = en ? 'AI agent' : 'Agente de IA';
+  return (
+    <span className="avatar agent-avatar" title={`${person.name} · ${label}`} style={{ width: size, height: size, borderRadius: Math.round(size * 0.3) }}>
+      {person.avatarUrl
+        ? <img src={apiUrl(person.avatarUrl)} alt="" loading="lazy" draggable={false} style={{ width: '100%', height: '100%', borderRadius: 'inherit', objectFit: 'cover' }} />
+        : <RobotGlyph size={Math.round(size * 0.62)} />}
+      {person.avatarUrl && size >= 22 && <span className="agent-badge" role="img" aria-label={label}><RobotGlyph size={10} /></span>}
     </span>
   );
 }

@@ -180,7 +180,7 @@ internal fun buildItems(messages: List<MessageDTO>, pending: List<PendingMessage
 }
 
 /** Mensajes de sistema: {"k": clave, ...}; algunos enlazan a un asunto, una reunión o una derivada. */
-private fun systemPayload(body: String): JsonObject? = if (body.startsWith("{")) runCatching { TcJson.parseToJsonElement(body) as JsonObject }.getOrNull() else null
+private fun systemPayload(body: String): JsonObject? = if (body.length <= 32_768 && body.startsWith("{")) runCatching { TcJson.parseToJsonElement(body) as JsonObject }.getOrNull() else null
 private fun JsonObject.s(k: String) = (this[k] as? JsonPrimitive)?.contentOrNull
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -217,13 +217,16 @@ fun ConversationScreen(
     val ctx = LocalContext.current
     val view = LocalView.current
     val scope = rememberCoroutineScope()
+    val leaveFocus = androidx.compose.ui.platform.LocalFocusManager.current
+    val leaveKeyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+    val leaveChat = { leaveFocus.clearFocus(force = true); leaveKeyboard?.hide(); onBack() }
     val state by client.state.collectAsStateWithLifecycle()
     val data = state.data
     val meta = data?.conversations?.firstOrNull { it.id == id }
     val convFallback = stringResource(R.string.conversation)
 
     if (data == null || meta == null) {
-        SimpleScaffold(title = convFallback, onBack = onBack) {
+        SimpleScaffold(title = convFallback, onBack = leaveChat) {
             Text(stringResource(R.string.chat_not_found), Modifier.padding(24.dp).testTag("notFound"), textAlign = TextAlign.Center)
         }
         return
@@ -309,10 +312,20 @@ fun ConversationScreen(
     /** «Seleccionar» (pulsación larga): varios mensajes para «✨ Pedir a gg (N)». */
     var selecting by remember(id) { mutableStateOf(false) }
     val selectedIds = remember(id) { androidx.compose.runtime.mutableStateListOf<String>() }
+    LaunchedEffect(gg?.open) { if (gg?.open == false) { selecting = false; selectedIds.clear(); gg.quoted.clear() } }
     var suggestFor by remember { mutableStateOf<List<String>?>(null) }
     /** Sugerencias marcadas que se van abriendo una a una (cada una en su diálogo, nada se ejecuta solo). */
     var ggQueue by remember { mutableStateOf(listOf<com.tiecoms.app.core.GgSuggestion>()) }
 
+    val conversationFocus = androidx.compose.ui.platform.LocalFocusManager.current
+    val conversationKeyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+    val conversationLifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+    androidx.compose.runtime.DisposableEffect(id, client.sessionGeneration) {
+        val lifecycle = conversationLifecycle
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, e -> if (e == androidx.lifecycle.Lifecycle.Event.ON_STOP) { conversationFocus.clearFocus(force = true); conversationKeyboard?.hide() } }
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer); conversationFocus.clearFocus(force = true); conversationKeyboard?.hide() }
+    }
     val listState = rememberLazyListState()
     val atBottom by remember { derivedStateOf { listState.firstVisibleItemIndex <= 1 } }
     val me = data.me.id
@@ -320,6 +333,8 @@ fun ConversationScreen(
     var readLoadFailed by remember(id) { mutableStateOf(false) }
     var readSaveFailed by remember(id) { mutableStateOf(false) }
     var readRetry by remember(id) { mutableIntStateOf(0) }
+    var retryJumpSeq by remember(id) { mutableStateOf<Long?>(null) }
+    var retryUnread by remember(id) { mutableStateOf(false) }
     val blockedDirect = meta.kind == "direct" && meta.memberIds.any { it in state.blockedUserIds }
     val pending = state.pending.filter { it.conversationId == id }
     // Foto al entrar, antes de marcar leído: hasta dónde leí y cuántos no leídos había (1.6.4 §D).
@@ -355,28 +370,70 @@ fun ConversationScreen(
     val newWhileAway = awaySeq?.let { from -> conv?.messages.orEmpty().count { it.seq > from && it.authorId != me && it.authorId !in state.blockedUserIds } } ?: 0
     val byId = remember(conv?.messages, state.blockedUserIds) { (conv?.messages ?: emptyList()).filter { it.authorId !in state.blockedUserIds }.associateBy { it.id } }
 
+    var jumpJob by remember(id) { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    var jumping by remember(id) { mutableStateOf(false) }
     fun jumpTo(seq: Long) {
-        scope.launch {
-            if (!client.ensureMessage(id, seq)) { readLoadFailed = true; return@launch }
-            // El filtro pasa al tema del mensaje, o a «Todo» si no tiene; en «Todo» no cambia (docs/TEMAS.md, 1.7.5).
-            // Los temas pueden no estar cargados todavía (burbuja o notificación en frío): se esperan, si no el salto
-            // creía que no había temas y dejaba el chat en «General».
-            val target = client.state.value.conversations[id]?.messages?.firstOrNull { it.seq == seq }
-            val topicsNow = client.state.value.topics[id] ?: runCatching { client.loadTopics(id) }.getOrDefault(emptyList())
-            topicFilter = com.tiecoms.app.core.Topics.jumpFilter(topicsNow, topicFilter, target, jumpTopicId) { iid -> client.state.value.issues[iid]?.topicId }
-            if (seq !in revealed) revealed.add(seq)
-            var idx = -1
-            for (i in 0 until 10) {
-                delay(40)
-                idx = itemsNow.indexOfFirst { (it as? ChatItem.Msg)?.m?.seq == seq }
-                if (idx >= 0) break
-            }
-            if (idx >= 0) listState.animateScrollToItem(idx)
-            mentionQueue.remove(seq)
-            highlight = seq
-            delay(2800); highlight = null
+        jumpJob?.cancel()
+        retryJumpSeq = seq; retryUnread = false
+        val generation = client.sessionGeneration
+        follow = false
+        jumpJob = scope.launch {
+            jumping = true; readLoadFailed = false
+            try {
+                if (!client.ensureMessage(id, seq)) { readLoadFailed = true; return@launch }
+                if (generation != client.sessionGeneration) return@launch
+                val target = client.state.value.conversations[id]?.messages?.firstOrNull { it.seq == seq }
+                val topicsNow = client.state.value.topics[id] ?: client.loadTopics(id)
+                if (generation != client.sessionGeneration) return@launch
+                topicFilter = com.tiecoms.app.core.Topics.jumpFilter(topicsNow, topicFilter, target, jumpTopicId) { iid -> client.state.value.issues[iid]?.topicId }
+                if (seq !in revealed) revealed.add(seq)
+                var idx = -1
+                for (frame in 0 until 30) {
+                    withFrameNanos { }
+                    idx = itemsNow.indexOfFirst { (it as? ChatItem.Msg)?.m?.seq == seq }
+                    if (idx >= 0) break
+                }
+                if (idx < 0) { readLoadFailed = true; return@launch }
+                listState.scrollToItem(idx)
+                withFrameNanos { }; withFrameNanos { }
+                if (generation != client.sessionGeneration || listState.layoutInfo.visibleItemsInfo.none { it.key == "m-${target?.id}" || (itemsNow.getOrNull(it.index) as? ChatItem.Msg)?.m?.seq == seq }) {
+                    readLoadFailed = true; return@launch
+                }
+                retryJumpSeq = null; retryUnread = false
+                mentionQueue.remove(seq); highlight = seq
+                delay(2800); highlight = null
+            } catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e; readLoadFailed = true }
+            finally { jumping = false }
         }
     }
+    fun jumpUnread() {
+        if (jumping) return
+        retryUnread = true; retryJumpSeq = null
+        jumpJob?.cancel()
+        val generation = client.sessionGeneration; val requestedFilter = shownFilter
+        follow = false
+        jumpJob = scope.launch {
+            jumping = true; readLoadFailed = false
+            try {
+                val floor = maxOf(client.meta(id)?.lastReadSeq ?: 0, meta.historyFromSeq)
+                while (true) {
+                    val c = client.state.value.conversations[id] ?: throw IllegalStateException("History unavailable")
+                    if (!com.tiecoms.app.core.ChatNav.needsOlder(c.messages, floor, meta.unread, me, c.hasMore)) break
+                    if (!client.loadOlder(id)) throw IllegalStateException("Unread page unavailable")
+                    if (generation != client.sessionGeneration || requestedFilter != shownFilter) return@launch
+                }
+                val c = client.state.value.conversations[id] ?: throw IllegalStateException("History unavailable")
+                val messages = com.tiecoms.app.core.Topics.view(c.messages, topics, requestedFilter) { iid -> client.state.value.issues[iid]?.topicId }
+                val target = messages.firstOrNull { it.seq > floor && it.authorId != me && it.authorId !in client.state.value.blockedUserIds && it.deletedAt == null && it.kind == "text" }
+                if (target == null) { readLoadFailed = true; return@launch }
+                jumping = false
+                jumpTo(target.seq)
+            } catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e; readLoadFailed = true }
+            finally { jumping = false }
+        }
+    }
+
+    androidx.compose.runtime.DisposableEffect(id) { onDispose { jumpJob?.cancel() } }
 
     // ---------- Buscar dentro del chat (tanda 1.7) ----------
     var searchOpen by rememberSaveable(id) { mutableStateOf(false) }
@@ -566,7 +623,7 @@ fun ConversationScreen(
         if (!positioned) return@LaunchedEffect
         val mine = newest is ChatItem.Pending || (newest as? ChatItem.Msg)?.mine == true
         // Arriba, lo nuevo no arrastra al final: se cuenta en el globo del ⌄.
-        if (newest != null && highlight == null && (follow || mine)) { follow = true; listState.animateScrollToItem(0) }
+        if (newest != null && highlight == null && !jumping && (follow || mine)) { follow = true; listState.animateScrollToItem(0) }
     }
     LaunchedEffect(atBottom, positioned) {
         if (atBottom) awaySeq = null
@@ -674,7 +731,16 @@ fun ConversationScreen(
             if (!embedded && m.kind == "text" && m.deletedAt == null)
                 add(SheetItem(ctx.getString(R.string.menu_ask_side), "🔒", tag = "menuSide", subtitle = ctx.getString(R.string.menu_ask_side_sub)) { sideStart = m })
             add(null)
-            add(SheetItem(ctx.getString(R.string.menu_copy_text), "⧉") { copyToClipboard(ctx, m.body); container.toast(ctx.getString(R.string.toast_copied)) })
+            val wholeCopy = if (m.kind == "text") (m.displayBody ?: com.tiecoms.app.core.LongContent.visibleBody(m.body, m.attachments)) else systemText(ctx, m.body, Names.person(data, m.authorId)?.name)
+            if (wholeCopy.isNotEmpty()) add(SheetItem(ctx.getString(R.string.menu_copy_text), "⧉") { copyToClipboard(ctx, wholeCopy); container.toast(ctx.getString(R.string.toast_copied)) })
+            m.attachments.filter { it.isImage }.forEach { a -> add(SheetItem(ctx.getString(R.string.copy_image) + if (m.attachments.size > 1) " · ${a.name}" else "", "🖼", tag = "copyImage-${a.id}") { scope.launch {
+                try { com.tiecoms.app.platform.AttachmentActions.copyImage(ctx, client, a); container.toast(ctx.getString(R.string.toast_copied)) }
+                catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e; container.toast(errorText(ctx, e)) }
+            } }) }
+            m.attachments.filter { com.tiecoms.app.core.LongContent.textFile(it) }.forEach { a -> add(SheetItem(ctx.getString(R.string.copy_content) + " · ${a.name}", "⧉", tag = "copyFile-${a.id}") { scope.launch {
+                try { com.tiecoms.app.platform.AttachmentActions.copyText(ctx, client, a); container.toast(ctx.getString(R.string.toast_copied)) }
+                catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e; container.toast(errorText(ctx, e)) }
+            } }) }
             add(SheetItem(ctx.getString(R.string.menu_copy_link), "⛓") { copyToClipboard(ctx, messageLink(id, m.seq)); container.toast(ctx.getString(R.string.toast_link_copied)) })
             add(null)
             if (meta.canPost) add(SheetItem(ctx.getString(if (isPinned) R.string.menu_unpin else R.string.menu_pin), "📌", tag = "menuPin") {
@@ -740,7 +806,7 @@ fun ConversationScreen(
     Scaffold(
         topBar = { if (!embedded)
             TopAppBar(
-                navigationIcon = { IconButton(onClick = onBack, modifier = Modifier.testTag("back")) { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.back)) } },
+                navigationIcon = { IconButton(onClick = leaveChat, modifier = Modifier.testTag("back")) { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.back)) } },
                 title = {
                     Column {
                         Column(Modifier.clickable(onClick = onDetails).semantics(mergeDescendants = true) { heading() }) {
@@ -748,6 +814,7 @@ fun ConversationScreen(
                             if (meta.kind == "internal") { Icon(Icons.Filled.Lock, stringResource(R.string.internal_cd), Modifier.size(16.dp)); Spacer(Modifier.width(4.dp)) }
                             if (meta.level == "directivo") Text("◆ ", color = Brand.Orange)
                             Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f, fill = false).testTag("chatTitle"))
+                            if (meta.kind == "direct" && !meta.isSide) Names.otherInDirect(meta, data)?.let { AvailabilityBadge(it.availability) }
                             if (muted) MutedMark(16.dp, tag = "chatMuted")
                         }
                         }
@@ -814,7 +881,10 @@ fun ConversationScreen(
             if (readLoadFailed || readSaveFailed) Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp).testTag("readRetry"), verticalAlignment = Alignment.CenterVertically) {
                 Text(stringResource(if (readLoadFailed) R.string.read_load_failed else R.string.read_save_failed), Modifier.weight(1f), style = MaterialTheme.typography.labelMedium)
                 TextButton(onClick = {
-                    if (readLoadFailed) { readLoadFailed = false; positioned = false; reloadKey++ }
+                    if (readLoadFailed) {
+                        readLoadFailed = false
+                        when { retryUnread -> jumpUnread(); retryJumpSeq != null -> jumpTo(retryJumpSeq!!); else -> { positioned = false; reloadKey++ } }
+                    }
                     readSaveFailed = false; readRetry++
                 }) { Text(stringResource(R.string.retry)) }
             }
@@ -898,13 +968,14 @@ fun ConversationScreen(
                     Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp))
                 if (conv?.loaded == true && items.isNotEmpty()) {
                     // Píldora «↑ N nuevos»: la línea de no leídos quedó arriba; tocar salta a ella.
-                    if (dividerAbove && entry.second > 0) {
+                    val pertinentUnread = if (shownFilter == com.tiecoms.app.core.Topics.ALL || topics.isEmpty()) meta.unread else topicUnread[shownFilter ?: ""] ?: 0
+                    if (dividerAbove && pertinentUnread > 0) {
                         val pillCd = stringResource(R.string.jump_new)
                         Surface(
-                            onClick = { scope.launch { itemsNow.indexOfFirst { it is ChatItem.NewDivider }.takeIf { it >= 0 }?.let { scrollDividerToTop(listState, it, animated = true) } } },
+                            onClick = { jumpUnread() },
                             shape = RoundedCornerShape(50), color = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary, shadowElevation = 3.dp,
                             modifier = Modifier.align(Alignment.TopCenter).padding(top = 8.dp).semantics { contentDescription = pillCd }.testTag("jumpNew"),
-                        ) { Text(stringResource(R.string.chat_new_pill, entry.second), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold,
+                        ) { Text(stringResource(R.string.chat_new_pill, pertinentUnread), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold,
                             modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)) }
                     }
                     Column(Modifier.align(Alignment.BottomEnd).padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -953,6 +1024,7 @@ fun ConversationScreen(
                 ScheduledStrip(id)
                 GgContinueStrip(gg)
                 GgQuickReplies(gg) { t -> GgDrafts.put(id, t) }
+                val composerReplyId = replyTo?.id
                 Composer(
                 id, title, data, replyTo, editing,
                 onCancelReply = { replyTo = null }, onCancelEdit = { editing = null },
@@ -962,7 +1034,7 @@ fun ConversationScreen(
                         val src = privateHere.source
                         client.send(id, text, null, com.tiecoms.app.core.ForwardedInfo("tiecoms", privateHere.authorName, src.createdAt, src.conversationId, src.id), attachments = att, mentions = mentions)
                         container.privateReply.value = null
-                    } else client.send(id, text, replyTo?.id, attachments = att, mentions = mentions, topicId = activeTopic?.id, viewOnce = once)
+                    } else client.send(id, text, composerReplyId, attachments = att, mentions = mentions, topicId = activeTopic?.id, viewOnce = once)
                     replyTo = null
                 },
                 onSaveEdit = { m, text, mentions ->
@@ -1192,36 +1264,68 @@ private fun Composer(
     val ctx = LocalContext.current
     val container = LocalContainer.current
     val scope = rememberCoroutineScope()
-    var text by rememberSaveable(id) { mutableStateOf("") }
+    val draftOwner = client.baseUrl + ":" + client.myId.orEmpty()
+    val restored = remember(id, draftOwner) { com.tiecoms.app.platform.ComposerDrafts.load(ctx, draftOwner, id) }
+    var text by remember(id, draftOwner) { mutableStateOf(restored.body) }
     // Menciones con @ (SPEC-v4 §H): tokens sobre el texto (UTF-16) y el cursor para el buscador.
-    var ments by remember(id) { mutableStateOf(listOf<com.tiecoms.app.core.MentionDTO>()) }
+    var ments by remember(id, draftOwner) { mutableStateOf(restored.mentions) }
     var sel by remember(id) { mutableStateOf(androidx.compose.ui.text.TextRange(0)) }
     var editMents by remember(editing?.id) { mutableStateOf(editing?.let { it.mentions + com.tiecoms.app.core.Refs.tokens(it) }.orEmpty()) }
     // ① Una sola vista (tanda 1.7) para el próximo mensaje: texto, fotos o nota de voz.
-    var viewOnce by remember(id) { mutableStateOf(false) }
+    var viewOnce by remember(id, draftOwner) { mutableStateOf(restored.viewOnce) }
     var editSel by remember(editing?.id) { mutableStateOf(androidx.compose.ui.text.TextRange(editing?.body?.length ?: 0)) }
     // Adjuntos elegidos (copiados a caché) antes de enviar; se suben al pulsar Enviar (SPEC-v4).
-    var files by remember(id) { mutableStateOf(listOf<com.tiecoms.app.core.Attachments.Shared>()) }
+    var files by remember(id, draftOwner) { mutableStateOf(restored.files) }
+    var creativePicker by remember(id) { mutableStateOf(false) }
+    var gif by remember(id, draftOwner) { mutableStateOf(restored.gif) }
+    var memeSources by remember(id, draftOwner) { mutableStateOf(restored.sources) }
     var uploading by remember(id) { mutableStateOf<Pair<Int, Float>?>(null) }
     var attError by remember(id) { mutableStateOf<String?>(null) }
+    var converting by remember(id) { mutableStateOf(false) }
+    LaunchedEffect(id, draftOwner, files, gif, text, memeSources, viewOnce, ments) {
+        val draftRevision = com.tiecoms.app.platform.ComposerDrafts.nextRevision()
+        val snapshot = com.tiecoms.app.platform.ComposerDrafts.Draft(text, files, gif, memeSources, viewOnce, ments)
+        if (draftOwner.isNotEmpty()) try { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            com.tiecoms.app.platform.ComposerDrafts.save(ctx, draftOwner, id, snapshot, draftRevision)
+        } } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            attError = ctx.getString(R.string.draft_save_failed)
+        }
+    }
+    LaunchedEffect(id, text, viewOnce, files.size) {
+        if (text.length > com.tiecoms.app.core.LongContent.MAX_BODY && editing == null) {
+            if (viewOnce) { attError = ctx.getString(R.string.long_once); return@LaunchedEffect }
+            if (files.size >= com.tiecoms.app.core.Attachments.MAX_PER_MESSAGE) { attError = ctx.getString(R.string.att_too_many); return@LaunchedEffect }
+            val original = text
+            converting = true
+            try {
+                val file = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { com.tiecoms.app.platform.ComposerDrafts.text(ctx, original) }
+                if (text == original) { files = files + file; text = ""; ments = emptyList(); sel = androidx.compose.ui.text.TextRange(0); attError = null }
+                else java.io.File(file.path).delete()
+            } catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e; attError = ctx.getString(R.string.long_limit) }
+            finally { converting = false }
+        }
+    }
     var picker by remember { mutableStateOf(false) }
     // Notas de voz (SPEC-v4 §F): mantener pulsado el micrófono cuando el compositor está vacío.
+    val voiceOwner = remember(client, id) { client.myId }
+    val voiceKey = remember(client, id) { client.baseUrl + ":" + voiceOwner + ":" + id }
     val recorder = remember(id) { com.tiecoms.app.platform.VoiceRecorder(ctx.applicationContext) }
     val rec by recorder.state.collectAsStateWithLifecycle()
     var locked by remember(id) { mutableStateOf(false) }
     var gesture by remember(id) { mutableStateOf(com.tiecoms.app.core.Waveform.Gesture.RECORDING) }
     var micWhy by remember { mutableStateOf(false) }
     var pendingVoice by remember(id) { mutableStateOf<com.tiecoms.app.platform.VoiceRecorder.Result?>(null) }
-    val micPermission = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { }
+    val micPermission = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { granted -> attError = ctx.getString(if (granted) R.string.voice_permission_ready else R.string.voice_permission_denied) }
     // Nota grabada sin enviar (envío fallido o grabación cortada): se ofrece Reintentar / Borrar sobre el compositor.
     val drafts by com.tiecoms.app.platform.VoiceDrafts.drafts.collectAsStateWithLifecycle()
-    val draft = drafts[id]
+    val draft = drafts[voiceKey]
     LaunchedEffect(Unit) { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { com.tiecoms.app.platform.VoiceRecorder.sweep(ctx.applicationContext) } }
     /** Salir del chat, apagar la pantalla o pasar a segundo plano: lo grabado no se pierde, queda como nota por enviar. */
     fun keepRecording() {
-        if (recorder.isRecording) recorder.stop()?.let { com.tiecoms.app.platform.VoiceDrafts.put(id, com.tiecoms.app.platform.VoiceDrafts.Draft(it)) }
+        if (recorder.isRecording) recorder.stop()?.let { com.tiecoms.app.platform.VoiceDrafts.put(voiceKey, com.tiecoms.app.platform.VoiceDrafts.Draft(it)) }
         locked = false
-        pendingVoice?.let { com.tiecoms.app.platform.VoiceDrafts.put(id, com.tiecoms.app.platform.VoiceDrafts.Draft(it)); pendingVoice = null }
+        pendingVoice?.let { com.tiecoms.app.platform.VoiceDrafts.put(voiceKey, com.tiecoms.app.platform.VoiceDrafts.Draft(it)); pendingVoice = null }
     }
     val owner = androidx.lifecycle.compose.LocalLifecycleOwner.current
     androidx.compose.runtime.DisposableEffect(recorder, owner) {
@@ -1231,18 +1335,22 @@ private fun Composer(
     }
     fun hasMic() = androidx.core.content.ContextCompat.checkSelfPermission(ctx, android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED
     fun uploadVoice(r: com.tiecoms.app.platform.VoiceRecorder.Result, aiConsent: Boolean) {
+        if (uploading != null) return
         val viewOnceVoice = viewOnce
-        viewOnce = false
         pendingVoice = null
         attError = null
-        com.tiecoms.app.platform.VoiceDrafts.take(id)
+        com.tiecoms.app.platform.VoiceDrafts.take(voiceKey)
         // En el scope de la app: salir del chat no corta la subida; si falla, la nota queda para reintentar.
+        val voiceGeneration = client.sessionGeneration
         container.scope.launch {
             uploading = 0 to 0f
             try {
+                check(client.myId == voiceOwner && client.sessionGeneration == voiceGeneration) { "Session changed; voice draft kept" }
                 val a = client.uploadAttachment(id, r.file, ctx.getString(R.string.voice_note) + ".m4a", "audio/mp4",
                     voice = com.tiecoms.app.core.TieComsClient.Voice(r.durationMs, r.waveform, aiConsent)) { sent, total -> uploading = 0 to (if (total > 0) sent.toFloat() / total else 0f) }
+                check(client.myId == voiceOwner && client.sessionGeneration == voiceGeneration) { "Session changed; voice draft kept" }
                 onSend("", listOf(a), emptyList(), viewOnceVoice)
+                viewOnce = false
                 r.file.delete()
             } catch (e: Exception) {
                 val msg = when (com.tiecoms.app.core.VoiceRules.uploadError(e)) {
@@ -1250,7 +1358,7 @@ private fun Composer(
                     com.tiecoms.app.core.VoiceRules.UploadError.NETWORK -> ctx.getString(R.string.voice_err_network)
                     com.tiecoms.app.core.VoiceRules.UploadError.OTHER -> errorText(ctx, e)
                 }
-                com.tiecoms.app.platform.VoiceDrafts.put(id, com.tiecoms.app.platform.VoiceDrafts.Draft(r, aiConsent, msg))
+                com.tiecoms.app.platform.VoiceDrafts.put(voiceKey, com.tiecoms.app.platform.VoiceDrafts.Draft(r, aiConsent, msg))
             } finally { uploading = null }
         }
     }
@@ -1259,12 +1367,12 @@ private fun Composer(
         locked = false
         if (r == null) { attError = ctx.getString(R.string.voice_too_short); return }
         attError = null
-        pendingVoice = r
+        com.tiecoms.app.platform.VoiceDrafts.put(voiceKey, com.tiecoms.app.platform.VoiceDrafts.Draft(r))
     }
     pendingVoice?.let { r ->
         // Cerrar el diálogo no borra la nota: queda por enviar.
         AiConsentDialog(voice = true, onAllow = { uploadVoice(r, true) }, onWithoutAi = { uploadVoice(r, false) },
-            onDismiss = { com.tiecoms.app.platform.VoiceDrafts.put(id, com.tiecoms.app.platform.VoiceDrafts.Draft(r)); pendingVoice = null })
+            onDismiss = { com.tiecoms.app.platform.VoiceDrafts.put(voiceKey, com.tiecoms.app.platform.VoiceDrafts.Draft(r)); pendingVoice = null })
     }
     recorder.onLimit = { container.toast(ctx.getString(R.string.voice_too_long)); sendVoice() }
     if (micWhy) androidx.compose.material3.AlertDialog(
@@ -1274,6 +1382,7 @@ private fun Composer(
         dismissButton = { TextButton(onClick = { micWhy = false }) { Text(stringResource(R.string.cancel)) } },
     )
     fun add(uris: List<android.net.Uri>, done: () -> Unit = {}) {
+        if (uploading != null) { done(); return }
         if (uris.isEmpty()) { done(); return }
         scope.launch {
             val copied = try {
@@ -1284,6 +1393,7 @@ private fun Composer(
                 attError = ctx.getString(R.string.paste_image_failed); emptyList()
             } finally { done() }
             if (copied.isEmpty()) return@launch
+            if (uploading != null) { copied.forEach { java.io.File(it.path).delete() }; return@launch }
             val plan = com.tiecoms.app.core.Attachments.plan(files + copied, null)
             attError = plan.tooLarge.firstOrNull()?.let { ctx.getString(R.string.att_too_large, it.name) }
                 ?: if (plan.dropped > 0) ctx.getString(R.string.att_too_many) else null
@@ -1292,7 +1402,14 @@ private fun Composer(
     }
     val taskDialogs = LocalTaskDialogs.current
     val sideIssue = client.meta(id)?.sideIssueId
-    AttachPicker(picker, onDismiss = { picker = false }, onPicked = { add(it) }, onEvent = onNewEvent, onIssue = onNewIssue,
+    if (creativePicker && com.tiecoms.app.core.CreativeMedia.available(client.meta(id)?.kind)) CreativeMediaPicker(
+        onDismiss = { creativePicker = false }, onGif = { gif = it }, onMeme = { file, source ->
+            val plan = com.tiecoms.app.core.Attachments.plan(files + file, null)
+            files = plan.files
+            if (file in files) memeSources = memeSources + (file.path to source)
+            else { java.io.File(file.path).delete(); attError = ctx.getString(R.string.att_too_many) }
+        })
+    AttachPicker(picker && uploading == null, onDismiss = { picker = false }, onPicked = { add(it) }, onEvent = onNewEvent, onIssue = onNewIssue,
         onTask = sideIssue?.let { sid -> { picker = false; taskDialogs.openTasks(sid, id) } },
         onMeetNow = onMeeting?.let { f -> { picker = false; f(true) } }, onMeetSchedule = onMeeting?.let { f -> { picker = false; f(false) } },
         onMail = onMail?.let { f -> { picker = false; f() } }, onWhatsApp = onWhatsApp?.let { f -> { picker = false; f() } })
@@ -1300,6 +1417,7 @@ private fun Composer(
     val focus = remember { androidx.compose.ui.focus.FocusRequester() }
     LaunchedEffect(id, autoFocus) { if (autoFocus) { delay(300); runCatching { focus.requestFocus() } } }
     val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
     LaunchedEffect(focusSignal) { if (focusSignal > 0) { withFrameNanos { }; runCatching { focus.requestFocus() }; keyboard?.show() } }
     // Borrador de gg (contrato 1-oct-2026): cae en la caja para editarlo; NUNCA se envía solo.
     val ggPending by GgDrafts.pending.collectAsStateWithLifecycle()
@@ -1311,41 +1429,81 @@ private fun Composer(
     }
     LaunchedEffect(text.isBlank()) { if (text.isBlank()) ggLabel = false }
     fun sendNow() {
+        if (uploading != null || converting) return
+        if (text.length > com.tiecoms.app.core.LongContent.MAX_BODY) { attError = ctx.getString(R.string.long_limit); return }
         val body = text
-        val bodyMents = ments
+        val bodyMents = ments.filter { !com.tiecoms.app.core.Fmt.inCode(text, it.start) }
         // ① solo con texto, fotos o nota de voz: con otros archivos no se manda (el servidor respondería 400).
         if (viewOnce && !files.all { it.contentType?.startsWith("image/") == true }) { attError = ctx.getString(R.string.vo_only_photos); return }
         val once = viewOnce
-        viewOnce = false
-        if (files.isEmpty()) { if (body.isNotBlank()) { onSend(body, emptyList(), bodyMents, once); text = ""; ments = emptyList(); sel = androidx.compose.ui.text.TextRange(0) }; return }
+        val selectedGif = gif
+        if (files.isEmpty() && selectedGif == null) {
+            if (body.isNotBlank()) try { onSend(body, emptyList(), bodyMents, once); viewOnce = false; text = ""; ments = emptyList(); sel = androidx.compose.ui.text.TextRange(0) }
+            catch (e: Exception) { attError = errorText(ctx, e) }
+            return
+        }
+        if (files.size + (if (selectedGif != null) 1 else 0) > com.tiecoms.app.core.Attachments.MAX_PER_MESSAGE) { attError = ctx.getString(R.string.att_too_many); return }
         attError = null
+        val selectedFiles = files.toList()
+        val selectedSources = memeSources.toMap()
+        val session = client.sessionGeneration
+        val author = client.myId
+        fun requireOwner() {
+            if (client.sessionGeneration != session || client.myId != author || author == null) throw kotlinx.coroutines.CancellationException("Session changed")
+        }
+        val send = onSend
+        // Set synchronously: a second tap cannot start another import before the coroutine runs.
+        uploading = 0 to 0f
         scope.launch {
-            val done = mutableListOf<com.tiecoms.app.core.AttachmentDTO>()
-            for ((i, f) in files.withIndex()) {
-                uploading = i to 0f
-                try {
-                    done += com.tiecoms.app.platform.AttachmentUpload.upload(ctx.applicationContext, client, id, java.io.File(f.path), f.name, f.contentType) { sent, total ->
-                        uploading = i to (if (total > 0) sent.toFloat() / total else 0f)
+            try {
+                requireOwner()
+                val done = mutableListOf<com.tiecoms.app.core.AttachmentDTO>()
+                val sources = selectedFiles.mapNotNull { selectedSources[it.path] }.toMutableList()
+                if (selectedGif != null) {
+                    try {
+                        requireOwner()
+                        val imported = client.importGif(id, selectedGif)
+                        requireOwner()
+                        done += imported.attachment
+                        sources += imported.attribution ?: com.tiecoms.app.core.CreativeMedia.attribution(selectedGif)
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        attError = errorText(ctx, e); uploading = null; return@launch
                     }
-                } catch (e: Exception) {
-                    attError = ctx.getString(R.string.att_upload_failed, f.name) + " · " + errorText(ctx, e)
-                    // Los ya subidos quedan pendientes en el servidor (el worker los borra a las 24 h); se reintenta todo.
-                    uploading = null
-                    return@launch
                 }
-            }
-            uploading = null
-            onSend(body, done, bodyMents, once)
-            files.forEach { java.io.File(it.path).delete() }
-            files = emptyList(); text = ""; ments = emptyList(); sel = androidx.compose.ui.text.TextRange(0)
+                for ((i, f) in selectedFiles.withIndex()) {
+                    uploading = i to 0f
+                    try {
+                        requireOwner()
+                        done += com.tiecoms.app.platform.AttachmentUpload.upload(ctx.applicationContext, client, id, java.io.File(f.path), f.name, f.contentType) { sent, total ->
+                            uploading = i to (if (total > 0) sent.toFloat() / total else 0f)
+                        }
+                        requireOwner()
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        attError = ctx.getString(R.string.att_upload_failed, f.name) + " · " + errorText(ctx, e)
+                        // Los ya subidos quedan pendientes en el servidor (el worker los borra a las 24 h); se reintenta todo.
+                        uploading = null
+                        return@launch
+                    }
+                }
+                requireOwner()
+                val fullBody = com.tiecoms.app.core.CreativeMedia.body(body, sources)
+                require(fullBody.length <= com.tiecoms.app.core.LongContent.MAX_BODY) { ctx.getString(R.string.long_limit) }
+                send(fullBody, done, bodyMents, once)
+                selectedFiles.forEach { java.io.File(it.path).delete() }
+                files = emptyList(); gif = null; memeSources = emptyMap(); viewOnce = false; text = ""; ments = emptyList(); sel = androidx.compose.ui.text.TextRange(0)
+            } catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e; attError = errorText(ctx, e) } finally { uploading = null }
         }
     }
-    var editText by rememberSaveable(editing?.id) { mutableStateOf(editing?.body ?: "") }
+    var editText by rememberSaveable(editing?.id) { mutableStateOf(editing?.let { it.displayBody ?: it.body } ?: "") }
     // Programar: solo texto (con menciones y respuesta); los adjuntos y las notas de voz salen al momento.
     var scheduling by remember { mutableStateOf(false) }
     val snackbar = LocalSnackbar.current
     val view = LocalView.current
-    val schedulable = canSchedule && editing == null && files.isEmpty() && text.isNotBlank() && uploading == null
+    val schedulable = canSchedule && editing == null && files.isEmpty() && gif == null && text.isNotBlank() && uploading == null
     if (scheduling) ScheduleSheet(onDismiss = { scheduling = false }, onPick = { at ->
         val body = text; val bodyMents = ments
         text = ""; ments = emptyList(); sel = androidx.compose.ui.text.TextRange(0)
@@ -1392,12 +1550,31 @@ private fun Composer(
             }
             if (ggLabel && editing == null && text.isNotBlank()) Text("✨ " + stringResource(R.string.ggs_draft_label), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp).testTag("ggDraftLabel"))
+            if (!rec.recording) FormatActions(if (editing != null) editText else text, if (editing != null) editSel else sel) { next, selection ->
+                fun adjust(old: String, oldSelection: androidx.compose.ui.text.TextRange, tokens: List<com.tiecoms.app.core.MentionDTO>): List<com.tiecoms.app.core.MentionDTO> {
+                    val prefix = selection.min - oldSelection.min; val delta = next.length - old.length
+                    return tokens.map { m -> m.copy(start = m.start + if (m.start >= oldSelection.max) delta else if (m.start >= oldSelection.min) prefix else 0) }
+                        .filter { it.start >= 0 && it.start + it.length <= next.length && !com.tiecoms.app.core.Fmt.inCode(next, it.start) }
+                }
+                if (editing != null) { editMents = adjust(editText, editSel, editMents); editText = next; editSel = selection }
+                else { ments = adjust(text, sel, ments); text = next; sel = selection }
+            }
             if (viewOnce && editing == null) Text("① " + stringResource(R.string.vo_next), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp).testTag("viewOnceOn"))
-            if (editing == null && files.isNotEmpty()) PendingFiles(files, uploading, onRemove = { f -> if (uploading == null) { files = files - f; java.io.File(f.path).delete() } })
+            if (editing == null && files.isNotEmpty()) PendingFiles(files, uploading, onRemove = { f -> if (uploading == null) { files = files - f; memeSources = memeSources - f.path; java.io.File(f.path).delete() } })
+            if (editing == null) gif?.let { item ->
+                Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp).testTag("pendingGif"), verticalAlignment = Alignment.CenterVertically) {
+                    AnimatedMediaImage(item.previewUrl, item.title, Modifier.size(56.dp))
+                    Column(Modifier.weight(1f).padding(8.dp)) {
+                        Text(item.title, style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(com.tiecoms.app.core.CreativeMedia.attribution(item), style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    }
+                    IconButton(onClick = { gif = null }, enabled = uploading == null, modifier = Modifier.testTag("gifRemove")) { Icon(Icons.Filled.Close, stringResource(R.string.cancel)) }
+                }
+            }
             if (editing == null && draft != null && !rec.recording) VoiceDraftBar(draft, busy = uploading != null,
-                onRetry = { if (draft.aiConsent != null) uploadVoice(draft.result, draft.aiConsent) else { com.tiecoms.app.platform.VoiceDrafts.take(id); pendingVoice = draft.result } },
-                onDelete = { com.tiecoms.app.platform.VoiceDrafts.discard(id); container.toast(ctx.getString(R.string.voice_cancelled)) })
+                onRetry = { if (draft.aiConsent != null) uploadVoice(draft.result, draft.aiConsent) else { com.tiecoms.app.platform.VoiceDrafts.take(voiceKey); pendingVoice = draft.result } },
+                onDelete = { com.tiecoms.app.platform.VoiceDrafts.discard(voiceKey); container.toast(ctx.getString(R.string.voice_cancelled)) })
             attError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp).testTag("attError")) }
             Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp), verticalAlignment = Alignment.Bottom) {
                 val bringLabel = stringResource(R.string.imp_action)
@@ -1413,6 +1590,10 @@ private fun Composer(
                     IconButton(onClick = onGgSpark, modifier = Modifier.size(48.dp).semantics { contentDescription = sparkCd }.testTag("ggSpark")) {
                         Text("✨", style = MaterialTheme.typography.titleMedium)
                     }
+                }
+                if (editing == null && com.tiecoms.app.core.CreativeMedia.available(client.meta(id)?.kind)) IconButton(onClick = { focusManager.clearFocus(); keyboard?.hide(); creativePicker = true }, enabled = uploading == null && !rec.recording,
+                    modifier = Modifier.size(40.dp).testTag("creativeButton").semantics { contentDescription = ctx.getString(R.string.creative_title) }) {
+                    Text("GIF", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
                 }
                 if (rec.recording) RecordingBar(rec, locked, gesture, onDelete = { recorder.cancel(); locked = false; container.toast(ctx.getString(R.string.voice_cancelled)) }, onSend = { sendVoice() }, modifier = Modifier.weight(1f))
                 else RichPasteScope(enabled = editing == null && uploading == null, onImages = { uris, done -> add(uris, done) }) { OutlinedTextField(
@@ -1447,19 +1628,29 @@ private fun Composer(
                     FilledIconButton(onClick = { onSaveEdit(editing, editText, editMents) }, enabled = editText.isNotBlank(), modifier = Modifier.size(52.dp).testTag("saveEdit"),
                         colors = IconButtonDefaults.filledIconButtonColors(containerColor = MaterialTheme.colorScheme.primary)) { Icon(Icons.Filled.Check, stringResource(R.string.edit_save)) }
                 } else {
-                    if (text.isBlank() && files.isEmpty() && uploading == null && !locked) MicButton(
-                        onStart = { if (!hasMic()) { micWhy = true; false } else { gesture = com.tiecoms.app.core.Waveform.Gesture.RECORDING; recorder.start() } },
-                        // Un toque rápido no descarta: deja la grabación bloqueada (manos libres) con Borrar y Enviar.
-                        onRelease = { held -> if (com.tiecoms.app.core.VoiceRules.onRelease(held) == com.tiecoms.app.core.VoiceRules.Release.LOCK) locked = true else sendVoice() },
-                        onCancel = { recorder.cancel(); container.toast(ctx.getString(R.string.voice_cancelled)) }, onLock = { locked = true }, onDrag = { gesture = it },
-                    ) else if (!rec.recording) {
+                    if (text.isBlank() && files.isEmpty() && gif == null && uploading == null && !locked) {
+                        MicButton(
+                            onStart = {
+                                if (!hasMic()) {
+                                    micWhy = true
+                                    false
+                                } else {
+                                    gesture = com.tiecoms.app.core.Waveform.Gesture.RECORDING
+                                    recorder.start().also { if (!it) attError = ctx.getString(R.string.voice_start_failed) }
+                                }
+                            },
+                            // Un toque rápido no descarta: deja la grabación bloqueada (manos libres) con Borrar y Enviar.
+                            onRelease = { held -> if (com.tiecoms.app.core.VoiceRules.onRelease(held) == com.tiecoms.app.core.VoiceRules.Release.LOCK) locked = true else sendVoice() },
+                            onCancel = { recorder.cancel(); container.toast(ctx.getString(R.string.voice_cancelled)) }, onLock = { locked = true }, onDrag = { gesture = it },
+                        )
+                    } else if (!rec.recording) {
                         if (schedulable) {
                             IconButton(onClick = { scheduling = true }, modifier = Modifier.size(48.dp).testTag("schedButton")) {
                                 Text("🕒", style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { contentDescription = ctx.getString(R.string.sched_button) })
                             }
                             Spacer(Modifier.width(4.dp))
                         }
-                        val enabled = uploading == null && (text.isNotBlank() || files.isNotEmpty())
+                        val enabled = uploading == null && (text.isNotBlank() || files.isNotEmpty() || gif != null)
                         val sendLabel = stringResource(R.string.send)
                         val schedLabel = stringResource(R.string.sched_button)
                         // ➤ con pulsación larga = el mismo menú de «Programar envío».
@@ -1608,7 +1799,7 @@ internal fun MessageBubble(
     val authorName = author?.name ?: stringResource(R.string.former_participant)
     val orgName = Names.org(data, author?.orgId)?.name ?: if (author?.guest == true) stringResource(R.string.common_guest) else null
     val deleted = m.deletedAt != null
-    val body = if (deleted) stringResource(R.string.deleted) else m.body
+    val body = if (deleted) stringResource(R.string.deleted) else m.displayBody ?: com.tiecoms.app.core.LongContent.visibleBody(m.body, m.attachments)
     val time = timeText(m.createdAt)
     val menuLabel = stringResource(R.string.menu_more)
     val a11y = (if (item.mine) "" else "$authorName${orgName?.let { " ($it)" } ?: ""}: ") + body + ". " + time + if (m.editedAt != null && !deleted) ". " + stringResource(R.string.msg_edited) else ""
@@ -1740,16 +1931,18 @@ internal fun MessageBubble(
                 // 1.7.1: un mensaje enorme se pliega a 30 líneas con «Ver más» (la búsqueda lo muestra entero).
                 val candidate = remember(body) { com.tiecoms.app.core.LongText.collapsible(body) }
                 var expanded by androidx.compose.runtime.saveable.rememberSaveable(m.id) { mutableStateOf(false) }
+                val readerKeyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+                if (expanded) LongMessageReader(body, m.mentions + com.tiecoms.app.core.Refs.tokens(m), data, onPerson) { expanded = false }
                 var overflows by remember(m.id) { mutableStateOf(false) }
-                val folded = candidate && !expanded && highlightQuery == null
+                val folded = candidate && highlightQuery == null
                 MessageText(body, m.mentions + com.tiecoms.app.core.Refs.tokens(m), fg, data, onPerson = onPerson, onColored = item.mine,
                     modifier = Modifier.testTag("body-${m.seq}"), highlight = highlightQuery,
                     maxLines = if (folded) com.tiecoms.app.core.LongText.COLLAPSED_LINES else Int.MAX_VALUE,
                     onOverflow = if (folded) ({ o -> overflows = o }) else null)
-                if (candidate && highlightQuery == null && (expanded || overflows)) Text(
+                if (candidate && highlightQuery == null) Text(
                     stringResource(if (expanded) R.string.msg_see_less else R.string.msg_see_more),
                     color = fg, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.padding(top = 4.dp).clip(RoundedCornerShape(6.dp)).clickable { expanded = !expanded }
+                    modifier = Modifier.padding(top = 4.dp).clip(RoundedCornerShape(6.dp)).clickable { readerKeyboard?.hide(); expanded = true }
                         .padding(horizontal = 2.dp, vertical = 4.dp).testTag("expand-${m.seq}"),
                 )
             }
@@ -1864,14 +2057,23 @@ private fun Modifier.swipeToReply(
             while (true) {
                 val ev = awaitPointerEvent()
                 val ch = ev.changes.firstOrNull { it.id == down.id } ?: break
-                if (!ch.pressed) break
+                if (!ch.pressed) {
+                    break
+                }
                 val d = ch.position - ch.previousPosition
                 if (!claimed) {
-                    if (ch.isConsumed) break
-                    dx += d.x; dy += d.y
+                    if (ch.isConsumed) {
+                        break
+                    }
+                    dx += d.x
+                    dy += d.y
                     when (com.tiecoms.app.core.SwipeReply.decide(dx, dy, slop)) {
                         com.tiecoms.app.core.SwipeReply.Decision.REJECT -> break
-                        com.tiecoms.app.core.SwipeReply.Decision.CLAIM -> { claimed = true; ch.consume(); dx -= slop }
+                        com.tiecoms.app.core.SwipeReply.Decision.CLAIM -> {
+                            claimed = true
+                            ch.consume()
+                            dx -= slop
+                        }
                         com.tiecoms.app.core.SwipeReply.Decision.UNDECIDED -> Unit
                     }
                 } else {

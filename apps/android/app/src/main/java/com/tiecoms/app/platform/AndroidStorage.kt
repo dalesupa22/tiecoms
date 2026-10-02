@@ -19,7 +19,8 @@ class PrefsStorage(context: Context) : KeyValueStorage {
     override fun get(key: String): String? = prefs.getString(key, null)
     // commit() síncrono: la cola de salida debe estar en disco antes de intentar enviar.
     override fun set(key: String, value: String?) {
-        prefs.edit().apply { if (value == null) remove(key) else putString(key, value) }.commit()
+        val saved = prefs.edit().apply { if (value == null) remove(key) else putString(key, value) }.commit()
+        if (key.startsWith("u:") && key.endsWith(":outbox")) check(saved) { "Unable to save queued message" }
     }
     override fun clearPrefix(prefix: String) {
         val e = prefs.edit()

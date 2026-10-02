@@ -1,5 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="creative_title">GIFs y memes</string>
+    <string name="creative_search">Buscar</string>
+    <string name="creative_empty">Sin resultados</string>
+    <string name="creative_more">Más GIFs</string>
+    <string name="creative_add">Añadir al mensaje</string>
+    <string name="creative_back">Volver a resultados</string>
+    <string name="memes">Memes</string>
+    <string name="meme_top">Texto superior</string>
+    <string name="meme_bottom">Texto inferior</string>
+    <string name="meme_local">El texto se dibuja en tu dispositivo. Enviar comparte la imagen terminada.</string>
     <string name="tagline">Una sola red entre las empresas con las que trabajas. Cada persona ve su propio alcance.</string>
     <string name="cd_logo">Logo de chaggu</string>
     <string name="email">Correo de trabajo</string>
@@ -135,4 +145,51 @@
         <item quantity="one">%d participante</item>
         <item quantity="other">%d participantes</item>
     </plurals>
+    <string name="long_once">El texto largo necesita un archivo. Desactiva explícitamente una sola vista para adjuntarlo.</string>
+    <string name="long_limit">El texto supera el límite automático de archivo (1 MiB). Conserva o adjunta el original.</string>
+    <string name="voice_permission_ready">Micrófono listo. Mantén pulsado otra vez para grabar.</string>
+    <string name="voice_permission_denied">Permiso de micrófono denegado. Actívalo en Ajustes.</string>
+    <string name="voice_start_failed">No se pudo iniciar la grabación. Intenta de nuevo.</string>
+    <string name="media_credits">Créditos</string>
+    <string name="copy_image">Copiar imagen</string>
+    <string name="copy_content">Copiar contenido completo</string>
+    <string name="copy_code">Copiar código</string>
+    <string name="format_bold">Negrita</string>
+    <string name="format_bullets">Viñetas</string>
+    <string name="format_numbered">Lista numerada</string>
+    <string name="format_inline">Código en línea</string>
+    <string name="format_block">Bloque de código</string>
+    <string name="tasks_all">Todas visibles</string>
+    <string name="tasks_active">Activas</string>
+    <string name="tasks_completed">Completadas</string>
+    <string name="tasks_any">Todos los estados</string>
+    <string name="availability_title">Disponibilidad</string>
+    <string name="availability_available">Disponible</string>
+    <string name="availability_busy">Ocupado</string>
+    <string name="availability_focus">Focus</string>
+    <string name="availability_dnd">No molestar</string>
+    <string name="availability_rest">Descanso</string>
+    <string name="availability_silent">Silencia avisos de Chaggu durante 1 hora</string>
+    <string name="media_pending">Preparando adjunto…</string>
+    <string name="media_retry">Reintentar adjunto</string>
+    <string name="sound_n_energy">Energía</string>
+    <string name="sound_n_spark">Chispa</string>
+    <string name="sound_n_portal">Portal</string>
+    <string name="sound_n_victory">Victoria</string>
+    <string name="calendar_find_slots">Buscar disponibilidad para reunión</string>
+    <string name="calendar_from_date">Desde (AAAA-MM-DD)</string>
+    <string name="calendar_to_date">Hasta (AAAA-MM-DD)</string>
+    <string name="calendar_duration">Duración (minutos)</string>
+    <string name="calendar_check">Consultar calendario conectado</string>
+    <string name="calendar_connect">Conecta o reconecta tu calendario en Reuniones</string>
+    <string name="calendar_no_slots">No hay horarios libres en este rango</string>
+    <string name="calendar_confirm">Confirmar horario y crear reunión</string>
+    <string name="calendar_open_meeting">Abrir reunión</string>
+    <string name="calendar_timezone">Zona horaria</string>
+    <string name="calendar_description">Descripción</string>
+    <string name="calendar_attendee_emails">Invitar por correo (separados por coma)</string>
+    <string name="calendar_invitees">Invitados de Chaggu</string>
+    <string name="wa_load_more">Cargar más conversaciones</string>
+    <string name="calendar_daily_window">Disponibilidad entre 09:00 y 18:00 en la zona elegida. Tu calendario principal y reuniones Chaggu; no consulta las agendas de invitados.</string>
+    <string name="draft_save_failed">No se pudo guardar el borrador localmente. Consérvalo abierto e intenta de nuevo.</string>
 </resources>

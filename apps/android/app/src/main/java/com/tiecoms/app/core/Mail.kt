@@ -111,6 +111,8 @@ data class SharedMailDTO(
     val webLink: String? = null,
     /** provider «whatsapp»: un mensaje de WhatsApp llevado al chat (from.name es el autor; subject, el chat). */
     val wa: SharedWaMetaDTO? = null,
+    val chagguAttachments: List<AttachmentDTO> = emptyList(),
+    val mediaStatus: String? = null,
 ) {
     val out: Boolean get() = direction == "out"
     val isWhatsApp: Boolean get() = provider == "whatsapp"

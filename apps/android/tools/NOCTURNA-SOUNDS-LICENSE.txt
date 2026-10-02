@@ -1,0 +1,5 @@
+Chaggu original notification sounds: energy.wav, spark.wav, portal.wav, victory.wav.
+Original synthesized compositions and recordings; no samples from anime or third-party works.
+Dedicated to the public domain under CC0 1.0 Universal:
+https://creativecommons.org/publicdomain/zero/1.0/
+Reproducible source: scripts/audio/generate-originals.py in the Chaggu repository.

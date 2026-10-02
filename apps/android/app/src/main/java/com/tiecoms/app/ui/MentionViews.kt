@@ -151,7 +151,7 @@ fun MentionPicker(query: String, conv: ConversationDTO, data: BootstrapDTO, onPi
  * con fondo naranja suave. Tocar una mención abre la tarjeta de la persona.
  */
 @Composable
-fun MessageText(text: String, mentions: List<MentionDTO>, color: Color, data: BootstrapDTO, onPerson: (String) -> Unit, modifier: Modifier = Modifier,
+internal fun InlineMessageText(text: String, mentions: List<MentionDTO>, color: Color, data: BootstrapDTO, onPerson: (String) -> Unit, modifier: Modifier = Modifier,
                 /** En listas (bandeja) el toque es de la fila: sin enlaces propios. */
                 interactive: Boolean = true,
                 /** Búsqueda en el chat (tanda 1.7): se resalta lo que coincide, sin mayúsculas ni tildes. */
@@ -164,6 +164,7 @@ fun MessageText(text: String, mentions: List<MentionDTO>, color: Color, data: Bo
                 onColored: Boolean = false) {
     // «- » al inicio de línea se ve como «• » (misma longitud: las menciones no se corren).
     @Suppress("NAME_SHADOWING") val text = remember(text) { com.tiecoms.app.core.Fmt.bullets(text) }
+    val codeRanges = remember(text) { com.tiecoms.app.core.Fmt.codeRanges(text) }
     val hits = remember(text, highlight) { if (highlight.isNullOrBlank()) emptyList() else com.tiecoms.app.core.matchRanges(text, highlight) }
     // @gg (estructurada o escrita a mano como palabra) se pinta con el degradado de gg.
     val gg = remember(text, mentions) { com.tiecoms.app.core.Gg.ggMentions(text, mentions) }
@@ -183,11 +184,11 @@ fun MessageText(text: String, mentions: List<MentionDTO>, color: Color, data: Bo
     val annotated = remember(text, mentions, color, interactive, hits, gg, phase, onColored) {
         val marks = mutableListOf<Int>()
         buildAnnotatedString {
-            val valid = (mentions.filter { it.start >= 0 && it.start + it.length <= text.length && !com.tiecoms.app.core.Gg.isGg(it.userId) } + gg).sortedBy { it.start }
+            val valid = (mentions.filter { it.start >= 0 && it.start + it.length <= text.length && !com.tiecoms.app.core.Gg.isGg(it.userId) && codeRanges.none { range -> it.start in range } } + gg.filter { codeRanges.none { range -> it.start in range } }).sortedBy { it.start }
             var i = 0
             fun plain(to: Int) {
                 if (to <= i) return
-                Links.split(text.substring(i, to)).forEach { p ->
+                com.tiecoms.app.core.Fmt.linkParts(text.substring(i, to)).forEach { p ->
                     val u = p.url
                     if (u == null) appendFormatted(p.text, color, marks)
                     else if (!interactive) append(p.text)

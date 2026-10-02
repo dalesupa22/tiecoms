@@ -7,12 +7,16 @@ object Attachments {
     /** Conversaciones destino a la vez desde la hoja de compartir. */
     const val MAX_TARGETS = 5
 
+    fun mime(value: String?): String = value.orEmpty().substringBefore(';').trim().lowercase(java.util.Locale.ROOT)
+    fun isGif(bytes: ByteArray): Boolean = bytes.size >= 6 && (bytes.copyOfRange(0, 6).toString(Charsets.US_ASCII) in setOf("GIF87a", "GIF89a"))
+    fun detectedMime(declared: String?, head: ByteArray): String = if (isGif(head)) "image/gif" else mime(declared).ifBlank { "application/octet-stream" }
+
     enum class Kind { IMAGE, VIDEO, FILE }
 
     fun kind(contentType: String?): Kind = when {
         contentType == null -> Kind.FILE
-        contentType.startsWith("image/") -> Kind.IMAGE
-        contentType.startsWith("video/") -> Kind.VIDEO
+        mime(contentType).startsWith("image/") -> Kind.IMAGE
+        mime(contentType).startsWith("video/") -> Kind.VIDEO
         else -> Kind.FILE
     }
 

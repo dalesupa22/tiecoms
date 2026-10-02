@@ -10,7 +10,7 @@ import kotlinx.serialization.Serializable
  * el predeterminado de la persona y su tono de llamada. Los archivos son res/raw/<nombre>.ogg (tools/sounds.py).
  */
 object Sounds {
-    val MESSAGE = listOf("pop", "gota", "campana", "marimba", "burbuja", "cristal", "acorde", "silbido", "tambor", "brisa")
+    val MESSAGE = listOf("pop", "gota", "campana", "marimba", "burbuja", "cristal", "acorde", "silbido", "tambor", "brisa", "energy", "spark", "portal", "victory")
     const val NONE = "none"
     val RINGTONES = listOf("clasico", "suave", "marimba")
     const val DEFAULT_SOUND = "pop"

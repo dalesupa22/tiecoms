@@ -86,6 +86,17 @@ object ReadTree {
      * Metadatos tras marcar hasta [seq]: el cursor nunca retrocede y lo que llegó después del seq enviado sigue
      * contando. Las menciones se limpian solo si ya no queda nada por leer.
      */
+    /** Server revision orders deliberate unread, viewport ACKs and socket events together. */
+    fun applyCursor(c: ConversationDTO, seq: Long, revision: Long?, legacyDecrease: Boolean = false): ConversationDTO {
+        if (revision != null) {
+            if (revision <= (c.readRevision ?: -1)) return c
+        } else if (c.readRevision != null) return c // A revision-less response cannot overwrite modern state.
+        val read = if (revision != null || legacyDecrease) seq else maxOf(c.lastReadSeq, seq)
+        return c.copy(lastReadSeq = read, readRevision = revision ?: c.readRevision,
+            unread = maxOf(0L, c.lastMessageSeq - maxOf(read, c.historyFromSeq)).toInt(),
+            unreadMentions = if (read >= c.lastMessageSeq) 0 else c.unreadMentions)
+    }
+
     fun applyRead(c: ConversationDTO, seq: Long): ConversationDTO {
         val read = maxOf(c.lastReadSeq, seq)
         val unread = maxOf(0L, c.lastMessageSeq - maxOf(read, c.historyFromSeq)).toInt()
@@ -95,5 +106,5 @@ object ReadTree {
 
 @Serializable data class ReadTreeItem(val conversationId: String, val seq: Long)
 @Serializable data class ReadTreeBody(val items: List<ReadTreeItem>)
-@Serializable data class ReadTreeMarked(val conversationId: String = "", val lastReadSeq: Long = 0)
+@Serializable data class ReadTreeMarked(val conversationId: String = "", val lastReadSeq: Long = 0, val readRevision: Long? = null)
 @Serializable data class ReadTreeResult(val marked: List<ReadTreeMarked> = emptyList())

@@ -8,6 +8,9 @@ import kotlinx.serialization.json.JsonElement
 const val CONTRACT_VERSION = "2026-09-29.1"
 const val PLATFORM = "android"
 
+@Serializable data class IssuePreferencesDTO(val view: String? = null, val grouping: String? = null)
+@Serializable data class PersonalPreferencesDTO(val issues: IssuePreferencesDTO? = null)
+
 @Serializable
 data class BlocksResult(val userIds: List<String> = emptyList())
 
@@ -33,6 +36,13 @@ data class DeviceInfo(
 )
 
 @Serializable
+data class AvailabilityDTO(val mode: String? = null, val until: String? = null, val silent: Boolean = false, val revision: Long = 0) {
+    fun active(nowMs: Long = System.currentTimeMillis()): Boolean = mode in setOf("available", "busy", "focus", "dnd", "rest") && (until == null || runCatching { java.time.Instant.parse(until).toEpochMilli() > nowMs }.getOrDefault(false))
+    fun quiet(nowMs: Long = System.currentTimeMillis()) = silent && active(nowMs)
+}
+@Serializable data class AvailabilityResult(val availability: AvailabilityDTO? = null)
+
+@Serializable
 data class UserDTO(
     val id: String = "",
     val name: String = "",
@@ -45,6 +55,7 @@ data class UserDTO(
     val avatarUrl: String? = null,
     /** «No molestar» hasta (SPEC-silencio §3); null = apagado o servidor viejo. */
     val dndUntil: String? = null,
+    val availability: AvailabilityDTO? = null,
     /** Solo en bootstrap.me: mi «No molestar todas las noches»; ausente = servidor anterior. */
     val sleep: SleepDTO? = null,
     /** Sonido predeterminado de mis chats (docs/SONIDOS.md): uno de [Sounds.MESSAGE] o "none"; null = el de fábrica (pop). */
@@ -101,6 +112,7 @@ data class PersonDTO(
     val email: String? = null,
     /** Horario de descanso (modo sueño); null = apagado o servidor viejo. */
     val sleep: SleepWindowDTO? = null,
+    val availability: AvailabilityDTO? = null,
 )
 
 @Serializable
@@ -139,6 +151,7 @@ data class ConversationDTO(
     val lastMessageAt: String? = null,
     val lastMessagePreview: String? = null,
     val lastReadSeq: Long = 0,
+    val readRevision: Long? = null,
     val unread: Int = 0,
     val canPost: Boolean = true,
     val canManage: Boolean = false,
@@ -222,6 +235,7 @@ data class MessageDTO(
     /** text | system */
     val kind: String = "text",
     val body: String = "",
+    val displayBody: String? = null,
     val replyTo: String? = null,
     val createdAt: String = "",
     val editedAt: String? = null,
@@ -278,6 +292,9 @@ data class MentionDTO(val userId: String = "", val start: Int = 0, val length: I
 
 /** Archivo adjunto a un mensaje. `url` y `thumbUrl` son relativas al API y piden Bearer. */
 @Serializable
+data class AttachmentProvenanceDTO(val version: Int = 1, val provider: String = "", val title: String = "", val attribution: String = "", val sourceUrl: String? = null, val author: String? = null, val license: String? = null, val licenseUrl: String? = null)
+
+@Serializable
 data class AttachmentDTO(
     val id: String = "",
     val name: String = "",
@@ -295,11 +312,28 @@ data class AttachmentDTO(
     val transcript: TranscriptDTO? = null,
     /** Solo en PDFs firmados con Chaggu: quién firmó, cuándo y las huellas (opcional, decodificación tolerante). */
     @Serializable(with = LenientSigningSerializer::class) val signing: AttachmentSigningDTO? = null,
+    val provenance: AttachmentProvenanceDTO? = null,
 ) {
     val isVoice: Boolean get() = kind == "voice"
-    val isImage: Boolean get() = !isVoice && contentType.startsWith("image/")
-    val isVideo: Boolean get() = !isVoice && contentType.startsWith("video/")
+    val isImage: Boolean get() = !isVoice && Attachments.mime(contentType).startsWith("image/")
+    val isVideo: Boolean get() = !isVoice && Attachments.mime(contentType).startsWith("video/")
+    val isGif: Boolean get() = isImage && Attachments.mime(contentType) == "image/gif"
 }
+
+/** Open media catalogue, served through Chaggu's authenticated media proxy. */
+@Serializable
+data class CreativeMediaDTO(
+    val id: String = "", val provider: String = "", val title: String = "",
+    val previewUrl: String = "", val url: String = "", val width: Int = 0, val height: Int = 0,
+    val attribution: String? = null, val sourceUrl: String? = null, val boxCount: Int? = null,
+)
+@Serializable
+data class CreativeProviderDTO(val label: String = "", val url: String = "")
+@Serializable
+data class CreativeMediaPage(val provider: String = "", val items: List<CreativeMediaDTO> = emptyList(),
+    val next: String? = null, val poweredBy: CreativeProviderDTO? = null)
+@Serializable
+data class GifAttachmentResult(val attachment: AttachmentDTO, val attribution: String? = null)
 
 /** Transcripción de una nota de voz: pending | done | failed | disabled. */
 @Serializable
@@ -617,6 +651,7 @@ data class IssueDTO(
     val status: String = "open",
     val waitingOnOrgId: String? = null,
     val ownerId: String? = null,
+    val assigneeIds: List<String> = emptyList(),
     val requestedBy: String? = null,
     val dueDate: String? = null,
     val createdBy: String = "",
@@ -658,7 +693,7 @@ data class IssueEventDTO(
 @Serializable data class CalendarPage(val events: List<CalendarEventDTO> = emptyList())
 @Serializable data class PinsResult(val messageIds: List<String> = emptyList())
 @Serializable data class PinnedMessages(val messages: List<MessageDTO> = emptyList())
-@Serializable data class ReadResult(val lastReadSeq: Long = 0)
+@Serializable data class ReadResult(val lastReadSeq: Long = 0, val readRevision: Long? = null)
 @Serializable data class IdResult(val id: String = "")
 @Serializable data class AdminIdsResult(val adminIds: List<String> = emptyList())
 @Serializable data class ReturnSuggestion(val summary: String = "", val source: String = "fallback")
@@ -725,8 +760,9 @@ data class WaChatDTO(
     val accountStatus: String? = null,
 )
 @Serializable data class WaCount(val total: Int = 0, val unread: Int = 0)
-@Serializable data class WaChatsPage(val chats: List<WaChatDTO> = emptyList(), val categories: Map<String, WaCount> = emptyMap())
-@Serializable data class WaMessageDTO(val id: String = "", val fromMe: Boolean = false, val author: String? = null, val kind: String = "text", val body: String = "", val sentAt: String = "")
+@Serializable data class WaChatsPage(val chats: List<WaChatDTO> = emptyList(), val categories: Map<String, WaCount> = emptyMap(), val next: String? = null, val hasMore: Boolean = false, val syncPartial: Boolean = false)
+@Serializable data class WaMediaDTO(val status: String = "unavailable", val attachment: AttachmentDTO? = null, val error: String? = null)
+@Serializable data class WaMessageDTO(val id: String = "", val fromMe: Boolean = false, val author: String? = null, val kind: String = "text", val body: String = "", val sentAt: String = "", val media: WaMediaDTO? = null)
 @Serializable data class WaMessagesPage(val messages: List<WaMessageDTO> = emptyList())
 @Serializable data class WaOrganizeResult(val reviewed: Int = 0, val changed: Int = 0)
 

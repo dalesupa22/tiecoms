@@ -91,7 +91,7 @@ fun rememberAttachmentImage(a: AttachmentDTO, full: Boolean, px: Int): ImageBitm
     val container = LocalContainer.current
     val path = if (full || a.thumbUrl == null) a.url else a.thumbUrl
     val url = remember(path) { client.mediaUrl(path) }
-    val img by produceState(url?.let { container.images.cached(it, px) }, url, px) {
+    val img by produceState<ImageBitmap?>(null, url, px, client.sessionGeneration) {
         if (url != null && value == null) value = container.images.load(url, px, client.bearer())
     }
     return img
@@ -131,6 +131,13 @@ fun AttachmentsBlock(list: List<AttachmentDTO>, fg: Color, onOpenMedia: (Int) ->
                 }
             }
         }
+        list.mapNotNull { it.provenance }.distinct().forEach { provenance ->
+            var open by remember(provenance) { mutableStateOf(false) }
+            androidx.compose.material3.TextButton(onClick = { open = true }, modifier = Modifier.heightIn(min = 40.dp).testTag("mediaCredits")) { Text(stringResource(R.string.media_credits), color = fg) }
+            if (open) androidx.compose.material3.AlertDialog(onDismissRequest = { open = false }, title = { Text(provenance.title) },
+                text = { androidx.compose.foundation.text.selection.SelectionContainer { Text(provenance.attribution) } },
+                confirmButton = { androidx.compose.material3.TextButton(onClick = { open = false }) { Text(stringResource(R.string.close)) } })
+        }
         files.forEach { f ->
             if (onOpenPdf != null && com.tiecoms.app.core.Signing.isPdf(f)) PdfChip(f, fg, onLongPress) { sign -> onOpenPdf(f, sign) }
             else FileChip(f, fg, onLongPress) { onOpenFile(f) }
@@ -141,11 +148,12 @@ fun AttachmentsBlock(list: List<AttachmentDTO>, fg: Color, onOpenMedia: (Int) ->
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun MediaTile(a: AttachmentDTO, modifier: Modifier, more: Int?, onLongPress: (() -> Unit)?, onClick: () -> Unit) {
-    val img = rememberAttachmentImage(a, full = false, px = 480)
+    val img = if (!a.isGif) rememberAttachmentImage(a, full = false, px = 480) else null
     val label = if (a.isVideo) stringResource(R.string.att_video) else stringResource(R.string.att_photo)
     Box(modifier.clip(RoundedCornerShape(12.dp)).background(Color(0x22000000)).combinedClickable(onClick = onClick, onLongClick = onLongPress)
         .semantics { contentDescription = "$label ${a.name}" }.testTag("att-${a.id}"), contentAlignment = Alignment.Center) {
-        if (img != null) Image(img, null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+        if (a.isGif) AnimatedMediaImage(a.url, a.name, Modifier.fillMaxSize(), px = 480)
+        else if (img != null) Image(img, null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
         else if (!a.isVideo) CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
         if (a.isVideo) Icon(Icons.Outlined.PlayCircle, null, tint = Color.White, modifier = Modifier.size(44.dp))
         if (more != null) Box(Modifier.fillMaxSize().background(Color(0x99000000)), contentAlignment = Alignment.Center) {
@@ -170,24 +178,26 @@ private fun FileChip(a: AttachmentDTO, fg: Color, onLongPress: (() -> Unit)?, on
     }
 }
 
+private suspend fun attachmentToast(ctx: Context, text: CharSequence) = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { Toast.makeText(ctx, text, Toast.LENGTH_SHORT).show() }
+
 /** Descarga (con caché) y abre con otra app: visor de PDF, hoja de cálculo, galería… */
 suspend fun openAttachment(ctx: Context, client: TieComsClient, a: AttachmentDTO) {
     val dir = File(ctx.cacheDir, "att/${a.id}").apply { mkdirs() }
     val f = File(dir, com.tiecoms.app.platform.ShareIntake.safeName(a.name, a.contentType, 0))
     try {
         if (!f.exists() || f.length() == 0L) {
-            Toast.makeText(ctx, R.string.att_downloading, Toast.LENGTH_SHORT).show()
+            attachmentToast(ctx, ctx.getString(R.string.att_downloading))
             client.downloadAttachment(a.url, f)
         }
         val uri = FileProvider.getUriForFile(ctx, ctx.packageName + ".files", f)
         val view = Intent(Intent.ACTION_VIEW).setDataAndType(uri, a.contentType).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        ctx.startActivity(Intent.createChooser(view, ctx.getString(R.string.att_open_with)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { ctx.startActivity(Intent.createChooser(view, ctx.getString(R.string.att_open_with)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
     } catch (_: ActivityNotFoundException) {
-        Toast.makeText(ctx, R.string.att_no_app, Toast.LENGTH_SHORT).show()
+        attachmentToast(ctx, ctx.getString(R.string.att_no_app))
     } catch (e: ApiException) {
-        Toast.makeText(ctx, if (e.status == 403) R.string.att_out_of_history else R.string.att_unavailable, Toast.LENGTH_SHORT).show()
+        attachmentToast(ctx, ctx.getString(if (e.status == 403) R.string.att_out_of_history else R.string.att_unavailable))
     } catch (e: Exception) {
-        Toast.makeText(ctx, errorText(ctx, e), Toast.LENGTH_SHORT).show()
+        attachmentToast(ctx, errorText(ctx, e))
     }
 }
 
@@ -203,12 +213,16 @@ fun MediaViewer(media: List<AttachmentDTO>, start: Int, onClose: () -> Unit) {
         Box(Modifier.fillMaxSize().background(Color.Black).testTag("mediaViewer")) {
             HorizontalPager(pager, Modifier.fillMaxSize(), beyondViewportPageCount = 0) { i ->
                 val a = media[i]
-                if (a.isVideo) VideoPage(a, active = pager.currentPage == i) else ZoomImage(a)
+                if (a.isVideo) VideoPage(a, active = pager.currentPage == i) else ZoomImage(a, active = pager.currentPage == i)
             }
             Row(Modifier.fillMaxWidth().safeDrawingPadding().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onClose, modifier = Modifier.testTag("viewerClose")) { Icon(Icons.Filled.Close, stringResource(R.string.close), tint = Color.White) }
                 Text(if (media.size > 1) stringResource(R.string.att_count, pager.currentPage + 1, media.size) else media.getOrNull(0)?.name ?: "",
                     color = Color.White, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).testTag("viewerCount"))
+                androidx.compose.material3.TextButton(onClick = { media.getOrNull(pager.currentPage)?.takeIf { it.isImage }?.let { a -> scope.launch {
+                    try { com.tiecoms.app.platform.AttachmentActions.copyImage(ctx, client, a); attachmentToast(ctx, ctx.getString(R.string.toast_copied)) }
+                    catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e; attachmentToast(ctx, errorText(ctx, e)) }
+                } } }, enabled = media.getOrNull(pager.currentPage)?.isImage == true, modifier = Modifier.testTag("viewerCopyImage")) { Text(stringResource(R.string.copy_image), color = Color.White) }
                 IconButton(onClick = { media.getOrNull(pager.currentPage)?.let { a -> scope.launch { openAttachment(ctx, client, a) } } }) {
                     Icon(Icons.AutoMirrored.Outlined.OpenInNew, stringResource(R.string.att_open_with), tint = Color.White)
                 }
@@ -218,9 +232,9 @@ fun MediaViewer(media: List<AttachmentDTO>, start: Int, onClose: () -> Unit) {
 }
 
 @Composable
-private fun ZoomImage(a: AttachmentDTO) {
-    val thumb = rememberAttachmentImage(a, full = false, px = 480)
-    val full = rememberAttachmentImage(a, full = true, px = 2048)
+private fun ZoomImage(a: AttachmentDTO, active: Boolean = true) {
+    val thumb = if (!a.isGif) rememberAttachmentImage(a, full = false, px = 480) else null
+    val full = if (!a.isGif) rememberAttachmentImage(a, full = true, px = 2048) else null
     var zoom by remember { mutableFloatStateOf(1f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
     Box(Modifier.fillMaxSize()
@@ -232,7 +246,9 @@ private fun ZoomImage(a: AttachmentDTO) {
             }
         }, contentAlignment = Alignment.Center) {
         val img = full ?: thumb
-        if (img != null) Image(img, a.name, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize()
+        if (a.isGif) AnimatedMediaImage(a.url, a.name, Modifier.fillMaxSize()
+            .graphicsLayer { scaleX = zoom; scaleY = zoom; translationX = offset.x; translationY = offset.y }.testTag("viewerImage"), fit = true, px = 2048, active = active)
+        else if (img != null) Image(img, a.name, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize()
             .graphicsLayer { scaleX = zoom; scaleY = zoom; translationX = offset.x; translationY = offset.y }.testTag("viewerImage"))
         else CircularProgressIndicator(color = Color.White)
     }

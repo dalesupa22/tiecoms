@@ -1,5 +1,7 @@
 package com.tiecoms.app.ui
 
+import androidx.compose.runtime.rememberUpdatedState
+
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 
 import androidx.compose.foundation.Canvas
@@ -185,6 +187,8 @@ fun WaveBars(levels: List<Float>, progress: Float, color: Color, modifier: Modif
  */
 @Composable
 fun MicButton(onStart: () -> Boolean, onRelease: (heldMs: Long) -> Unit, onCancel: () -> Unit, onLock: () -> Unit, onDrag: (Waveform.Gesture) -> Unit, modifier: Modifier = Modifier) {
+    val startNow by rememberUpdatedState(onStart); val releaseNow by rememberUpdatedState(onRelease)
+    val cancelNow by rememberUpdatedState(onCancel); val lockNow by rememberUpdatedState(onLock); val dragNow by rememberUpdatedState(onDrag)
     val haptic = LocalHapticFeedback.current
     val density = LocalDensity.current
     val label = stringResource(R.string.voice_record)
@@ -193,21 +197,27 @@ fun MicButton(onStart: () -> Boolean, onRelease: (heldMs: Long) -> Unit, onCance
         .pointerInput(Unit) {
             awaitEachGesture {
                 val down = awaitFirstDown()
-                if (!onStart()) return@awaitEachGesture
+                if (!startNow()) return@awaitEachGesture
                 val downAt = down.uptimeMillis
-                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                while (true) {
-                    val ev = awaitPointerEvent()
-                    val c = ev.changes.firstOrNull { it.id == down.id } ?: break
-                    val d = c.position - down.position
-                    val g = with(density) { Waveform.gesture(d.x.toDp().value, d.y.toDp().value) }
-                    onDrag(g)
-                    when {
-                        g == Waveform.Gesture.CANCEL -> { haptic.performHapticFeedback(HapticFeedbackType.LongPress); onCancel(); break }
-                        g == Waveform.Gesture.LOCK -> { haptic.performHapticFeedback(HapticFeedbackType.LongPress); onLock(); break }
-                        !c.pressed -> { haptic.performHapticFeedback(HapticFeedbackType.LongPress); onRelease(c.uptimeMillis - downAt); break }
+                var ended = false
+                try {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    while (true) {
+                        val ev = awaitPointerEvent()
+                        val c = ev.changes.firstOrNull { it.id == down.id } ?: break
+                        val d = c.position - down.position
+                        val g = with(density) { Waveform.gesture(d.x.toDp().value, d.y.toDp().value) }
+                        dragNow(g)
+                        when {
+                            g == Waveform.Gesture.CANCEL -> { ended = true; cancelNow(); break }
+                            g == Waveform.Gesture.LOCK -> { ended = true; lockNow(); break }
+                            !c.pressed -> { ended = true; releaseNow(c.uptimeMillis - downAt); break }
+                        }
+                        c.consume()
                     }
-                    c.consume()
+                } finally {
+                    // Lost pointer/disposal ends in preview rather than leaving an invisible microphone running.
+                    if (!ended) releaseNow(com.tiecoms.app.core.VoiceRules.TAP_MS + 1)
                 }
             }
         }.testTag("mic"), contentAlignment = Alignment.Center) {
@@ -245,9 +255,14 @@ fun RecordingBar(st: com.tiecoms.app.platform.VoiceRecorder.State, locked: Boole
 /** Nota grabada sin enviar: duración, el motivo si falló, Reintentar (o Enviar) y Borrar. */
 @Composable
 fun VoiceDraftBar(d: com.tiecoms.app.platform.VoiceDrafts.Draft, busy: Boolean, onRetry: () -> Unit, onDelete: () -> Unit) {
+    var playing by remember(d.result.file.path) { mutableStateOf(false) }
+    val player = remember(d.result.file.path) { runCatching { android.media.MediaPlayer().apply { setDataSource(d.result.file.path); prepare(); setOnCompletionListener { playing = false } } }.getOrNull() }
+    androidx.compose.runtime.DisposableEffect(player) { onDispose { runCatching { player?.release() } } }
     Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant).padding(start = 16.dp, end = 4.dp).heightIn(min = 52.dp).testTag("voiceDraft"),
         verticalAlignment = Alignment.CenterVertically) {
-        Icon(Icons.Filled.Mic, null, tint = MaterialTheme.colorScheme.primary)
+        IconButton(onClick = { if (player != null) { if (playing) player.pause() else player.start(); playing = !playing } }, enabled = !busy && player != null, modifier = Modifier.testTag("voiceDraftPlay")) {
+            Text(if (playing) "Ⅱ" else "▶", color = MaterialTheme.colorScheme.primary)
+        }
         Spacer(Modifier.width(8.dp))
         Column(Modifier.weight(1f)) {
             Text(stringResource(R.string.voice_draft, Waveform.clock(d.result.durationMs)), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)

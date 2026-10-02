@@ -22,7 +22,7 @@ class SoundsTest {
     }
 
     @Test fun `que sonido suena`() {
-        assertEquals(10, Sounds.MESSAGE.size); assertEquals(listOf("clasico", "suave", "marimba"), Sounds.RINGTONES)
+        assertEquals(14, Sounds.MESSAGE.size); assertEquals(listOf("clasico", "suave", "marimba"), Sounds.RINGTONES)
         assertEquals("pop", Sounds.effective(null, null))           // de fábrica
         assertEquals("brisa", Sounds.effective(null, "brisa"))      // mi predeterminado
         assertEquals("gota", Sounds.effective("gota", "brisa"))     // el del chat gana
@@ -36,8 +36,15 @@ class SoundsTest {
     @Test fun `hay un archivo por sonido, por mencion y por tono`() {
         val raw = File("src/main/res/raw")
         Sounds.MESSAGE.forEach { s ->
-            assertTrue("falta $s", File(raw, "$s.ogg").length() > 500)
-            assertTrue("falta ${s}_mention", File(raw, "${s}_mention.ogg").length() > 500)
+            if (s in listOf("energy", "spark", "portal", "victory")) {
+                val wav = File(raw, "$s.wav")
+                assertTrue("falta $s", wav.length() > 500)
+                val header = wav.inputStream().use { it.readNBytes(12) }.toString(Charsets.US_ASCII)
+                assertTrue("WAV PCM header", header.startsWith("RIFF") && header.endsWith("WAVE"))
+            } else {
+                assertTrue("falta $s", File(raw, "$s.ogg").length() > 500)
+                assertTrue("falta ${s}_mention", File(raw, "${s}_mention.ogg").length() > 500)
+            }
         }
         Sounds.RINGTONES.forEach { assertTrue("falta ring_$it", File(raw, "ring_$it.ogg").length() > 500) }
     }

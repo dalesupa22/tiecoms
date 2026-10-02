@@ -373,6 +373,7 @@ fun NewIssueDialog(conversationId: String?, originMessageId: String?, defaultTit
     val members = if (personal) emptyList() else humansOf(data, conv)
     var title by rememberSaveable { mutableStateOf(defaultTitle) }
     var owner by rememberSaveable { mutableStateOf(defaultOwnerId?.takeIf { o -> members.any { it.id == o } } ?: data.me.id) }
+    var assignees by rememberSaveable { mutableStateOf(emptyList<String>()) }
     var due by rememberSaveable { mutableStateOf(defaultDue) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -382,16 +383,17 @@ fun NewIssueDialog(conversationId: String?, originMessageId: String?, defaultTit
         if (conversationId == null) Dropdown(stringResource(R.string.issue_where),
             listOf(com.tiecoms.app.core.IssueTasks.PERSONAL to stringResource(R.string.issue_personal_option)) +
                 destinations.map { c -> c.id to com.tiecoms.app.core.QuickSearch.issueLabel(data, c) { Names.conversationTitle(it, data, internalFallback, convFallback) } },
-            conv, { conv = it; owner = data.me.id }, modifier = Modifier.fillMaxWidth(), tag = "issue.where")
+            conv, { conv = it; owner = data.me.id; assignees = emptyList() }, modifier = Modifier.fillMaxWidth(), tag = "issue.where")
         if (personal) Text(stringResource(R.string.issue_personal_note), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.testTag("issuePersonalNote"))
         else Dropdown(stringResource(R.string.issue_owner), members.map { p -> p.id to "${p.name}${if (p.id == data.me.id) " $you" else ""} · ${Names.org(data, p.orgId)?.name ?: guest}" }, owner, { owner = it })
+        if (!personal) AssigneesPicker(members, (assignees + owner).distinct()) { assignees = it; owner = it.firstOrNull() ?: data.me.id }
         DateField(stringResource(R.string.issue_due), due?.let { LocalDate.parse(it) }, { due = it?.toString() }, allowClear = true, modifier = Modifier.fillMaxWidth())
         ErrorText(error)
         DialogButtons(onClose, stringResource(R.string.issue_create), enabled = !busy && title.trim().length >= 2 && conv.isNotEmpty(), confirmTag = "issueCreate") {
             busy = true; error = null
             scope.launch {
                 try {
-                    val i = if (personal) client.createPersonalIssue(title.trim(), due) else client.createIssue(conv, title.trim(), owner, due, originMessageId)
+                    val i = if (personal) client.createPersonalIssue(title.trim(), due) else client.createIssue(conv, title.trim(), owner, due, originMessageId, assigneeIds = (assignees + owner).filter { id -> members.any { it.id == id } }.distinct())
                     onClose(); onCreated(i.id)
                 }
                 catch (e: Exception) { error = errorText(ctx, e) } finally { busy = false }

@@ -100,8 +100,9 @@ object ImageTools {
      * (sin EXIF: sin GPS). GIF, videos, archivos y fotos ya livianas pasan tal cual; si no se puede decodificar, también.
      */
     suspend fun prepareForUpload(ctx: Context, f: com.tiecoms.app.core.Attachments.Shared): com.tiecoms.app.core.Attachments.Shared = withContext(Dispatchers.IO) {
-        val type = f.contentType.lowercase()
-        if (f.path.isEmpty() || !type.startsWith("image/") || type == "image/gif" || type == "image/svg+xml") return@withContext f
+        if (f.path.isEmpty()) return@withContext f
+        val type = com.tiecoms.app.core.Attachments.detectedMime(f.contentType, java.io.File(f.path).inputStream().use { it.readNBytes(6) })
+        if (f.path.isEmpty() || !type.startsWith("image/") || type == "image/gif" || type == "image/svg+xml") return@withContext f.copy(contentType = type)
         val src = java.io.File(f.path)
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         runCatching { BitmapFactory.decodeFile(src.absolutePath, bounds) }

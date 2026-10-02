@@ -150,6 +150,7 @@ fun TaskQuickAdd(parent: IssueDTO, conversationId: String?) {
     val members = humansOf(data, where).sortedByDescending { it.id == data.me.id }
     var title by rememberSaveable(parent.id) { mutableStateOf("") }
     var owner by rememberSaveable(parent.id) { mutableStateOf(data.me.id) }
+    var assignees by rememberSaveable(parent.id) { mutableStateOf(listOf<String>()) }
     var vis by rememberSaveable(parent.id) {
         mutableStateOf(if (inSide) "all" else IssueTasks.defaultVisibility(humansOf(data, parent.conversationId).map { it.orgId }, data.me.primaryOrgId))
     }
@@ -167,12 +168,13 @@ fun TaskQuickAdd(parent: IssueDTO, conversationId: String?) {
         busy = true
         scope.launch {
             try {
-                client.createChildIssue(parent.id, text, owner, visibility = effective, conversationId = if (inSide) where else null)
+                client.createChildIssue(parent.id, text, owner, visibility = effective, conversationId = if (inSide) where else null, assigneeIds = (assignees + owner).distinct())
                 title = ""; runCatching { focus.requestFocus() }
             } catch (e: Exception) { snackbar.showSnackbar(errorText(ctx, e)) } finally { busy = false }
         }
     }
     Column(Modifier.fillMaxWidth().testTag("taskAdd"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        AssigneesPicker(members, (assignees + owner).distinct()) { assignees = it; owner = it.firstOrNull() ?: data.me.id }
         OutlinedTextField(title, { title = it.take(200).replace("\n", " ") }, placeholder = { Text(stringResource(R.string.task_ph)) },
             leadingIcon = { Text("＋", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }, singleLine = true,
             keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Done),

@@ -1,5 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="creative_title">GIFs and memes</string>
+    <string name="creative_search">Search</string>
+    <string name="creative_empty">No results</string>
+    <string name="creative_more">More GIFs</string>
+    <string name="creative_add">Add to message</string>
+    <string name="creative_back">Back to results</string>
+    <string name="memes">Memes</string>
+    <string name="meme_top">Top caption</string>
+    <string name="meme_bottom">Bottom caption</string>
+    <string name="meme_local">Captions are drawn on your device. Send shares the finished image.</string>
     <string name="app_name" translatable="false">chaggu</string>
     <string name="tagline">One network across the companies you work with. Everyone sees their own scope.</string>
     <string name="cd_logo">chaggu logo</string>
@@ -136,4 +146,51 @@
         <item quantity="one">%d participant</item>
         <item quantity="other">%d participants</item>
     </plurals>
+    <string name="long_once">Long text needs a file. Turn off one-view explicitly to attach it.</string>
+    <string name="long_limit">Text exceeds the automatic file limit (1 MiB). Keep or attach the original file.</string>
+    <string name="voice_permission_ready">Microphone ready. Hold again to record.</string>
+    <string name="voice_permission_denied">Microphone permission denied. Enable it in Settings.</string>
+    <string name="voice_start_failed">Could not start recording. Try again.</string>
+    <string name="media_credits">Credits</string>
+    <string name="copy_image">Copy image</string>
+    <string name="copy_content">Copy complete content</string>
+    <string name="copy_code">Copy code</string>
+    <string name="format_bold">Bold</string>
+    <string name="format_bullets">Bullets</string>
+    <string name="format_numbered">Numbered list</string>
+    <string name="format_inline">Inline code</string>
+    <string name="format_block">Code block</string>
+    <string name="tasks_all">All visible</string>
+    <string name="tasks_active">Active</string>
+    <string name="tasks_completed">Completed</string>
+    <string name="tasks_any">All states</string>
+    <string name="availability_title">Availability</string>
+    <string name="availability_available">Available</string>
+    <string name="availability_busy">Busy</string>
+    <string name="availability_focus">Focus</string>
+    <string name="availability_dnd">Do not disturb</string>
+    <string name="availability_rest">Rest</string>
+    <string name="availability_silent">Silences Chaggu alerts for 1 hour</string>
+    <string name="media_pending">Preparing attachment…</string>
+    <string name="media_retry">Retry attachment</string>
+    <string name="sound_n_energy">Energy</string>
+    <string name="sound_n_spark">Spark</string>
+    <string name="sound_n_portal">Portal</string>
+    <string name="sound_n_victory">Victory</string>
+    <string name="calendar_find_slots">Find meeting availability</string>
+    <string name="calendar_from_date">From date (YYYY-MM-DD)</string>
+    <string name="calendar_to_date">Through date (YYYY-MM-DD)</string>
+    <string name="calendar_duration">Duration (minutes)</string>
+    <string name="calendar_check">Check connected calendar</string>
+    <string name="calendar_connect">Connect or reconnect your calendar in Meetings</string>
+    <string name="calendar_no_slots">No free slots in this range</string>
+    <string name="calendar_confirm">Confirm selected time and create meeting</string>
+    <string name="calendar_open_meeting">Open meeting</string>
+    <string name="calendar_timezone">Timezone</string>
+    <string name="calendar_description">Description</string>
+    <string name="calendar_attendee_emails">Invite by email (comma separated)</string>
+    <string name="calendar_invitees">Chaggu invitees</string>
+    <string name="wa_load_more">Load more conversations</string>
+    <string name="calendar_daily_window">Availability between 09:00 and 18:00 in the chosen timezone. Your primary calendar and Chaggu meetings; invitee calendars are not checked.</string>
+    <string name="draft_save_failed">The draft could not be saved locally. Keep it open and try again.</string>
 </resources>

@@ -83,12 +83,15 @@ object IssueTasks {
     fun matches(filter: String, i: IssueDTO, myId: String) = when (filter) {
         "closed" -> i.closed
         "open" -> !i.closed
-        else -> !i.closed && i.ownerId == myId
+        else -> !i.closed && (i.ownerId == myId || myId in i.assigneeIds)
     }
+
+    fun matches(scope: String, status: String, i: IssueDTO, myId: String): Boolean =
+        (scope != "mine" || i.ownerId == myId || myId in i.assigneeIds) && when (status) { "completed" -> i.status == "done"; "active" -> !i.closed; else -> true }
 
     /** Número del ícono «Todo»: mis tareas sin cerrar (abiertas, en curso o esperando), la misma regla que iOS (myOpenIssues). */
     fun myOpenCount(issues: Collection<IssueDTO>, myId: String?): Int =
-        if (myId == null) 0 else issues.count { it.ownerId == myId && !it.closed }
+        if (myId == null) 0 else issues.count { (it.ownerId == myId || myId in it.assigneeIds) && !it.closed }
 
     /**
      * Secciones de la pestaña Asuntos. Por responsable: yo primero, luego por nombre y «Sin responsable» al final.
@@ -96,7 +99,10 @@ object IssueTasks {
      */
     fun sections(list: List<IssueDTO>, byPerson: Boolean, myId: String, title: (String) -> String): List<Pair<String, List<IssueDTO>>> {
         val buckets = LinkedHashMap<String, MutableList<IssueDTO>>()
-        for (i in list) buckets.getOrPut(if (byPerson) i.ownerId ?: NO_OWNER else i.conversationId ?: PERSONAL) { mutableListOf() }.add(i)
+        for (i in list) {
+            val keys = if (byPerson) (i.assigneeIds + listOfNotNull(i.ownerId)).distinct().ifEmpty { listOf(NO_OWNER) } else listOf(i.conversationId ?: PERSONAL)
+            keys.forEach { k -> buckets.getOrPut(k) { mutableListOf() }.add(i) }
+        }
         val cmp: Comparator<Map.Entry<String, MutableList<IssueDTO>>> = if (byPerson)
             compareByDescending<Map.Entry<String, MutableList<IssueDTO>>> { it.key == myId }.thenBy { it.key == NO_OWNER }.thenBy { title(it.key).lowercase() }
         // Por grupo, «Personal · solo tú» va primero.

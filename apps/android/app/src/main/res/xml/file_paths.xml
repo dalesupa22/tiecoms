@@ -3,4 +3,6 @@
 <paths>
     <cache-path name="photos" path="photos/" />
     <cache-path name="att" path="att/" />
+    <!-- Only exported originals prepared by an explicit copy action. -->
+    <cache-path name="clipboard" path="clipboard/" />
 </paths>

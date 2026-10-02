@@ -29,9 +29,9 @@ internal fun AnnotatedString.Builder.appendFormatted(s: String, color: Color, ma
     var at = 0
     Fmt.spans(s).forEach { sp ->
         append(s.substring(at, sp.start))
-        marks += length; append(s[sp.start])
-        withStyle(fmtStyle(sp.kind, color)) { append(s.substring(sp.start + 1, sp.end - 1)) }
-        marks += length; append(s[sp.end - 1])
+        repeat(sp.marks) { k -> marks += length; append(s[sp.start + k]) }
+        withStyle(fmtStyle(sp.kind, color)) { append(s.substring(sp.start + sp.marks, sp.end - sp.marks)) }
+        repeat(sp.marks) { k -> marks += length; append(s[sp.end - sp.marks + k]) }
         at = sp.end
     }
     append(s.substring(at))

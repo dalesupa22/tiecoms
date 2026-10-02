@@ -17,6 +17,8 @@ object SoundFiles {
         "burbuja" to (R.raw.burbuja to R.raw.burbuja_mention), "cristal" to (R.raw.cristal to R.raw.cristal_mention),
         "acorde" to (R.raw.acorde to R.raw.acorde_mention), "silbido" to (R.raw.silbido to R.raw.silbido_mention),
         "tambor" to (R.raw.tambor to R.raw.tambor_mention), "brisa" to (R.raw.brisa to R.raw.brisa_mention),
+        "energy" to (R.raw.energy to R.raw.energy), "spark" to (R.raw.spark to R.raw.spark),
+        "portal" to (R.raw.portal to R.raw.portal), "victory" to (R.raw.victory to R.raw.victory),
     )
     private val rings = mapOf("clasico" to R.raw.ring_clasico, "suave" to R.raw.ring_suave, "marimba" to R.raw.ring_marimba)
 
@@ -34,6 +36,7 @@ object SoundFiles {
         "gota" -> R.string.sound_n_gota; "campana" -> R.string.sound_n_campana; "marimba" -> R.string.sound_n_marimba
         "burbuja" -> R.string.sound_n_burbuja; "cristal" -> R.string.sound_n_cristal; "acorde" -> R.string.sound_n_acorde
         "silbido" -> R.string.sound_n_silbido; "tambor" -> R.string.sound_n_tambor; "brisa" -> R.string.sound_n_brisa
+        "energy" -> R.string.sound_n_energy; "spark" -> R.string.sound_n_spark; "portal" -> R.string.sound_n_portal; "victory" -> R.string.sound_n_victory
         Sounds.NONE -> R.string.sound_none; else -> R.string.sound_n_pop
     })
     fun ringLabel(ctx: Context, name: String): String = ctx.getString(when (name) { "suave" -> R.string.ring_n_suave; "marimba" -> R.string.ring_n_marimba; else -> R.string.ring_n_clasico })

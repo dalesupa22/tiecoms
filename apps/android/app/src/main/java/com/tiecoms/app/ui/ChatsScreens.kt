@@ -102,7 +102,7 @@ fun openUrl(ctx: Context, url: String) {
 @Composable
 fun LinkifiedText(text: String, color: Color, modifier: Modifier = Modifier, maxLines: Int = Int.MAX_VALUE, onOverflow: ((Boolean) -> Unit)? = null) {
     val ctx = LocalContext.current
-    val parts = remember(text) { Links.split(text) }
+    val parts = remember(text) { com.tiecoms.app.core.Fmt.linkParts(text) }
     val overflow = if (maxLines == Int.MAX_VALUE) androidx.compose.ui.text.style.TextOverflow.Clip else androidx.compose.ui.text.style.TextOverflow.Ellipsis
     val layout: (androidx.compose.ui.text.TextLayoutResult) -> Unit = onOverflow?.let { f -> { r -> f(r.hasVisualOverflow) } } ?: {}
     // *negrilla*, _cursiva_, ~tachado~ y `código` (core/Fmt.kt): con formato también se arma el AnnotatedString.

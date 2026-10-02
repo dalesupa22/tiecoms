@@ -1,5 +1,7 @@
 package com.tiecoms.app.core
 
+import kotlinx.coroutines.sync.withLock
+
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
@@ -19,10 +21,12 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
@@ -186,12 +190,18 @@ class TieComsClient(
             authorId != null && authorId in state.blockedUserIds)
     }
     private val noticeSessionLock = Any()
+    private var noticeEnding = false
+    private var authenticatedOwner: String? = null
+    private fun endNoticeSession() {
+        noticeEnding = true
+        try { onNoticeSessionEnded() } finally { noticeEnding = false }
+    }
     fun clearNoticesIfSignedOut(action: () -> Unit) = synchronized(noticeSessionLock) {
         if (s.status == SessionStatus.ANONYMOUS) action()
     }
     /** Publication and session invalidation must not pass one another. Cold restoration remains valid. */
     fun <T> withNoticeSession(generation: Long, action: () -> T): T? = synchronized(noticeSessionLock) {
-        if (generation != noticeGeneration || s.status == SessionStatus.ANONYMOUS) null else action()
+        if (noticeEnding || generation != noticeGeneration || s.status == SessionStatus.ANONYMOUS || (authenticatedOwner != null && authenticatedOwner != myId)) null else action()
     }
     @Volatile private var meetingProof: MeetingProof? = null
     private val meetingAttempts = java.util.concurrent.ConcurrentHashMap<String, MeetingAttempt>()
@@ -229,6 +239,12 @@ class TieComsClient(
     private var bootstrapJob: Job? = null
     private var startRetryJob: Job? = null
     private val readJobs = HashMap<String, Job>()
+    private val readIntents = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    private fun nextReadIntent(id: String): Long = readIntents.merge(id, 1L, Long::plus)!!
+    private fun applyReadCursor(id: String, seq: Long, revision: Long?, intent: Long? = null, legacyDecrease: Boolean = false) {
+        if (revision == null && intent != null && readIntents[id] != intent) return
+        patchMeta(id) { ReadTree.applyCursor(this, seq, revision, legacyDecrease) }
+    }
     private val catchingUp = HashSet<String>()
     private var flushing = false
     private var lastTypingSent = 0L
@@ -261,7 +277,7 @@ class TieComsClient(
         },
     )
 
-    private inline fun setState(f: ClientState.() -> ClientState) { _state.value = _state.value.f() }
+    private inline fun setState(f: ClientState.() -> ClientState) { _state.update { it.f() } }
     private val s get() = _state.value
 
     private fun setConv(id: String, f: ConversationState.() -> ConversationState) = setState {
@@ -312,13 +328,22 @@ class TieComsClient(
     private fun applyAuth(r: AuthResult, refreshingSession: Boolean = false): Unit = synchronized(noticeSessionLock) {
         if (authSessionId != r.sessionId) {
             if (!refreshingSession || authSessionId != null) {
-                onNoticeSessionEnded()
+                endNoticeSession()
                 noticeGeneration++
             }
             sessionGeneration++; authSessionId = r.sessionId
             cancelMeetingConnect(); meetingAttempts.clear(); meetingOwner = null
             cancelMailConnect()
         }
+        val nextOwner = r.user.id.takeIf(String::isNotBlank)
+        if (myId != null && nextOwner != null && myId != nextOwner) {
+            // Shared chat IDs must not retain the previous account's authorized history or drafts.
+            socket.stop(); flushJob?.cancel(); prefetchJob?.cancel(); bootstrapJob?.cancel()
+            readJobs.values.forEach { it.cancel() }; readJobs.clear(); readIntents.clear()
+            paintedFromCache = false; live = false
+            _state.value = ClientState(status = SessionStatus.LOADING)
+        }
+        authenticatedOwner = nextOwner
         accessToken = r.accessToken
         accessExp = runCatching { Instant.parse(r.accessExpiresAt).toEpochMilli() }.getOrElse { now() + 10 * 60_000 }
         r.refreshToken?.let { secrets.set(it) }
@@ -454,14 +479,15 @@ class TieComsClient(
 
     private fun handleSignedOut(): Unit = synchronized(noticeSessionLock) {
         val previousNoticeGeneration = noticeGeneration
-        onNoticeSessionEnded()
+        endNoticeSession()
         sessionGeneration++; noticeGeneration++; authSessionId = null
         cancelMeetingConnect(); meetingAttempts.clear(); meetingOwner = null; meetingStore.set(null)
         val me = s.data?.me?.id
         socket.stop()
         flushJob?.cancel(); bootstrapJob?.cancel(); startRetryJob?.cancel()
-        readJobs.values.forEach { it.cancel() }; readJobs.clear()
+        readJobs.values.forEach { it.cancel() }; readJobs.clear(); readIntents.clear()
         accessToken = null
+        authenticatedOwner = null
         secrets.set(null)
         if (me != null) storage.clearPrefix("u:$me:")
         synchronized(snapshotLock) { live = false; paintedFromCache = false; runCatching { snapshots.clear(me ?: storage.get(LAST_USER_KEY)) } }
@@ -533,7 +559,18 @@ class TieComsClient(
         val dnd = if (serverKnowsDnd) data.me.dndUntil else storage.get(DND_KEY)
         if (serverKnowsDnd) { storage.set(DND_KEY, dnd); storage.set(DND_LOCAL_KEY, null) }
         val localOnly = !serverKnowsDnd && storage.get(DND_LOCAL_KEY) == "1"
-        setState { copy(data = sorted, conversations = conversations.filterKeys { it in allowed }, dndUntil = dnd, dndLocalOnly = localOnly) }
+        setState {
+            val current = this.data?.conversations?.associateBy { it.id }.orEmpty()
+            val merged = sorted.copy(conversations = sorted.conversations.map { incoming ->
+                val existing = current[incoming.id]
+                if (existing?.readRevision != null && existing.readRevision > (incoming.readRevision ?: -1))
+                    incoming.copy(lastReadSeq = existing.lastReadSeq, readRevision = existing.readRevision,
+                        unread = maxOf(0L, incoming.lastMessageSeq - maxOf(existing.lastReadSeq, incoming.historyFromSeq)).toInt(),
+                        unreadMentions = if (existing.lastReadSeq >= incoming.lastMessageSeq) 0 else existing.unreadMentions)
+                else incoming
+            })
+            copy(data = merged, conversations = conversations.filterKeys { it in allowed }, dndUntil = dnd, dndLocalOnly = localOnly)
+        }
         // 1.7.1: la llamada en la que estoy desde otro dispositivo (con myDevices) entra al estado de llamadas.
         sorted.myActiveCall?.takeIf { !it.ended }?.let { c -> setState { copy(calls = Calls.put(calls, c)) } }
         // Si el servidor conoce el campo, manda él: una llamada que ya no es «la mía en otro dispositivo» pierde sus myDevices.
@@ -543,7 +580,7 @@ class TieComsClient(
         }
         restoreMeetingAttempts(sorted.me.id)
         sorted.me.sleep?.let { rememberSleep(it); syncSleepTz(it) }
-        return sorted
+        return s.data ?: sorted
     }
 
     // ---------- Modo sueño («No molestar todas las noches») ----------
@@ -642,9 +679,8 @@ class TieComsClient(
             }
             is AccountEvent.ReadUpdated -> {
                 val c = meta(e.conversationId) ?: return
-                if (e.seq > c.lastReadSeq) patchMeta(c.id) {
-                    copy(lastReadSeq = e.seq, unread = maxOf(0L, lastMessageSeq - maxOf(e.seq, historyFromSeq)).toInt(), unreadMentions = if (e.seq >= lastMessageSeq) 0 else unreadMentions)
-                }
+                if (e.readRevision == null && c.readRevision == null && e.seq > c.lastReadSeq) nextReadIntent(c.id)
+                applyReadCursor(c.id, e.seq, e.readRevision)
             }
             is AccountEvent.ReminderDue -> {
                 setState { copy(reminders = (reminders.filter { it.id != e.reminder.id } + e.reminder).sortedBy { it.remindAt }) }
@@ -664,6 +700,7 @@ class TieComsClient(
             }
             is AccountEvent.DriveUpdated -> setState { copy(driveRevision = driveRevision + 1) }
             AccountEvent.RemindersChanged -> scope.launch { runCatching { loadRemindersInternal() } }
+            is AccountEvent.AvailabilityUpdated -> applyAvailability(e.userId, e.availability)
             is AccountEvent.DndUpdated -> applyDnd(e.dndUntil, localOnly = false)
             is AccountEvent.SleepUpdated -> applySleep(e.sleep)
             is AccountEvent.IssueUpdated -> { putIssues(listOf(e.issue)); recountIssues(e.issue.conversationId) }
@@ -831,6 +868,7 @@ class TieComsClient(
         setConv(id) { copy(loading = true) }
         try {
             val page = request("GET", "/conversations/$id/messages?before=$before&limit=50", null, MessagesPage.serializer())
+            if (generation != sessionGeneration) return@withContext false
             setConv(id) {
                 val known = messages.map { it.id }.toSet()
                 copy(messages = (page.messages.filter { it.id !in known } + messages).sortedBy { it.seq }, hasMore = page.hasMore, loading = false)
@@ -848,8 +886,14 @@ class TieComsClient(
         val c = meta(id) ?: return@withContext
         val seq = minOf(throughSeq, c.lastMessageSeq)
         if (seq <= c.lastReadSeq) return@withContext
-        requestUnit("POST", "/conversations/$id/read", TcJson.encodeToString(ReadBody.serializer(), ReadBody(seq)))
-        patchMeta(id) { ReadTree.applyRead(this, seq) }
+        val generation = sessionGeneration
+        val intent = nextReadIntent(id)
+        val payload = request("POST", "/conversations/$id/read", TcJson.encodeToString(ReadBody.serializer(), ReadBody(seq)), JsonElement.serializer())
+        if (generation != sessionGeneration) return@withContext
+        // Old API may acknowledge with {}; newer API returns its authoritative cursor and revision.
+        val result = if ((payload as? JsonObject)?.containsKey("lastReadSeq") == true)
+            TcJson.decodeFromJsonElement(ReadResult.serializer(), payload) else ReadResult(seq)
+        applyReadCursor(id, result.lastReadSeq, result.readRevision, intent)
     }
 
     /** Aviso de escritura: como máximo uno cada 2 s. */
@@ -873,6 +917,7 @@ class TieComsClient(
         /** Una sola vista (tanda 1.7): solo texto, imágenes o nota de voz. */
         viewOnce: Boolean = false,
     ): String? {
+        require(body.length <= LongContent.MAX_BODY) { "Message too long: attach the original text file" }
         // El servidor recorta el body: se recorta aquí y se corren los offsets de las menciones y de las #etiquetas
         // (que llegan del compositor como tokens con prefijo, ver [Refs]).
         val (text, ments, refs) = Refs.split(body, mentions)
@@ -885,10 +930,16 @@ class TieComsClient(
             refs = refs, viewOnce = viewOnce && forwarded == null && fwd.isEmpty() && ViewOnce.allowed(attachments),
         )
         // Primero se guarda localmente: si la app se cierra, el mensaje sigue en la cola.
-        scope.launch {
-            savePending(s.pending + p)
-            scheduleFlush(0)
-        }
+        val generation = noticeGeneration
+        val author = myId
+        val persisted = withNoticeSession(generation) {
+            if (author == null || author != myId) false else {
+                savePending(s.pending + p)
+                scheduleFlush(0)
+                true
+            }
+        } == true
+        check(persisted) { "Session changed; draft kept" }
         return p.clientMessageId
     }
 
@@ -904,9 +955,9 @@ class TieComsClient(
     }
 
     private fun savePending(list: List<PendingMessage>) {
-        setState { copy(pending = list) }
         val me = myId ?: return
         storage.set("u:$me:outbox", TcJson.encodeToString(ListSerializer(PendingMessage.serializer()), list))
+        setState { copy(pending = list) }
     }
 
     private fun dropPending(m: MessageDTO) {
@@ -920,22 +971,28 @@ class TieComsClient(
     }
 
     private suspend fun flush() {
-        if (flushing || s.status != SessionStatus.READY) return
+        if (flushing || s.status != SessionStatus.READY || starting || accessToken == null) return
+        val generation = noticeGeneration
+        val author = myId
+        if (withNoticeSession(generation) { author != null && author == myId } != true) return
         flushing = true
         try {
             // En orden: dentro de una conversación, los mensajes salen uno tras otro.
             for (p in s.pending.toList()) {
+                if (withNoticeSession(generation) { author == myId } != true) return
                 if (p.status == "failed" || p.nextAttemptAt > now()) continue
                 if (s.pending.none { it.clientMessageId == p.clientMessageId }) continue
                 updatePending(p.clientMessageId) { copy(status = "sending") }
                 try {
                     val message = deliver(p)
+                    if (withNoticeSession(generation) { author == myId } != true) return
                     if (s.conversations[p.conversationId]?.loaded == true) setConv(p.conversationId) { copy(messages = upsertMessage(messages, message)) }
                     bumpMeta(message)
                     savePending(s.pending.filter { it.clientMessageId != p.clientMessageId })
                     _signals.tryEmit(ClientSignal.Sent(message))
                 } catch (e: Exception) {
-                    if (s.status != SessionStatus.READY) return
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    if (withNoticeSession(generation) { author == myId } != true || s.status != SessionStatus.READY) return
                     val permanent = e is ApiException && e.permanent
                     val attempts = p.attempts + 1
                     val backoff = (minOf(30_000.0, 500.0 * (1 shl minOf(attempts, 6))) * (0.5 + Random.nextDouble())).toLong()
@@ -948,7 +1005,7 @@ class TieComsClient(
             }
         } finally {
             flushing = false
-            if (s.status == SessionStatus.READY) savePending(s.pending)
+            if (s.status == SessionStatus.READY && withNoticeSession(generation) { author == myId } == true) savePending(s.pending)
         }
     }
 
@@ -1009,13 +1066,19 @@ class TieComsClient(
         val n = s.issues.values.count { it.conversationId == conversationId && !it.closed }
         patchMeta(conversationId) { copy(openIssues = n) }
     }
+    suspend fun loadIssuePreferences(): IssuePreferencesDTO? = withContext(dispatcher) { req("GET", "/me/personal-preferences", null, PersonalPreferencesDTO.serializer()).issues }
+    suspend fun saveIssueGrouping(grouping: String): IssuePreferencesDTO? = withContext(dispatcher) {
+        require(grouping in setOf("group", "assignee"))
+        req("PATCH", "/me/personal-preferences", buildJsonObject { put("issues", buildJsonObject { put("grouping", JsonPrimitive(grouping)) }) }, PersonalPreferencesDTO.serializer()).issues
+    }
     suspend fun loadIssues(workspaceId: String? = null, conversationId: String? = null, mine: Boolean = false, open: Boolean = false): List<IssueDTO> = withContext(dispatcher) {
         val r = req("GET", "/issues" + q("workspaceId" to workspaceId, "conversationId" to conversationId, "mine" to if (mine) "1" else null, "open" to if (open) "1" else null), null, IssuesPage.serializer())
         putIssues(r.issues); r.issues
     }
-    suspend fun createIssue(conversationId: String, title: String, ownerId: String?, dueDate: String?, originMessageId: String?): IssueDTO = withContext(dispatcher) {
+    suspend fun createIssue(conversationId: String, title: String, ownerId: String?, dueDate: String?, originMessageId: String?, assigneeIds: List<String> = emptyList()): IssueDTO = withContext(dispatcher) {
         val body = buildJsonObject {
             put("title", JsonPrimitive(title)); put("ownerId", ownerId?.let { JsonPrimitive(it) } ?: JsonNull)
+            if (assigneeIds.isNotEmpty()) put("assigneeIds", kotlinx.serialization.json.JsonArray(assigneeIds.distinct().map { JsonPrimitive(it) }))
             put("dueDate", dueDate?.let { JsonPrimitive(it) } ?: JsonNull); put("originMessageId", originMessageId?.let { JsonPrimitive(it) } ?: JsonNull)
         }
         val i = req("POST", "/conversations/$conversationId/issues", body, IssueDTO.serializer())
@@ -1036,9 +1099,10 @@ class TieComsClient(
      * salió de él. [visibility] all | org | private; [viewerIds] personas con acceso (pueden no estar en el chat).
      */
     suspend fun createChildIssue(parentId: String, title: String, ownerId: String?, dueDate: String? = null, visibility: String? = null,
-                                 viewerIds: List<String> = emptyList(), conversationId: String? = null): IssueDTO = withContext(dispatcher) {
+                                 viewerIds: List<String> = emptyList(), conversationId: String? = null, assigneeIds: List<String> = emptyList()): IssueDTO = withContext(dispatcher) {
         val body = buildJsonObject {
             put("title", JsonPrimitive(title)); put("ownerId", ownerId?.let { JsonPrimitive(it) } ?: JsonNull)
+            if (assigneeIds.isNotEmpty()) put("assigneeIds", kotlinx.serialization.json.JsonArray(assigneeIds.distinct().map { JsonPrimitive(it) }))
             dueDate?.let { put("dueDate", JsonPrimitive(it)) }; visibility?.let { put("visibility", JsonPrimitive(it)) }
             if (viewerIds.isNotEmpty()) put("viewerIds", kotlinx.serialization.json.JsonArray(viewerIds.map { JsonPrimitive(it) }))
             conversationId?.let { put("conversationId", JsonPrimitive(it)) }
@@ -1180,9 +1244,23 @@ class TieComsClient(
 
     // ---------- «No molestar» (SPEC-silencio §3) ----------
     /** Valor vigente (estado o, antes del primer bootstrap —p. ej. un push con la app cerrada—, el guardado). */
+    private fun applyAvailability(userId: String, availability: AvailabilityDTO) {
+        setState { val d = data ?: return@setState this
+            val old = if (d.me.id == userId) d.me.availability else d.people.firstOrNull { it.id == userId }?.availability
+            if (old != null && old.revision > availability.revision) return@setState this
+            copy(data = d.copy(me = if (d.me.id == userId) d.me.copy(availability = availability) else d.me,
+                people = d.people.map { if (it.id == userId) it.copy(availability = availability) else it }))
+        }
+    }
+    suspend fun setAvailability(mode: String?, until: String? = null): AvailabilityDTO? = withContext(dispatcher) {
+        val generation = sessionGeneration; val owner = myId
+        val got = req("PUT", "/me/availability", buildJsonObject { put("mode", mode?.let { JsonPrimitive(it) } ?: JsonNull); put("until", until?.let { JsonPrimitive(it) } ?: JsonNull) }, AvailabilityResult.serializer()).availability
+        if (myId == owner && sessionGeneration == generation && owner != null && got != null) applyAvailability(owner, got)
+        got
+    }
     fun dndUntil(): String? = if (s.data != null) s.dndUntil else storage.get(DND_KEY)
     /** «No molestar» manual o dentro de mi horario de descanso (todas las noches). */
-    fun dndActive(): Boolean = Silence.active(dndUntil(), now()) || SleepMode.sleepingNow(SleepMode.of(mySleep()), Instant.ofEpochMilli(now()))
+    fun dndActive(): Boolean = s.data?.me?.availability?.quiet(now()) == true || Silence.active(dndUntil(), now()) || SleepMode.sleepingNow(SleepMode.of(mySleep()), Instant.ofEpochMilli(now()))
 
     private fun applyDnd(until: String?, localOnly: Boolean) {
         val v = until?.takeIf { Silence.active(it, now()) }
@@ -1275,9 +1353,12 @@ class TieComsClient(
         req("PUT", "/workspaces/$id/prefs", buildJsonObject { put("pinned", JsonPrimitive(pinned)) }, JsonElement.serializer()); Unit
     }
     suspend fun markUnread(conversationId: String, seq: Long) = withContext(dispatcher) {
-        val r = req("POST", "/conversations/$conversationId/unread", buildJsonObject { put("seq", JsonPrimitive(seq)) }, ReadResult.serializer())
+        val generation = sessionGeneration
+        val intent = nextReadIntent(conversationId)
         readJobs[conversationId]?.cancel()
-        patchMeta(conversationId) { copy(lastReadSeq = r.lastReadSeq, unread = maxOf(0L, lastMessageSeq - maxOf(r.lastReadSeq, historyFromSeq)).toInt(), unreadMentions = if (r.lastReadSeq >= lastMessageSeq) 0 else unreadMentions) }
+        val r = req("POST", "/conversations/$conversationId/unread", buildJsonObject { put("seq", JsonPrimitive(seq)) }, ReadResult.serializer())
+        if (generation != sessionGeneration) return@withContext
+        applyReadCursor(conversationId, r.lastReadSeq, r.readRevision, intent, legacyDecrease = true)
     }
     suspend fun markConversationRead(conversationId: String): Boolean = withContext(dispatcher) {
         val c = meta(conversationId) ?: return@withContext false
@@ -1295,9 +1376,11 @@ class TieComsClient(
         val d = s.data ?: return@withContext 0
         val root = d.conversations.firstOrNull { it.id == rootId } ?: return@withContext 0
         val items = ReadTree.items(d, root, now())
+        val generation = sessionGeneration
+        val intents = items.associate { it.conversationId to nextReadIntent(it.conversationId) }
         val r = request("POST", "/conversations/$rootId/read-tree", TcJson.encodeToString(ReadTreeBody.serializer(), ReadTreeBody(items)), ReadTreeResult.serializer())
-        // El servidor puede tener un cursor más adelante (otro dispositivo): se aplica sin retroceder.
-        for (m in r.marked) patchMeta(m.conversationId) { ReadTree.applyRead(this, m.lastReadSeq) }
+        if (generation != sessionGeneration) return@withContext 0
+        for (m in r.marked) applyReadCursor(m.conversationId, m.lastReadSeq, m.readRevision, intents[m.conversationId])
         r.marked.size
     }
 
@@ -1531,14 +1614,26 @@ class TieComsClient(
 
     /** Busca un mensaje por id en lo cargado, pidiendo páginas viejas si hace falta (push de reacción). Devuelve su seq. */
     suspend fun ensureMessageId(conversationId: String, messageId: String): Long? {
+        val generation = sessionGeneration
         openConversation(conversationId)
-        while (true) {
+        if (generation != sessionGeneration) return null
+        state.value.conversations[conversationId]?.messages?.firstOrNull { it.id == messageId }?.let { return it.seq }
+        try {
+            val page = request("GET", "/conversations/$conversationId/messages/around?messageId=${enc(messageId)}&limit=50", null, MessagesPage.serializer())
+            if (generation != sessionGeneration) return null
+            // Around resolves an identity, but must never splice disjoint windows into the read collection.
+            // Keep backward pagination contiguous so every skipped interval remains reachable and unread.
+            val target = page.messages.firstOrNull { it.id == messageId } ?: return null
+            return if (ensureMessage(conversationId, target.seq) && generation == sessionGeneration)
+                state.value.conversations[conversationId]?.messages?.firstOrNull { it.id == messageId }?.seq else null
+        } catch (e: ApiException) { if (e.status != 404) throw e } // old API: bounded legacy pagination
+        repeat(100) {
+            if (generation != sessionGeneration) return null
             val c = state.value.conversations[conversationId] ?: return null
-            if (!c.loaded) return null
             c.messages.firstOrNull { it.id == messageId }?.let { return it.seq }
-            if (!c.hasMore) return null
-            if (!loadOlder(conversationId)) return null
+            if (!c.hasMore || !loadOlder(conversationId)) return null
         }
+        return null
     }
 
     // ---------- Recordatorios ----------
@@ -1595,14 +1690,16 @@ class TieComsClient(
     }
     /** Carga hacia atrás hasta tener el mensaje con ese seq (para saltar a un mensaje de origen). */
     suspend fun ensureMessage(conversationId: String, seq: Long): Boolean {
+        val generation = sessionGeneration
         openConversation(conversationId)
-        while (true) {
+        while (generation == sessionGeneration) {
             val c = state.value.conversations[conversationId] ?: return false
             if (!c.loaded) return false
             if (c.messages.any { it.seq == seq }) return true
             if (!c.hasMore || (c.messages.firstOrNull()?.seq ?: 0) <= seq) return false
             if (!loadOlder(conversationId)) return false
         }
+        return false
     }
 
     // ---------- Reenviar a otros chats ----------
@@ -1619,6 +1716,19 @@ class TieComsClient(
     }
 
     // ---------- Adjuntos (SPEC-v4 §A) ----------
+    suspend fun creativeCatalogue(query: String = "", language: String = "es", cursor: String? = null): CreativeMediaPage = withContext(dispatcher) {
+        req("GET", CreativeMedia.cataloguePath(query, language, cursor), null, CreativeMediaPage.serializer())
+    }
+    suspend fun memeTemplates(): CreativeMediaPage = withContext(dispatcher) {
+        req("GET", "/memes/templates", null, CreativeMediaPage.serializer())
+    }
+    /** Imports bytes only. The caller explicitly sends a normal attachment message afterwards. */
+    suspend fun importGif(conversationId: String, item: CreativeMediaDTO): GifAttachmentResult = withContext(dispatcher) {
+        require(CreativeMedia.available(meta(conversationId)?.kind)) { "Native chat required" }
+        require(CreativeMedia.isProxy(item.url)) { "Chaggu media proxy required" }
+        req("POST", "/conversations/$conversationId/gifs", buildJsonObject { put("url", JsonPrimitive(item.url)) }, GifAttachmentResult.serializer())
+    }
+
     /**
      * POST /conversations/:id/attachments con el archivo en crudo (se transmite desde disco). Queda pendiente en el
      * servidor hasta que un mensaje lo use con [send]. [onProgress] recibe (enviados, total).
@@ -1924,8 +2034,21 @@ class TieComsClient(
         req("POST", "/whatsapp/accounts/$id/relink", buildJsonObject { put("pairPhone", pairPhone?.let { JsonPrimitive(it) } ?: JsonNull) }, WaAccountDTO.serializer())
     }
     suspend fun waRemove(id: String) = withContext(dispatcher) { req("DELETE", "/whatsapp/accounts/$id", null, JsonElement.serializer()); Unit }
-    suspend fun waChats(accountId: String?, category: String?, groups: Boolean?, hidden: Boolean, search: String?): WaChatsPage = withContext(dispatcher) {
-        req("GET", "/whatsapp/chats" + q("accountId" to accountId, "category" to category, "groups" to groups?.let { if (it) "1" else "0" }, "hidden" to if (hidden) "1" else null, "q" to search?.takeIf { it.isNotBlank() }), null, WaChatsPage.serializer())
+    suspend fun waChats(accountId: String?, category: String?, groups: Boolean?, hidden: Boolean, search: String?, limit: Int? = null, cursor: String? = null): WaChatsPage = withContext(dispatcher) {
+        req("GET", "/whatsapp/chats" + q("accountId" to accountId, "category" to category, "groups" to groups?.let { if (it) "1" else "0" }, "hidden" to if (hidden) "1" else null, "q" to search?.takeIf { it.isNotBlank() }, "limit" to limit?.toString(), "cursor" to cursor), null, WaChatsPage.serializer())
+    }
+    private var waCountCache: Triple<String, Long, Int>? = null
+    private val waCountMutex = kotlinx.coroutines.sync.Mutex()
+    suspend fun waUnreadCount(): Int = waCountMutex.withLock {
+        val owner = myId ?: return@withLock 0
+        val ownerKey = "$owner:$sessionGeneration"
+        waCountCache?.takeIf { it.first == ownerKey && now() - it.second < 60_000 }?.let { return@withLock it.third }
+        val generation = sessionGeneration
+        val p = waChats(null, null, null, false, null, limit = 1)
+        val count = p.categories.values.sumOf { it.unread }.coerceAtLeast(0)
+        if (myId != owner || sessionGeneration != generation) throw kotlinx.coroutines.CancellationException("Session changed")
+        waCountCache = Triple(ownerKey, now(), count)
+        count
     }
     suspend fun waPatchChat(c: WaChatDTO, patch: JsonObject): WaChatDTO = withContext(dispatcher) {
         req("PATCH", "/whatsapp/chats/${c.accountId}/${enc(c.jid)}", patch, WaChatDTO.serializer())
@@ -1985,7 +2108,14 @@ class TieComsClient(
     suspend fun ggSideOpen(source: String): GgSideMessageDTO = withContext(dispatcher) {
         gg { req("POST", "/gg/side/open", buildJsonObject { put("source", JsonPrimitive(source)) }, GgSideOne.serializer()).message }
     }
-    /** Al entrar a un chat: recalcula el número del botón gg (el servidor limita a 1 recálculo por fuente cada 10 min). */
+    /** Real connected calendar availability, requested explicitly by the user. */
+    suspend fun ggCalendarSlots(source: String, messageIds: List<String>, from: String, to: String, durationMin: Int, timezone: String): GgCalendarSlots = withContext(dispatcher) {
+        req("POST", "/gg/calendar/slots", buildJsonObject { put("source", JsonPrimitive(source)); put("messageIds", kotlinx.serialization.json.JsonArray(messageIds.map { JsonPrimitive(it) })); put("from", JsonPrimitive(from)); put("to", JsonPrimitive(to)); put("durationMin", JsonPrimitive(durationMin)); put("timezone", JsonPrimitive(timezone)) }, GgCalendarSlots.serializer())
+    }
+    suspend fun ggCalendarConfirm(source: String, messageIds: List<String>, provider: String, key: String, title: String, slot: GgCalendarSlot, timezone: String, description: String = "", attendeeEmails: List<String> = emptyList(), inviteeIds: List<String> = emptyList()): MeetingDTO = withContext(dispatcher) {
+        req("POST", "/gg/calendar/confirm", buildJsonObject { put("source", JsonPrimitive(source)); put("messageIds", kotlinx.serialization.json.JsonArray(messageIds.map { JsonPrimitive(it) })); put("provider", JsonPrimitive(provider)); put("idempotencyKey", JsonPrimitive(key)); put("title", JsonPrimitive(title)); put("startsAt", JsonPrimitive(slot.startsAt)); put("endsAt", JsonPrimitive(slot.endsAt)); put("timezone", JsonPrimitive(timezone)); if (source.startsWith("c:")) put("conversationId", JsonPrimitive(source.removePrefix("c:"))); put("shareToChat", JsonPrimitive(false)); if (description.isNotBlank()) put("description", JsonPrimitive(description)); if (attendeeEmails.isNotEmpty()) put("attendeeEmails", JsonArray(attendeeEmails.distinct().map { JsonPrimitive(it) })); if (inviteeIds.isNotEmpty()) put("inviteeIds", JsonArray(inviteeIds.distinct().map { JsonPrimitive(it) })) }, MeetingDTO.serializer())
+    }
+    /** Optional explicit refresh; header and opening gg never trigger it automatically. */
     suspend fun ggPendingRefresh(source: String): GgPendingRefresh = withContext(dispatcher) {
         gg { req("POST", "/gg/side/pending/refresh", buildJsonObject { put("source", JsonPrimitive(source)) }, GgPendingRefresh.serializer()) }
     }
@@ -2350,7 +2480,7 @@ class TieComsClient(
     fun debugReconnect() { scope.launch { socket.start() } }
 
     fun close(): Unit = synchronized(noticeSessionLock) {
-        onNoticeSessionEnded()
+        endNoticeSession()
         sessionGeneration++; noticeGeneration++; cancelMeetingConnect(); meetingAttempts.clear()
         socket.stop()
         scope.cancel()

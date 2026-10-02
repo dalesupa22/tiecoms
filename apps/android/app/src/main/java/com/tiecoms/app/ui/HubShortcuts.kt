@@ -100,8 +100,8 @@ fun HubShortcuts(onOpen: (String) -> Unit, modifier: Modifier = Modifier) {
     var waUnread by remember { mutableIntStateOf(0) }
     // Los no leídos de WhatsApp: los mismos contadores por categoría que usa la pantalla de WhatsApp.
     LaunchedEffect(st.waRevision) {
-        runCatching { client.waChats(null, null, null, false, null) }
-            .onSuccess { p -> waUnread = p.categories.values.sumOf { it.unread } }
+        runCatching { client.waUnreadCount() }
+            .onSuccess { waUnread = it }
             .onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
     }
     // Correo: GET /mail/unread al abrir Todo; si falla, la pastilla va sin número.

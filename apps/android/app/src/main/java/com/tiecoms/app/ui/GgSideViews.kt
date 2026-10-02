@@ -100,20 +100,17 @@ object GgDrafts {
     fun take(conversationId: String): String? = pending.value[conversationId]?.also { pending.value = pending.value - conversationId }
 }
 
-/** Ícono gg del encabezado: las letras «gg» en un círculo oscuro con una chispa; con número si hay pendientes. */
+/** Ícono gg del encabezado: las letras «gg» en un círculo oscuro con una chispa; sin contador ni consultas automáticas. */
 @Composable
 fun GgButton(count: Int, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    val cd = if (count > 0) stringResource(R.string.ggs_button_pending_cd, count) else stringResource(R.string.ggs_button_cd)
+    val cd = stringResource(R.string.ggs_button_cd)
     IconButton(onClick = onClick, modifier = modifier.semantics { contentDescription = cd }.testTag("ggSideButton")) {
         Box(Modifier.size(34.dp).clearAndSetSemantics {}, contentAlignment = Alignment.Center) {
             Box(Modifier.size(28.dp).background(GgInk, CircleShape), contentAlignment = Alignment.Center) {
                 Text("gg", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp, modifier = Modifier.offset(y = (-1).dp))
             }
             Text("✦", color = GgSpark, fontSize = 10.sp, modifier = Modifier.align(Alignment.TopEnd).offset(x = 1.dp, y = (-1).dp))
-            if (count > 0) Box(
-                Modifier.align(Alignment.BottomEnd).offset(x = 3.dp, y = 2.dp).widthIn(min = 16.dp).background(GgSpark, CircleShape).padding(horizontal = 4.dp),
-                contentAlignment = Alignment.Center,
-            ) { Text(if (count > 9) "9+" else count.toString(), color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.testTag("ggSideCount")) }
+
         }
     }
 }
@@ -143,8 +140,7 @@ class GgSideModel(private val client: TieComsClient, val source: String, private
         try {
             val t = client.ggSide(source)
             messages.clear(); messages.addAll(t.messages); pending = t.pending; available = true
-            // Recalcula el número al entrar (best-effort; puede pedir IA en el servidor, que pone el tope).
-            runCatching { client.ggPendingRefresh(source) }.onSuccess { pending = it.pending }
+
         } catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) throw e
             // 404/403 de acceso: sin botón para esta fuente. Red caída: se deja visible (null) y se reintenta al abrir.
@@ -186,7 +182,7 @@ class GgSideModel(private val client: TieComsClient, val source: String, private
         }
     }
 
-    fun hide() { open = false; closedWithHistory = messages.isNotEmpty() }
+    fun hide() { quoted.clear(); open = false; closedWithHistory = messages.isNotEmpty() }
 
     fun quote(q: GgQuotedDTO) { if (quoted.none { it.id == q.id }) quoted.add(q) }
 
@@ -280,11 +276,16 @@ private fun Chip(text: String, tag: String? = null, onClick: () -> Unit) {
 fun GgSideSheet(
     model: GgSideModel, onUseDraft: (String) -> Unit, onAction: (com.tiecoms.app.core.GgActionDTO) -> Unit, onJump: (String) -> Unit,
 ) {
+    val ggFocus = androidx.compose.ui.platform.LocalFocusManager.current
+    val ggKeyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+    androidx.compose.runtime.DisposableEffect(model) { onDispose { ggFocus.clearFocus(force = true); ggKeyboard?.hide() } }
     if (!model.open) return
     val openGeneral = LocalOpenGeneralGg.current
     val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var input by remember { mutableStateOf("") }
     var menu by remember { mutableStateOf(false) }
+    var calendar by remember { mutableStateOf(false) }
+    if (calendar) GgCalendarSheet(model.source, model.quoted.map { it.id }) { calendar = false }
     val list = rememberLazyListState()
     LaunchedEffect(model.messages.size, model.busy) { if (model.messages.isNotEmpty()) list.animateScrollToItem(model.messages.size) }
     val summarize = stringResource(R.string.ggs_summarize)
@@ -302,6 +303,7 @@ fun GgSideSheet(
                 Box {
                     IconButton(onClick = { menu = true }, modifier = Modifier.testTag("ggSideMenu")) { Icon(Icons.Filled.MoreVert, stringResource(R.string.menu_more)) }
                     AnchoredMenu(menu, listOf(
+                        SheetItem(stringResource(R.string.calendar_find_slots), "📅", tag = "ggCalendarFind") { calendar = true },
                         SheetItem(stringResource(R.string.ggs_new), "↺", tag = "ggSideNew") { model.newSession() },
                         SheetItem(stringResource(R.string.ggs_open_general), "↗", tag = "ggSideGeneral") { model.hide(); openGeneral() },
                     ), { menu = false })
@@ -357,6 +359,10 @@ fun GgSideSheet(
 @Composable
 private fun GgSideBubble(m: GgSideMessageDTO, last: Boolean, onUseDraft: (String) -> Unit, onAction: (com.tiecoms.app.core.GgActionDTO) -> Unit, onTone: (String) -> Unit, onJump: (String) -> Unit) {
     val mine = m.role == "user"
+    val data = LocalClient.current.state.value.data
+    var reading by remember(m.id) { mutableStateOf(false) }
+    val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+    if (reading && data != null) LongMessageReader(m.body, emptyList(), data, {}, { reading = false })
     Column(Modifier.fillMaxWidth(), horizontalAlignment = if (mine) Alignment.End else Alignment.Start) {
         m.quoted.orEmpty().forEach { q ->
             Text("❝ " + (if (q.author.isNotBlank()) q.author + ": " else "") + q.text, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -366,7 +372,12 @@ private fun GgSideBubble(m: GgSideMessageDTO, last: Boolean, onUseDraft: (String
             shape = RoundedCornerShape(14.dp),
             color = if (mine) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
             modifier = Modifier.widthIn(max = 320.dp),
-        ) { Text(m.body, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) }
+        ) { Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+            val long = m.body.length > 3000 || m.body.count { it == '\n' } > 30
+            if (long || data == null) Text(m.body, style = MaterialTheme.typography.bodyMedium, maxLines = if (long) 30 else Int.MAX_VALUE, overflow = TextOverflow.Ellipsis)
+            else MessageText(m.body, emptyList(), MaterialTheme.colorScheme.onSurface, data, {})
+            if (long && data != null) TextButton(onClick = { keyboard?.hide(); reading = true }, modifier = Modifier.testTag("ggReadWhole-${m.id}")) { Text(stringResource(R.string.msg_see_more)) }
+        } }
         val ex = m.extra
         if (!mine && ex != null) {
             if (ex.pending.isNotEmpty()) Column(Modifier.padding(top = 6.dp).fillMaxWidth().testTag("ggSidePending")) {
@@ -478,6 +489,8 @@ fun GgSuggestSheet(model: GgSideModel, messageIds: List<String>, onRun: (List<Gg
     var list by remember(messageIds) { mutableStateOf<List<GgSuggestion>?>(null) }
     var failed by remember(messageIds) { mutableStateOf(false) }
     val picked = remember(messageIds) { mutableStateListOf<String>() }
+    var calendar by remember { mutableStateOf(false) }
+    if (calendar) GgCalendarSheet(model.source, messageIds) { calendar = false }
     var free by remember { mutableStateOf("") }
     LaunchedEffect(messageIds) {
         try { list = model.suggest(messageIds).also { l -> picked.clear(); l.firstOrNull()?.let { picked.add(it.id) } } }
@@ -488,6 +501,7 @@ fun GgSuggestSheet(model: GgSideModel, messageIds: List<String>, onRun: (List<Gg
         }
     }
     FormSheet(stringResource(R.string.ggs_suggest_title), onClose, tag = "ggSuggestSheet") {
+        OutlinedButton(onClick = { calendar = true }, modifier = Modifier.testTag("selectionFindSlots")) { Text(stringResource(R.string.calendar_find_slots)) }
         when {
             list == null -> CircularProgressIndicator()
             failed -> Text(stringResource(R.string.ggs_error), color = MaterialTheme.colorScheme.error)

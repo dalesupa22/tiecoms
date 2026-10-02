@@ -197,12 +197,8 @@ fun ViewOnceViewer(content: ViewOnceOpenDTO, kind: ViewOnce.Kind, onClose: () ->
                     ViewOnce.Kind.PHOTO -> {
                         val a = content.attachments.firstOrNull { it.isImage }
                         val px = with(LocalDensity.current) { 1600.dp.roundToPx() }.coerceAtMost(2048)
-                        val url = a?.url?.let { container.client.value.mediaUrl(it) }
-                        val bmp by produceState<androidx.compose.ui.graphics.ImageBitmap?>(null, url) {
-                            value = url?.let { runCatching { container.images.load(it, px, container.client.value.bearer()) }.getOrNull() }
-                        }
-                        bmp?.let { Image(it, null, Modifier.fillMaxSize().align(Alignment.Center), contentScale = ContentScale.Fit) }
-                            ?: CircularProgressIndicator(Modifier.align(Alignment.Center), color = Color.White)
+                        if (a != null) AnimatedMediaImage(a.url, a.name, Modifier.fillMaxSize().align(Alignment.Center), fit = true, private = true, px = px)
+                        else Text(stringResource(R.string.att_unavailable), Modifier.align(Alignment.Center))
                     }
                     ViewOnce.Kind.VOICE -> OnceVoice(content, Modifier.align(Alignment.Center))
                     ViewOnce.Kind.TEXT -> Text(content.body, style = MaterialTheme.typography.headlineSmall, textAlign = TextAlign.Center,
@@ -221,9 +217,9 @@ fun ViewOnceViewer(content: ViewOnceOpenDTO, kind: ViewOnce.Kind, onClose: () ->
 /** Nota de voz de una sola vista: se reproduce desde la URL firmada (60 s); no queda guardada. */
 @Composable
 private fun OnceVoice(content: ViewOnceOpenDTO, modifier: Modifier) {
-    val container = LocalContainer.current
+    val client = LocalClient.current
     val a = content.attachments.firstOrNull { it.isVoice }
-    val url = a?.url?.let { container.client.value.mediaUrl(it) }
+    val url = a?.url?.let { client.mediaUrl(it) }
     var playing by remember { mutableStateOf(false) }
     val player = remember { android.media.MediaPlayer() }
     DisposableEffect(Unit) { onDispose { runCatching { player.stop() }; player.release() } }

@@ -371,6 +371,7 @@ fun QuickAddIssue(conversationId: String?, modifier: Modifier = Modifier) {
     val members = if (personal) emptyList() else humansOf(data, conv).sortedByDescending { it.id == data.me.id }
     var title by rememberSaveable { mutableStateOf("") }
     var owner by rememberSaveable(conv) { mutableStateOf(data.me.id) }
+    var assignees by rememberSaveable(conv) { mutableStateOf(listOf<String>()) }
     var due by rememberSaveable { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -385,7 +386,7 @@ fun QuickAddIssue(conversationId: String?, modifier: Modifier = Modifier) {
         scope.launch {
             try {
                 if (personal) client.createPersonalIssue(text, due)
-                else client.createIssue(conv, text, if (members.any { it.id == owner }) owner else data.me.id, due, null)
+                else client.createIssue(conv, text, if (members.any { it.id == owner }) owner else data.me.id, due, null, assigneeIds = (assignees + owner).filter { id -> members.any { it.id == id } }.distinct())
                 title = ""; due = null
                 runCatching { focus.requestFocus() }
             } catch (e: Exception) { error = errorText(ctx, e) } finally { busy = false }
@@ -407,7 +408,8 @@ fun QuickAddIssue(conversationId: String?, modifier: Modifier = Modifier) {
                 if (conversationId == null) Dropdown(stringResource(R.string.issue_where),
                     listOf(IssueTasks.PERSONAL to stringResource(R.string.issue_personal_option)) +
                         destinations.map { c -> c.id to com.tiecoms.app.core.QuickSearch.issueLabel(data, c) { Names.conversationTitle(it, data, internalFallback, convFallback) } },
-                    conv, { picked = it; owner = data.me.id }, modifier = Modifier.fillMaxWidth(), tag = "issueQuickWhere")
+                    conv, { picked = it; owner = data.me.id; assignees = emptyList() }, modifier = Modifier.fillMaxWidth(), tag = "issueQuickWhere")
+                if (!personal) AssigneesPicker(members, (assignees + owner).distinct()) { assignees = it; owner = it.firstOrNull() ?: data.me.id }
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.Center) {
                     val who = members.firstOrNull { it.id == owner }
                     // Personal: siempre eres tú, no hay a quién asignarlo.
@@ -472,6 +474,7 @@ fun ConversationIssues(conversationId: String, canCreate: Boolean, onOpen: (Stri
 fun IssuesScreen(onOpen: (String) -> Unit, conversationFilter: String? = null, onBack: (() -> Unit)? = null, quick: QuickNav? = null, hub: ((String) -> Unit)? = null) {
     val ctx = LocalContext.current
     val client = LocalClient.current
+    val scope = rememberCoroutineScope()
     val container = LocalContainer.current
     val st by client.state.collectAsStateWithLifecycle()
     val data = st.data ?: return
@@ -497,15 +500,20 @@ fun IssuesScreen(onOpen: (String) -> Unit, conversationFilter: String? = null, o
             }
             return@Scaffold
         }
-        var filter by rememberSaveable { mutableStateOf(container.settings.issueFilter) }
-        var groupBy by rememberSaveable { mutableStateOf(container.settings.issueGroupBy) }
+        var filter by rememberSaveable(data.me.id) { mutableStateOf("mine") }
+        var taskStatus by rememberSaveable(data.me.id) { mutableStateOf("active") }
+        val taskPrefs = remember(data.me.id) { ctx.getSharedPreferences("task_preferences_" + data.me.id, android.content.Context.MODE_PRIVATE) }
+        var groupBy by rememberSaveable(data.me.id) { mutableStateOf(taskPrefs.getString("grouping", "group") ?: "group") }
         var error by remember { mutableStateOf<String?>(null) }
+        LaunchedEffect(data.me.id) { runCatching { client.loadIssuePreferences() }.onSuccess { pref ->
+            pref?.grouping?.takeIf { it == "group" || it == "assignee" }?.let { groupBy = if (it == "assignee") "person" else "group"; taskPrefs.edit().putString("grouping", groupBy).apply() }
+        } }
         LaunchedEffect(Unit) { runCatching { client.loadIssues() }.onFailure { error = errorText(ctx, it) } }
         val mine = data.me.id
         // Los restringidos pueden ser de un chat que no leo (me asignaron una tarea): el servidor ya filtró.
         val inView = st.issues.values.filter { it.personal || it.conversationId in visible || it.restricted }
-        val list = inView.filter { IssueTasks.matches(filter, it, mine) }
-            .sortedWith(if (filter == "closed") IssueTasks.byClosedDesc else IssueTasks.byUrgency())
+        val list = inView.filter { IssueTasks.matches(filter, taskStatus, it, mine) }
+            .sortedWith(if (taskStatus == "completed") IssueTasks.byClosedDesc else IssueTasks.byUrgency())
         val byPerson = groupBy == "person"
         val noOwner = stringResource(R.string.issue_no_owner)
         val you = stringResource(R.string.you)
@@ -532,14 +540,11 @@ fun IssuesScreen(onOpen: (String) -> Unit, conversationFilter: String? = null, o
                         Text(stringResource(R.string.nav_issues), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold,
                             modifier = Modifier.padding(top = 4.dp).semantics { heading() }.testTag("hubTasksTitle"))
                     }
-                    Segmented(listOf(
-                        "mine" to "${stringResource(R.string.issue_mine)} ${count("mine")}",
-                        "open" to "${stringResource(R.string.issue_all_open)} ${count("open")}",
-                        "closed" to "${stringResource(R.string.issue_closed)} ${count("closed")}",
-                    ), filter, { filter = it; container.settings.issueFilter = it }, Modifier.testTag("issueFilter"))
+                    Segmented(listOf("mine" to "${stringResource(R.string.issue_mine)} ${inView.count { IssueTasks.matches("mine", taskStatus, it, mine) }}", "all" to "${stringResource(R.string.tasks_all)} ${inView.count { IssueTasks.matches("all", taskStatus, it, mine) }}"), filter, { filter = it }, Modifier.testTag("issueFilter"))
+                    Segmented(listOf("active" to stringResource(R.string.tasks_active), "completed" to stringResource(R.string.tasks_completed), "all" to stringResource(R.string.tasks_any)), taskStatus, { taskStatus = it }, Modifier.testTag("issueStatus"))
                     Segmented(listOf("group" to stringResource(R.string.issue_by_group), "person" to stringResource(R.string.issue_by_person)), groupBy,
-                        { groupBy = it; container.settings.issueGroupBy = it }, Modifier.semantics { contentDescription = ctx.getString(R.string.issue_group_by) }.testTag("issueGroupBy"))
-                    if (filter != "closed") QuickAddIssue(null)
+                        { groupBy = it; taskPrefs.edit().putString("grouping", it).apply(); scope.launch { runCatching { client.saveIssueGrouping(if (it == "person") "assignee" else "group") }.onFailure { error = errorText(ctx, it) } } }, Modifier.semantics { contentDescription = ctx.getString(R.string.issue_group_by) }.testTag("issueGroupBy"))
+                    if (taskStatus == "active") QuickAddIssue(null)
                     ErrorText(error)
                     if (list.isEmpty()) EmptyNote(stringResource(R.string.issue_empty))
                 }
@@ -700,12 +705,11 @@ fun IssueDetailScreen(id: String, onBack: () -> Unit, onOpenOrigin: (String, Lon
             }
             if (!personal) item(key = "who") {
                 Question(stringResource(R.string.issue_q_who), tag = "issueQWho") {
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        members.forEach { p ->
-                            Chip(i.ownerId == p.id, if (p.id == data.me.id) stringResource(R.string.issue_me) else IssueTasks.firstName(p.name), "owner-${p.id}",
-                                leading = { PersonAvatar(p, data, size = 22.dp) }) { if (i.ownerId != p.id) update("ownerId", p.id) }
-                        }
-                        if (i.ownerId != null) Chip(false, stringResource(R.string.issue_no_owner), "owner-none") { update("ownerId", null) }
+                    AssigneesPicker(members, (i.assigneeIds + listOfNotNull(i.ownerId)).distinct()) { picked ->
+                        scope.launch { runCatching { client.updateIssue(i.id, kotlinx.serialization.json.buildJsonObject {
+                            put("assigneeIds", kotlinx.serialization.json.JsonArray(picked.map { kotlinx.serialization.json.JsonPrimitive(it) }))
+                            put("ownerId", picked.firstOrNull()?.let { kotlinx.serialization.json.JsonPrimitive(it) } ?: kotlinx.serialization.json.JsonNull)
+                        }) }.onFailure { error = errorText(ctx, it) } }
                     }
                 }
             }

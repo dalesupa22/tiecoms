@@ -395,6 +395,7 @@ fun SettingsScreen(onNavigate: (String) -> Unit) {
             NavRow("⑂ " + stringResource(R.string.nav_trazo), null, tag = "rowTrazo") { onNavigate("trazo") }
             HorizontalDivider()
             // SPEC-silencio §3: «No molestar» (1 hora · 8 horas · Hasta mañana · Hasta que lo reactive).
+            AvailabilityRow()
             DndRow()
             HorizontalDivider()
             // 1.6.6: «Reuniones» (Meet, Teams, Zoom): Conectar, Reconectar y Desconectar.

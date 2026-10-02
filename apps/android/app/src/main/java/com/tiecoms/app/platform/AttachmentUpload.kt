@@ -21,7 +21,8 @@ object AttachmentUpload {
 
     suspend fun upload(ctx: Context, client: TieComsClient, conversationId: String, file: File, name: String, type: String,
                        onProgress: ((Long, Long) -> Unit)? = null): AttachmentDTO {
-        val a = client.uploadAttachment(conversationId, file, name, type, onProgress = onProgress)
+        val realType = Attachments.detectedMime(type, file.inputStream().use { it.readNBytes(6) })
+        val a = client.uploadAttachment(conversationId, file, name, realType, onProgress = onProgress)
         val kind = Attachments.kind(a.contentType.ifBlank { type })
         if (kind == Attachments.Kind.FILE) return a
         val thumb = runCatching { thumbnail(ctx, file, kind) }.getOrNull() ?: return a

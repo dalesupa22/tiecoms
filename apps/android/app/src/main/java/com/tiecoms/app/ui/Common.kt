@@ -105,6 +105,7 @@ private fun detailPaths(e: ApiException): String {
 /** Mensajes de sistema: {"k": clave, ...datos}; los antiguos llegan como texto plano. */
 fun systemText(ctx: Context, body: String, author: String? = null): String {
     if (!body.startsWith("{")) return body
+    if (body.length > 32_000) return ctx.getString(R.string.system_message)
     // La vista previa de la lista llega recortada (140 caracteres): si el JSON quedó incompleto se
     // recuperan los campos de texto que sí alcanzaron a llegar, para nunca mostrar JSON crudo.
     val o = runCatching { TcJson.parseToJsonElement(body) as JsonObject }.getOrNull() ?: partialSystemJson(body)
@@ -275,6 +276,7 @@ fun PersonAvatar(p: PersonDTO?, data: BootstrapDTO?, size: Dp = 40.dp, orgBadge:
     val org = Names.org(data, p?.orgId)
     Box(modifier.size(size)) {
         Avatar(p?.name ?: "?", parseColor(org?.colorBg, Brand.Black), parseColor(org?.colorFg, Color.White), size = size, photo = p?.avatarUrl)
+        Box(Modifier.align(Alignment.BottomEnd)) { AvailabilityBadge(if (p?.id == data?.me?.id) data?.me?.availability else p?.availability) }
     }
 }
 

@@ -33,7 +33,7 @@ sealed interface ConversationEvent {
 
 sealed interface AccountEvent {
     data class ScopeChanged(val reason: String) : AccountEvent
-    data class ReadUpdated(val conversationId: String, val seq: Long) : AccountEvent
+    data class ReadUpdated(val conversationId: String, val seq: Long, val readRevision: Long? = null) : AccountEvent
     data class ReminderDue(val reminder: ReminderDTO) : AccountEvent
     /** Aviso de reunión (SPEC-v4 §E): empieza en [minutes] minutos (10). */
     data class EventSoon(val event: CalendarEventDTO, val minutes: Int) : AccountEvent
@@ -46,6 +46,7 @@ sealed interface AccountEvent {
     /** Mis recordatorios cambiaron en otro dispositivo (👀 / ✅): volver a pedir GET /reminders. */
     data object RemindersChanged : AccountEvent
     /** «No molestar» cambió en otra sesión (`me.dnd`); null = apagado. */
+    data class AvailabilityUpdated(val userId: String, val availability: AvailabilityDTO) : AccountEvent
     data class DndUpdated(val dndUntil: String?) : AccountEvent
     /** Un programado mío cambió en cualquier dispositivo (`scheduled.updated`). */
     data class ScheduledUpdated(val scheduled: ScheduledMessageDTO) : AccountEvent
@@ -116,7 +117,7 @@ fun decodeAccountEvent(el: JsonElement): AccountEvent {
         "scope.changed" -> AccountEvent.ScopeChanged(o.str("reason") ?: "")
         "read.updated" -> {
             val c = o.str("conversationId"); val s = o.long("seq")
-            if (c != null && s != null) AccountEvent.ReadUpdated(c, s) else AccountEvent.Unknown(type)
+            if (c != null && s != null) AccountEvent.ReadUpdated(c, s, o.long("readRevision")) else AccountEvent.Unknown(type)
         }
         "reminder.due" -> obj(o, "reminder", ReminderDTO.serializer())?.takeIf { it.id.isNotEmpty() }?.let { AccountEvent.ReminderDue(it) } ?: AccountEvent.Unknown(type)
         "event.soon" -> obj(o, "event", CalendarEventDTO.serializer())?.takeIf { it.id.isNotEmpty() }
@@ -145,6 +146,7 @@ fun decodeAccountEvent(el: JsonElement): AccountEvent {
             AccountEvent.CallElsewhere(CallElsewhere(it, type == "call.answered", o.str("deviceKey"), o.str("platform"), o.str("label")))
         } ?: AccountEvent.Unknown(type)
         "calls.missed" -> o.long("missedCalls")?.let { AccountEvent.CallsMissed(o.str("callId"), it.toInt()) } ?: AccountEvent.Unknown(type)
+        "person.availability" -> o.str("userId")?.let { id -> runCatching { TcJson.decodeFromJsonElement(AvailabilityDTO.serializer(), o["availability"] ?: return@let null) }.getOrNull()?.let { AccountEvent.AvailabilityUpdated(id, it) } } ?: AccountEvent.Unknown(type)
         "me.dnd" -> if (o.containsKey("dndUntil")) AccountEvent.DndUpdated(o.str("dndUntil")) else AccountEvent.Unknown(type)
         else -> AccountEvent.Unknown(type)
     }

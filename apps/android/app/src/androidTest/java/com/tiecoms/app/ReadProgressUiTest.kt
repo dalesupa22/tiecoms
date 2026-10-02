@@ -58,6 +58,7 @@ class ReadProgressUiTest {
                     path == "/api/v1/scheduled" -> """{"scheduled":[]}"""
                     path == "/api/v1/issues" -> """{"issues":[]}"""
                     path == "/api/v1/calendar/events" -> """{"events":[]}"""
+                    path == "/api/v1/conversations/read-qa/topics" -> """{"topics":[]}"""
                     path == "/api/v1/conversations/read-qa/pins" -> """{"messageIds":[]}"""
                     path == "/api/v1/conversations/read-qa/events" -> """{"events":[],"lastEventSeq":0}"""
                     else -> return MockResponse().setResponseCode(404).setBody("{}")
@@ -96,5 +97,19 @@ class ReadProgressUiTest {
         Thread.sleep(700)
         assertTrue("Jumping to newest must retain the unseen middle", reads.max() < 300L)
         assertTrue(client.meta("read-qa")!!.unread > 0)
+        compose.onNodeWithTag("composer").performTextInput("Unsent jump QA draft")
+        compose.onNodeWithTag("composer").performClick()
+        fun imeVisible(): Boolean {
+            var visible = false
+            compose.runOnUiThread { visible = androidx.core.view.ViewCompat.getRootWindowInsets(compose.activity.window.decorView)?.isVisible(androidx.core.view.WindowInsetsCompat.Type.ime()) == true }
+            return visible
+        }
+        compose.waitUntil(5000) { imeVisible() }
+        val firstPending = client.meta("read-qa")!!.lastReadSeq + 1
+        compose.onNodeWithTag("jumpNew").assertIsDisplayed().performTouchInput { click() }
+        compose.waitUntil(10_000) { runCatching { compose.onNodeWithTag("msg-$firstPending").assertIsDisplayed() }.isSuccess }
+        assertTrue("Unread jump with keyboard cannot acknowledge the hidden middle", reads.max() < 300L)
+        compose.onNodeWithTag("composer").assertTextContains("Unsent jump QA draft")
+        ins.uiAutomation.takeScreenshot()?.let { bitmap -> java.io.File(ins.targetContext.getExternalFilesDir(null), "night-unread-keyboard-jump.png").outputStream().use { bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) } }
     }
 }

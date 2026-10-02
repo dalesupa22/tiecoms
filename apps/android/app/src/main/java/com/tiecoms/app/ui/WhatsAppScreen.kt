@@ -103,16 +103,34 @@ fun WhatsAppScreen(onBack: () -> Unit, onOpenConversation: (String) -> Unit) {
     var connectOpen by rememberSaveable { mutableStateOf(false) }
     var chats by remember { mutableStateOf<List<WaChatDTO>>(emptyList()) }
     var counts by remember { mutableStateOf<Map<String, WaCount>>(emptyMap()) }
+    var next by remember { mutableStateOf<String?>(null) }
+    var hasMore by remember { mutableStateOf(false) }
+    var syncPartial by remember { mutableStateOf(false) }
+    var chatsLoading by remember { mutableStateOf(false) }
     var accountId by rememberSaveable { mutableStateOf<String?>(null) }
     var category by rememberSaveable { mutableStateOf<String?>(null) }
-    var onlyGroups by rememberSaveable { mutableStateOf(true) }
+    var onlyGroups by rememberSaveable { mutableStateOf(false) }
     var showHidden by rememberSaveable { mutableStateOf(false) }
     var q by rememberSaveable { mutableStateOf("") }
     var open by remember { mutableStateOf<WaChatDTO?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
 
     suspend fun loadAccounts() { runCatching { client.waAccounts() }.onSuccess { accounts = it.accounts; max = it.max }.onFailure { error = errorText(ctx, it); if (accounts == null) accounts = emptyList() } }
-    suspend fun loadChats() { runCatching { client.waChats(accountId, category, if (onlyGroups) true else null, showHidden, q) }.onSuccess { chats = it.chats; counts = it.categories } }
+    suspend fun loadChats(reset: Boolean = true) {
+        if (!reset && (chatsLoading || !hasMore || next == null)) return
+        val scopeKey = listOf(client.myId, accountId, category, onlyGroups.toString(), showHidden.toString(), q, revision.toString())
+        val generation = client.sessionGeneration
+        val cursor = if (reset) null else next
+        chatsLoading = true
+        try {
+            val p = client.waChats(accountId, category, if (onlyGroups) true else null, showHidden, q, limit = 50, cursor = cursor)
+            if (generation != client.sessionGeneration || scopeKey != listOf(client.myId, accountId, category, onlyGroups.toString(), showHidden.toString(), q, revision.toString())) return
+            chats = (if (reset) p.chats else chats + p.chats).distinctBy { it.accountId to it.jid }
+                .sortedWith(compareByDescending<WaChatDTO> { it.pinned }.thenByDescending { it.lastMessageAt ?: "" }.thenBy { it.accountId }.thenBy { it.jid })
+            counts = p.categories; next = p.next; hasMore = p.hasMore == true && p.next != null && p.next != cursor; syncPartial = p.syncPartial == true; error = null
+        } catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e; error = errorText(ctx, e) }
+        finally { if (generation == client.sessionGeneration && scopeKey == listOf(client.myId, accountId, category, onlyGroups.toString(), showHidden.toString(), q, revision.toString())) chatsLoading = false }
+    }
     LaunchedEffect(revision) { loadAccounts() }
     LaunchedEffect(revision, accountId, category, onlyGroups, showHidden, q) { if (q.isNotEmpty()) delay(250); loadChats() }
     // Mientras hay un código en pantalla se pregunta seguido: el QR cambia cada ~20 s.
@@ -168,8 +186,10 @@ fun WhatsAppScreen(onBack: () -> Unit, onOpenConversation: (String) -> Unit) {
                         Checkbox(showHidden, null); Text(stringResource(R.string.wa_show_hidden), style = MaterialTheme.typography.bodySmall)
                     }
                 }
-                if (chats.isEmpty()) item { EmptyNote(stringResource(if (connected.isNotEmpty()) R.string.wa_no_chats else R.string.wa_syncing)) }
+                if (syncPartial) item { Text(stringResource(R.string.wa_syncing), style = MaterialTheme.typography.labelSmall) }
+                if (chats.isEmpty() && error == null && !chatsLoading) item { EmptyNote(stringResource(if (connected.isNotEmpty()) R.string.wa_no_chats else R.string.wa_syncing)) }
                 items(chats, key = { "${it.accountId}|${it.jid}" }) { c -> ChatRow(c, multi = (accounts?.size ?: 0) > 1, inbox = inboxOf(c)) { open = c } }
+                if (hasMore) item { TextButton(onClick = { scope.launch { loadChats(reset = false) } }, enabled = !chatsLoading, modifier = Modifier.testTag("waLoadMore")) { Text(stringResource(R.string.wa_load_more)) } }
             }
             item { Spacer(Modifier.heightIn(min = 24.dp)) }
         }
@@ -342,7 +362,8 @@ internal fun WaChatSheet(c: WaChatDTO, revision: Int, onClose: () -> Unit, onPat
     val container = LocalContainer.current
     val data = client.state.collectAsStateWithLifecycle().value.data ?: return
     var messages by remember { mutableStateOf<List<WaMessageDTO>?>(null) }
-    LaunchedEffect(c.accountId, c.jid, revision) { messages = runCatching { client.waMessages(c) }.getOrDefault(emptyList()) }
+    var mediaError by remember(c.accountId, c.jid) { mutableStateOf<String?>(null) }
+    LaunchedEffect(c.accountId, c.jid, revision) { try { messages = client.waMessages(c); mediaError = null } catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e; mediaError = errorText(ctx, e) } }
     var waMenu by remember { mutableStateOf<WaMessageDTO?>(null) }
     var waShare by remember { mutableStateOf<WaMessageDTO?>(null) }
     val targets = data.conversations.filter { it.kind != "direct" && it.canPost }
@@ -353,6 +374,7 @@ internal fun WaChatSheet(c: WaChatDTO, revision: Int, onClose: () -> Unit, onPat
     val gg = rememberGgSide(com.tiecoms.app.core.GgSide.whatsapp(c.accountId, c.jid), enabled = !client.ggSideMissing)
     var selecting by remember(c.jid) { mutableStateOf(false) }
     val selected = remember(c.jid) { androidx.compose.runtime.mutableStateListOf<String>() }
+    LaunchedEffect(gg?.open) { if (gg?.open == false) { selecting = false; selected.clear(); gg.quoted.clear() } }
     var suggestFor by remember { mutableStateOf<List<String>?>(null) }
     var queue by remember { mutableStateOf(listOf<com.tiecoms.app.core.GgSuggestion>()) }
     fun copyDraft(t: String) { copyToClipboard(ctx, t); container.toast(ctx.getString(R.string.ggs_draft_copied)) }
@@ -372,6 +394,7 @@ internal fun WaChatSheet(c: WaChatDTO, revision: Int, onClose: () -> Unit, onPat
         Dropdown(stringResource(R.string.wa_category), WA_CATEGORIES.map { it to "${CAT_ICON[it]} ${catName(it)}" }, c.category, { onPatch(mapOf("category" to JsonPrimitive(it))) })
         Text(stringResource(if (c.categoryManual) R.string.wa_manual else R.string.wa_suggested), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         c.description?.let { Text(it.take(300), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        ErrorText(mediaError)
         when {
             messages == null -> CircularProgressIndicator()
             messages!!.isEmpty() -> Text(stringResource(R.string.wa_no_messages), style = MaterialTheme.typography.bodySmall)
@@ -383,6 +406,7 @@ internal fun WaChatSheet(c: WaChatDTO, revision: Int, onClose: () -> Unit, onPat
                         modifier = if (data.mailEnabled || gg != null) Modifier.combinedClickable(onClick = {}, onLongClick = { waMenu = m }).testTag("waMsg-${m.id}") else Modifier) {
                         Column(Modifier.padding(8.dp)) {
                             if (!m.fromMe && c.isGroup && m.author != null) Text(m.author, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, color = if (m.fromMe) Color(0xFF1F1F1F) else MaterialTheme.colorScheme.onSurface)
+                            CanonicalAttachments(listOfNotNull(m.media?.attachment), m.media?.status)
                             Text(m.body, color = if (m.fromMe) Color(0xFF1F1F1F) else MaterialTheme.colorScheme.onSurface)
                             Text(shortDateTime(m.sentAt), style = MaterialTheme.typography.labelSmall, color = if (m.fromMe) Color(0xFF55605A) else MaterialTheme.colorScheme.onSurfaceVariant)
                         }

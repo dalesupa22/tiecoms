@@ -390,6 +390,7 @@ private fun WaMailCard(e: SharedMailDTO, data: BootstrapDTO, canPost: Boolean, m
                 Box(Modifier.width(3.dp).fillMaxHeight().background(WaGreen, RoundedCornerShape(2.dp)))
                 Text(e.snippet, style = MaterialTheme.typography.bodyMedium, maxLines = 6, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 8.dp).weight(1f).testTag("waQuote"))
             }
+            CanonicalAttachments(e.chagguAttachments, e.mediaStatus)
             MailCardComments(e, data, canPost) { nav.openMail(e.id, "comments") }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.End)) {
                 val pad = ButtonDefaults.TextButtonContentPadding

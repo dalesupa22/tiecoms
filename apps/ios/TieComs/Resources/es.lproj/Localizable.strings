@@ -2887,3 +2887,7 @@
 "zoom.label" = "Tamaño del texto de este chat";
 "zoom.out" = "Achicar (⌘/Ctrl + rueda)";
 "zoom.reset" = "Volver al 100 %";
+
+"composer.format" = "Formato";
+"composer.italic" = "Cursiva";
+"composer.bold" = "Negrita";

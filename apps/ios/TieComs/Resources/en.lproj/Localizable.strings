@@ -2887,3 +2887,7 @@
 "zoom.label" = "Text size of this chat";
 "zoom.out" = "Zoom out (⌘/Ctrl + wheel)";
 "zoom.reset" = "Back to 100%";
+
+"composer.format" = "Format";
+"composer.italic" = "Italic";
+"composer.bold" = "Bold";

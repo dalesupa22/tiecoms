@@ -408,10 +408,12 @@ struct AttachButton: View {
     var onMail: (() -> Void)? = nil
     var onWhatsApp: (() -> Void)? = nil
     var onGifs: (() -> Void)? = nil
+    var formatting: ComposerFormattingController? = nil
     var onError: (String) -> Void
 
     var body: some View {
         Menu {
+            if let formatting { ComposerFormatMenu(controller: formatting); Divider() }
             Button { showPhotos = true } label: { Label(L("att.fromPhotos"), systemImage: "photo.on.rectangle") }
             if UIImagePickerController.isSourceTypeAvailable(.camera) {
                 Button { showCamera = true } label: { Label(L("att.fromCamera"), systemImage: "camera") }

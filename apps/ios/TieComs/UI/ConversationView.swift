@@ -162,6 +162,7 @@ struct ConversationView: View {
     /// Nota cuya subida falló (413, red…): se conserva para reintentar, no se pierde en silencio.
     @State private var failedVoice: PendingVoiceSend?
     @State private var showingVoiceAIConsent = false
+    @StateObject private var composerFormatting = ComposerFormattingController()
     @State private var composerFocused = false
     /// Cursor del compositor (UTF-16).
     @State private var draftCursor = 0
@@ -454,6 +455,7 @@ struct ConversationView: View {
     @ViewBuilder
     private func content(_ d: BootstrapDTO, _ c: ConversationDTO) -> some View {
         let state = store.conversations[conversationId]
+        GeometryReader { available in
         VStack(spacing: 0) {
             if store.connection != .online {
                 ConnectionBanner(connection: store.connection).padding(.horizontal, 16).padding(.vertical, 6)
@@ -499,6 +501,12 @@ struct ConversationView: View {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity).accessibilityLabel(L("common.loading"))
             }
             typingLine
+        }
+        .frame(width: available.size.width, height: available.size.height, alignment: .top)
+        .clipped()
+        }
+        // Anchor input above the keyboard even when landscape/accessibility chrome needs more room.
+        .safeAreaInset(edge: .bottom, spacing: 0) {
             if gg.selecting {
                 GgSelectionBar(count: gg.selected.count, onCancel: { gg.selecting = false; gg.selected = [] }, onAsk: { gg.suggesting = true })
             } else if c.kind == .direct && c.memberIds.contains(where: { store.blockedUserIds.contains($0) }) {
@@ -511,6 +519,7 @@ struct ConversationView: View {
                     .accessibilityIdentifier("chat.readOnly")
             }
         }
+
         .toolbar {
             // Dentro del panel del sidechat la cabecera es la del panel (no se mezcla con la del chat de origen).
             if !embedded {
@@ -1570,7 +1579,7 @@ struct ConversationView: View {
                                  // Correo en el chat (docs/CORREO.md): ＋ › Correo con este chat como destino; WhatsApp va a su pantalla.
                                  onMail: embedded || !store.mailEnabled || Naming.isGuest(d, c) ? nil : { store.push(.mailBox(conversationId: conversationId)) },
                                  onWhatsApp: embedded || !store.mailEnabled || Naming.isGuest(d, c) ? nil : { store.push(.whatsapp) },
-                                 onGifs: { pickingGifs = true }) { store.show($0) }
+                                 onGifs: { pickingGifs = true }, formatting: composerFormatting) { store.show($0) }
                         .disabled(uploading)
                 }
                 if editing == nil && !commenting && !embedded { ViewOnceToggle(on: $viewOnceNext) }
@@ -1590,7 +1599,8 @@ struct ConversationView: View {
                 ComposerTextView(text: $draft, mentions: $draftMentions, cursor: $draftCursor, focused: $composerFocused,
                                  placeholder: composerPlaceholder(d, c), accessibilityLabel: L("chat.composerLabel"),
                                  onChange: { new in if !new.isEmpty && editing == nil { store.userIsTyping(conversationId) } },
-                                 onPasteAttachments: editing == nil && !commenting && !recorder.isActive && !uploading ? { stagePasted($0) } : nil)
+                                 onPasteAttachments: editing == nil && !commenting && !recorder.isActive && !uploading ? { stagePasted($0) } : nil,
+                                 formatting: composerFormatting)
                     .overlay(alignment: .topLeading) {
                         if draft.isEmpty {
                             Text(composerPlaceholder(d, c)).font(.body).foregroundStyle(Theme.textSecondary.opacity(0.8))

@@ -140,7 +140,7 @@ enum RichText {
         return v
     }
 
-    /// Compositor: tokens resaltados con el color de la persona y un fondo suave.
+    /// Preview uses raw UTF-16 offsets: markers stay editable, with the same styles as sent text.
     static func applyComposerStyle(_ storage: NSTextStorage, mentions: [Mention]) {
         let full = NSRange(location: 0, length: storage.length)
         storage.beginEditing()
@@ -151,6 +151,17 @@ enum RichText {
         }
         // @gg mientras se escribe: fondo tenue del degradado.
         GGMention.applyComposer(storage, mentions: mentions, font: boldFont())
+        for span in formatSpans(storage.string, mentions: mentions) {
+            applyFormat(span, to: storage, mine: false)
+            for location in [span.range.location, NSMaxRange(span.range) - span.markerWidth] {
+                storage.addAttribute(.foregroundColor, value: UIColor.secondaryLabel,
+                                     range: NSRange(location: location, length: span.markerWidth))
+            }
+        }
+        for block in CodeMessages.blocks(storage.string) {
+            storage.addAttributes([.font: codeFont(), .foregroundColor: UIColor(Theme.textPrimary),
+                                   .backgroundColor: UIColor(Theme.textPrimary).withAlphaComponent(0.08)], range: block.range)
+        }
         storage.endEditing()
     }
 }
@@ -242,34 +253,29 @@ struct ComposerTextView: UIViewRepresentable {
     var onChange: (String) -> Void = { _ in }
     /// Pegar imágenes (menú Pegar o ⌘V, 1.7.1): se adjuntan como si se eligieran de Fotos. nil = solo texto.
     var onPasteAttachments: (([LocalAttachment]) -> Void)? = nil
+    var formatting: ComposerFormattingController? = nil
     static let maxLines: CGFloat = 5
 
     func makeUIView(context: Context) -> UITextView {
         let v = PastingTextView()
+        v.formatting = formatting
+        formatting?.editor = v
         v.onPasteAttachments = onPasteAttachments
+        v.canApplyFormat = { [weak coord = context.coordinator, weak v] command in
+            guard let coord, let v, v.markedTextRange == nil else { return false }
+            return MessageFormat.compose(v.text ?? "", selection: v.selectedRange, command: command, mentions: coord.parent.mentions) != nil
+        }
         v.onWrap = { [weak coord = context.coordinator, weak v] mark in
             guard let coord, let v else { return }
             coord.wrap(v, mark: mark)
         }
-        let toolbar = UIToolbar(frame: CGRect(x: 0, y: 0, width: 320, height: 40))
-        toolbar.items = [
-            UIBarButtonItem(title: "B", style: .plain, target: v, action: #selector(PastingTextView.toggleBoldface(_:))),
-            UIBarButtonItem(barButtonSystemItem: .flexibleSpace, target: nil, action: nil),
-            UIBarButtonItem(title: "•", style: .plain, target: v, action: #selector(PastingTextView.bulletSelection(_:))),
-            UIBarButtonItem(title: "1.", style: .plain, target: v, action: #selector(PastingTextView.numberSelection(_:))),
-            UIBarButtonItem(title: "`…`", style: .plain, target: v, action: #selector(PastingTextView.codeSelection(_:))),
-            UIBarButtonItem(title: "{ }", style: .plain, target: v, action: #selector(PastingTextView.blockSelection(_:)))
-        ]
-        toolbar.items?[0].accessibilityLabel = L("composer.bold")
-        toolbar.items?[2].accessibilityLabel = L("format.bullets")
-        toolbar.items?[3].accessibilityLabel = L("format.numbered")
-        toolbar.items?[4].accessibilityLabel = L("format.inlineCode")
-        toolbar.items?[5].accessibilityLabel = L("format.code")
-        v.inputAccessoryView = toolbar
         v.font = RichText.baseFont()
         v.adjustsFontForContentSizeCategory = true
         v.backgroundColor = .clear
-        v.isScrollEnabled = false
+        // Keep UIKit's scrolling layout active even before overflow. With scrolling disabled,
+        // contentSize can equal the capped bounds, so it cannot be used to enable scrolling later.
+        v.isScrollEnabled = true
+        v.alwaysBounceVertical = false
         v.textContainerInset = UIEdgeInsets(top: 10, left: 10, bottom: 10, right: 10)
         v.textContainer.lineFragmentPadding = 4
         v.allowsEditingTextAttributes = false   // pegar = texto plano
@@ -299,6 +305,7 @@ struct ComposerTextView: UIViewRepresentable {
             let end = min(cursor, (text as NSString).length)
             v.selectedRange = NSRange(location: end, length: 0)
             c.applying = false
+            (v as? PastingTextView)?.revealSelectionAfterLayout()
         } else if c.styledMentions != mentions, v.markedTextRange == nil {
             let sel = v.selectedRange
             RichText.applyComposerStyle(v.textStorage, mentions: mentions)
@@ -307,6 +314,7 @@ struct ComposerTextView: UIViewRepresentable {
         c.styledMentions = mentions
         v.typingAttributes = [.font: RichText.baseFont(), .foregroundColor: UIColor(Theme.textPrimary)]
         v.accessibilityValue = text.isEmpty ? placeholder : nil
+        (v as? PastingTextView)?.refreshFormatCommands()
         // Solo en el CAMBIO de `focused` (flanco): si el teclado se cerró por fuera (deslizar la lista, tocar fuera)
         // `focused` sigue en true un instante hasta que llega textViewDidEndEditing; reenfocar por nivel volvía a
         // abrir el teclado y no había forma de cerrarlo.
@@ -315,18 +323,17 @@ struct ComposerTextView: UIViewRepresentable {
             if focused && !v.isFirstResponder { DispatchQueue.main.async { [weak v, weak c] in guard let v, let c, !c.tornDown, c.parent.focused, v.window != nil else { return }; v.becomeFirstResponder() } }
             if !focused && v.isFirstResponder { DispatchQueue.main.async { v.resignFirstResponder() } }
         }
-        let lineH = (v.font ?? RichText.baseFont()).lineHeight
-        let maxH = lineH * Self.maxLines + v.textContainerInset.top + v.textContainerInset.bottom
-        let wantsScroll = v.contentSize.height > maxH + 1
-        if v.isScrollEnabled != wantsScroll { v.isScrollEnabled = wantsScroll }
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context: Context) -> CGSize? {
         let w = proposal.width ?? 240
-        let lineH = (uiView.font ?? RichText.baseFont()).lineHeight
+        let lineH = RichText.baseFont().lineHeight
         let maxH = lineH * Self.maxLines + uiView.textContainerInset.top + uiView.textContainerInset.bottom
+        let minH = lineH + uiView.textContainerInset.top + uiView.textContainerInset.bottom
+        // Large accessibility text or a landscape keyboard may leave less than five lines.
+        let available = min(maxH, max(minH, proposal.height ?? maxH))
         let fit = uiView.sizeThatFits(CGSize(width: w, height: .greatestFiniteMagnitude)).height
-        return CGSize(width: w, height: min(maxH, max(lineH + uiView.textContainerInset.top + uiView.textContainerInset.bottom, ceil(fit))))
+        return CGSize(width: w, height: min(available, max(minH, ceil(fit))))
     }
 
     static func dismantleUIView(_ view: UITextView, coordinator: Coordinator) {
@@ -341,6 +348,7 @@ struct ComposerTextView: UIViewRepresentable {
         var parent: ComposerTextView
         var applying = false
         var styledMentions: [Mention] = []
+        var lastSelection = NSRange(location: 0, length: 0)
         /// Último valor de `focused` aplicado al UITextView (para reaccionar solo a cambios).
         var lastFocused = false
         init(_ p: ComposerTextView) { parent = p }
@@ -388,8 +396,34 @@ struct ComposerTextView: UIViewRepresentable {
 
         func textViewDidChangeSelection(_ textView: UITextView) {
             guard !applying else { return }
+            if lastSelection != textView.selectedRange {
+                lastSelection = textView.selectedRange
+                (textView as? PastingTextView)?.revealSelectionAfterLayout()
+            }
+            (textView as? PastingTextView)?.refreshFormatCommands()
             let loc = textView.selectedRange.location
             if parent.cursor != loc { DispatchQueue.main.async { self.parent.cursor = loc } }
+        }
+
+        func textView(_ textView: UITextView, editMenuForTextIn range: NSRange, suggestedActions: [UIMenuElement]) -> UIMenu? {
+            guard let editor = textView as? PastingTextView else { return nil }
+            let actions = ComposerFormattingController.items.map { item in
+                UIAction(title: L(item.label), image: UIImage(systemName: item.symbol),
+                         attributes: editor.canFormat(item.command) ? [] : .disabled) { [weak editor] _ in editor?.applyFormat(item.command) }
+            }
+            let format = UIMenu(title: L("composer.format"), image: UIImage(systemName: "textformat"), identifier: .format, children: actions)
+            var replaced = false
+            func replacingFormat(_ element: UIMenuElement) -> UIMenuElement {
+                guard let menu = element as? UIMenu else { return element }
+                let hasBold = menu.children.contains { ($0 as? UICommand)?.action == #selector(UIResponderStandardEditActions.toggleBoldface(_:)) }
+                if menu.identifier == .format || menu.identifier == .textStyle || hasBold {
+                    replaced = true
+                    return format
+                }
+                return menu.replacingChildren(menu.children.map(replacingFormat))
+            }
+            let existing = suggestedActions.map(replacingFormat)
+            return UIMenu(children: existing + (replaced ? [] : [format]))
         }
 
         func textViewDidBeginEditing(_ textView: UITextView) {
@@ -406,7 +440,10 @@ struct ComposerTextView: UIViewRepresentable {
             guard textView.markedTextRange == nil,
                   let r = MessageFormat.compose(textView.text ?? "", selection: textView.selectedRange, command: mark, mentions: parent.mentions) else { return }
             applying = true
-            textView.text = r.text
+            // UITextInput replacement keeps UIKit's editing/undo transaction, unlike assigning .text.
+            if let range = textView.textRange(from: textView.beginningOfDocument, to: textView.endOfDocument) {
+                textView.replace(range, withText: r.text)
+            }
             RichText.applyComposerStyle(textView.textStorage, mentions: r.mentions)
             textView.selectedRange = r.selection
             applying = false
@@ -415,13 +452,60 @@ struct ComposerTextView: UIViewRepresentable {
 
         private func publish(_ textView: UITextView, text: String, mentions: [Mention]) {
             styledMentions = mentions
+            lastSelection = textView.selectedRange
+            (textView as? PastingTextView)?.revealSelectionAfterLayout()
             textView.typingAttributes = [.font: RichText.baseFont(), .foregroundColor: UIColor(Theme.textPrimary)]
             parent.mentions = mentions
             parent.cursor = textView.selectedRange.location
             parent.text = text
             parent.onChange(text)
+            (textView as? PastingTextView)?.refreshFormatCommands()
             textView.invalidateIntrinsicContentSize()
         }
+    }
+}
+
+@MainActor
+final class ComposerFormattingController: ObservableObject {
+    struct Item {
+        let command: String
+        let label: String
+        let symbol: String
+    }
+    static let items = [Item(command: "**", label: "composer.bold", symbol: "bold"),
+                        Item(command: "_", label: "composer.italic", symbol: "italic"),
+                        Item(command: "~", label: "composer.strike", symbol: "strikethrough"),
+                        Item(command: "bullets", label: "format.bullets", symbol: "list.bullet"),
+                        Item(command: "numbered", label: "format.numbered", symbol: "list.number"),
+                        Item(command: "`", label: "format.inlineCode", symbol: "chevron.left.forwardslash.chevron.right"),
+                        Item(command: "block", label: "format.code", symbol: "curlybraces.square")]
+    weak var editor: PastingTextView?
+    @Published private(set) var available: Set<String> = []
+    func update(_ commands: Set<String>) {
+        guard commands != available else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.available = Set(Self.items.map(\.command).filter { self.editor?.canFormat($0) == true })
+        }
+    }
+    func apply(_ command: String) {
+        guard let editor else { return }
+        editor.becomeFirstResponder()
+        editor.applyFormat(command)
+    }
+}
+
+struct ComposerFormatMenu: View {
+    @ObservedObject var controller: ComposerFormattingController
+    var body: some View {
+        Menu {
+            ForEach(ComposerFormattingController.items, id: \.command) { item in
+                Button { controller.apply(item.command) } label: { Label(L(item.label), systemImage: item.symbol) }
+                    .disabled(!controller.available.contains(item.command))
+                    .accessibilityIdentifier("composer.format." + item.command)
+            }
+        } label: { Label(L("composer.format"), systemImage: "textformat") }
+        .accessibilityIdentifier("composer.plus.format")
     }
 }
 
@@ -432,26 +516,71 @@ final class PastingTextView: UITextView {
     var onPasteAttachments: (([LocalAttachment]) -> Void)?
     /// Formato con teclado o con Formato ▸ Negrita / Cursiva del menú: envuelve la selección en la marca («*», «_», «~»).
     var onWrap: ((String) -> Void)?
+    var canApplyFormat: ((String) -> Bool)?
+
+    weak var formatting: ComposerFormattingController?
+    func refreshFormatCommands() {
+        let commands = Set(ComposerFormattingController.items.map(\.command).filter(canFormat))
+        formatting?.update(commands)
+    }
+
+    func canFormat(_ command: String) -> Bool {
+        canWrap && (canApplyFormat?(command) ?? true)
+    }
+    func applyFormat(_ command: String) { if canFormat(command) { onWrap?(command) } }
     /// Portapapeles a usar (las pruebas pasan uno propio).
     var pasteboard: UIPasteboard = .general
 
-    private var canWrap: Bool { onWrap != nil && selectedRange.length > 0 && markedTextRange == nil }
+    private var revealGeneration = 0
+    private var previousSize = CGSize.zero
+
+    func revealSelectionAfterLayout() {
+        revealGeneration += 1
+        let generation = revealGeneration
+        setNeedsLayout()
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.revealGeneration == generation, self.isFirstResponder,
+                  !self.isDragging, !self.isDecelerating else { return }
+            self.layoutIfNeeded()
+            // A large paste may still have estimated TextKit 2 fragments outside the viewport.
+            if let layout = self.textLayoutManager, let document = layout.textContentManager?.documentRange {
+                layout.ensureLayout(for: document)
+            }
+            self.scrollRangeToVisible(self.selectedRange)
+            guard let selection = self.selectedTextRange else { return }
+            let caret = self.caretRect(for: selection.end)
+            guard caret.height > 0 else { return }
+            self.scrollRectToVisible(caret.insetBy(dx: 0, dy: -self.textContainerInset.bottom), animated: false)
+        }
+    }
+
+    override func layoutSubviews() {
+        let resized = previousSize != bounds.size
+        previousSize = bounds.size
+        super.layoutSubviews()
+        // Scrolling changes bounds.origin, not size. A manual pan must not schedule a caret jump.
+        if resized { revealSelectionAfterLayout() }
+    }
+
+    private var canWrap: Bool { onWrap != nil && markedTextRange == nil }
 
     override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
         if action == #selector(paste(_:)), onPasteAttachments != nil, PasteImages.hasImages(pasteboard) { return true }
-        if action == #selector(toggleBoldface(_:)) || action == #selector(toggleItalics(_:)) || action == #selector(strikeSelection(_:)) { return canWrap }
+        if action == #selector(toggleBoldface(_:)) { return canFormat("**") }
+        if action == #selector(toggleItalics(_:)) { return canFormat("_") }
+        if action == #selector(strikeSelection(_:)) { return canFormat("~") }
         if action == #selector(toggleUnderline(_:)) { return false }
         return super.canPerformAction(action, withSender: sender)
     }
 
     // El texto es plano (allowsEditingTextAttributes = false): ⌘B / ⌘I ponen las marcas de la web.
-    override func toggleBoldface(_ sender: Any?) { if canWrap { onWrap?("**") } }
-    override func toggleItalics(_ sender: Any?) { if canWrap { onWrap?("_") } }
-    @objc func bulletSelection(_ sender: Any?) { if markedTextRange == nil { onWrap?("bullets") } }
-    @objc func numberSelection(_ sender: Any?) { if markedTextRange == nil { onWrap?("numbered") } }
-    @objc func codeSelection(_ sender: Any?) { if canWrap { onWrap?("`") } }
-    @objc func blockSelection(_ sender: Any?) { if markedTextRange == nil { onWrap?("block") } }
-    @objc func strikeSelection(_ sender: Any?) { if canWrap { onWrap?("~") } }
+    override func toggleBoldface(_ sender: Any?) { applyFormat("**") }
+    override func toggleItalics(_ sender: Any?) { applyFormat("_") }
+    @objc func bulletSelection(_ sender: Any?) { applyFormat("bullets") }
+    @objc func numberSelection(_ sender: Any?) { applyFormat("numbered") }
+    @objc func codeSelection(_ sender: Any?) { applyFormat("`") }
+    @objc func blockSelection(_ sender: Any?) { applyFormat("block") }
+    @objc func strikeSelection(_ sender: Any?) { applyFormat("~") }
 
     override var keyCommands: [UIKeyCommand]? {
         let strike = UIKeyCommand(input: "x", modifierFlags: [.command, .shift], action: #selector(strikeSelection(_:)))

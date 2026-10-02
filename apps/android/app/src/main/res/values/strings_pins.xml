@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 2-oct-2026: tapping a WhatsApp chat opens it, compact WhatsApp header and two named pins (main screen / WhatsApp / Mail). -->
+<resources>
+    <plurals name="wa_accounts_line">
+        <item quantity="one">%d account connected</item>
+        <item quantity="other">%d accounts connected</item>
+    </plurals>
+    <string name="wa_accounts_partial">%1$d of %2$d accounts connected</string>
+    <string name="wa_accounts_none">No account connected</string>
+    <string name="wa_accounts_title">WhatsApp accounts</string>
+    <string name="wa_reply_from_chaggu">Reply from chaggu</string>
+    <string name="wa_reply_from_chaggu_hint">Lets you write in this account\'s chats from chaggu. Off = read only.</string>
+    <string name="pin_main">📌 Pin to main screen</string>
+    <string name="unpin_main">📌 Unpin from main screen</string>
+    <string name="pin_wa">📌 Pin in WhatsApp</string>
+    <string name="unpin_wa">📌 Unpin from WhatsApp</string>
+    <string name="pin_mail">📌 Pin in Mail</string>
+    <string name="unpin_mail">📌 Unpin from Mail</string>
+    <string name="wa_hidden_done">Chat hidden</string>
+    <string name="wa_chat_settings">Chat settings</string>
+    <string name="wa_open_chat">Open chat</string>
+    <string name="wa_composer_ph">Write on WhatsApp…</string>
+    <string name="wa_read_only">Read only. Turn on “Reply from chaggu” to write from here.</string>
+    <string name="wa_enable_reply">Turn on</string>
+    <string name="wa_send_queued">It will be sent as soon as WhatsApp is connected</string>
+    <string name="wa_send_failed">Could not send: %1$s</string>
+    <string name="wa_account_filter">Account</string>
+    <string name="wa_business">WhatsApp Business</string>
+    <string name="wa_business_short">Business</string>
+    <string name="wa_linked_chaggu">⇄ chaggu</string>
+    <string name="mail_pins_section">Pinned</string>
+    <string name="mail_pin_row_cd">Pinned email: %1$s, from %2$s</string>
+    <string name="wa_work_only">💼 Work only</string>
+</resources>

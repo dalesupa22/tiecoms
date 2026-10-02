@@ -2132,6 +2132,15 @@ class TieComsClient(
     suspend fun waRelink(id: String, pairPhone: String?): WaAccountDTO = withContext(dispatcher) {
         req("POST", "/whatsapp/accounts/$id/relink", buildJsonObject { put("pairPhone", pairPhone?.let { JsonPrimitive(it) } ?: JsonNull) }, WaAccountDTO.serializer())
     }
+    /** «Responder desde chaggu» con esta cuenta (PATCH /whatsapp/accounts/:id { sendEnabled }). */
+    suspend fun waSetSendEnabled(id: String, on: Boolean): WaAccountDTO = withContext(dispatcher) {
+        req("PATCH", "/whatsapp/accounts/$id", buildJsonObject { put("sendEnabled", JsonPrimitive(on)) }, WaAccountDTO.serializer())
+    }
+    /** Responder un chat de WhatsApp (solo con «Responder desde chaggu» activo en la cuenta). */
+    suspend fun waSend(c: WaChatDTO, text: String): WaSendResult = withContext(dispatcher) {
+        requireWaSource(WaInbox.key(c))
+        req("POST", "/whatsapp/chats/${c.accountId}/${enc(c.jid)}/send", buildJsonObject { put("text", JsonPrimitive(text.trim().take(4000))) }, WaSendResult.serializer())
+    }
     suspend fun waRemove(id: String) = withContext(dispatcher) { req("DELETE", "/whatsapp/accounts/$id", null, JsonElement.serializer()); Unit }
     suspend fun waChats(accountId: String?, category: String?, groups: Boolean?, hidden: Boolean, search: String?, limit: Int? = null, cursor: String? = null): WaChatsPage = withContext(dispatcher) {
         val revision = s.waPrivacy.revision
@@ -2157,8 +2166,16 @@ class TieComsClient(
         waCountCache = Triple(ownerKey, now(), count)
         count
     }
+    /** PATCH de un chat (categoría, fijar en WhatsApp, ocultar, vincular…). Si está en mi lista principal, la fila se actualiza en el acto. */
     suspend fun waPatchChat(c: WaChatDTO, patch: JsonObject): WaChatDTO = withContext(dispatcher) {
-        req("PATCH", "/whatsapp/chats/${c.accountId}/${enc(c.jid)}", patch, WaChatDTO.serializer())
+        val got = req("PATCH", "/whatsapp/chats/${c.accountId}/${enc(c.jid)}", patch, WaChatDTO.serializer())
+        val merged = got.copy(accountStatus = got.accountStatus ?: c.accountStatus, accountLabel = got.accountLabel.ifEmpty { c.accountLabel })
+        setState {
+            val d = data ?: return@setState this
+            if (d.waInbox.none { WaInbox.key(it) == WaInbox.key(merged) }) return@setState this
+            copy(data = d.copy(waInbox = WaInbox.apply(d.waInbox, merged).filter { waPrivacy.allows(WaInbox.key(it)) }))
+        }
+        merged
     }
     suspend fun waMessages(c: WaChatDTO): List<WaMessageDTO> = withContext(dispatcher) {
         req("GET", "/whatsapp/chats/${c.accountId}/${enc(c.jid)}/messages?limit=80", null, WaMessagesPage.serializer()).messages
@@ -2380,6 +2397,26 @@ class TieComsClient(
     }
     suspend fun listMail(provider: String, f: Mail.Filters, category: String?, page: String? = null, fresh: Boolean = false): MailListDTO = withContext(dispatcher) {
         req("GET", Mail.listQuery(provider, f, category, page, fresh), null, MailListDTO.serializer())
+    }
+    /** Pines de correo (GET /mail/pins); los deja en el bootstrap. */
+    suspend fun loadMailPins(): List<MailPinDTO> = withContext(dispatcher) {
+        val l = req("GET", "/mail/pins", null, MailPinsPage.serializer()).pins
+        setState { val d = data ?: return@setState this; copy(data = d.copy(mailPins = l)) }; l
+    }
+    /**
+     * Fija o quita una conversación de correo (PUT /mail/pins): [main] = pantalla principal, [mail] = Correo; null no
+     * cambia. Se ve en el acto y se revierte si falla.
+     */
+    suspend fun setMailPin(pin: MailPinDTO, main: Boolean? = null, mail: Boolean? = null): List<MailPinDTO> = withContext(dispatcher) {
+        val before = s.data?.mailPins
+        setState { val d = data ?: return@setState this; copy(data = d.copy(mailPins = MailPins.optimistic(d.mailPins.orEmpty(), pin, main, mail, Instant.ofEpochMilli(now()).toString()))) }
+        try {
+            val l = req("PUT", "/mail/pins", MailPins.body(pin.provider, pin.threadKey, pin.messageId, pin.subject, pin.from, pin.date, main, mail), MailPinsPage.serializer()).pins
+            setState { val d = data ?: return@setState this; copy(data = d.copy(mailPins = l)) }; l
+        } catch (e: Exception) {
+            setState { val d = data ?: return@setState this; copy(data = d.copy(mailPins = before)) }
+            throw e
+        }
     }
     suspend fun getMail(provider: String, id: String): MailMessageDTO = withContext(dispatcher) {
         req("GET", "/mail/messages/${enc(provider)}/${enc(id)}", null, MailMessageDTO.serializer())

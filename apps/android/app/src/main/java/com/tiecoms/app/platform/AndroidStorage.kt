@@ -101,6 +101,10 @@ class AppSettings(context: Context) {
     var mailProvider: String
         get() = prefs.getString("mailProvider", "") ?: ""
         set(v) { prefs.edit().putString("mailProvider", v).apply() }
+    /** WhatsApp «💼 Solo trabajo» (2-oct-2026): solo trabajo y clientes, en la pantalla WhatsApp y en la bandeja. */
+    var waWorkOnly: Boolean
+        get() = prefs.getBoolean("waWorkOnly", false)
+        set(v) { prefs.edit().putBoolean("waWorkOnly", v).apply() }
     /** Vista de Grupos (1.6.4): «list» (Lista, por defecto) o «tree» (Árbol). */
     var groupsView: String
         get() = prefs.getString("groupsView", "list")?.takeIf { it == "list" || it == "tree" } ?: "list"

@@ -1,5 +1,7 @@
 package com.tiecoms.app.ui
 
+import androidx.compose.ui.draw.clip
+
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 import androidx.compose.foundation.background
@@ -102,18 +104,16 @@ object GgDrafts {
     fun take(conversationId: String): String? = pending.value[conversationId]?.also { pending.value = pending.value - conversationId }
 }
 
-/** Ícono gg del encabezado: las letras «gg» en un círculo oscuro con una chispa; sin contador ni consultas automáticas. */
+/**
+ * Sello gg del encabezado (2-oct-2026): la marca de gg pequeñita (22 dp, con sus estrellitas que titilan), sin fondo
+ * ni botón grande, para que el nombre del chat gane espacio. La entrada principal es «Seguir con gg» de abajo.
+ */
 @Composable
 fun GgButton(count: Int, onClick: () -> Unit, modifier: Modifier = Modifier) {
     val cd = stringResource(R.string.ggs_button_cd)
-    IconButton(onClick = onClick, modifier = modifier.semantics { contentDescription = cd }.testTag("ggSideButton")) {
-        Box(Modifier.size(34.dp).clearAndSetSemantics {}, contentAlignment = Alignment.Center) {
-            Box(Modifier.size(28.dp).background(GgInk, CircleShape), contentAlignment = Alignment.Center) {
-                Text("gg", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp, modifier = Modifier.offset(y = (-1).dp))
-            }
-            Text("✦", color = GgSpark, fontSize = 10.sp, modifier = Modifier.align(Alignment.TopEnd).offset(x = 1.dp, y = (-1).dp))
-
-        }
+    Box(modifier.size(36.dp).clip(CircleShape).clickable(onClick = onClick, role = androidx.compose.ui.semantics.Role.Button)
+        .semantics { contentDescription = cd }.testTag("ggSideButton"), contentAlignment = Alignment.Center) {
+        GgMark(22.dp, Modifier.clearAndSetSemantics {})
     }
 }
 

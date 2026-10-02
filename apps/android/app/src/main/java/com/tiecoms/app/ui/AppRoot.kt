@@ -104,6 +104,7 @@ val LocalSnackbar = staticCompositionLocalOf { SnackbarHostState() }
 @Composable
 fun AppRoot() {
     val container = LocalContext.current.container
+    remember(container) { WaWorkOnly.value = container.settings.waWorkOnly }
     val client by container.client.collectAsStateWithLifecycle()
     val state by client.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
@@ -352,6 +353,8 @@ private fun MainNav() {
         return true
     }
     fun openConv(id: String, seq: Long? = null, side: String? = null, messageId: String? = null, topicId: String? = null) {
+        // WhatsApp (fila de la bandeja, pantalla WhatsApp o aviso): directo a los mensajes.
+        if (com.tiecoms.app.core.WaInbox.isWa(id)) { nav.navigate("wa/" + android.net.Uri.encode(id)) { launchSingleTop = true }; return }
         if (jumpHere(id, seq, side, messageId)) return
         com.tiecoms.app.platform.Perf.chatTapped().let { nav.navigate("conv/$id?m=${seq ?: ""}&side=${side ?: ""}&mid=${messageId ?: ""}&t=${topicId ?: ""}") { launchSingleTop = true } }
     }
@@ -375,7 +378,8 @@ private fun MainNav() {
         container.pendingLink.value = null
         when (p) {
             is DeepLink.Conversation ->
-                if (data.conversations.any { it.id == p.id }) {
+                if (com.tiecoms.app.core.WaInbox.isWa(p.id)) openConv(p.id)
+                else if (data.conversations.any { it.id == p.id }) {
                     if (!jumpHere(p.id, p.seq, p.side, p.messageId)) { nav.popBackStack(nav.graph.findStartDestination().id, false); openConv(p.id, p.seq, p.side, p.messageId, p.topicId) }
                 }
                 // Sidechat de un chat que no puedo leer (colega que no está en el grupo): el sidechat a pantalla completa.
@@ -459,6 +463,7 @@ private fun MainNav() {
                 openMail = { id, mode -> nav.navigate("mail/$id?mode=$mode") { launchSingleTop = true } },
                 openList = { c -> nav.navigate("mailbox?conv=${c ?: ""}") { launchSingleTop = true } },
                 openWhatsApp = { nav.navigate("whatsapp") { launchSingleTop = true } },
+                openPin = { p -> MailOpenRequest.value = p; nav.navigate("mailbox?conv=") { launchSingleTop = true } },
             )
         }
         CompositionLocalProvider(LocalMailNav provides mailNav, LocalOpenGeneralGg provides { gg.openPanel(false) }) {
@@ -554,7 +559,10 @@ private fun MainNav() {
             composable("scheduled") { ScheduledScreen(onBack = { nav.popBackStack() }, onOpenConversation = { c -> openConv(c) }) }
             composable("reminders") { RemindersScreen(onBack = { nav.popBackStack() }, onOpen = { c, seq -> openConv(c, seq) }) }
             composable("trazo") { TrazoScreen(onBack = { nav.popBackStack() }, onOpen = { c -> openConv(c) }) }
-            composable("whatsapp") { WhatsAppScreen(onBack = { nav.popBackStack() }, onOpenConversation = { c -> openConv(c) }) }
+            composable("whatsapp") { WhatsAppScreen(onBack = { nav.popBackStack() }, onOpenChat = { c -> WaOpenCache.put(c); openConv(com.tiecoms.app.core.WaInbox.key(c)) }) }
+            composable("wa/{key}") {
+                WaConversationScreen(it.arguments?.getString("key") ?: "", onBack = { if (!nav.popBackStack()) tab("home") }, onOpenConversation = { c -> openConv(c) })
+            }
             // Correo: la lista (con ?conv= el destino ya viene elegido) y el correo abierto (mode: read | comments | reply).
             composable("mailbox?conv={conv}", arguments = listOf(navArgument("conv") { type = NavType.StringType; defaultValue = "" })) {
                 val conv = it.arguments?.getString("conv")?.takeIf { c -> c.isNotBlank() }

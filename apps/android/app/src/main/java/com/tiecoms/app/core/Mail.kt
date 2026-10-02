@@ -71,6 +71,67 @@ data class MailMessageDTO(
     val attachments: List<MailAttachmentInfoDTO> = emptyList(),
 )
 
+/**
+ * Pin de una conversación de correo (migr. 096, MailPinDTO de packages/contracts). Cada persona fija lo suyo:
+ * [mainPinnedAt] = en «Fijados» de la pantalla principal (Grupos y DMs); [mailPinnedAt] = arriba en Correo.
+ * [threadKey] = threadId del proveedor (o el id del correo si no tiene hilo).
+ */
+@Serializable
+data class MailPinDTO(
+    val provider: String = "google",
+    val threadKey: String = "",
+    val messageId: String = "",
+    val subject: String = "",
+    val from: MailAddressDTO? = null,
+    val date: String? = null,
+    val mainPinnedAt: String? = null,
+    val mailPinnedAt: String? = null,
+) {
+    val key: String get() = provider + ":" + threadKey
+    /** Como fila de la lista (para abrir el correo con la misma vista previa). */
+    fun asItem() = MailListItemDTO(provider = provider, id = messageId, threadId = threadKey, from = from, subject = subject, date = date)
+}
+@Serializable data class MailPinsPage(val pins: List<MailPinDTO> = emptyList())
+
+object MailPins {
+    /** threadKey de un correo: su hilo, o su id si no tiene. */
+    fun threadKey(threadId: String?, id: String) = threadId?.takeIf { it.isNotBlank() } ?: id
+    fun keyOf(provider: String, threadId: String?, id: String) = provider + ":" + threadKey(threadId, id)
+    fun find(pins: List<MailPinDTO>?, provider: String, threadId: String?, id: String): MailPinDTO? = pins?.firstOrNull { it.key == keyOf(provider, threadId, id) }
+    /** Fijados en la pantalla principal, el más reciente primero. */
+    fun main(pins: List<MailPinDTO>?): List<MailPinDTO> = pins.orEmpty().filter { it.mainPinnedAt != null }.sortedByDescending { it.mainPinnedAt }
+    /** Fijados en Correo de un proveedor, el más reciente primero. */
+    fun inMail(pins: List<MailPinDTO>?, provider: String): List<MailPinDTO> = pins.orEmpty().filter { it.mailPinnedAt != null && it.provider == provider }.sortedByDescending { it.mailPinnedAt }
+
+    /** Cuerpo de PUT /mail/pins: main/mail true fija, false quita, null no se manda (no cambia). */
+    fun body(provider: String, threadKey: String, messageId: String, subject: String, from: MailAddressDTO?, date: String?, main: Boolean?, mail: Boolean?) =
+        kotlinx.serialization.json.buildJsonObject {
+            put("provider", kotlinx.serialization.json.JsonPrimitive(provider))
+            put("threadKey", kotlinx.serialization.json.JsonPrimitive(threadKey.take(500)))
+            put("messageId", kotlinx.serialization.json.JsonPrimitive(messageId.take(500)))
+            put("subject", kotlinx.serialization.json.JsonPrimitive(subject.take(300)))
+            put("from", from?.let { f -> kotlinx.serialization.json.buildJsonObject {
+                put("name", f.name?.let { kotlinx.serialization.json.JsonPrimitive(it.take(200)) } ?: kotlinx.serialization.json.JsonNull)
+                put("email", kotlinx.serialization.json.JsonPrimitive(f.email.take(254)))
+            } } ?: kotlinx.serialization.json.JsonNull)
+            put("date", date?.takeIf { it.isNotBlank() }?.let { kotlinx.serialization.json.JsonPrimitive(it) } ?: kotlinx.serialization.json.JsonNull)
+            main?.let { put("main", kotlinx.serialization.json.JsonPrimitive(it)) }
+            mail?.let { put("mail", kotlinx.serialization.json.JsonPrimitive(it)) }
+        }
+
+    /** Lo que el PUT dejaría (para verlo en el acto): null si ya no queda ningún pin. */
+    fun optimistic(pins: List<MailPinDTO>, pin: MailPinDTO, main: Boolean?, mail: Boolean?, nowIso: String): List<MailPinDTO> {
+        val old = pins.firstOrNull { it.key == pin.key }
+        val base = old?.copy(messageId = pin.messageId, subject = pin.subject, from = pin.from, date = pin.date ?: old.date) ?: pin.copy(mainPinnedAt = null, mailPinnedAt = null)
+        val next = base.copy(
+            mainPinnedAt = when (main) { null -> base.mainPinnedAt; true -> base.mainPinnedAt ?: nowIso; false -> null },
+            mailPinnedAt = when (mail) { null -> base.mailPinnedAt; true -> base.mailPinnedAt ?: nowIso; false -> null },
+        )
+        val rest = pins.filter { it.key != pin.key }
+        return if (next.mainPinnedAt == null && next.mailPinnedAt == null) rest else listOf(next) + rest
+    }
+}
+
 @Serializable data class SharedMailCommentDTO(val id: String = "", val emailId: String = "", val authorId: String = "", val body: String = "", val createdAt: String = "")
 @Serializable data class ScheduledReplyDTO(val id: String = "", val sendAt: String = "")
 

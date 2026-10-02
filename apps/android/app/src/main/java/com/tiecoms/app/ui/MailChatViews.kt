@@ -79,6 +79,8 @@ class MailNav(
     /** La lista de correos; con un chat, «Comentar aquí» lo comparte en ese chat. */
     val openList: (conversationId: String?) -> Unit = {},
     val openWhatsApp: () -> Unit = {},
+    /** Un correo fijado en la pantalla principal: abre su bandeja con ese correo. */
+    val openPin: (com.tiecoms.app.core.MailPinDTO) -> Unit = {},
 )
 val LocalMailNav = staticCompositionLocalOf { MailNav() }
 

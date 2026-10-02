@@ -75,14 +75,15 @@ fun waInboxAct(ctx: Context, c: WaChatDTO, place: String? = null, placeSet: Bool
 }
 
 /**
- * Menú de la fila de WhatsApp EN la bandeja (pulsación larga): Fijar/Quitar de fijados, mover a la sección
- * contraria, Sacar de mi lista principal y abrir el chat.
+ * Menú de la fila de WhatsApp EN la bandeja (pulsación larga): abrir, los dos pines con su estado («Fijar en la
+ * pantalla principal» y «Fijar en WhatsApp»), mover a la sección contraria y sacar de mi lista principal.
  */
 fun waInboxRowMenu(ctx: Context, c: WaChatDTO, onOpen: () -> Unit): List<SheetItem?> {
     val pinned = c.inboxPinnedAt != null
     return listOf(
-        SheetItem(ctx.getString(R.string.wa_open_in_wa), "↗", tag = "waMenuOpen", onClick = onOpen),
-        SheetItem(ctx.getString(if (pinned) R.string.wa_unpin_top else R.string.wa_pin_top), "📌", tag = "waMenuPin") { waInboxAct(ctx, c, pinned = !pinned) },
+        SheetItem(ctx.getString(R.string.wa_open_chat), "↗", tag = "waMenuOpen", onClick = onOpen),
+        SheetItem(ctx.getString(if (pinned) R.string.unpin_main else R.string.pin_main), "", tag = "waMenuPin") { waInboxAct(ctx, c, pinned = !pinned) },
+        SheetItem(ctx.getString(if (c.pinned) R.string.unpin_wa else R.string.pin_wa), "", tag = "waMenuPinWa") { waPinInWhatsApp(ctx, c, !c.pinned) },
         if (c.inboxPlace == WaInbox.GROUPS) SheetItem(ctx.getString(R.string.wa_move_dms), "↪", tag = "waMenuToDms") { waInboxAct(ctx, c, WaInbox.DMS, placeSet = true) }
         else SheetItem(ctx.getString(R.string.wa_move_groups), "↪", tag = "waMenuToGroups") { waInboxAct(ctx, c, WaInbox.GROUPS, placeSet = true) },
         null,
@@ -90,22 +91,14 @@ fun waInboxRowMenu(ctx: Context, c: WaChatDTO, onOpen: () -> Unit): List<SheetIt
     )
 }
 
-/**
- * Menú de la pantalla WhatsApp (fila y detalle): «Mover a mi lista principal» › A Grupos / A DMs (con la sugerida
- * marcada) y «📌 Fijar arriba»; si ya está, «Sacar de mi lista principal».
- */
-fun waScreenInboxMenu(ctx: Context, c: WaChatDTO): List<SheetItem?> {
-    val suggested = WaInbox.suggested(c)
-    val mark = " · " + ctx.getString(R.string.wa_suggested_mark)
-    val pinned = c.inboxPinnedAt != null
-    return listOfNotNull(
-        if (c.inboxPlace == null) SheetItem(ctx.getString(R.string.wa_move_to_inbox), "⤴", tag = "waMoveInbox", children = listOf(
-            SheetItem(ctx.getString(R.string.wa_to_groups) + if (suggested == WaInbox.GROUPS) mark else "", if (suggested == WaInbox.GROUPS) "✓" else "#", tag = "waToGroups") { waInboxAct(ctx, c, WaInbox.GROUPS, placeSet = true) },
-            SheetItem(ctx.getString(R.string.wa_to_dms) + if (suggested == WaInbox.DMS) mark else "", if (suggested == WaInbox.DMS) "✓" else "✉", tag = "waToDms") { waInboxAct(ctx, c, WaInbox.DMS, placeSet = true) },
-        )) else null,
-        SheetItem(ctx.getString(if (pinned) R.string.wa_unpin_top else R.string.wa_pin_top), "📌", tag = "waPinTop") { waInboxAct(ctx, c, pinned = !pinned) },
-        if (c.inboxPlace != null) SheetItem(ctx.getString(R.string.wa_remove_from_inbox), "⎋", danger = true, tag = "waRemoveInbox") { waInboxAct(ctx, c, null, placeSet = true) } else null,
-    )
+/** «📌 Fijar en WhatsApp» desde la bandeja (PATCH { pinned }): arriba en la pantalla WhatsApp. */
+fun waPinInWhatsApp(ctx: Context, c: WaChatDTO, on: Boolean) {
+    val container = (ctx.applicationContext as com.tiecoms.app.TieComsApp).container
+    val client = container.client.value
+    container.scope.launch {
+        runCatching { client.waPatchChat(c, kotlinx.serialization.json.buildJsonObject { put("pinned", kotlinx.serialization.json.JsonPrimitive(on)) }) }
+            .onFailure { container.toast(errorText(ctx, it)) }
+    }
 }
 
 /**
@@ -233,21 +226,4 @@ fun AccessChip(tag: String, cd: String, count: Int, onClick: () -> Unit, onLongC
             }
         }
     }
-}
-
-/** El chat de WhatsApp abierto desde la bandeja: la misma hoja de la pantalla WhatsApp, con su estado propio. */
-@Composable
-fun WaChatHost(chat: WaChatDTO, onClose: () -> Unit, onOpenConversation: (String) -> Unit) {
-    val ctx = LocalContext.current
-    val client = LocalClient.current
-    val container = LocalContainer.current
-    val revision = client.state.collectAsStateWithLifecycle().value.waRevision
-    var current by remember(chat.accountId, chat.jid) { mutableStateOf(chat) }
-    WaChatSheet(current, revision, onClose = onClose, onPatch = { p ->
-        container.scope.launch {
-            runCatching { client.waPatchChat(current, kotlinx.serialization.json.JsonObject(p)) }
-                .onSuccess { up -> current = up.copy(accountStatus = up.accountStatus ?: current.accountStatus) }
-                .onFailure { container.toast(errorText(ctx, it)) }
-        }
-    }, onOpenConversation = onOpenConversation)
 }

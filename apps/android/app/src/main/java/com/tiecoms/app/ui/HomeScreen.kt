@@ -95,10 +95,11 @@ import kotlinx.coroutines.launch
 private fun visibleData(): Pair<BootstrapDTO, com.tiecoms.app.core.ClientState>? {
     val state by LocalClient.current.state.collectAsStateWithLifecycle()
     val originalData = state.data ?: return null
-    val data = remember(originalData, state.blockedUserIds) {
+    val workOnly = WaWorkOnly.value
+    val data = remember(originalData, state.blockedUserIds, workOnly) {
         originalData.copy(conversations = originalData.conversations.map { c ->
             if (c.memberIds.any { it in state.blockedUserIds }) c.copy(lastMessagePreview = "", lastHumanPreview = null) else c
-        })
+        }, waInbox = com.tiecoms.app.core.WaView.inboxFilter(originalData.waInbox, workOnly))
     }
     return data to state
 }
@@ -198,7 +199,6 @@ fun GroupsScreen(
     // Recordatorios vencidos: chip «🔔 N» al final de los filtros (1.7.7; antes era una fila arriba de la lista).
     val dueReminders = state.reminders.count { r -> parseInstant(r.remindAt)?.let { !it.isAfter(java.time.Instant.now()) } == true }
     val access = rememberAccessChips()
-    var waOpen by remember { mutableStateOf<com.tiecoms.app.core.WaChatDTO?>(null) }
 
     Scaffold(
         topBar = {
@@ -259,7 +259,12 @@ fun GroupsScreen(
                     // Correo (docs/CORREO.md; en la web va en Hoy): «Comenta tus correos con el equipo · Conectar», solo sin cuenta conectada.
                     item(key = "mailNudge") { val mailNav = LocalMailNav.current; MailConnectNudge(onOpen = { mailNav.openList(null) }) }
                     // Con personas o chats encontrados, el «nada coincide» del árbol sobra.
-                    items(rows.filter { !(it is GroupsTree.Empty && it.filtered && query.isNotBlank() && !quickResults.isEmpty) }, key = { it.key }) { row ->
+                    // Correos fijados en la pantalla principal: en «Fijados», junto a los grupos fijados.
+                    val mainPins = if (query.isBlank() && filterWs == null && tab == GroupsTree.Tab.ALL) com.tiecoms.app.core.MailPins.main(data.mailPins) else emptyList()
+                    val display = withMailPins(rows.filter { !(it is GroupsTree.Empty && it.filtered && query.isNotBlank() && !quickResults.isEmpty) }, mainPins)
+                    items(display, key = { e -> if (e is com.tiecoms.app.core.MailPinDTO) "mp:" + e.key else (e as GroupsTree.Row).key }) { entry ->
+                        if (entry is com.tiecoms.app.core.MailPinDTO) { Box(Modifier.animateItem()) { MailPinRow(entry, indent = 16.dp, iconSize = 32.dp) }; return@items }
+                        val row = entry as GroupsTree.Row
                         // Al cambiar el orden (llega un no leído), la fila se desliza a su lugar en vez de saltar.
                         Box(Modifier.animateItem()) { when (row) {
                             is GroupsTree.Section -> SectionRow(row, myOrg,
@@ -276,8 +281,8 @@ fun GroupsScreen(
                                 // WhatsApp en Grupos (contrato 1-oct-2026): su fila, su menú y deslizar para fijar.
                                 val wa = waChatOf(data, row.c)
                                 if (wa != null) SwipePin(wa.inboxPinnedAt != null, { waInboxAct(ctx, wa, pinned = wa.inboxPinnedAt == null) }, "swipe-${row.key}") {
-                                    WaInboxRow(wa, indent = 16.dp, iconSize = 32.dp, menuOpen = menuKey == row.key, menuItems = { waInboxRowMenu(ctx, wa) { waOpen = wa } },
-                                        onDismissMenu = { menuKey = null }, onLongPress = { menuKey = row.key }) { waOpen = wa }
+                                    WaInboxRow(wa, indent = 16.dp, iconSize = 32.dp, menuOpen = menuKey == row.key, menuItems = { waInboxRowMenu(ctx, wa) { onOpen(row.c.id) } },
+                                        onDismissMenu = { menuKey = null }, onLongPress = { menuKey = row.key }) { onOpen(row.c.id) }
                                 }
                             } else SwipePin(row.c.pinnedAt != null, { container.scope.launch { runCatching { client.setConversationPrefs(row.c.id, pinned = row.c.pinnedAt == null) }.onFailure { container.toast(errorText(ctx, it)) } } }, "swipe-${row.key}") {
                                 val ws = data.workspaces.firstOrNull { it.id == row.c.workspaceId }
@@ -359,7 +364,6 @@ fun GroupsScreen(
         )
     }
     HomeMenus(data, meetingFor, remindFor, leaveFor, { meetingFor = it }, { remindFor = it }, { leaveFor = it })
-    waOpen?.let { w -> WaChatHost(w, onClose = { waOpen = null }, onOpenConversation = { c -> waOpen = null; onOpen(c) }) }
 }
 
 private fun sectionKeyOf(row: GroupsTree.Section) = GroupsTree.sectionKey(row.kind, if (row.kind == GroupsTree.Kind.ORG) row.key.removePrefix("s:ORG:") else null)
@@ -443,7 +447,6 @@ fun DmsScreen(onOpen: (String) -> Unit, onNewMessage: () -> Unit, onDetails: (St
     val openPerson = rememberOpenPerson(data, onOpen)
     val container = LocalContainer.current
     val access = rememberAccessChips()
-    var waOpen by remember { mutableStateOf<com.tiecoms.app.core.WaChatDTO?>(null) }
     Scaffold(
         topBar = {
             TopAppBar(
@@ -477,8 +480,16 @@ fun DmsScreen(onOpen: (String) -> Unit, onNewMessage: () -> Unit, onDetails: (St
                     if (searching && list.isNotEmpty()) item(key = "chatsHeader") { QuickHeader(R.string.search_chats) }
                     val nowMs = System.currentTimeMillis()
                     val tree = threadTree
+                    // Correos fijados en la pantalla principal: en «Fijados», después de los chats fijados.
+                    val mainPins = if (!searching && !unreadOnly) com.tiecoms.app.core.MailPins.main(data.mailPins) else emptyList()
+                    val lastPinned = list.indexOfLast { com.tiecoms.app.core.HomeTree.blockOf(it, nowMs, tree) == com.tiecoms.app.core.HomeTree.Block.PINNED }
+                    if (mainPins.isNotEmpty() && lastPinned < 0) {
+                        item(key = "b:PINNED") { Box(Modifier.animateItem()) { BlockHeader(com.tiecoms.app.core.HomeTree.Block.PINNED) } }
+                        items(mainPins, key = { "mp:" + it.key }) { p -> Box(Modifier.animateItem()) { MailPinRow(p, indent = 16.dp, iconSize = 44.dp) } }
+                    }
                     list.forEachIndexed { i, c ->
                         // Separadores «Fijados · Sin leer · Recientes» (orden único 1.6.4); buscando no hacen falta.
+                        if (lastPinned >= 0 && i == lastPinned + 1) items(mainPins, key = { "mp:" + it.key }) { p -> Box(Modifier.animateItem()) { MailPinRow(p, indent = 16.dp, iconSize = 44.dp) } }
                         val block = com.tiecoms.app.core.HomeTree.blockOf(c, nowMs, tree)
                         if (!searching && (i == 0 || com.tiecoms.app.core.HomeTree.blockOf(list[i - 1], nowMs, tree) != block))
                             item(key = "b:" + block.name) { Box(Modifier.animateItem()) { BlockHeader(block) } }
@@ -488,8 +499,8 @@ fun DmsScreen(onOpen: (String) -> Unit, onNewMessage: () -> Unit, onDetails: (St
                         if (wa != null) Box(Modifier.animateItem()) {
                             // WhatsApp en DMs: su fila, su menú y deslizar para fijar.
                             SwipePin(wa.inboxPinnedAt != null, { waInboxAct(ctx, wa, pinned = wa.inboxPinnedAt == null) }, "swipe-${c.id}") {
-                                WaInboxRow(wa, indent = 16.dp, iconSize = 44.dp, menuOpen = menuFor == c.id, menuItems = { waInboxRowMenu(ctx, wa) { waOpen = wa } },
-                                    onDismissMenu = { menuFor = null }, onLongPress = { menuFor = c.id }) { waOpen = wa }
+                                WaInboxRow(wa, indent = 16.dp, iconSize = 44.dp, menuOpen = menuFor == c.id, menuItems = { waInboxRowMenu(ctx, wa) { onOpen(c.id) } },
+                                    onDismissMenu = { menuFor = null }, onLongPress = { menuFor = c.id }) { onOpen(c.id) }
                             }
                         } else Box(Modifier.animateItem()) {
                             SwipePin(c.pinnedAt != null, { container.scope.launch { runCatching { client.setConversationPrefs(c.id, pinned = c.pinnedAt == null) }.onFailure { container.toast(errorText(ctx, it)) } } }, "swipe-${c.id}") {
@@ -504,6 +515,7 @@ fun DmsScreen(onOpen: (String) -> Unit, onNewMessage: () -> Unit, onDetails: (St
                         }
                         }
                     }
+                    if (lastPinned >= 0 && lastPinned == list.lastIndex) items(mainPins, key = { "mp:" + it.key }) { p -> Box(Modifier.animateItem()) { MailPinRow(p, indent = 16.dp, iconSize = 44.dp) } }
                     if (searching) quickSearchSections(data, quickResults, hidePeople = QuickSearch.directPeople(list), internalFallback, convFallback,
                         onPerson = { p -> openPerson(p) }, onConv = onOpen)
                     item { Spacer(Modifier.heightIn(min = 24.dp)) }
@@ -512,7 +524,6 @@ fun DmsScreen(onOpen: (String) -> Unit, onNewMessage: () -> Unit, onDetails: (St
         }
     }
     HomeMenus(data, meetingFor, remindFor, leaveFor, { meetingFor = it }, { remindFor = it }, { leaveFor = it })
-    waOpen?.let { w -> WaChatHost(w, onClose = { waOpen = null }, onOpenConversation = { cid -> waOpen = null; onOpen(cid) }) }
 }
 
 // ---------- Piezas compartidas ----------
@@ -1002,4 +1013,57 @@ private fun rememberAccessChips(): List<AccessItem> {
         SheetItem(com.tiecoms.app.core.Mail.label(p), "✉", tag = "accessPick-$p") { settings.mailProvider = p; nav.openList(null) }
     }) { pick = false }
     return out
+}
+
+/**
+ * Inserta los correos fijados en la pantalla principal dentro de «Fijados» de Grupos: después del último grupo fijado;
+ * si no hay grupos fijados, con su propia cabecera «Fijados» arriba (después del bloque WhatsApp).
+ */
+internal fun withMailPins(rows: List<GroupsTree.Row>, pins: List<com.tiecoms.app.core.MailPinDTO>): List<Any> {
+    if (pins.isEmpty()) return rows
+    // Lista: bloques «Fijados · Sin leer · Recientes». Van al final del bloque Fijados (o en uno nuevo, arriba).
+    val pinDiv = rows.indexOfFirst { it is GroupsTree.Divider && it.block == com.tiecoms.app.core.HomeTree.Block.PINNED }
+    if (pinDiv >= 0) {
+        val end = (pinDiv + 1 until rows.size).firstOrNull { rows[it] is GroupsTree.Divider || rows[it] is GroupsTree.Section } ?: rows.size
+        return rows.subList(0, end) + pins + rows.subList(end, rows.size)
+    }
+    val firstDiv = rows.indexOfFirst { it is GroupsTree.Divider }
+    if (firstDiv >= 0) return rows.subList(0, firstDiv) + listOf(GroupsTree.Divider(com.tiecoms.app.core.HomeTree.Block.PINNED)) + pins + rows.subList(firstDiv, rows.size)
+    // Árbol: después del último grupo fijado; si no hay, con su cabecera «Fijados» (después del bloque WhatsApp).
+    val lastPinned = rows.indexOfLast { it.key.startsWith("pc:") }
+    if (lastPinned >= 0) return rows.subList(0, lastPinned + 1) + pins + rows.subList(lastPinned + 1, rows.size)
+    val afterWa = rows.indexOfFirst { !(it.key == "s:WHATSAPP" || it.key.startsWith("wc:")) }.let { if (it < 0) rows.size else it }
+    return rows.subList(0, afterWa) + listOf(GroupsTree.Section(GroupsTree.Kind.PINNED, null, false, 0, key = "s:PINNED")) + pins + rows.subList(afterWa, rows.size)
+}
+
+/** Fila de un correo fijado en la pantalla principal: logo de Gmail/Outlook, asunto y remitente. Tocar = abrir ese correo. */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+internal fun MailPinRow(p: com.tiecoms.app.core.MailPinDTO, indent: androidx.compose.ui.unit.Dp, iconSize: androidx.compose.ui.unit.Dp) {
+    val ctx = LocalContext.current
+    val nav = LocalMailNav.current
+    var menu by remember { mutableStateOf(false) }
+    val subject = p.subject.ifBlank { stringResource(R.string.web_mail_noSubject) }
+    val who = p.from?.let { it.name?.takeIf { n -> n.isNotBlank() } ?: it.email } ?: ""
+    val cd = stringResource(R.string.mail_pin_row_cd, subject, who)
+    Box {
+        Row(Modifier.fillMaxWidth().combinedClickable(onClick = { nav.openPin(p) }, onLongClick = { menu = true }, onLongClickLabel = stringResource(R.string.menu_more))
+            .heightIn(min = 56.dp).padding(start = indent, end = 16.dp, top = 6.dp, bottom = 6.dp)
+            .semantics(mergeDescendants = true) { contentDescription = cd }.testTag("mailPin-${p.threadKey}"), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(iconSize), contentAlignment = Alignment.Center) { ProviderIcon(p.provider, (iconSize.value * 0.6f).dp) }
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(subject, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                    Text(" 📌", style = MaterialTheme.typography.labelSmall)
+                }
+                if (who.isNotEmpty()) Text(who, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            Text(mailDate(p.date), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        AnchoredMenu(menu, if (!menu) emptyList() else listOf(
+            SheetItem(ctx.getString(R.string.web_mail_open), "↗", tag = "mailPinOpen") { nav.openPin(p) },
+            SheetItem(ctx.getString(R.string.unpin_main), "", tag = "mailPinUnmain") { mailPinAct(ctx, p, main = false) },
+        ), { menu = false })
+    }
 }

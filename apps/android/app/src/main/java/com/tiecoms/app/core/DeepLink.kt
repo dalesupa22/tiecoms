@@ -96,7 +96,11 @@ object DeepLinks {
             "asuntos" -> DeepLink.Screen(SCREEN_ISSUES)
             "agenda" -> DeepLink.Screen(SCREEN_AGENDA)
             "trazo" -> DeepLink.Screen(SCREEN_TRAZO)
-            "whatsapp" -> DeepLink.Screen(SCREEN_WHATSAPP)
+            // chaggu://whatsapp/<cuenta>/<jid>: ese chat de WhatsApp, directo a los mensajes (aviso o enlace).
+            "whatsapp" -> {
+                val jid = segments.getOrNull(2)?.takeIf { WA_JID.matches(it) }
+                if (arg != null && jid != null) DeepLink.Conversation(WaInbox.key(arg, jid)) else DeepLink.Screen(SCREEN_WHATSAPP)
+            }
             "ajustes" -> DeepLink.Screen(SCREEN_SETTINGS)
             "programados" -> DeepLink.Screen(SCREEN_SCHEDULED)
             "call" -> arg?.let { DeepLink.CallJoin(it, query["camera"] == "1") }
@@ -105,6 +109,8 @@ object DeepLinks {
             else -> null
         }
     }
+
+    private val WA_JID = Regex("^[0-9A-Za-z._\\-:]{1,80}@(s\\.whatsapp\\.net|g\\.us|lid|broadcast|newsletter)$")
 
     private fun split(path: String?): List<String> =
         (path ?: "").split('/').filter { it.isNotEmpty() }.map { URLDecoder.decode(it, "UTF-8") }

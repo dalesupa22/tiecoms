@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -536,6 +537,30 @@ private object MailListCache {
  * Tú › Correo, o el ＋ del chat › Correo (con [conversationId] el destino ya viene dado y el botón dice «Comentar aquí»).
  * [onShared] recibe el chat donde quedó.
  */
+/** Correo fijado tocado en la pantalla principal: la bandeja lo abre al entrar (lo consume). */
+val MailOpenRequest = mutableStateOf<com.tiecoms.app.core.MailPinDTO?>(null)
+
+/** Pin de un correo de la lista (la conversación: su hilo, o el correo si no tiene). */
+fun mailPinOf(m: MailListItemDTO) = com.tiecoms.app.core.MailPinDTO(provider = m.provider, threadKey = com.tiecoms.app.core.MailPins.threadKey(m.threadId, m.id),
+    messageId = m.id, subject = m.subject, from = m.from, date = m.date)
+
+/** Fija o quita (PUT /mail/pins) con aviso de error; se ve en el acto. */
+fun mailPinAct(ctx: Context, pin: com.tiecoms.app.core.MailPinDTO, main: Boolean? = null, mail: Boolean? = null) {
+    val container = (ctx.applicationContext as com.tiecoms.app.TieComsApp).container
+    val client = container.client.value
+    container.scope.launch { runCatching { client.setMailPin(pin, main, mail) }.onFailure { container.toast(errorText(ctx, it)) } }
+}
+
+/** Las dos opciones con su estado: «📌 Fijar en la pantalla principal» y «📌 Fijar en Correo» (o «Quitar de…»). */
+fun mailPinItems(ctx: Context, pins: List<com.tiecoms.app.core.MailPinDTO>?, pin: com.tiecoms.app.core.MailPinDTO): List<SheetItem> {
+    val cur = pins?.firstOrNull { it.key == pin.key }
+    val main = cur?.mainPinnedAt != null; val mail = cur?.mailPinnedAt != null
+    return listOf(
+        SheetItem(ctx.getString(if (main) R.string.unpin_main else R.string.pin_main), "", tag = "mailPinMain") { mailPinAct(ctx, pin, main = !main) },
+        SheetItem(ctx.getString(if (mail) R.string.unpin_mail else R.string.pin_mail), "", tag = "mailPinMail") { mailPinAct(ctx, pin, mail = !mail) },
+    )
+}
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun MailListScreen(conversationId: String?, onBack: () -> Unit, onShared: (String, String?) -> Unit) {
@@ -584,6 +609,14 @@ private fun MailBrowser(ready: List<MailConnectionDTO>, conversationId: String?,
     val scope = rememberCoroutineScope()
     // Escribir busca solo, a los 400 ms.
     LaunchedEffect(qText) { delay(400); if (f.q != qText.trim()) f = f.copy(q = qText.trim()) }
+    val pins = client.state.collectAsStateWithLifecycle().value.data?.mailPins
+    // Un correo fijado tocado en la pantalla principal: su bandeja y su vista previa.
+    val request = MailOpenRequest.value
+    LaunchedEffect(request) {
+        val r = request ?: return@LaunchedEffect
+        MailOpenRequest.value = null
+        if (ready.any { it.provider == r.provider }) { provider = r.provider; preview = r.asItem() }
+    }
     val cats = Mail.categories(provider)
     val category = Mail.category(f, cat, provider)
     val key = Mail.listQuery(provider, f, category)
@@ -674,12 +707,25 @@ private fun MailBrowser(ready: List<MailConnectionDTO>, conversationId: String?,
                 err?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("mailError")) }
             }
         }
+        // «Fijados» arriba de la bandeja: las conversaciones fijadas en Correo de esta cuenta.
+        val pinnedHere = if (f.box == "inbox" && !f.filtered) com.tiecoms.app.core.MailPins.inMail(pins, provider) else emptyList()
+        if (pinnedHere.isNotEmpty()) {
+            item(key = "pinsHeader") { BlockHeader(com.tiecoms.app.core.HomeTree.Block.PINNED) }
+            items(pinnedHere, key = { "pin:" + it.key }) { p ->
+                val live = items?.firstOrNull { com.tiecoms.app.core.MailPins.keyOf(it.provider, it.threadId, it.id) == p.key }
+                MailRow(live ?: p.asItem(), showDir = false, query = "", pickLabel = stringResource(if (conversationId != null) R.string.web_mail_pickHere else R.string.web_mail_bring),
+                    onOpen = { preview = live ?: p.asItem() }, onPick = { sharing = live ?: p.asItem() }, menuItems = if (pins != null) ({ mailPinItems(ctx, pins, p) }) else null, tagPrefix = "mailPinnedRow-")
+                HorizontalDivider(Modifier.padding(start = 56.dp))
+            }
+            item(key = "pinsEnd") { Spacer(Modifier.height(8.dp)) }
+        }
         val list = items
         if (list == null) item { Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() } }
         else if (list.isEmpty() && err == null) item { EmptyNote(stringResource(if (f.filtered) R.string.web_mail_noResults else R.string.web_mail_empty)) }
-        else items(list, key = { it.id }) { m ->
+        else items(list.filter { m -> pinnedHere.none { it.key == com.tiecoms.app.core.MailPins.keyOf(m.provider, m.threadId, m.id) } }, key = { it.id }) { m ->
             MailRow(m, showDir = f.box != "inbox", query = f.q, pickLabel = stringResource(if (conversationId != null) R.string.web_mail_pickHere else R.string.web_mail_bring),
-                onOpen = { preview = m }, onPick = { sharing = m })
+                onOpen = { preview = m }, onPick = { sharing = m }, menuItems = if (pins != null) ({ mailPinItems(ctx, pins, mailPinOf(m)) }) else null,
+                pinned = com.tiecoms.app.core.MailPins.find(pins, m.provider, m.threadId, m.id)?.mailPinnedAt != null)
             HorizontalDivider(Modifier.padding(start = 56.dp))
         }
         if (next != null) item {
@@ -697,7 +743,7 @@ private fun MailBrowser(ready: List<MailConnectionDTO>, conversationId: String?,
     }
     preview?.let { p ->
         MailPreviewSheet(provider, p, stringResource(if (conversationId != null) R.string.web_mail_pickHere else R.string.web_mail_bring),
-            onPick = { preview = null; sharing = p }, onClose = { preview = null })
+            onPick = { preview = null; sharing = p }, onClose = { preview = null }, pins = pins)
     }
     sharing?.let { s -> MailShareSheet(provider, s, conversationId, onClose = { sharing = null }, onDone = { cid, mid -> sharing = null; onShared(cid, mid) }) }
 }
@@ -744,16 +790,22 @@ private fun highlight(text: String, q: String, bg: Color) = buildAnnotatedString
 }
 
 @Composable
-private fun MailRow(m: MailListItemDTO, showDir: Boolean, query: String, pickLabel: String, onOpen: () -> Unit, onPick: () -> Unit) {
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+private fun MailRow(m: MailListItemDTO, showDir: Boolean, query: String, pickLabel: String, onOpen: () -> Unit, onPick: () -> Unit,
+                    menuItems: (() -> List<SheetItem?>)? = null, pinned: Boolean = false, tagPrefix: String = "mailRow-") {
     val other = Mail.other(m)
     val hl = Color(0x55FFD54F)
-    Row(Modifier.fillMaxWidth().clickable(onClick = onOpen).padding(horizontal = 12.dp, vertical = 8.dp).testTag("mailRow-${m.id}"), verticalAlignment = Alignment.CenterVertically) {
+    var menu by remember { mutableStateOf(false) }
+    Box {
+    // Pulsación larga = fijar en la pantalla principal o en Correo.
+    Row(Modifier.fillMaxWidth().combinedClickable(onClick = onOpen, onLongClick = if (menuItems != null) ({ menu = true }) else null)
+        .padding(horizontal = 12.dp, vertical = 8.dp).testTag("$tagPrefix${m.id}"), verticalAlignment = Alignment.CenterVertically) {
         Avatar(Mail.who(other).ifBlank { "?" }, personColor(other?.email ?: m.id), Color.White, size = 32.dp)
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (showDir) { DirBadge(m.box == "sent"); Spacer(Modifier.width(4.dp)) }
-                Text((if (m.box == "sent") stringResource(R.string.web_mail_toShort) + " " else "") + Mail.who(other), fontWeight = if (m.unread) FontWeight.Bold else FontWeight.SemiBold,
+                Text((if (pinned) "📌 " else "") + (if (m.box == "sent") stringResource(R.string.web_mail_toShort) + " " else "") + Mail.who(other), fontWeight = if (m.unread) FontWeight.Bold else FontWeight.SemiBold,
                     maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 Text(mailDate(m.date), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
@@ -767,12 +819,14 @@ private fun MailRow(m: MailListItemDTO, showDir: Boolean, query: String, pickLab
             Text(pickLabel, style = MaterialTheme.typography.labelMedium, maxLines = 2)
         }
     }
+    if (menuItems != null) AnchoredMenu(menu, if (menu) menuItems() else emptyList(), { menu = false })
+    }
 }
 
 /** Vista previa del correo completo (en vivo) antes de llevarlo al chat. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun MailPreviewSheet(provider: String, item: MailListItemDTO, pickLabel: String, onPick: () -> Unit, onClose: () -> Unit) {
+private fun MailPreviewSheet(provider: String, item: MailListItemDTO, pickLabel: String, onPick: () -> Unit, onClose: () -> Unit, pins: List<com.tiecoms.app.core.MailPinDTO>? = null) {
     val ctx = LocalContext.current
     val client = LocalClient.current
     var m by remember(item.id) { mutableStateOf<MailMessageDTO?>(null) }
@@ -789,6 +843,13 @@ private fun MailPreviewSheet(provider: String, item: MailListItemDTO, pickLabel:
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 atts.forEach { a -> Text("📎 ${a.name} · ${Mail.kb(a.size)}", style = MaterialTheme.typography.labelMedium,
                     modifier = Modifier.background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp)).padding(horizontal = 8.dp, vertical = 6.dp)) }
+            }
+        }
+        // Fijar esta conversación (el hilo): en la pantalla principal y en Correo, cada uno con su estado.
+        if (pins != null) {
+            val pin = mailPinOf((m?.let { MailListItemDTO(provider = it.provider, id = it.id, threadId = it.threadId, from = it.from, subject = it.subject, date = it.date) } ?: item).copy(provider = provider))
+            mailPinItems(ctx, pins, pin).forEach { it ->
+                OutlinedButton(onClick = { it.onClick?.invoke() }, modifier = Modifier.fillMaxWidth().testTag(it.tag + "Btn")) { Text(it.label) }
             }
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {

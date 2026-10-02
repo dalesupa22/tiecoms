@@ -384,6 +384,8 @@ data class BootstrapDTO(
     val missedCalls: Int = 0,
     /** WhatsApp en la bandeja (migración 081, docs/CONTRATO-GG-CHAT-WA-INBOX.md): chats movidos a Grupos o DMs. Ausente = servidor anterior. */
     val waInbox: List<WaChatDTO> = emptyList(),
+    /** Pines de correo (migr. 096): null = servidor anterior (no se ofrece fijar correos). */
+    val mailPins: List<MailPinDTO>? = null,
 ) {
     val callsEnabled: Boolean get() = features.calls
     /** Correo en el chat prendido (`MAIL_ENABLED` en el servidor). */
@@ -731,7 +733,11 @@ data class WaAccountDTO(
     val chats: Int = 0,
     val groups: Int = 0,
     val createdAt: String = "",
+    /** «Responder desde chaggu» (apagado por defecto: solo lectura). */
+    val sendEnabled: Boolean = false,
 )
+/** POST /whatsapp/chats/:cuenta/:jid/send: sent | queued (el puente lo manda en cuanto pueda) | failed. */
+@Serializable data class WaSendResult(val id: String = "", val status: String = "queued", val error: String? = null)
 @Serializable data class WaAccountsPage(val accounts: List<WaAccountDTO> = emptyList(), val max: Int = 5)
 
 @Serializable

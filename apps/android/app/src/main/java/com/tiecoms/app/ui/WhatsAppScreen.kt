@@ -1,6 +1,19 @@
 package com.tiecoms.app.ui
 
 import android.graphics.BitmapFactory
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
+import androidx.compose.material3.rememberSwipeToDismissBoxState
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.pluralStringResource
 import android.util.Base64
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -69,11 +82,15 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
 
+/** «💼 Solo trabajo» (preferencia local; se lee al abrir la app en AppRoot). */
+val WaWorkOnly = mutableStateOf(false)
+fun setWaWorkOnly(settings: com.tiecoms.app.platform.AppSettings, on: Boolean) { WaWorkOnly.value = on; settings.waWorkOnly = on }
+
 val WA_CATEGORIES = listOf("trabajo", "clientes", "familia", "amigos", "comunidad", "otros")
-private val CAT_ICON = mapOf("trabajo" to "💼", "clientes" to "🤝", "familia" to "🏠", "amigos" to "🍻", "comunidad" to "🏘", "otros" to "◌")
+internal val CAT_ICON = mapOf("trabajo" to "💼", "clientes" to "🤝", "familia" to "🏠", "amigos" to "🍻", "comunidad" to "🏘", "otros" to "◌")
 
 @Composable
-private fun catName(c: String) = stringResource(
+internal fun catName(c: String) = stringResource(
     when (c) { "trabajo" -> R.string.wa_cat_trabajo; "clientes" -> R.string.wa_cat_clientes; "familia" -> R.string.wa_cat_familia; "amigos" -> R.string.wa_cat_amigos; "comunidad" -> R.string.wa_cat_comunidad; else -> R.string.wa_cat_otros },
 )
 
@@ -91,11 +108,19 @@ private fun whenShort(iso: String?): String {
     return if (z.toLocalDate() == java.time.LocalDate.now()) timeText(iso) else z.format(java.time.format.DateTimeFormatter.ofPattern("d MMM"))
 }
 
+/**
+ * Pantalla WhatsApp (2-oct-2026): arriba solo el buscador, la línea «● N cuentas conectadas ›» (abre la hoja de
+ * cuentas), las categorías y Grupos/Todos. Tocar un chat lo ABRE ([onOpenChat]); pulsación larga o ⋮ = su menú;
+ * deslizar a la derecha = fijar en WhatsApp, a la izquierda = ocultar (con «Deshacer»). «Mostrar ocultos» y
+ * «Reorganizar» van en el ⋯ de la barra.
+ */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-fun WhatsAppScreen(onBack: () -> Unit, onOpenConversation: (String) -> Unit) {
+fun WhatsAppScreen(onBack: () -> Unit, onOpenChat: (WaChatDTO) -> Unit) {
     val ctx = LocalContext.current
     val client = LocalClient.current
     val container = LocalContainer.current
+    val snackbar = LocalSnackbar.current
     val scope = rememberCoroutineScope()
     val state = client.state.collectAsStateWithLifecycle().value
     val revision = state.waRevision
@@ -103,19 +128,22 @@ fun WhatsAppScreen(onBack: () -> Unit, onOpenConversation: (String) -> Unit) {
     var accounts by remember { mutableStateOf<List<WaAccountDTO>?>(null) }
     var max by remember { mutableStateOf(5) }
     var connectOpen by rememberSaveable { mutableStateOf(false) }
+    var accountsOpen by rememberSaveable { mutableStateOf(false) }
     var chats by remember { mutableStateOf<List<WaChatDTO>>(emptyList()) }
     var chatTokens by remember { mutableStateOf<Map<String, Long>>(emptyMap()) }
     var counts by remember { mutableStateOf<Map<String, WaCount>>(emptyMap()) }
+    var countsLoaded by remember { mutableStateOf(false) }
     var next by remember { mutableStateOf<String?>(null) }
     var hasMore by remember { mutableStateOf(false) }
     var syncPartial by remember { mutableStateOf(false) }
     var chatsLoading by remember { mutableStateOf(false) }
+    var loadedOnce by remember { mutableStateOf(false) }
     var accountId by rememberSaveable { mutableStateOf<String?>(null) }
     var category by rememberSaveable { mutableStateOf<String?>(null) }
     var onlyGroups by rememberSaveable { mutableStateOf(false) }
     var showHidden by rememberSaveable { mutableStateOf(false) }
     var q by rememberSaveable { mutableStateOf("") }
-    var open by remember { mutableStateOf<WaChatDTO?>(null) }
+    var barMenu by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
 
     suspend fun loadAccounts() { runCatching { client.waAccounts() }.onSuccess { accounts = it.accounts; max = it.max }.onFailure { error = errorText(ctx, it); if (accounts == null) accounts = emptyList() } }
@@ -128,40 +156,64 @@ fun WhatsAppScreen(onBack: () -> Unit, onOpenConversation: (String) -> Unit) {
         try {
             val p = client.waChats(accountId, category, if (onlyGroups) true else null, showHidden, q, limit = 50, cursor = cursor)
             if (generation != client.sessionGeneration || scopeKey != listOf(client.myId, accountId, category, onlyGroups.toString(), showHidden.toString(), q, revision.toString())) return
-            chats = (if (reset) p.chats else chats + p.chats).distinctBy { it.accountId to it.jid }
-                .sortedWith(compareByDescending<WaChatDTO> { it.pinned }.thenByDescending { it.lastMessageAt ?: "" }.thenBy { it.accountId }.thenBy { it.jid })
+            chats = com.tiecoms.app.core.WaView.sort(if (reset) p.chats else chats + p.chats)
             chatTokens = chatTokens + p.chats.associate { com.tiecoms.app.core.WaInbox.key(it) to client.state.value.waPrivacy.token(com.tiecoms.app.core.WaInbox.key(it)) }
-            counts = p.categories; next = p.next; hasMore = p.hasMore == true && p.next != null && p.next != cursor; syncPartial = p.syncPartial == true; error = null
-        } catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e; error = errorText(ctx, e) }
+            counts = p.categories; countsLoaded = true; next = p.next; hasMore = p.hasMore && p.next != null && p.next != cursor; syncPartial = p.syncPartial; error = null
+            loadedOnce = true
+        } catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e; error = errorText(ctx, e); loadedOnce = true }
         finally { if (generation == client.sessionGeneration && scopeKey == listOf(client.myId, accountId, category, onlyGroups.toString(), showHidden.toString(), q, revision.toString())) chatsLoading = false }
     }
-    val visibleChats = chats.filter { val key = com.tiecoms.app.core.WaInbox.key(it); privacy.allows(key) && chatTokens[key] == privacy.token(key) }
-    LaunchedEffect(privacy.revision) {
-        chats = visibleChats; counts = emptyMap(); next = null; hasMore = false
-        open?.let { if (!privacy.allows(com.tiecoms.app.core.WaInbox.key(it))) open = null }
-    }
+    val workOnly = WaWorkOnly.value
+    LaunchedEffect(workOnly) { if (workOnly && category != null && category !in com.tiecoms.app.core.WaView.WORK) category = null }
+    val visibleChats = com.tiecoms.app.core.WaView.workFilter(chats.filter { val key = com.tiecoms.app.core.WaInbox.key(it); privacy.allows(key) && chatTokens[key] == privacy.token(key) }, workOnly)
+    LaunchedEffect(privacy.revision) { chats = visibleChats; counts = emptyMap(); countsLoaded = false; next = null; hasMore = false }
     LaunchedEffect(revision) { loadAccounts() }
     LaunchedEffect(revision, accountId, category, onlyGroups, showHidden, q) { if (q.isNotEmpty()) delay(250); loadChats() }
     // Mientras hay un código en pantalla se pregunta seguido: el QR cambia cada ~20 s.
     val waiting = accounts?.any { it.status == "pending" || it.status == "qr" || it.status == "reconnecting" } == true
     LaunchedEffect(waiting) { while (waiting) { delay(3000); loadAccounts() } }
-    val connected = accounts?.filter { it.status == "connected" } ?: emptyList()
-    val total = counts.values.sumOf { it.total }
-    fun patch(c: WaChatDTO, p: Map<String, JsonElement>) = scope.launch {
-        runCatching { client.waPatchChat(c, kotlinx.serialization.json.JsonObject(p)) }
-            .onSuccess { up -> chats = chats.map { if (it.accountId == up.accountId && it.jid == up.jid) up else it }; if (open?.jid == up.jid && open?.accountId == up.accountId) open = up; loadChats() }
-            .onFailure { container.toast(errorText(ctx, it)) }
+    val accs = accounts.orEmpty()
+    fun local(up: WaChatDTO) { chats = com.tiecoms.app.core.WaView.applyLocal(chats, up, showHidden) }
+    fun patch(c: WaChatDTO, p: Map<String, JsonElement>, optimistic: WaChatDTO? = null, then: (() -> Unit)? = null) {
+        optimistic?.let { local(it) }
+        scope.launch {
+            runCatching { client.waPatchChat(c, kotlinx.serialization.json.JsonObject(p)) }
+                .onSuccess { up -> local(up); then?.invoke(); loadChats() }
+                .onFailure { optimistic?.let { local(c) }; container.toast(errorText(ctx, it)) }
+        }
+    }
+    fun togglePinWa(c: WaChatDTO) = patch(c, mapOf("pinned" to JsonPrimitive(!c.pinned)), c.copy(pinned = !c.pinned))
+    fun hide(c: WaChatDTO) {
+        patch(c, mapOf("hidden" to JsonPrimitive(true)), c.copy(hidden = true)) {
+            scope.launch {
+                val r = snackbar.showSnackbar(ctx.getString(R.string.wa_hidden_done), actionLabel = ctx.getString(R.string.undo), duration = androidx.compose.material3.SnackbarDuration.Short)
+                if (r == androidx.compose.material3.SnackbarResult.ActionPerformed) patch(c.copy(hidden = true), mapOf("hidden" to JsonPrimitive(false)))
+            }
+        }
     }
 
-    SimpleScaffold(stringResource(R.string.wa_title), onBack) {
-        LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp).testTag("whatsapp"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            item {
-                Text(stringResource(R.string.wa_intro), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
-                if ((accounts?.size ?: 0) < max) Button(onClick = { connectOpen = true }, modifier = Modifier.padding(top = 8.dp).testTag("waConnect")) { Text(stringResource(R.string.wa_connect)) }
-                ErrorText(error)
-            }
-            if (accounts == null) item { CircularProgressIndicator() }
-            if (accounts?.isEmpty() == true) item {
+    SimpleScaffold(stringResource(R.string.wa_title), onBack, actions = {
+        Box {
+            IconButton(onClick = { barMenu = true }, modifier = Modifier.testTag("waMore")) { Icon(Icons.Filled.MoreVert, stringResource(R.string.menu_more)) }
+            AnchoredMenu(barMenu, if (!barMenu) emptyList() else listOfNotNull(
+                SheetItem(ctx.getString(R.string.wa_show_hidden), if (showHidden) "✓" else "👁", tag = "waShowHidden") { showHidden = !showHidden },
+                SheetItem(ctx.getString(R.string.wa_reorganize), "✦", tag = "waReorganize") {
+                    scope.launch { runCatching { client.waOrganize() }.onSuccess { container.toast(ctx.getString(R.string.wa_organized, it.changed)); loadChats() }.onFailure { container.toast(errorText(ctx, it)) } }
+                },
+                if (accs.size > 1) SheetItem(ctx.getString(R.string.wa_account_filter), "◉", tag = "waAccountFilter", hint = accs.firstOrNull { it.id == accountId }?.label ?: ctx.getString(R.string.wa_all_accounts),
+                    children = listOf(SheetItem(ctx.getString(R.string.wa_all_accounts), if (accountId == null) "✓" else "", tag = "waAcc-all") { accountId = null }) +
+                        accs.map { a -> SheetItem(a.label, if (accountId == a.id) "✓" else "●", tag = "waAcc-${a.id}") { accountId = a.id } }) else null,
+                null,
+                SheetItem(ctx.getString(R.string.wa_accounts_title), "⚙", tag = "waManageAccounts") { accountsOpen = true },
+                if (accs.size < max) SheetItem(ctx.getString(R.string.wa_connect), "＋", tag = "waConnectMenu") { connectOpen = true } else null,
+            ), { barMenu = false })
+        }
+    }) {
+        when {
+            accounts == null -> Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+            accs.isEmpty() -> Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                // Sin cuentas: aquí sí va la explicación.
+                Text(stringResource(R.string.wa_intro), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.testTag("waIntro"))
                 Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceContainer, modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                         Text("👤  🏪", style = MaterialTheme.typography.headlineSmall)
@@ -169,42 +221,135 @@ fun WhatsAppScreen(onBack: () -> Unit, onOpenConversation: (String) -> Unit) {
                         Text(stringResource(R.string.wa_empty_body), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
+                Button(onClick = { connectOpen = true }, modifier = Modifier.testTag("waConnect")) { Text(stringResource(R.string.wa_connect)) }
+                ErrorText(error)
             }
-            items(accounts ?: emptyList(), key = { it.id }) { a -> AccountCard(a) { scope.launch { loadAccounts() } } }
-            if (connected.isNotEmpty() || total > 0) {
-                item {
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 16.dp)) {
-                        SectionHeader(stringResource(R.string.wa_organizer), Modifier.weight(1f).semantics { heading() })
-                        TextButton(onClick = { scope.launch { runCatching { client.waOrganize() }.onSuccess { container.toast(ctx.getString(R.string.wa_organized, it.changed)); loadChats() }.onFailure { container.toast(errorText(ctx, it)) } } }) {
-                            Text("✦ " + stringResource(R.string.wa_reorganize))
+            else -> {
+                // Arriba: buscador, la línea de cuentas, categorías y Grupos/Todos. Nada más.
+                Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    OutlinedTextField(q, { q = it }, placeholder = { Text(stringResource(R.string.wa_search), maxLines = 1, overflow = TextOverflow.Ellipsis) }, singleLine = true,
+                        leadingIcon = { Icon(Icons.Filled.Search, null) },
+                        trailingIcon = if (q.isNotEmpty()) ({ IconButton(onClick = { q = "" }) { Icon(Icons.Filled.Close, stringResource(R.string.clear_search)) } }) else null,
+                        modifier = Modifier.fillMaxWidth().testTag("waSearch"))
+                    AccountsLine(accs) { accountsOpen = true }
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.testTag("waCats")) {
+                        item {
+                            // «💼 Solo trabajo»: quita el ruido (familia, amigos, comunidad, otros); queda guardado.
+                            val n = com.tiecoms.app.core.WaView.workCount(counts, countsLoaded)
+                            FilterChip(workOnly, { setWaWorkOnly(container.settings, !workOnly) }, label = { Text(stringResource(R.string.wa_work_only) + (n?.let { " $it" } ?: "")) },
+                                modifier = Modifier.testTag("waWorkOnly"))
+                        }
+                        item {
+                            val n = com.tiecoms.app.core.WaView.chipCount(counts, countsLoaded, null)
+                            FilterChip(category == null, { category = null }, label = { Text(stringResource(R.string.wa_cat_all) + (n?.let { " $it" } ?: "")) }, modifier = Modifier.testTag("waCat-all"))
+                        }
+                        items(if (workOnly) WA_CATEGORIES.filter { it in com.tiecoms.app.core.WaView.WORK } else WA_CATEGORIES) { c ->
+                            val n = com.tiecoms.app.core.WaView.chipCount(counts, countsLoaded, c)
+                            val unread = counts[c]?.unread ?: 0
+                            FilterChip(category == c, { category = c }, label = { Text("${CAT_ICON[c]} ${catName(c)}" + (n?.let { " $it" } ?: "") + if (countsLoaded && unread > 0) " · $unread" else "") },
+                                modifier = Modifier.testTag("waCat-$c"))
                         }
                     }
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        item { FilterChip(category == null, { category = null }, label = { Text("${stringResource(R.string.wa_cat_all)} $total") }) }
-                        items(WA_CATEGORIES) { c ->
-                            val n = counts[c]
-                            FilterChip(category == c, { category = c }, label = { Text("${CAT_ICON[c]} ${catName(c)} ${n?.total ?: 0}" + if ((n?.unread ?: 0) > 0) " · ${n!!.unread}" else "") })
-                        }
-                    }
-                    OutlinedTextField(q, { q = it }, placeholder = { Text(stringResource(R.string.wa_search)) }, singleLine = true, modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
-                    if ((accounts?.size ?: 0) > 1) {
-                        Dropdown("", listOf<Pair<String?, String>>(null to stringResource(R.string.wa_all_accounts)) + accounts!!.map { it.id to it.label }, accountId, { accountId = it }, Modifier.fillMaxWidth().padding(top = 8.dp))
-                    }
-                    Segmented(listOf(true to stringResource(R.string.wa_groups), false to stringResource(R.string.wa_all_chats)), onlyGroups, { onlyGroups = it }, Modifier.padding(top = 8.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { showHidden = !showHidden }) {
-                        Checkbox(showHidden, null); Text(stringResource(R.string.wa_show_hidden), style = MaterialTheme.typography.bodySmall)
-                    }
+                    Segmented(listOf(true to stringResource(R.string.wa_groups), false to stringResource(R.string.wa_all_chats)), onlyGroups, { onlyGroups = it }, Modifier.fillMaxWidth())
+                    ErrorText(error)
                 }
-                if (syncPartial) item { Text(stringResource(R.string.wa_syncing), style = MaterialTheme.typography.labelSmall) }
-                if (visibleChats.isEmpty() && error == null && !chatsLoading) item { EmptyNote(stringResource(if (connected.isNotEmpty()) R.string.wa_no_chats else R.string.wa_syncing)) }
-                items(visibleChats, key = { "${it.accountId}|${it.jid}" }) { c -> ChatRow(c, multi = (accounts?.size ?: 0) > 1, inbox = inboxOf(c)) { open = c } }
-                if (hasMore) item { TextButton(onClick = { scope.launch { loadChats(reset = false) } }, enabled = !chatsLoading, modifier = Modifier.testTag("waLoadMore")) { Text(stringResource(R.string.wa_load_more)) } }
+                LazyColumn(Modifier.fillMaxSize().testTag("whatsapp")) {
+                    if (syncPartial && visibleChats.isEmpty()) item { Text(stringResource(R.string.wa_syncing), style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(horizontal = 16.dp)) }
+                    if (!loadedOnce) item { Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() } }
+                    else if (visibleChats.isEmpty() && error == null && !chatsLoading) item { EmptyNote(stringResource(if (accs.any { it.status == "connected" }) R.string.wa_no_chats else R.string.wa_syncing)) }
+                    items(visibleChats, key = { "${it.accountId}|${it.jid}" }) { c ->
+                        val inbox = inboxOf(c)
+                        Box(Modifier.animateItem()) {
+                            WaSwipeRow(c.pinned, onPin = { togglePinWa(c) }, onHide = { hide(c) }, tag = "waSwipe-${c.jid}") {
+                                ChatRow(c, accountColor = com.tiecoms.app.core.WaView.accountColor(accs, c.accountId)?.let { Color(it) },
+                                    menuItems = { waChatMenu(ctx, inbox, onOpen = { onOpenChat(inbox) }, onPinWa = { togglePinWa(c) }, onHide = { if (c.hidden) patch(c, mapOf("hidden" to JsonPrimitive(false)), c.copy(hidden = false)) else hide(c) },
+                                        onCategory = { cat -> patch(c, mapOf("category" to JsonPrimitive(cat)), c.copy(category = cat, categoryManual = true)) }) },
+                                    onOpen = { onOpenChat(inbox) })
+                            }
+                        }
+                    }
+                    if (hasMore) item { TextButton(onClick = { scope.launch { loadChats(reset = false) } }, enabled = !chatsLoading, modifier = Modifier.padding(horizontal = 8.dp).testTag("waLoadMore")) { Text(stringResource(R.string.wa_load_more)) } }
+                    item { Spacer(Modifier.heightIn(min = 24.dp)) }
+                }
             }
-            item { Spacer(Modifier.heightIn(min = 24.dp)) }
         }
     }
-    if (connectOpen) ConnectDialog(accounts ?: emptyList(), onClose = { connectOpen = false }, onDone = { connectOpen = false; scope.launch { loadAccounts() } })
-    open?.let { c -> WaChatSheet(c, revision, onClose = { open = null }, onPatch = { patch(c, it) }, onOpenConversation = onOpenConversation) }
+    if (accountsOpen) FormSheet(stringResource(R.string.wa_accounts_title), { accountsOpen = false }, tag = "waAccountsSheet") {
+        Text(stringResource(R.string.wa_intro), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+        accs.forEach { a -> AccountCard(a) { scope.launch { loadAccounts() } } }
+        if (accs.size < max) Button(onClick = { connectOpen = true }, modifier = Modifier.testTag("waConnect")) { Text(stringResource(R.string.wa_connect)) }
+    }
+    if (connectOpen) ConnectDialog(accs, onClose = { connectOpen = false }, onDone = { connectOpen = false; accountsOpen = true; scope.launch { loadAccounts() } })
+}
+
+/** «● 2 cuentas conectadas ›»: verde si todas, naranja si alguna espera el código, roja si alguna se cayó. */
+@Composable
+private fun AccountsLine(accounts: List<WaAccountDTO>, onClick: () -> Unit) {
+    val s = com.tiecoms.app.core.WaView.summary(accounts)
+    val dot = when { s.allConnected -> Color(0xFF1E8E5A); s.waiting -> Color(0xFFFF8A1F); else -> Color(0xFFC62828) }
+    val text = when {
+        s.allConnected -> pluralStringResource(R.plurals.wa_accounts_line, s.connected, s.connected)
+        s.connected == 0 -> stringResource(R.string.wa_accounts_none)
+        else -> stringResource(R.string.wa_accounts_partial, s.connected, s.total)
+    }
+    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable(onClick = onClick).heightIn(min = 36.dp).padding(horizontal = 4.dp, vertical = 6.dp).testTag("waAccountsLine"),
+        verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(8.dp).background(dot, CircleShape))
+        Spacer(Modifier.width(8.dp))
+        Text(text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+        Text("›", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+/**
+ * Menú de un chat de WhatsApp (fila de la pantalla WhatsApp y ⋯ de la conversación): abrir, los dos pines con su
+ * estado, llevar a / sacar de mi lista principal, categoría y ocultar.
+ */
+fun waChatMenu(ctx: android.content.Context, c: WaChatDTO, onOpen: (() -> Unit)?, onPinWa: () -> Unit, onHide: () -> Unit, onCategory: (String) -> Unit, extra: List<SheetItem?> = emptyList()): List<SheetItem?> {
+    val suggested = com.tiecoms.app.core.WaInbox.suggested(c)
+    val mark = " · " + ctx.getString(R.string.wa_suggested_mark)
+    val mainPinned = c.inboxPinnedAt != null
+    return listOfNotNull(
+        onOpen?.let { SheetItem(ctx.getString(R.string.wa_open_chat), "↗", tag = "waMenuOpenChat", onClick = it) },
+        SheetItem(ctx.getString(if (mainPinned) R.string.unpin_main else R.string.pin_main), "", tag = "waPinMain") { waInboxAct(ctx, c, pinned = !mainPinned) },
+        SheetItem(ctx.getString(if (c.pinned) R.string.unpin_wa else R.string.pin_wa), "", tag = "waPinWa", onClick = onPinWa),
+        null,
+        if (c.inboxPlace == null) SheetItem(ctx.getString(R.string.wa_move_to_inbox), "⤴", tag = "waMoveInbox", children = listOf(
+            SheetItem(ctx.getString(R.string.wa_to_groups) + if (suggested == com.tiecoms.app.core.WaInbox.GROUPS) mark else "", if (suggested == com.tiecoms.app.core.WaInbox.GROUPS) "✓" else "#", tag = "waToGroups") { waInboxAct(ctx, c, com.tiecoms.app.core.WaInbox.GROUPS, placeSet = true) },
+            SheetItem(ctx.getString(R.string.wa_to_dms) + if (suggested == com.tiecoms.app.core.WaInbox.DMS) mark else "", if (suggested == com.tiecoms.app.core.WaInbox.DMS) "✓" else "✉", tag = "waToDms") { waInboxAct(ctx, c, com.tiecoms.app.core.WaInbox.DMS, placeSet = true) },
+        )) else SheetItem(ctx.getString(R.string.wa_remove_from_inbox), "⎋", tag = "waRemoveInbox") { waInboxAct(ctx, c, null, placeSet = true) },
+        SheetItem(ctx.getString(R.string.wa_category), CAT_ICON[c.category] ?: "◌", tag = "waMenuCategory", hint = catLabel(ctx, c.category),
+            children = WA_CATEGORIES.map { k -> SheetItem(catLabel(ctx, k), if (k == c.category) "✓" else CAT_ICON[k] ?: "", tag = "waCatSet-$k") { onCategory(k) } }),
+    ) + extra + listOf(null, SheetItem(ctx.getString(if (c.hidden) R.string.wa_unhide else R.string.wa_hide), "🙈", danger = !c.hidden, tag = "waMenuHide", onClick = onHide))
+}
+
+internal fun catLabel(ctx: android.content.Context, c: String) = ctx.getString(
+    when (c) { "trabajo" -> R.string.wa_cat_trabajo; "clientes" -> R.string.wa_cat_clientes; "familia" -> R.string.wa_cat_familia; "amigos" -> R.string.wa_cat_amigos; "comunidad" -> R.string.wa_cat_comunidad; else -> R.string.wa_cat_otros },
+)
+
+/** Deslizar una fila de WhatsApp: a la derecha fija/quita en WhatsApp, a la izquierda la oculta. La fila vuelve a su sitio. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun WaSwipeRow(pinned: Boolean, onPin: () -> Unit, onHide: () -> Unit, tag: String, content: @Composable () -> Unit) {
+    val pin by rememberUpdatedState(onPin)
+    val hide by rememberUpdatedState(onHide)
+    val st = rememberSwipeToDismissBoxState()
+    LaunchedEffect(st.currentValue) {
+        when (st.currentValue) {
+            SwipeToDismissBoxValue.StartToEnd -> { pin(); st.snapTo(SwipeToDismissBoxValue.Settled) }
+            SwipeToDismissBoxValue.EndToStart -> { hide(); st.snapTo(SwipeToDismissBoxValue.Settled) }
+            else -> Unit
+        }
+    }
+    SwipeToDismissBox(state = st, modifier = Modifier.testTag(tag), backgroundContent = {
+        val toEnd = st.dismissDirection == SwipeToDismissBoxValue.StartToEnd
+        Box(Modifier.fillMaxSize().background(if (toEnd) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.errorContainer).padding(horizontal = 20.dp),
+            contentAlignment = if (toEnd) Alignment.CenterStart else Alignment.CenterEnd) {
+            Text(if (toEnd) stringResource(if (pinned) R.string.unpin_wa else R.string.pin_wa) else "🙈 " + stringResource(R.string.wa_hide),
+                style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold,
+                color = if (toEnd) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onErrorContainer)
+        }
+    }) { Box(Modifier.background(MaterialTheme.colorScheme.background)) { content() } }
 }
 
 /** Estado de bandeja vigente de un chat: manda `waInbox` del bootstrap (lo que se mueve o fija se ve en el acto). */
@@ -240,7 +385,7 @@ private fun AccountCard(a: WaAccountDTO, onChanged: () -> Unit) {
                 Text(if (business) "🏪" else "👤", style = MaterialTheme.typography.titleLarge)
                 Spacer(Modifier.width(10.dp))
                 Column(Modifier.weight(1f)) {
-                    Text("${a.label} · ${if (business) "WhatsApp Business" else "WhatsApp"}", fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text("${a.label} · ${stringResource(if (business) R.string.wa_business else R.string.wa_title)}", fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text(listOfNotNull(a.phone?.let { "+$it" }, a.pushName).joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 val dot = when (a.status) { "connected" -> Color(0xFF1E8E5A); "qr", "pending", "reconnecting" -> Color(0xFFFF8A1F); else -> Color(0xFFC62828) }
@@ -271,8 +416,16 @@ private fun AccountCard(a: WaAccountDTO, onChanged: () -> Unit) {
                     TextButton(onClick = { usePhone = !usePhone }) { Text(stringResource(if (usePhone) R.string.wa_use_qr else R.string.wa_use_phone)) }
                 }
             }
+            // «Responder desde chaggu»: apagado = solo lectura (por defecto).
+            Row(Modifier.fillMaxWidth().clickable(enabled = !busy) { run { client.waSetSendEnabled(a.id, !a.sendEnabled) } }.testTag("waReply-${a.id}"), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(stringResource(R.string.wa_reply_from_chaggu), style = MaterialTheme.typography.bodyMedium)
+                    Text(stringResource(R.string.wa_reply_from_chaggu_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                androidx.compose.material3.Switch(a.sendEnabled, null, enabled = !busy)
+            }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                TextButton(enabled = !busy, onClick = { confirm = true }) { Text(stringResource(R.string.wa_disconnect)) }
+                TextButton(enabled = !busy, onClick = { confirm = true }, modifier = Modifier.testTag("waDisconnect-${a.id}")) { Text(stringResource(R.string.wa_disconnect)) }
             }
         }
     }
@@ -295,7 +448,7 @@ private fun ConnectDialog(existing: List<WaAccountDTO>, onClose: () -> Unit, onD
     var phone by rememberSaveable { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
-    val fallback = if (kind == "business") "Business" else stringResource(R.string.wa_personal)
+    val fallback = stringResource(if (kind == "business") R.string.wa_business_short else R.string.wa_personal)
     FormSheet(stringResource(R.string.wa_connect_title), onClose, tag = "waConnectDialog") {
         Text(stringResource(R.string.wa_connect_body), color = MaterialTheme.colorScheme.onSurfaceVariant)
         listOf("personal", "business").forEach { k ->
@@ -308,7 +461,7 @@ private fun ConnectDialog(existing: List<WaAccountDTO>, onClose: () -> Unit, onD
                     Text(if (k == "business") "🏪" else "👤", style = MaterialTheme.typography.titleLarge)
                     Spacer(Modifier.width(10.dp))
                     Column {
-                        Text(if (k == "business") "WhatsApp Business" else "WhatsApp", fontWeight = FontWeight.SemiBold)
+                        Text(stringResource(if (k == "business") R.string.wa_business else R.string.wa_title), fontWeight = FontWeight.SemiBold)
                         Text(stringResource(if (k == "business") R.string.wa_kind_business else R.string.wa_kind_personal), style = MaterialTheme.typography.bodySmall)
                     }
                 }
@@ -332,155 +485,45 @@ private fun ConnectDialog(existing: List<WaAccountDTO>, onClose: () -> Unit, onD
     }
 }
 
+/**
+ * Fila de la pantalla WhatsApp: avatar, nombre (📌 si está fijado en WhatsApp), hora, vista previa y no leídos. Sin la
+ * línea «cuenta · categoría»; con más de una cuenta, un punto pequeño del color de la cuenta. Toque = abrir;
+ * pulsación larga o ⋮ = menú.
+ */
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun ChatRow(c: WaChatDTO, multi: Boolean, inbox: WaChatDTO, onOpen: () -> Unit) {
-    val ctx = LocalContext.current
-    // Pulsación larga (contrato 1-oct-2026): «Mover a mi lista principal» › A Grupos / A DMs, «📌 Fijar arriba» y «Sacar…».
+private fun ChatRow(c: WaChatDTO, accountColor: Color?, menuItems: () -> List<SheetItem?>, onOpen: () -> Unit) {
     var menu by remember { mutableStateOf(false) }
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
     Box {
-    Row(Modifier.fillMaxWidth().combinedClickable(onClick = onOpen, onLongClick = { menu = true }, onLongClickLabel = stringResource(R.string.menu_more))
-        .heightIn(min = 60.dp).padding(vertical = 6.dp).testTag("waChat-${c.jid}"), verticalAlignment = Alignment.CenterVertically) {
-        Text(if (c.isGroup) "👥" else CAT_ICON[c.category] ?: "◌", style = MaterialTheme.typography.titleLarge)
-        Spacer(Modifier.width(10.dp))
-        Column(Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text((if (c.pinned) "📌 " else "") + c.name, fontWeight = if (c.unread > 0) FontWeight.Bold else FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                Text(whenShort(c.lastMessageAt), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Row(Modifier.fillMaxWidth().combinedClickable(onClick = onOpen, onLongClick = { haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress); menu = true },
+            onLongClickLabel = stringResource(R.string.menu_more))
+            .heightIn(min = 60.dp).padding(start = 16.dp, end = 4.dp, top = 6.dp, bottom = 6.dp).testTag("waChat-${c.jid}"), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(40.dp)) {
+                Avatar(c.name.ifBlank { "WA" }, MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.colorScheme.onSurfaceVariant, size = 40.dp, square = c.isGroup)
+                if (accountColor != null) Box(Modifier.align(Alignment.BottomEnd).size(12.dp).background(MaterialTheme.colorScheme.background, CircleShape).padding(2.dp)
+                    .background(accountColor, CircleShape).testTag("waAccDot-${c.jid}"))
             }
-            Text(c.lastPreview ?: (if (c.isGroup && c.participants != null) stringResource(R.string.wa_members, c.participants) else ""), style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(listOfNotNull(if (multi) c.accountLabel else null, "${CAT_ICON[c.category]} ${catName(c.category)}", if (c.linkedConversationId != null) "⇄ chaggu" else null).joinToString(" · "),
-                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        if (inbox.inboxPlace != null) Text(if (inbox.inboxPinnedAt != null) "📌" else "⤴", style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(end = 6.dp).testTag("waInInbox-${c.jid}"))
-        if (c.unread > 0) Box(Modifier.background(MaterialTheme.colorScheme.primary, CircleShape).padding(horizontal = 6.dp, vertical = 2.dp)) {
-            Text(c.unread.toString(), color = MaterialTheme.colorScheme.onPrimary, style = MaterialTheme.typography.labelSmall)
-        }
-    }
-    AnchoredMenu(menu, if (menu) waScreenInboxMenu(ctx, inbox) else emptyList(), { menu = false })
-    }
-}
-
-/** Chat de WhatsApp (pantalla WhatsApp y filas de la bandeja), con gg de este chat (fuente `wa:<cuenta>:<jid>`). */
-@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
-@Composable
-internal fun WaChatSheet(c: WaChatDTO, revision: Int, onClose: () -> Unit, onPatch: (Map<String, JsonElement>) -> Unit, onOpenConversation: (String) -> Unit) {
-    val ctx = LocalContext.current
-    val client = LocalClient.current
-    val container = LocalContainer.current
-    val state = client.state.collectAsStateWithLifecycle().value
-    val source = com.tiecoms.app.core.WaInbox.key(c)
-    val openedToken = remember(source) { state.waPrivacy.token(source) }
-    val permitted = state.waPrivacy.allows(source) && openedToken == state.waPrivacy.token(source)
-    LaunchedEffect(permitted) { if (!permitted) onClose() }
-    if (!permitted) return
-    val data = state.data ?: return
-    var messages by remember { mutableStateOf<List<WaMessageDTO>?>(null) }
-    var mediaError by remember(c.accountId, c.jid) { mutableStateOf<String?>(null) }
-    LaunchedEffect(c.accountId, c.jid, revision) { messages = null; try { messages = client.waMessages(c); mediaError = null } catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e; mediaError = errorText(ctx, e) } }
-    var waMenu by remember { mutableStateOf<WaMessageDTO?>(null) }
-    var waShare by remember { mutableStateOf<WaMessageDTO?>(null) }
-    val targets = data.conversations.filter { it.kind != "direct" && it.canPost }
-    val linked = c.linkedConversationId?.let { id -> data.conversations.firstOrNull { it.id == id } }
-    val inbox = inboxOf(c)
-    var inboxMenu by remember { mutableStateOf(false) }
-    // gg de este chat: borradores al portapapeles (desde el teléfono no se envía por WhatsApp); nada se manda solo.
-    val gg = rememberGgSide(com.tiecoms.app.core.GgSide.whatsapp(c.accountId, c.jid), enabled = !client.ggSideMissing)
-    var selecting by remember(c.jid) { mutableStateOf(false) }
-    val selected = remember(c.jid) { androidx.compose.runtime.mutableStateListOf<String>() }
-    LaunchedEffect(gg?.open) { if (gg?.open == false) { selecting = false; selected.clear(); gg.quoted.clear() } }
-    var suggestFor by remember { mutableStateOf<List<String>?>(null) }
-    var queue by remember { mutableStateOf(listOf<com.tiecoms.app.core.GgSuggestion>()) }
-    fun copyDraft(t: String) { if (runCatching { client.requireWaSource(source) }.getOrNull() != openedToken) return; copyToClipboard(ctx, t); container.toast(ctx.getString(R.string.ggs_draft_copied)) }
-    FormSheet(c.name, onClose, tag = "waChatSheet") {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(listOfNotNull(c.accountLabel, if (c.isGroup && c.participants != null) stringResource(R.string.wa_members, c.participants) else null).joinToString(" · "),
-                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
-            if (gg != null && gg.available != false) GgButton(gg.pending, onClick = { gg.show() })
-        }
-        // Bandeja: mover a mi lista principal, fijar arriba, sacar.
-        Box {
-            OutlinedButton(onClick = { inboxMenu = true }, modifier = Modifier.testTag("waInboxMenu")) {
-                Text(if (inbox.inboxPlace == null) "⤴ " + stringResource(R.string.wa_move_to_inbox) else (if (inbox.inboxPinnedAt != null) "📌 " else "⤴ ") + stringResource(if (inbox.inboxPlace == com.tiecoms.app.core.WaInbox.GROUPS) R.string.nav_groups else R.string.nav_dms))
-            }
-            AnchoredMenu(inboxMenu, if (inboxMenu) waScreenInboxMenu(ctx, inbox) else emptyList(), { inboxMenu = false })
-        }
-        Dropdown(stringResource(R.string.wa_category), WA_CATEGORIES.map { it to "${CAT_ICON[it]} ${catName(it)}" }, c.category, { onPatch(mapOf("category" to JsonPrimitive(it))) })
-        Text(stringResource(if (c.categoryManual) R.string.wa_manual else R.string.wa_suggested), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        c.description?.let { Text(it.take(300), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-        ErrorText(mediaError)
-        when {
-            messages == null -> CircularProgressIndicator()
-            messages!!.isEmpty() -> Text(stringResource(R.string.wa_no_messages), style = MaterialTheme.typography.bodySmall)
-            else -> messages!!.takeLast(40).forEach { m ->
-                GgSelectable(selecting, m.id in selected, onToggle = { if (m.id in selected) selected.remove(m.id) else selected.add(m.id) }) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = if (m.fromMe) Arrangement.End else Arrangement.Start) {
-                    // Pulsación larga: «Comentar en chaggu…» (con el correo prendido), «✨ Preguntar a gg» y «Seleccionar».
-                    Surface(shape = RoundedCornerShape(12.dp), color = if (m.fromMe) Color(0xFFDCF8C6) else MaterialTheme.colorScheme.surfaceContainerHigh,
-                        modifier = if (data.mailEnabled || gg != null) Modifier.combinedClickable(onClick = {}, onLongClick = { waMenu = m }).testTag("waMsg-${m.id}") else Modifier) {
-                        Column(Modifier.padding(8.dp)) {
-                            if (!m.fromMe && c.isGroup && m.author != null) Text(m.author, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, color = if (m.fromMe) Color(0xFF1F1F1F) else MaterialTheme.colorScheme.onSurface)
-                            CanonicalAttachments(listOfNotNull(m.media?.attachment), m.media?.status)
-                            Text(m.body, color = if (m.fromMe) Color(0xFF1F1F1F) else MaterialTheme.colorScheme.onSurface)
-                            Text(shortDateTime(m.sentAt), style = MaterialTheme.typography.labelSmall, color = if (m.fromMe) Color(0xFF55605A) else MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (c.pinned) Text("📌 ", style = MaterialTheme.typography.labelSmall, modifier = Modifier.testTag("waPinned-${c.jid}"))
+                    Text(c.name, fontWeight = if (c.unread > 0) FontWeight.Bold else FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                    Text(whenShort(c.lastMessageAt), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(c.lastPreview ?: (if (c.isGroup && c.participants != null) stringResource(R.string.wa_members, c.participants) else ""), style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                    if (c.unread > 0) Box(Modifier.padding(start = 6.dp).background(Color(0xFF1FA855), CircleShape).padding(horizontal = 6.dp, vertical = 1.dp)) {
+                        Text(if (c.unread > 99) "99+" else c.unread.toString(), color = Color.White, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
                     }
                 }
-                }
+            }
+            IconButton(onClick = { menu = true }, modifier = Modifier.size(40.dp).testTag("waRowMore-${c.jid}")) {
+                Icon(Icons.Filled.MoreVert, stringResource(R.string.menu_more), tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
-        if (gg != null && gg.available != false) {
-            if (selecting) GgSelectionBar(selected.size, onAsk = { suggestFor = selected.toList() }, onCancel = { selecting = false; selected.clear() })
-            // «Responder por mí» rápido: solo si lo último es de la otra persona y al tocar ✨.
-            else if (messages?.lastOrNull()?.fromMe == false) TextButton(onClick = { gg.loadQuick() }, modifier = Modifier.testTag("waGgSpark")) { Text("✨ " + stringResource(R.string.ggs_reply_for_me)) }
-            GgQuickReplies(gg) { t -> copyDraft(t) }
-            GgContinueStrip(gg)
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = { onPatch(mapOf("pinned" to JsonPrimitive(!c.pinned))) }) { Text(stringResource(if (c.pinned) R.string.wa_unpin else R.string.wa_pin)) }
-            OutlinedButton(onClick = { onPatch(mapOf("hidden" to JsonPrimitive(!c.hidden))) }) { Text(stringResource(if (c.hidden) R.string.wa_unhide else R.string.wa_hide)) }
-            if (c.categoryManual) TextButton(onClick = { onPatch(mapOf("category" to JsonNull)) }) { Text(stringResource(R.string.wa_reset_category)) }
-        }
-        Dropdown(stringResource(R.string.wa_link_to), listOf<Pair<String?, String>>(null to stringResource(R.string.wa_not_linked)) + targets.map { x -> x.id to (titleOf(ctx, x, data) + (data.workspaces.firstOrNull { it.id == x.workspaceId }?.let { " · ${it.name}" } ?: "")) },
-            c.linkedConversationId, { onPatch(mapOf("linkedConversationId" to (it?.let { v -> JsonPrimitive(v) } ?: JsonNull))) })
-        if (linked != null) TextButton(onClick = { onClose(); onOpenConversation(linked.id) }) { Text(stringResource(R.string.wa_linked_hint, titleOf(ctx, linked, data))) }
-        else Text(stringResource(R.string.wa_link_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        AnchoredMenu(menu, if (menu) menuItems() else emptyList(), { menu = false })
     }
-    waMenu?.let { m -> ActionSheet(null, listOfNotNull(
-        if (data.mailEnabled) SheetItem(ctx.getString(R.string.web_wa_bring), "⤴", tag = "waCommentIn") { waMenu = null; waShare = m } else null,
-        if (gg != null && gg.available != false) SheetItem(ctx.getString(R.string.ggs_ask_about), "✨", tag = "waAskGg") {
-            waMenu = null; gg.quote(com.tiecoms.app.core.GgQuotedDTO(m.id, if (m.fromMe) ctx.getString(R.string.ggs_you) else m.author ?: c.name, excerpt(m.body, 200))); gg.show()
-        } else null,
-        if (gg != null && gg.available != false) SheetItem(ctx.getString(R.string.ggs_select), "☑", tag = "waSelect") { waMenu = null; selecting = true; if (m.id !in selected) selected.add(m.id) } else null,
-    ), onDismiss = { waMenu = null }) }
-    gg?.let { g ->
-        GgSideSheet(g, onUseDraft = { t -> copyDraft(t) },
-            onAction = { a -> queue = listOf(com.tiecoms.app.core.GgSuggestion(id = "draft-action", kind = a.kind, title = a.title)) }, onJump = {})
-        if (!g.open && suggestFor == null) GgConsentDialog(g)
-        suggestFor?.let { ids ->
-            GgSuggestSheet(g, ids, onRun = { l -> queue = ggRunOrder(l); selecting = false; selected.clear() },
-                onFreeAsk = { t ->
-                    ids.forEach { mid -> messages?.firstOrNull { it.id == mid }?.let { m -> g.quote(com.tiecoms.app.core.GgQuotedDTO(m.id, if (m.fromMe) ctx.getString(R.string.ggs_you) else m.author ?: c.name, excerpt(m.body, 200))) } }
-                    g.ask(t, ids); g.show(); selecting = false; selected.clear()
-                }, onClose = { suggestFor = null })
-        }
-    }
-    // Cola de sugerencias en WhatsApp: respuesta al portapapeles; tarea y recordatorio en sus diálogos (en el chat vinculado o personal).
-    val head = queue.firstOrNull()
-    LaunchedEffect(head) {
-        val s = head ?: return@LaunchedEffect
-        when (s.kind) {
-            "task", "reminder" -> Unit
-            "summary" -> { gg?.let { g -> g.ask(ctx.getString(R.string.ggs_summarize), s.forMessageIds); g.show() }; queue = queue.drop(1) }
-            else -> { copyDraft(s.draft ?: s.title); queue = queue.drop(1) }
-        }
-    }
-    if (head != null) androidx.compose.runtime.key(head.id + "|" + queue.size) {
-        if (head.kind == "reminder" && linked != null) ReminderDialog(linked, null, onClose = { queue = queue.drop(1) }, defaultNote = head.param("title") ?: head.title)
-        else if (head.kind == "task" || head.kind == "reminder") NewIssueDialog(linked?.id, null, head.param("title") ?: head.title, onClose = { queue = queue.drop(1) }, onCreated = {},
-            defaultDue = com.tiecoms.app.core.GgSide.dueDate(head.param("due")))
-    }
-    waShare?.let { m -> WaShareSheet(c, m, onClose = { waShare = null }, onDone = { cid -> waShare = null; onClose(); onOpenConversation(cid) }) }
 }
 

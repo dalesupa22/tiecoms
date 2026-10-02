@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 2-oct-2026: tocar un chat de WhatsApp lo abre, cabecera de WhatsApp compacta y dos pines con nombre (pantalla principal / WhatsApp / Correo). -->
+<resources>
+    <plurals name="wa_accounts_line">
+        <item quantity="one">%d cuenta conectada</item>
+        <item quantity="other">%d cuentas conectadas</item>
+    </plurals>
+    <string name="wa_accounts_partial">%1$d de %2$d cuentas conectadas</string>
+    <string name="wa_accounts_none">Ninguna cuenta conectada</string>
+    <string name="wa_accounts_title">Cuentas de WhatsApp</string>
+    <string name="wa_reply_from_chaggu">Responder desde chaggu</string>
+    <string name="wa_reply_from_chaggu_hint">Te deja escribir en los chats de esta cuenta desde chaggu. Apagado = solo lectura.</string>
+    <string name="pin_main">📌 Fijar en la pantalla principal</string>
+    <string name="unpin_main">📌 Quitar de fijados en la pantalla principal</string>
+    <string name="pin_wa">📌 Fijar en WhatsApp</string>
+    <string name="unpin_wa">📌 Quitar de fijados en WhatsApp</string>
+    <string name="pin_mail">📌 Fijar en Correo</string>
+    <string name="unpin_mail">📌 Quitar de fijados en Correo</string>
+    <string name="wa_hidden_done">Chat oculto</string>
+    <string name="wa_chat_settings">Ajustes del chat</string>
+    <string name="wa_open_chat">Abrir chat</string>
+    <string name="wa_composer_ph">Escribe por WhatsApp…</string>
+    <string name="wa_read_only">Solo lectura. Activa «Responder desde chaggu» para escribir desde aquí.</string>
+    <string name="wa_enable_reply">Activar</string>
+    <string name="wa_send_queued">Se enviará en cuanto WhatsApp esté conectado</string>
+    <string name="wa_send_failed">No se pudo enviar: %1$s</string>
+    <string name="wa_account_filter">Cuenta</string>
+    <string name="wa_business">WhatsApp Business</string>
+    <string name="wa_business_short">Business</string>
+    <string name="wa_linked_chaggu">⇄ chaggu</string>
+    <string name="mail_pins_section">Fijados</string>
+    <string name="mail_pin_row_cd">Correo fijado: %1$s, de %2$s</string>
+    <string name="wa_work_only">💼 Solo trabajo</string>
+</resources>

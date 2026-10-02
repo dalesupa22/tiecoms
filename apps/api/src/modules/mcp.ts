@@ -9,6 +9,7 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { BootstrapDTO, CalendarEventDTO, ConversationDTO, IssueDTO, MessageDTO } from '@tiecoms/contracts';
+import { IssueFieldsInput, TaskColumnInput } from '@tiecoms/contracts';
 import { pool } from '../db.ts';
 import { ApiError, badRequest, notFound, unauthorized } from '../errors.ts';
 import { randomToken, sha256 } from '../security.ts';
@@ -165,7 +166,7 @@ function taskView(b: BootstrapDTO, i: IssueDTO) {
   return {
     id: i.id, title: i.title, status: i.status, due: i.dueDate,
     assignees: (i.assigneeIds ?? (i.ownerId ? [i.ownerId] : [])).map(name), requestedBy: name(i.requestedBy), chat: c ? chatName(b, c) : null, chatId: i.conversationId,
-    ...(i.externalId ? { ticket: i.externalId } : {}), ...(i.externalMeta ? { meta: i.externalMeta } : {}), comments: i.commentCount, updatedAt: i.updatedAt,
+    ...(i.externalId ? { ticket: i.externalId } : {}), ...(i.externalMeta ? { meta: i.externalMeta } : {}), ...(i.fields ? { fields: i.fields } : {}), comments: i.commentCount, updatedAt: i.updatedAt,
   };
 }
 
@@ -387,13 +388,26 @@ const tools: Tool[] = [
   // ---------- Tareas y tickets (asuntos; los de la mesa de ayuda llegan por integración) ----------
   {
     name: 'list_tasks', readOnly: true,
-    description: 'Tareas y tickets que puedo ver. mine=true: solo los asignados a mí. Incluye los tickets de la mesa de ayuda (con cliente y correo en meta).',
-    schema: z.object({ mine: z.boolean().optional(), include_closed: z.boolean().optional(), query: z.string().max(120).optional(), limit: z.number().int().min(1).max(100).optional() }),
+    description: 'Tareas y tickets que puedo ver. mine=true: solo los asignados a mí. chat: solo las de ese chat o grupo. Incluye los tickets de la mesa de ayuda (con cliente y correo en meta) y los campos dinámicos de cada tarea (fields, que en la app son columnas). field + field_value filtran por un campo.',
+    schema: z.object({
+      mine: z.boolean().optional(), include_closed: z.boolean().optional(), query: z.string().max(120).optional(), limit: z.number().int().min(1).max(100).optional(),
+      chat: z.string().max(200).optional().describe('Id o nombre del chat o grupo'),
+      field: z.string().max(60).optional().describe('Nombre de un campo dinámico (p. ej. «Resultado»)'),
+      field_value: z.string().max(200).optional().describe('Valor que debe contener ese campo'),
+    }),
     run: async (userId, a) => {
-      const [b, list] = await Promise.all([bootstrap(userId), issues.listIssues(userId, { mine: a.mine ?? false, open: !a.include_closed })]);
+      const b = await bootstrap(userId);
+      const conversationId = a.chat ? findChat(b, a.chat).id : undefined;
+      const list = await issues.listIssues(userId, { mine: a.mine ?? false, open: !a.include_closed, ...(conversationId ? { conversationId } : {}) });
       let out = list.map((i) => taskView(b, i));
-      if (a.query) { const q = fold(a.query); out = out.filter((t) => fold(`${t.title} ${JSON.stringify(t.meta ?? {})} ${t.ticket ?? ''}`).includes(q)); }
-      return { tasks: out.slice(0, a.limit ?? 30), total: out.length };
+      if (a.query) { const q = fold(a.query); out = out.filter((t) => fold(`${t.title} ${JSON.stringify(t.meta ?? {})} ${JSON.stringify(t.fields ?? {})} ${t.ticket ?? ''}`).includes(q)); }
+      if (a.field) {
+        const k = fold(a.field); const v = a.field_value ? fold(a.field_value) : null;
+        out = out.filter((t) => Object.entries(t.fields ?? {}).some(([fk, fv]) => fold(fk) === k && (v === null || fold(String(fv)).includes(v))));
+      }
+      const defined = conversationId ? (await issues.getTaskColumns(userId, conversationId)).columns : [];
+      const columns = [...new Set([...defined.map((c) => c.name), ...out.flatMap((t) => Object.keys(t.fields ?? {}))])];
+      return { tasks: out.slice(0, a.limit ?? 30), total: out.length, ...(columns.length ? { columns } : {}), ...(defined.length ? { columnTypes: defined } : {}) };
     },
   },
   {
@@ -417,19 +431,21 @@ const tools: Tool[] = [
   },
   {
     name: 'update_task',
-    description: 'Cambia un ticket o tarea: estado (open, in_progress, waiting, done, cancelled), responsables (por nombre o id; reemplaza la lista), fecha límite o título. Confirma antes con la persona.',
+    description: 'Cambia un ticket o tarea: estado (open, in_progress, waiting, done, cancelled), responsables (por nombre o id; reemplaza la lista), fecha límite, título o campos dinámicos (fields: se mezclan con los que ya tiene; null borra un campo). Confirma antes con la persona.',
     schema: z.object({
       id: z.string().uuid(),
       status: z.enum(['open', 'in_progress', 'waiting', 'done', 'cancelled']).optional(),
       assignees: z.array(z.string().min(1).max(200)).max(20).optional().describe('Responsables (nombres o ids). [] = sin responsable'),
       due_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional().describe('AAAA-MM-DD o null para quitarla'),
       title: z.string().trim().min(2).max(200).optional(),
+      fields: IssueFieldsInput.optional().describe('Campos dinámicos { "Servicios": "…", "Prioridad": 2, "Bloqueado": true }; null borra'),
     }),
     run: async (userId, a) => {
       const b = await bootstrap(userId);
       const input: Record<string, unknown> = {};
       if (a.status) input.status = a.status;
       if (a.title) input.title = a.title;
+      if (a.fields) input.fields = a.fields;
       if (a.due_date !== undefined) input.dueDate = a.due_date;
       if (a.assignees) input.assigneeIds = a.assignees.map((x: string) => personId(b, x));
       if (!Object.keys(input).length) throw badRequest('Nada que cambiar');
@@ -437,18 +453,35 @@ const tools: Tool[] = [
     },
   },
   {
+    name: 'get_task_columns', readOnly: true,
+    description: 'Columnas de las tareas de un grupo: nombre, tipo (text, select = lista desplegable, number, checkbox) y las opciones de cada lista (p. ej. Tipo: Bug, Funcionalidad nueva, Mejora). Úsalo antes de crear o cambiar tareas con fields para usar las opciones válidas.',
+    schema: z.object({ chat: z.string().min(1).max(200).describe('Id o nombre del grupo') }),
+    run: async (userId, a) => issues.getTaskColumns(userId, findChat(await bootstrap(userId), a.chat).id),
+  },
+  {
+    name: 'set_task_columns',
+    description: 'Define las columnas de las tareas de un grupo (reemplaza la lista completa; trae primero las actuales con get_task_columns). type: text, select (lista desplegable con options), number o checkbox. Solo quien administra el grupo. Confirma antes con la persona.',
+    schema: z.object({ chat: z.string().min(1).max(200), columns: z.array(TaskColumnInput).max(30) }),
+    run: async (userId, a) => issues.setTaskColumns(userId, findChat(await bootstrap(userId), a.chat).id, { columns: a.columns }),
+  },
+  {
     name: 'create_task',
-    description: 'Crea una tarea o ticket en un chat de chaggu (por id o nombre), con responsables y fecha límite opcionales. Confirma antes con la persona.',
+    description: 'Crea una tarea o ticket en un chat de chaggu (por id o nombre), con responsables, fecha límite, descripción (primer comentario) y campos dinámicos opcionales (fields: columnas propias como «Servicios», «Motivo», «Ambiente»). Confirma antes con la persona.',
     schema: z.object({
       chat: z.string().min(1).max(200),
       title: z.string().trim().min(2).max(200),
       assignees: z.array(z.string().min(1).max(200)).max(20).optional(),
       due_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+      description: z.string().trim().min(1).max(4000).optional(),
+      fields: IssueFieldsInput.optional().describe('Campos dinámicos { "Tipo": "Bug", "Servicios": "…", "Prioridad": 2 }. En las columnas de lista (get_task_columns) usa una de sus opciones'),
     }),
     run: async (userId, a) => {
       const b = await bootstrap(userId);
       const c = findChat(b, a.chat);
-      const i = await issues.createIssue(userId, c.id, { title: a.title, ...(a.assignees ? { assigneeIds: a.assignees.map((x: string) => personId(b, x)) } : {}), ...(a.due_date ? { dueDate: a.due_date } : {}) });
+      let i = await issues.createIssue(userId, c.id, {
+        title: a.title, ...(a.assignees ? { assigneeIds: a.assignees.map((x: string) => personId(b, x)) } : {}), ...(a.due_date ? { dueDate: a.due_date } : {}), ...(a.fields ? { fields: a.fields } : {}),
+      });
+      if (a.description) i = await issues.commentIssue(userId, i.id, a.description);
       return { task: taskView(b, i) };
     },
   },

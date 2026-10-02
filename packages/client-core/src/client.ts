@@ -2,7 +2,7 @@ import { io, type Socket } from 'socket.io-client';
 import {
   CONTRACT_VERSION, SOCKET_EVENTS,
   type AccountEvent, type AuthResult, type BootstrapDTO, type ConversationDTO, type ConversationEvent, type DeviceInfo,
-  type AttachmentDTO, type MentionDTO, type MentionItemDTO, type CalendarEventDTO, type EventsPage, type ForwardedInfo, type InvitationPreviewDTO, type IssueDTO, type IssueVisibility, type MeetingConnectionDTO, type MeetingDTO, type MeetingProvider, type IssueEventDTO, type MessageDTO, type OrgInvitationCreatedDTO, type OrgInvitationPreviewDTO, type PendingInvitationDTO, type Platform, type ReminderDTO, type Rsvp, type ScheduledMessageDTO, type SleepDTO,
+  type AttachmentDTO, type MentionDTO, type MentionItemDTO, type CalendarEventDTO, type EventsPage, type ForwardedInfo, type InvitationPreviewDTO, type IssueDTO, type IssueVisibility, type IssueFieldValue, type TaskColumnDTO, type MeetingConnectionDTO, type MeetingDTO, type MeetingProvider, type IssueEventDTO, type MessageDTO, type OrgInvitationCreatedDTO, type OrgInvitationPreviewDTO, type PendingInvitationDTO, type Platform, type ReminderDTO, type Rsvp, type ScheduledMessageDTO, type SleepDTO,
   type CreateGroupRequest, type CreateGroupResultDTO, type InvitationCreatedDTO, type OversightDTO,
   type LinkItemDTO, type LinkPreviewMode, type LinkSummaryDTO, type LinksPageDTO, type ReactionDTO, type TopicColor, type TopicDTO, type UserDTO, normalizeEmoji,
   type SoundChoice, type Ringtone, type CallDTO, type CallHistoryItemDTO, type CallJoinDTO, type CallLinkDTO, type SignupConfirmPreviewDTO, type CallKind, type CallTranscriptDTO, type CallTranscriptSegmentDTO, type CallTranscriptSegmentInput,
@@ -1207,17 +1207,24 @@ export class TieComsClient {
     this.putIssues([i]); this.recountIssues(i.conversationId);
     return i;
   }
-  async createIssue(conversationId: string, input: { title: string; assigneeIds?: string[]; attachmentIds?: string[]; ownerId?: string | null; dueDate?: string | null; originMessageId?: string | null; visibility?: IssueVisibility; viewerIds?: string[]; parentIssueId?: string | null; topicId?: string | null }) {
+  async createIssue(conversationId: string, input: { title: string; assigneeIds?: string[]; attachmentIds?: string[]; ownerId?: string | null; dueDate?: string | null; originMessageId?: string | null; visibility?: IssueVisibility; viewerIds?: string[]; parentIssueId?: string | null; topicId?: string | null; fields?: Record<string, IssueFieldValue> }) {
     const i = await this.request<IssueDTO>(`/conversations/${conversationId}/issues`, { method: 'POST', json: input });
     this.putIssues([i]); this.recountIssues(conversationId);
     return i;
   }
-  async updateIssue(id: string, patch: { assigneeIds?: string[]; attachmentIds?: string[]; conversationId?: string | null } & Partial<Pick<IssueDTO, 'title' | 'status' | 'ownerId' | 'dueDate' | 'waitingOnOrgId' | 'visibility' | 'viewerIds' | 'topicId'>>) {
+  async updateIssue(id: string, patch: { assigneeIds?: string[]; attachmentIds?: string[]; conversationId?: string | null; fields?: Record<string, IssueFieldValue | null> } & Partial<Pick<IssueDTO, 'title' | 'status' | 'ownerId' | 'dueDate' | 'waitingOnOrgId' | 'visibility' | 'viewerIds' | 'topicId'>>) {
     const previousConversationId = this.state.issues[id]?.conversationId;
     const i = await this.request<IssueDTO>(`/issues/${id}`, { method: 'PATCH', json: patch });
     this.putIssues([i]); this.recountIssues(i.conversationId);
     if (previousConversationId && previousConversationId !== i.conversationId) this.recountIssues(previousConversationId);
     return i;
+  }
+  /** Columnas de las tareas del grupo (texto, lista desplegable, número, casilla). */
+  async taskColumns(conversationId: string) {
+    return this.request<{ columns: TaskColumnDTO[]; canEdit: boolean }>(`/conversations/${conversationId}/task-columns`);
+  }
+  async setTaskColumns(conversationId: string, columns: TaskColumnDTO[]) {
+    return this.request<{ columns: TaskColumnDTO[]; canEdit: boolean }>(`/conversations/${conversationId}/task-columns`, { method: 'PUT', json: { columns } });
   }
   async issueDetail(id: string) {
     const r = await this.request<{ issue: IssueDTO; events: IssueEventDTO[]; children?: IssueDTO[] }>(`/issues/${id}`);

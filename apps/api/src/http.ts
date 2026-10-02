@@ -1,6 +1,6 @@
 import { CalendarSlotsInput,CalendarConfirmInput,calendarSlots,confirmCalendar } from './modules/gg-calendar.ts';
 import { readWaMedia,retryWaMedia } from './modules/wa-media.ts';
-import { AvailabilityInput, PersonalPreferencesPatchInput } from '@tiecoms/contracts';
+import { AvailabilityInput, MailPinInput, PersonalPreferencesPatchInput } from '@tiecoms/contracts';
 import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
 import cookie from '@fastify/cookie';
 import cors from '@fastify/cors';
@@ -47,6 +47,7 @@ import * as push from './modules/push.ts';
 import * as attachments from './modules/attachments.ts';
 import * as fileLinks from './modules/file-links.ts';
 import * as ggActions from './modules/gg-actions.ts';
+import * as mailPins from './modules/mail-pins.ts';
 import { registerGifMediaRoute, registerGifRoutes } from './modules/gifs.ts';
 import * as storageUsage from './modules/storage-usage.ts';
 import * as voice from './modules/voice.ts';
@@ -668,6 +669,9 @@ export async function buildHttp() {
     // Correo en el chat (docs/CORREO.md): la bandeja se lee en vivo; solo se guarda lo que se comparte.
     const mailLimit = { config: { rateLimit: { max: 60, timeWindow: '1 minute' } } };
     priv.get('/api/v1/mail/connections', async (req) => ({ connections: await mailbox.listConnections(req.userId) }));
+    // Pines de conversaciones de correo: en la pantalla principal y/o en Correo (MailPinDTO).
+    priv.get('/api/v1/mail/pins', async (req, reply) => { reply.header('cache-control', 'no-store'); return { pins: await mailPins.listPins(req.userId) }; });
+    priv.put('/api/v1/mail/pins', async (req, reply) => { reply.header('cache-control', 'no-store'); return mailPins.setPin(req.userId, MailPinInput.parse(req.body)); });
     priv.post('/api/v1/mail/connect/confirm', async (req, reply) => { reply.header('cache-control', 'no-store'); return mailbox.confirmConnect(req.userId, MeetingConfirmInput.parse(req.body)); });
     priv.post<{ Params: { provider: string } }>('/api/v1/mail/connect/:provider', async (req) => {
       const b = MeetingConnectInput.parse(req.body ?? {});

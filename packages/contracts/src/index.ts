@@ -817,6 +817,20 @@ export interface MailListItemDTO {
   subject: string; snippet: string; date: string | null; unread: boolean; hasAttachments: boolean; box: 'inbox' | 'sent';
 }
 export interface MailListDTO { items: MailListItemDTO[]; nextPage: string | null; accountEmail: string | null }
+/**
+ * Conversación de correo fijada (2-oct-2026). Dos pines independientes, como WhatsApp:
+ * mainPinnedAt = arriba en la pantalla principal; mailPinnedAt = arriba en la pantalla Correo.
+ */
+export interface MailPinDTO {
+  provider: MailProvider; threadKey: string; messageId: string; subject: string; from: MailAddressDTO | null; date: string | null;
+  mainPinnedAt: string | null; mailPinnedAt: string | null;
+}
+/** PUT /mail/pins. threadKey = threadId del proveedor (o el id del correo si no tiene hilo). main/mail: true fija, false quita, ausente no cambia. */
+export const MailPinInput = z.object({
+  provider: z.enum(['google', 'microsoft']), threadKey: z.string().min(1).max(500), messageId: z.string().min(1).max(500),
+  subject: z.string().max(300).default(''), from: z.object({ name: z.string().max(200).nullable().optional(), email: z.string().max(254) }).nullable().optional(),
+  date: z.iso.datetime({ offset: true }).nullable().optional(), main: z.boolean().optional(), mail: z.boolean().optional(),
+});
 /** Correo completo leído en vivo (vista previa antes de compartir). */
 export interface MailMessageDTO extends MailListItemDTO { cc: MailAddressDTO[]; body: string; attachments: MailAttachmentInfoDTO[] }
 export const MailListQuery = z.object({
@@ -1045,6 +1059,8 @@ export interface BootstrapDTO {
   missedCalls?: number;
   /** Chats de WhatsApp movidos a la bandeja (inboxPlace no null), de cuentas no removidas y sin ocultar. */
   waInbox?: WaChatDTO[];
+  /** Conversaciones de correo fijadas (en la principal, en Correo o en las dos). Ausente = servidor anterior. */
+  mailPins?: MailPinDTO[];
 }
 
 // ---------- Espacios y conversaciones ----------

@@ -20,10 +20,12 @@ import {
 } from '../split.ts';
 import { gridSpanLayout } from '../grid-span-layout.ts';
 import { paneColumnTracks } from '../grid-track-sizing.ts';
+import { collapseMany, collapseToDock, dockPanes, fillColumns, othersOf, pruneCollapsed, restoreAll, restoreFromDock, useCollapsed, visiblePanes } from '../grid-collapse.ts';
 import { GridTrackHandles } from './GridTrackHandles.tsx';
 import { usePaneGestures } from './usePaneGestures.ts';
 import { ConversationScreen } from './Conversation.tsx';
 import { ensureAssigned, openTintMenu, usePaneTints } from '../tints.ts';
+import './GridDock.css';
 import { InboxPane, MailPane, SectionPane, TasksPane, WaListPane, WaPane } from './Panes.tsx';
 
 const sectionLabel = (key: string) => ({ tasks: t('nav.issues'), inbox: t('nav.mail'), wachats: 'WhatsApp', agenda: t('nav.agenda'), trazo: t('nav.trazo'), calls: t('nav.calls') } as Record<string,string>)[parseKey(key).kind] ?? parseKey(key).kind;
@@ -64,8 +66,16 @@ export function GridArea({ id, search = '', side }: { id: string | null; search?
   const exists = (x: string) => parseKey(x).kind !== 'chat' || x === id || !!known?.some((c) => c.id === x);
   // En /c/:id, un solo panel guardado no esconde el chat abierto; en /cuadricula se ven todos, aunque sea uno.
   const shown = panes.filter(exists);
-  const list = wide && (id ? shown.length > 1 : shown.length > 0) ? shown : id ? [id] : shown.slice(0, 1);
-  if (id && !list.includes(id)) list[0] = id;
+  const opened = wide && (id ? shown.length > 1 : shown.length > 0) ? shown : id ? [id] : shown.slice(0, 1);
+  if (id && !opened.includes(id)) opened[0] = id;
+  // Recogidos (grid-collapse.ts): siguen abiertos pero salen del dibujo y van a la barra de arriba.
+  const collapsed = useCollapsed();
+  const canCollapse = wide && opened.length > 1;
+  const list = canCollapse ? visiblePanes(opened, collapsed) : opened;
+  const docked = canCollapse ? dockPanes(opened, collapsed) : [];
+  // El chat del URL siempre se ve: abrirlo lo saca de la barra.
+  useEffect(() => { if (id) restoreFromDock(id); }, [id]);
+  useEffect(() => { if (wide && d) pruneCollapsed(panes.filter(exists)); }, [panes.join('|'), wide, !!d]);
   const expanded = expandedKey && list.includes(expandedKey) ? expandedKey : null;
   const customLayout = wide && !side && layout === 'custom';
   const mixedLayout = wide && !side && layout !== 'classic' && layout !== 'custom' && list.length >= 4;
@@ -87,7 +97,9 @@ export function GridArea({ id, search = '', side }: { id: string | null; search?
   const full = list.filter((k) => k !== TASKS_KEY).length >= MAX_PANES;
   const currentTall = customLayout ? tallPanes : mixedLayout ? arranged.slice(0, 2) : [...(hasTasks ? [TASKS_KEY] : []), ...(grid.length <= 2 ? grid : [])];
   const currentWide = customLayout ? widePanes : [];
-  const spanLayout = gridSpanLayout(arranged, new Set(currentTall), new Set(currentWide), customLayout ? panePositions : {});
+  const packed = gridSpanLayout(arranged, new Set(currentTall), new Set(currentWide), customLayout && !docked.length ? panePositions : {});
+  // Con recogidos, los demás se reacomodan y llenan el espacio libre (grid-collapse.ts).
+  const spanLayout = docked.length ? { ...packed, cells: fillColumns(packed.cells) } : packed;
   // Translate presets to their visible column order before the first direct resize.
   const sizingOrder = mixedLayout
     ? (layout === 'tall-left' ? [arranged[2]!, arranged[3]!, arranged[0]!, arranged[1]!] : layout === 'tall-center' ? [arranged[0]!, arranged[2]!, arranged[3]!, arranged[1]!] : arranged.slice(0, 4)).concat(arranged.slice(4))
@@ -203,7 +215,7 @@ export function GridArea({ id, search = '', side }: { id: string | null; search?
   const cell = (x: string) => {
     const ref = parseKey(x);
     const size = wide && !side && !expanded ? { rows: (currentTall.includes(x) ? 2 : 1) as 1 | 2, columns: (currentWide.includes(x) ? 2 : 1) as 1 | 2, set: (rows: 1 | 2, columns: 1 | 2) => resizePane(x, rows, columns) } : undefined;
-    const frame = { size, visible: expanded ? expanded === x : visible.includes(x), active: x === active, count: list.length, pinned: pinned.has(x), onClose: () => closePane(x, id), onOnly: () => onlyPane(x), onPin: () => togglePin(x), onTint: (el: HTMLElement) => openTintMenu(el, x) };
+    const frame = { size, onCollapse: canCollapse && list.length > 1 ? () => collapseToDock(x) : undefined, visible: expanded ? expanded === x : visible.includes(x), active: x === active, count: list.length, pinned: pinned.has(x), onClose: () => closePane(x, id), onOnly: () => onlyPane(x), onPin: () => togglePin(x), onTint: (el: HTMLElement) => openTintMenu(el, x) };
     return (
       <div key={x} data-pane={x} data-tint={tints[x]} hidden={expanded ? expanded !== x : !visible.includes(x)}
         style={!expanded && customLayout && list.length > 1 ? { gridColumn: `${spanLayout.cells[x]!.column} / span ${spanLayout.cells[x]!.width}`, gridRow: `${spanLayout.cells[x]!.row} / span ${spanLayout.cells[x]!.span}` }
@@ -266,6 +278,7 @@ export function GridArea({ id, search = '', side }: { id: string | null; search?
   };
   return (
     <div className="grid-workspace">
+      {docked.length > 0 && !expanded && <GridDock keys={docked} name={paneName} unread={(k) => known?.find((c) => c.id === k)?.unread ?? 0} tints={tints} />}
       {(expanded || (wide && list.length > 1)) && <div className="grid-layout-tools">
         {expanded ? <button className="btn small" onClick={collapsePane}>↙ {locale().startsWith('en') ? 'Back to grid' : 'Volver a la cuadrícula'}</button>
           : <><label>{locale().startsWith('en') ? 'Layout' : 'Diseño'} <select value={layout} onChange={(e) => setGridLayout(e.target.value as GridLayout)}>
@@ -281,6 +294,7 @@ export function GridArea({ id, search = '', side }: { id: string | null; search?
               <option value="1">{locale().startsWith('en') ? '1 row' : '1 fila'}</option><option value="2">{locale().startsWith('en') ? '2 rows' : '2 filas'}</option>
             </select><select aria-label={`${locale().startsWith('en') ? 'Width of' : 'Ancho de'} ${paneName(key)}`} value={currentWide.includes(key) ? '2' : '1'} onChange={(e) => resizePane(key, currentTall.includes(key) ? 2 : 1, +e.target.value as 1 | 2)}><option value="1">{locale().startsWith('en') ? '1 column' : '1 columna'}</option><option value="2">{locale().startsWith('en') ? '2 columns' : '2 columnas'}</option></select></label>)}
           </details>
+          {list.length > 2 && active && <button className="btn small grid-collapse-others" title={locale().startsWith('en') ? 'Leave only the active panel; the rest go to the bar above' : 'Deja solo el panel activo; los demás quedan en la barra de arriba'} onClick={() => collapseMany(othersOf(list, active))}>▁ {locale().startsWith('en') ? 'Tuck away the rest' : 'Recoger los demás'}</button>}
           {customLayout && <label>{locale().startsWith('en') ? 'Height' : 'Alto'} <input aria-label={locale().startsWith('en') ? 'Small panels height' : 'Alto de paneles pequeños'} type="range" min="20" max="80" value={Math.round(sizes.row * 100)} onChange={(e) => setSplitSize({ row: +e.target.value / 100 }, true)} /></label>}
           {mixedLayout && <><label>{locale().startsWith('en') ? 'Width' : 'Ancho'} <input aria-label={locale().startsWith('en') ? 'Column width' : 'Ancho de columnas'} type="range" min="20" max="80" value={Math.round(sizes.col * 100)} onChange={(e) => setSplitSize({ col: +e.target.value / 100 }, true)} /></label>
             <label>{locale().startsWith('en') ? 'Height' : 'Alto'} <input aria-label={locale().startsWith('en') ? 'Small panels height' : 'Alto de paneles pequeños'} type="range" min="20" max="80" value={Math.round(sizes.row * 100)} onChange={(e) => setSplitSize({ row: +e.target.value / 100 }, true)} /></label>
@@ -293,6 +307,24 @@ export function GridArea({ id, search = '', side }: { id: string | null; search?
       <div className="grid-main-body">{body(list)}</div>
       {hint && <div className="split-drop" aria-hidden><span>⊞ {hint}</span></div>}
       </div>
+    </div>
+  );
+}
+
+/** La barra de recogidos: una pestaña por panel; un clic lo devuelve a la cuadrícula. */
+function GridDock({ keys, name, unread, tints }: { keys: string[]; name: (k: string) => string; unread: (k: string) => number; tints: Record<string, string | undefined> }) {
+  const en = locale().startsWith('en');
+  return (
+    <div className="grid-dock" role="toolbar" aria-label={en ? 'Tucked-away panels' : 'Paneles recogidos'}>
+      <span className="grid-dock-label">{en ? 'Tucked away' : 'Recogidos'} · {keys.length}</span>
+      {keys.map((k) => {
+        const n = unread(k);
+        return <button key={k} className="grid-dock-chip" data-tint={tints[k]} title={en ? 'Show in the grid' : 'Mostrar en la cuadrícula'} onClick={() => { restoreFromDock(k); focusPane(k); }}>
+          <span className="ellipsis">{name(k)}</span>{n > 0 && <span className="grid-dock-unread">{n > 99 ? '99+' : n}</span>}<span aria-hidden className="grid-dock-up">▴</span>
+        </button>;
+      })}
+      <span className="grow" />
+      <button className="btn ghost small" onClick={restoreAll}>▴ {en ? 'Show all' : 'Mostrar todos'}</button>
     </div>
   );
 }

@@ -1,0 +1,15 @@
+/* ---------- Paneles recogidos de la cuadrícula (grid-collapse.ts) ---------- */
+.grid-dock { display: flex; align-items: center; gap: 6px; padding: 5px 8px; border-bottom: 1px solid var(--line); background: var(--paper-soft, var(--paper)); overflow-x: auto; scrollbar-width: thin; flex: none; font-size: 12px; }
+.grid-dock-label { flex: none; color: var(--ink-3, var(--muted)); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; font-size: 11px; }
+.grid-dock-chip { --th: 30; flex: none; display: inline-flex; align-items: center; gap: 6px; max-width: 220px; padding: 4px 10px; border: 1px solid var(--line); border-radius: 99px; background: var(--card); color: var(--ink); font: inherit; cursor: pointer; }
+.grid-dock-chip:hover { background: var(--hover); }
+.grid-dock-chip[data-tint="sage"] { --th: 145; } .grid-dock-chip[data-tint="sky"] { --th: 205; } .grid-dock-chip[data-tint="lilac"] { --th: 265; }
+.grid-dock-chip[data-tint="peach"] { --th: 22; } .grid-dock-chip[data-tint="sand"] { --th: 46; } .grid-dock-chip[data-tint="rose"] { --th: 340; }
+.grid-dock-chip[data-tint] { background: hsl(var(--th) 44% 93%); border-color: hsl(var(--th) 26% 78%); }
+:root[data-theme="dark"] .grid-dock-chip[data-tint] { background: hsl(var(--th) 21% 18%); border-color: hsl(var(--th) 15% 30%); }
+.grid-dock-chip .ellipsis { min-width: 0; }
+.grid-dock-unread { flex: none; min-width: 18px; padding: 0 5px; border-radius: 99px; background: var(--accent, #e8590c); color: #fff; font-size: 11px; font-weight: 700; text-align: center; line-height: 18px; }
+.grid-dock-up { flex: none; opacity: .55; }
+.grid-dock .grow { flex: 1; }
+.grid-dock .btn { flex: none; }
+.pane-collapse-control { font-weight: 700; }

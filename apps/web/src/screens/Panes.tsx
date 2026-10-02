@@ -38,7 +38,7 @@ export function SectionPane({ kind, frame }: { kind: 'agenda' | 'trazo' | 'calls
     <div className="section-pane-body">{kind === 'agenda' ? <AgendaScreen /> : kind === 'trazo' ? <TrazoScreen /> : <CallsScreen />}</div></div>;
 }
 
-export interface PaneFrame { size?: import('./PaneSizeControl.tsx').PaneSizing; visible?: boolean; presentation?: 'sidebar'; expanded?: boolean; active: boolean; count: number; pinned: boolean; onClose: () => void; onOnly: () => void; onPin: () => void; onTint: (anchor: HTMLElement) => void }
+export interface PaneFrame { size?: import('./PaneSizeControl.tsx').PaneSizing; visible?: boolean; presentation?: 'sidebar'; expanded?: boolean; active: boolean; count: number; pinned: boolean; onClose: () => void; onOnly: () => void; onPin: () => void; onTint: (anchor: HTMLElement) => void; onCollapse?: () => void }
 
 /** Cabecera común de un panel: qué es, cómo se llama, fijar, dejar solo este y cerrar. */
 function PaneHead({ icon, title, sub, frame, extra }: { icon: ReactNode; title: string; sub?: string; frame: PaneFrame; extra?: ReactNode }) {
@@ -52,6 +52,7 @@ function PaneHead({ icon, title, sub, frame, extra }: { icon: ReactNode; title: 
       {frame.presentation !== 'sidebar' && <button className="icon-btn head-keep" aria-label={t('tint.title')} title={t('tint.title')} onClick={(e) => frame.onTint(e.currentTarget)}>🎨</button>}
       {frame.presentation !== 'sidebar' && <button className={`icon-btn head-keep pane-pin-control ${frame.pinned ? 'is-on' : ''}`} aria-pressed={frame.pinned} aria-label={t(frame.pinned ? 'grid.unpin' : 'grid.pin')} title={t(frame.pinned ? 'grid.unpin' : 'grid.pin')} onClick={frame.onPin}><span aria-hidden>📌</span>{frame.pinned && <span className="pane-pin-label">{locale().startsWith('en') ? 'Pinned' : 'Fijado'}</span>}</button>}
       {frame.presentation === 'sidebar' && <button className="btn small" onClick={frame.onOnly}>{frame.expanded ? (locale().startsWith('en') ? '↙ Side panel' : '↙ Vista lateral') : (locale().startsWith('en') ? '⤢ Expand' : '⤢ Expandir')}</button>}
+      {frame.presentation !== 'sidebar' && frame.onCollapse && <button className="icon-btn head-keep pane-collapse-control" aria-label={t('split.collapse')} title={t('split.collapse')} onClick={frame.onCollapse}>▁</button>}
       {frame.presentation !== 'sidebar' && frame.count > 1 && <button className="icon-btn head-keep" aria-label={t('split.only')} title={t('split.only')} onClick={frame.onOnly}>⤢</button>}
       <button className="icon-btn head-keep" aria-label={t('split.close')} title={t('split.close')} onClick={frame.onClose}>×</button>
       </div>

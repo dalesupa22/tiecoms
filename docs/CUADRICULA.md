@@ -42,3 +42,7 @@ Sin arrastrar: el botón **Fijar** de cada fila (`PinToGrid`) abre un mini mapa 
 ## Pendiente a propósito
 
 Arrastrar una tarea suelta a un chat; adjuntos al responder un correo en vivo; la bandeja en pantallas táctiles (hoy la cuadrícula solo existe desde 860 px de ancho).
+
+## Recoger paneles (2-oct-2026)
+
+Botón **▁** en la cabecera de cada panel (aparece con 2 o más a la vista): el panel sale del dibujo pero sigue abierto (no pierde lugar, color ni fijado) y queda como pestaña en la barra **Recogidos** de arriba, con sus no leídos. Un clic en la pestaña lo devuelve; **Mostrar todos** devuelve todos; **Recoger los demás** (en la barra de Diseño) deja solo el activo. Siempre queda uno a la vista, y abrir un chat recogido desde la lista lo devuelve. En «Paneles a tu medida», mientras haya recogidos los demás se reacomodan y el que queda solo en su columna crece a lo alto (solo el dibujo: las posiciones guardadas vuelven al devolverlos). Código: `apps/web/src/grid-collapse.ts` (aparte de split.ts), `GridDock` en `screens/Split.tsx`, estilos en `screens/GridDock.css`. Se guarda en `localStorage` (`chaggu:split-collapsed`).

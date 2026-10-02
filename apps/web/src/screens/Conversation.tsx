@@ -68,7 +68,7 @@ const draftKey = (id: string) => `tiecoms:draft:${id}`;
 const excerpt = (s: string, n = 90) => s.replace(/\s+/g, ' ').trim().slice(0, n);
 
 /** Panel dentro de la vista en paralelo (Split.tsx): activo = el del URL; count = cuántos hay abiertos. */
-export interface PaneProps { size?: PaneSizing; active: boolean; count: number; onClose: () => void; onOnly: () => void; pinned?: boolean; onPin?: () => void; onTint?: (anchor: HTMLElement) => void }
+export interface PaneProps { size?: PaneSizing; active: boolean; count: number; onClose: () => void; onOnly: () => void; pinned?: boolean; onPin?: () => void; onTint?: (anchor: HTMLElement) => void; onCollapse?: () => void }
 
 export function ConversationScreen({ id, embedded, pane, search }: { id: string; embedded?: { onClose: () => void; anchor?: MessageDTO | null; onSeeAnchor?: () => void }; pane?: PaneProps; search?: string }) {
   const d = useClient((s) => s.data)!;
@@ -817,6 +817,7 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
             </> : pane ? <>
               <PaneSizeControl size={pane.size} />
               {pane.onPin && <button className={`icon-btn chat-header-primary-control pane-pin-control ${pane.pinned ? 'is-on' : ''}`} aria-label={t(pane.pinned ? 'grid.unpin' : 'grid.pin')} title={t(pane.pinned ? 'grid.unpin' : 'grid.pin')} aria-pressed={!!pane.pinned} onClick={pane.onPin}><span aria-hidden>📌</span>{pane.pinned && <span className="pane-pin-label">{locale().startsWith('en') ? 'Pinned' : 'Fijado'}</span>}</button>}
+              {pane.onCollapse && <button className="icon-btn chat-header-primary-control pane-collapse-control" aria-label={t('split.collapse')} title={t('split.collapse')} onClick={pane.onCollapse}>▁</button>}
               {pane.count > 1 && <button className="icon-btn chat-header-primary-control" aria-label={t('split.only')} title={t('split.only')} onClick={pane.onOnly}>⤢</button>}
               <button className="icon-btn chat-header-primary-control" aria-label={t('split.close')} title={t('split.close')} onClick={pane.onClose}>×</button>
             </> : null}

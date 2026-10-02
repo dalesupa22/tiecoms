@@ -8,10 +8,31 @@ enum WaColors {
     static let badge = Color(hex: 0x1DA851)
 }
 
-/// Fila de un chat de WhatsApp mezclada en Grupos o DMs: avatar con el logo verde en la esquina, nombre, debajo
-/// «WhatsApp · {cuenta}» (o la vista previa), contador verde y 📌 si está fijado. Cuenta desconectada: atenuada.
+/// Punto de color de una cuenta de WhatsApp: con más de una cuenta conectada distingue la fila sin texto. El color sale
+/// del id de la cuenta (el mismo en la pantalla WhatsApp, en Grupos/DMs y en la hoja de cuentas).
+struct WaAccountDot: View {
+    let accountId: String
+    var size: CGFloat = 8
+    var body: some View {
+        Circle().fill(Self.color(accountId)).frame(width: size, height: size)
+            .overlay(Circle().stroke(Theme.background, lineWidth: 1))
+            .accessibilityHidden(true)
+    }
+
+    /// Colores bien distintos entre sí (verde, azul, morado, ámbar, rosa), fijos por cuenta.
+    static let palette: [UInt32] = [0x25D366, 0x2F6FDB, 0x7C4DDB, 0xF59E0B, 0xD6338A]
+    static func color(_ accountId: String) -> Color {
+        let h = accountId.unicodeScalars.reduce(UInt32(5381)) { ($0 &* 33) &+ $1.value }
+        return Color(hex: palette[Int(h % UInt32(palette.count))])
+    }
+}
+
+/// Fila de un chat de WhatsApp mezclada en Grupos o DMs: avatar con el logo verde en la esquina, nombre, vista previa,
+/// contador verde y 📌 si está fijado en la pantalla principal. Con varias cuentas, un punto de color (sin texto).
+/// Cuenta desconectada: atenuada y «WhatsApp desconectado».
 struct WaInboxRow: View {
     let chat: WaChatDTO
+    var multi = false
     @Environment(\.dynamicTypeSize) private var typeSize
     var body: some View {
         let off = chat.isDisconnected
@@ -25,15 +46,16 @@ struct WaInboxRow: View {
                 HStack(spacing: 6) {
                     Text(chat.name).font(.subheadline.weight(chat.unread > 0 ? .bold : .medium)).foregroundStyle(Theme.textPrimary)
                         .lineLimit(typeSize.isAccessibilitySize ? 2 : 1)
+                    if multi { WaAccountDot(accountId: chat.accountId, size: 7) }
                     Spacer(minLength: 4)
                     if chat.inboxPinnedAt != nil {
                         Text("📌").font(.caption2).accessibilityHidden(true).accessibilityIdentifier("row.pinned.\(chat.inboxKey)")
                     }
                     if chat.unread > 0 && !off { UnreadPill(count: chat.unread, color: WaColors.badge).accessibilityIdentifier("wa.row.unread") }
                 }
-                Text(off ? L("wa.disconnected") : "WhatsApp · \(chat.accountLabel)")
-                    .font(.caption2).foregroundStyle(off ? Color.red.opacity(0.8) : Theme.textSecondary).lineLimit(1)
-                    .padding(.top, -1)
+                if off {
+                    Text(L("wa.disconnected")).font(.caption2).foregroundStyle(Color.red.opacity(0.8)).lineLimit(1).padding(.top, -1)
+                }
                 HStack(spacing: 6) {
                     Text(chat.lastPreview ?? "").font(.caption).foregroundStyle(Theme.textSecondary).lineLimit(typeSize.isAccessibilitySize ? 2 : 1)
                     Spacer(minLength: 4)
@@ -43,77 +65,69 @@ struct WaInboxRow: View {
         }
         .opacity(off ? 0.55 : 1)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel([chat.name, "WhatsApp", chat.accountLabel, off ? L("wa.disconnected") : nil,
+        .accessibilityLabel([chat.name, "WhatsApp", multi ? chat.accountLabel : nil, off ? L("wa.disconnected") : nil,
                              chat.inboxPinnedAt != nil ? L("side.pinned") : nil,
                              chat.unread > 0 ? L("a11y.unread", ["n": chat.unread]) : nil, chat.lastPreview].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: ", "))
     }
 }
 
-/// Menú de una fila de WhatsApp en la bandeja (pulsación larga): fijar, mover a la otra sección y sacar.
-struct WaInboxMenuItems: View {
+/// Menú de un chat de WhatsApp (pulsación larga, ⋯ de la fila y ⋯ dentro de la conversación). Los dos pines con nombre
+/// propio: «📌 Fijar en la pantalla principal» (`inboxPinned`, arriba en Grupos/DMs) y «📌 Fijar en WhatsApp» (`pinned`,
+/// arriba en la pantalla WhatsApp). Aparte, «Llevar a mi lista principal» (`inboxPlace`), categoría y ocultar.
+struct WaChatMenuItems: View {
     @Environment(AppStore.self) private var store
     let chat: WaChatDTO
-    var onOpen: (() -> Void)? = nil
-    var body: some View {
-        let pinned = chat.inboxPinnedAt != nil
-        Button { run { try await store.waSetInboxPinned(chat, !pinned) } } label: {
-            Label(pinned ? L("wa.inboxUnpin") : L("wa.inboxPin"), systemImage: pinned ? "pin.slash" : "pin")
-        }
-        .accessibilityIdentifier("wa.menu.pin")
-        if chat.inboxPlace == WaInbox.groups {
-            Button { run(toast: L("wa.movedDms")) { try await store.waSetInboxPlace(chat, WaInbox.dms) } } label: {
-                Label(L("wa.moveDms"), systemImage: "bubble.left.and.bubble.right")
-            }
-            .accessibilityIdentifier("wa.menu.moveDms")
-        } else {
-            Button { run(toast: L("wa.movedGroups")) { try await store.waSetInboxPlace(chat, WaInbox.groups) } } label: {
-                Label(L("wa.moveGroups"), systemImage: "number")
-            }
-            .accessibilityIdentifier("wa.menu.moveGroups")
-        }
-        if let onOpen {
-            Button(action: onOpen) { Label(L("wa.openChat"), systemImage: "phone.bubble") }
-        }
-        Divider()
-        Button(role: .destructive) { run(toast: L("wa.removedInbox")) { try await store.waSetInboxPlace(chat, nil) } } label: {
-            Label(L("wa.removeFromInbox"), systemImage: "tray.and.arrow.up")
-        }
-        .accessibilityIdentifier("wa.menu.remove")
-    }
-
-    private func run(toast: String? = nil, _ f: @escaping () async throws -> Void) {
-        Task { do { try await f(); if let toast { store.show(toast) } } catch { store.show(L10n.errorText(error)) } }
-    }
-}
-
-/// En la pantalla WhatsApp (fila y detalle): «Mover a mi lista principal» › A Grupos / A DMs (la sugerida marcada),
-/// «📌 Fijar arriba» y, si ya está, «Sacar de mi lista principal».
-struct WaMoveToInboxItems: View {
-    @Environment(AppStore.self) private var store
-    let chat: WaChatDTO
+    /// En la pantalla WhatsApp y en la conversación: también Categoría y Ocultar.
+    var full = true
     var onChanged: (WaChatDTO) -> Void = { _ in }
     var body: some View {
-        let inbox = store.waInbox.first { $0.id == chat.id } ?? chat
-        if inbox.inInbox {
-            let pinned = inbox.inboxPinnedAt != nil
-            Button { run { try await store.waSetInboxPinned(inbox, !pinned) } } label: {
-                Label(pinned ? L("wa.inboxUnpin") : "📌 " + L("wa.pinTop"), systemImage: pinned ? "pin.slash" : "pin")
+        // La bandeja manda en lo suyo (inboxPlace/inboxPinnedAt); el resto, la copia que se tiene.
+        let inbox = store.waInbox.first { $0.id == chat.id }
+        let c = inbox.map { i -> WaChatDTO in var x = chat; x.inboxPlace = i.inboxPlace; x.inboxPinnedAt = i.inboxPinnedAt; return x } ?? chat
+        let onMain = c.inboxPinnedAt != nil
+        Button { run(toast: onMain ? L("toast.unpinned") : L("toast.pinned")) { try await store.waSetInboxPinned(c, !onMain) } } label: {
+            if onMain { Label(L("wa.unpinMain"), systemImage: "pin.slash") } else { Text(L("wa.pinMain")) }
+        }
+        .accessibilityIdentifier("wa.menu.pinMain")
+        Button { run(toast: c.pinned ? L("toast.unpinned") : L("toast.pinned")) { try await store.waSetPinned(c, !c.pinned) } } label: {
+            if c.pinned { Label(L("wa.unpinWa"), systemImage: "pin.slash") } else { Text(L("wa.pinWa")) }
+        }
+        .accessibilityIdentifier("wa.menu.pinWa")
+        Divider()
+        if let place = c.inboxPlace {
+            let other = place == WaInbox.groups ? WaInbox.dms : WaInbox.groups
+            Button { run(toast: L(other == WaInbox.groups ? "wa.movedGroups" : "wa.movedDms")) { try await store.waSetInboxPlace(c, other) } } label: {
+                Label(L(other == WaInbox.groups ? "wa.moveGroups" : "wa.moveDms"), systemImage: other == WaInbox.groups ? "number" : "bubble.left.and.bubble.right")
             }
-            .accessibilityIdentifier("wa.inbox.pinTop")
-            Button(role: .destructive) { run(toast: L("wa.removedInbox")) { try await store.waSetInboxPlace(inbox, nil) } } label: {
+            .accessibilityIdentifier(other == WaInbox.groups ? "wa.menu.moveGroups" : "wa.menu.moveDms")
+            Button(role: .destructive) { run(toast: L("wa.removedInbox")) { try await store.waSetInboxPlace(c, nil) } } label: {
                 Label(L("wa.removeFromInbox"), systemImage: "tray.and.arrow.up")
             }
-            .accessibilityIdentifier("wa.inbox.remove")
+            .accessibilityIdentifier("wa.menu.remove")
         } else {
             Menu {
-                place(inbox, WaInbox.groups, L("wa.toGroups"))
-                place(inbox, WaInbox.dms, L("wa.toDms"))
+                place(c, WaInbox.groups, L("wa.toGroups"))
+                place(c, WaInbox.dms, L("wa.toDms"))
             } label: { Label(L("wa.moveToInbox"), systemImage: "tray.and.arrow.down") }
             .accessibilityIdentifier("wa.inbox.move")
-            Button { run(toast: L("toast.pinned")) { try await store.waSetInboxPinned(inbox, true) } } label: {
-                Label("📌 " + L("wa.pinTop"), systemImage: "pin")
+        }
+        if full {
+            Menu {
+                ForEach(WaCategory.allCases, id: \.self) { k in
+                    Button { run { try await store.waPatchChat(c, ["category": k.rawValue]) } } label: {
+                        if c.category == k { Label("\(k.icon) \(L("wa.cat.\(k.rawValue)"))", systemImage: "checkmark") } else { Text("\(k.icon) \(L("wa.cat.\(k.rawValue)"))") }
+                    }
+                }
+                if c.categoryManual {
+                    Divider()
+                    Button(L("wa.resetCategory")) { run { try await store.waPatchChat(c, ["category": NSNull()]) } }
+                }
+            } label: { Label(L("wa.category") + " · " + L("wa.cat.\(c.category.rawValue)"), systemImage: "folder") }
+            .accessibilityIdentifier("wa.menu.category")
+            Button(role: c.hidden ? nil : .destructive) { hide(c) } label: {
+                Label(c.hidden ? L("wa.unhide") : L("wa.hide"), systemImage: c.hidden ? "eye" : "eye.slash")
             }
-            .accessibilityIdentifier("wa.inbox.pinTop")
+            .accessibilityIdentifier("wa.menu.hide")
         }
     }
 
@@ -122,6 +136,21 @@ struct WaMoveToInboxItems: View {
             if c.suggestedPlace == p { Label(title + " · " + L("wa.suggestedPlace"), systemImage: "checkmark") } else { Text(title) }
         }
         .accessibilityIdentifier("wa.inbox.to.\(p)")
+    }
+
+    private func hide(_ c: WaChatDTO) {
+        let to = !c.hidden
+        Task {
+            do {
+                let up = try await store.waSetHidden(c, to)
+                onChanged(up)
+                if to {
+                    store.show(L("wa.hiddenToast")) {
+                        Task { if let back = try? await store.waSetHidden(up, false) { onChanged(back); store.waRevision += 1 } }
+                    }
+                }
+            } catch { store.show(L10n.errorText(error)) }
+        }
     }
 
     private func run(toast: String? = nil, _ f: @escaping () async throws -> WaChatDTO) {
@@ -155,6 +184,8 @@ extension AppStore {
         Haptics.tap()
         Task { do { try await waSetInboxPinned(w, w.inboxPinnedAt == nil) } catch { show(L10n.errorText(error)) } }
     }
+    /// ¿Hay chats de más de una cuenta en la bandeja? Entonces cada fila lleva el punto de color de su cuenta.
+    var waInboxMultiAccount: Bool { Set(waInbox.map(\.accountId)).count > 1 }
 }
 
 // MARK: - Accesos con logo y chip de recordatorios

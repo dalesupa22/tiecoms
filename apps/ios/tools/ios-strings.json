@@ -5842,5 +5842,133 @@
   "gg.mail.ccShort": [
     "Copia",
     "Cc"
+  ],
+  "mail.pinMail": [
+    "📌 Fijar en Correo",
+    "📌 Pin in Mail"
+  ],
+  "mail.pinMain": [
+    "📌 Fijar en la pantalla principal",
+    "📌 Pin to main screen"
+  ],
+  "mail.pinned": [
+    "Fijados",
+    "Pinned"
+  ],
+  "mail.unpinMail": [
+    "Quitar de fijados en Correo",
+    "Unpin from Mail"
+  ],
+  "mail.unpinMain": [
+    "Quitar de la pantalla principal",
+    "Unpin from main screen"
+  ],
+  "wa.accounts.many": [
+    "{n} cuentas conectadas",
+    "{n} accounts connected"
+  ],
+  "wa.accounts.one": [
+    "1 cuenta conectada",
+    "1 account connected"
+  ],
+  "wa.accounts.some": [
+    "{c} de {n} cuentas conectadas",
+    "{c} of {n} accounts connected"
+  ],
+  "wa.accounts.waiting": [
+    "Falta escanear el código",
+    "Waiting for you to scan the code"
+  ],
+  "wa.accountsTitle": [
+    "Cuentas de WhatsApp",
+    "WhatsApp accounts"
+  ],
+  "wa.activate": [
+    "Activar",
+    "Turn on"
+  ],
+  "wa.chatSettings": [
+    "Ajustes del chat",
+    "Chat settings"
+  ],
+  "wa.composerPh": [
+    "Escribe un mensaje",
+    "Message"
+  ],
+  "wa.enableSend": [
+    "Activar «Responder desde chaggu»",
+    "Turn on “Reply from chaggu”"
+  ],
+  "wa.hiddenShort": [
+    "Oculto",
+    "Hidden"
+  ],
+  "wa.hiddenToast": [
+    "Chat oculto",
+    "Chat hidden"
+  ],
+  "wa.linkedShort": [
+    "Llega a un chat de chaggu",
+    "Goes to a chaggu chat"
+  ],
+  "wa.more": [
+    "Más opciones",
+    "More options"
+  ],
+  "wa.offline": [
+    "La cuenta no está conectada ahora mismo",
+    "This account isn't connected right now"
+  ],
+  "wa.pinMain": [
+    "📌 Fijar en la pantalla principal",
+    "📌 Pin to main screen"
+  ],
+  "wa.pinWa": [
+    "📌 Fijar en WhatsApp",
+    "📌 Pin in WhatsApp"
+  ],
+  "wa.pinnedInWa": [
+    "Fijado en WhatsApp",
+    "Pinned in WhatsApp"
+  ],
+  "wa.queued": [
+    "Se enviará en cuanto WhatsApp responda",
+    "It will be sent as soon as WhatsApp responds"
+  ],
+  "wa.readOnly": [
+    "Solo lectura",
+    "Read only"
+  ],
+  "wa.send": [
+    "Enviar",
+    "Send"
+  ],
+  "wa.sendFailed": [
+    "No se pudo enviar: {error}",
+    "Couldn't send: {error}"
+  ],
+  "wa.sending": [
+    "Enviando…",
+    "Sending…"
+  ],
+  "wa.unpinMain": [
+    "Quitar de la pantalla principal",
+    "Unpin from main screen"
+  ],
+  "wa.unpinWa": [
+    "Quitar de fijados en WhatsApp",
+    "Unpin in WhatsApp"
+  ],
+  "wa.workOnly": [
+    "💼 Solo trabajo",
+    "💼 Work only"
+  ],
+  "wa.showHidden": [
+    "Mostrar ocultos",
+    "Show hidden"
+  ],
+  "wa.reorganize": [
+    "Reorganizar",
+    "Reorganise"
   ]
 }

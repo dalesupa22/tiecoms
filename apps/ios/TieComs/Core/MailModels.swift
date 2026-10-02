@@ -538,3 +538,93 @@ enum MailCallback: Equatable {
         return .receipt(p, receipt)
     }
 }
+
+// MARK: - Pines de correo (migr. 096, MailPinDTO)
+
+/// Una conversación (hilo) de correo fijada: en la pantalla principal (`mainPinnedAt`) y/o arriba en Correo (`mailPinnedAt`).
+struct MailPinDTO: Codable, Equatable, Hashable, Identifiable, Sendable {
+    var provider: MailProvider
+    var threadKey: String
+    var messageId: String
+    var subject: String
+    var from: MailAddressDTO?
+    var date: String?
+    var mainPinnedAt: String?
+    var mailPinnedAt: String?
+    var id: String { "\(provider.rawValue)|\(threadKey)" }
+    var onMain: Bool { mainPinnedAt != nil }
+    var onMail: Bool { mailPinnedAt != nil }
+
+    init(provider: MailProvider, threadKey: String, messageId: String, subject: String, from: MailAddressDTO?, date: String?,
+         mainPinnedAt: String? = nil, mailPinnedAt: String? = nil) {
+        self.provider = provider; self.threadKey = threadKey; self.messageId = messageId; self.subject = subject
+        self.from = from; self.date = date; self.mainPinnedAt = mainPinnedAt; self.mailPinnedAt = mailPinnedAt
+    }
+    init(from decoder: Decoder) throws {
+        let c = try container(decoder)
+        provider = try c.decode(MailProvider.self, forKey: AnyKey("provider"))
+        threadKey = c.v("threadKey", "")
+        messageId = c.v("messageId", "")
+        subject = c.v("subject", "")
+        from = c.o("from")
+        date = c.o("date")
+        mainPinnedAt = c.o("mainPinnedAt")
+        mailPinnedAt = c.o("mailPinnedAt")
+    }
+
+    /// Para abrir el correo fijado con la vista previa de siempre.
+    var listItem: MailListItemDTO {
+        var x = MailListItemDTO(provider: provider, id: messageId, from: from, to: [], subject: subject, snippet: "", date: date)
+        x.threadId = threadKey
+        return x
+    }
+}
+
+/// Reglas puras de los pines de correo (PUT /mail/pins).
+enum MailPins {
+    /// threadId del correo o, si no tiene hilo, su id.
+    static func threadKey(_ m: MailListItemDTO) -> String {
+        if let t = m.threadId, !t.isEmpty { return t }
+        return m.id
+    }
+
+    /// Cuerpo del PUT: `main`/`mail` true fija, false quita y ausente no cambia.
+    static func body(_ m: MailListItemDTO, main: Bool? = nil, mail: Bool? = nil) -> [String: Any] {
+        var b: [String: Any] = [
+            "provider": m.provider.rawValue, "threadKey": threadKey(m), "messageId": m.id,
+            "subject": String(m.subject.prefix(300)),
+            "from": m.from.map { f -> [String: Any] in ["name": f.name.map { $0 as Any } ?? NSNull(), "email": f.email] } ?? NSNull(),
+            "date": m.date.map { $0 as Any } ?? NSNull(),
+        ]
+        if let main { b["main"] = main }
+        if let mail { b["mail"] = mail }
+        return b
+    }
+
+    static func find(_ pins: [MailPinDTO], _ m: MailListItemDTO) -> MailPinDTO? {
+        let k = threadKey(m)
+        return pins.first { $0.provider == m.provider && ($0.threadKey == k || $0.messageId == m.id) }
+    }
+
+    /// Fijados en la pantalla principal (Grupos y DMs), el más reciente primero.
+    static func main(_ pins: [MailPinDTO]) -> [MailPinDTO] {
+        pins.filter(\.onMain).sorted { ($0.mainPinnedAt ?? "") > ($1.mainPinnedAt ?? "") }
+    }
+
+    /// Fijados arriba en Correo de una cuenta.
+    static func mail(_ pins: [MailPinDTO], provider: MailProvider) -> [MailPinDTO] {
+        pins.filter { $0.onMail && $0.provider == provider }.sorted { ($0.mailPinnedAt ?? "") > ($1.mailPinnedAt ?? "") }
+    }
+
+    /// Cambio local (optimista), igual que el servidor: si no queda ningún pin, la fila desaparece.
+    static func applying(_ pins: [MailPinDTO], _ m: MailListItemDTO, main: Bool? = nil, mail: Bool? = nil, now: String = ISODate.string()) -> [MailPinDTO] {
+        var x = find(pins, m) ?? MailPinDTO(provider: m.provider, threadKey: threadKey(m), messageId: m.id, subject: m.subject, from: m.from, date: m.date)
+        x.messageId = m.id
+        if !m.subject.isEmpty { x.subject = m.subject }
+        if let main { x.mainPinnedAt = main ? (x.mainPinnedAt ?? now) : nil }
+        if let mail { x.mailPinnedAt = mail ? (x.mailPinnedAt ?? now) : nil }
+        var out = pins.filter { $0.id != x.id }
+        if x.onMain || x.onMail { out.insert(x, at: 0) }
+        return out
+    }
+}

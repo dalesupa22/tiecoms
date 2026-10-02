@@ -90,7 +90,8 @@ final class WaGgUITests: XCTestCase {
         XCTAssertTrue(app.buttons["wa.menu.moveDms"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["wa.menu.remove"].exists)
         shot("05-menu-fila-wa")
-        app.buttons["wa.menu.pin"].tap() // quita el fijado
+        XCTAssertTrue(app.buttons["wa.menu.pinWa"].exists, "los dos pines con nombre propio")
+        app.buttons["wa.menu.pinMain"].tap() // quita el fijado de la pantalla principal
         sleep(1)
 
         // 4. DMs: el chat 1 a 1 fijado.
@@ -296,5 +297,183 @@ final class WaGgUITests: XCTestCase {
         let last = String(describing: out.last ?? [:])
         XCTAssertTrue(last.contains("jorge@cliente.com"), last)
         XCTAssertFalse(last.contains("hacker@malo.com"), last)
+    }
+
+    // MARK: 2-oct-2026: tocar abre el chat, cabecera compacta, dos pines, «💼 Solo trabajo» y pines de correo
+
+    struct PinesFixture: Decodable {
+        struct Person: Decodable { var email: String; var id: String }
+        var apiUrl: String
+        var password: String
+        var a: Person
+        var personal: String
+        var ventasKey: String
+        var acmeKey: String
+        var familiaKey: String
+        var vecinosKey: String
+        var lauraKey: String
+        var amigoKey: String
+        var pedidosKey: String
+        var mailThread: String
+    }
+
+    private func waitGone(_ e: XCUIElement, _ timeout: TimeInterval = 8) -> Bool {
+        let until = Date().addingTimeInterval(timeout)
+        while Date() < until && e.exists { usleep(250_000) }
+        return !e.exists
+    }
+
+    private func back(_ app: XCUIApplication) {
+        let b = app.navigationBars.buttons.element(boundBy: 0)
+        if b.exists { b.tap() }
+        sleep(1)
+    }
+
+    func testWhatsAppTapOpensChatCompactHeaderAndPins() throws {
+        guard let path = ProcessInfo.processInfo.environment["TC_FIXTURE_PINES"], !path.isEmpty else { throw XCTSkip("Sin TC_FIXTURE_PINES") }
+        let p = try JSONDecoder().decode(PinesFixture.self, from: Data(contentsOf: URL(fileURLWithPath: path)))
+        guard p.apiUrl.contains("localhost") || p.apiUrl.contains("127.0.0.1") else { throw XCTSkip("solo API local") }
+        let app = login(Fixture(apiUrl: p.apiUrl, password: p.password, a: .init(email: p.a.email, id: p.a.id), generalId: "", waGroupKey: "", waDmKey: ""))
+
+        // 1. Grupos: tocar el chat de WhatsApp abre sus mensajes (no un menú ni una hoja de ajustes).
+        let acme = app.buttons["wa.row.\(p.acmeKey)"]
+        XCTAssertTrue(acme.waitForExistence(timeout: 25), "Clientes Acme en Grupos")
+        // Al entrar, la app revalida WhatsApp (resync): se espera a que la lista quede quieta antes de tocar.
+        sleep(4)
+        XCTAssertTrue(acme.waitForExistence(timeout: 15))
+        acme.tap()
+        XCTAssertTrue(app.navigationBars["Clientes Acme"].waitForExistence(timeout: 10), "abre la conversación")
+        sleep(1); shot("p00-tras-tocar")
+        XCTAssertTrue(app.buttons["wa.enableSend"].waitForExistence(timeout: 12),
+                      "cuenta personal en solo lectura: barra para activar «Responder desde chaggu»")
+        XCTAssertFalse(app.buttons["wa.inbox.move"].exists, "sin la hoja de ajustes arriba de los mensajes")
+        XCTAssertTrue(app.buttons["wa.chat.more"].exists, "los ajustes del chat van en ⋯")
+        sleep(1); shot("p01-grupos-toque-abre-chat")
+        app.buttons["wa.chat.more"].tap()
+        XCTAssertTrue(app.buttons["wa.menu.pinMain"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["wa.menu.pinWa"].exists)
+        XCTAssertTrue(app.buttons["wa.chat.settings"].exists)
+        shot("p02-chat-menu-dos-pines")
+        // «📌 Fijar en la pantalla principal» desde ⋯ del chat.
+        app.buttons["wa.menu.pinMain"].tap()
+        sleep(1)
+        back(app)
+        XCTAssertTrue(app.descendants(matching: .any)["row.pinned.\(p.acmeKey)"].waitForExistence(timeout: 8), "📌 en la fila de Grupos")
+        XCTAssertTrue(app.descendants(matching: .any)["grp.bucket.pinned"].exists, "sale en Fijados")
+        shot("p03-grupos-fijado-principal")
+
+        // 2. Pantalla WhatsApp: cabecera compacta y buscador arriba.
+        let access = app.buttons.matching(identifier: "access.whatsapp").allElementsBoundByIndex.first(where: \.isHittable)
+        XCTAssertNotNil(access); access?.tap()
+        let line = app.buttons["wa.accounts"]
+        XCTAssertTrue(line.waitForExistence(timeout: 10), "línea de cuentas")
+        XCTAssertTrue(line.label.contains("2 cuentas conectadas"), line.label)
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Conecta tu WhatsApp personal'")).firstMatch.exists, "el texto explicativo solo sin cuentas")
+        XCTAssertFalse(app.buttons["Desconectar"].exists, "sin tarjetas grandes de cuenta")
+        let search = app.searchFields.firstMatch
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
+        XCTAssertLessThan(search.frame.minY, line.frame.minY, "buscador arriba")
+        XCTAssertTrue(app.buttons["wa.workOnly"].exists, "«💼 Solo trabajo» junto a las categorías")
+        // Se recuerda en el dispositivo: si una corrida anterior lo dejó encendido, se apaga para empezar.
+        if app.buttons["wa.workOnly"].isSelected { app.buttons["wa.workOnly"].tap(); sleep(1) }
+        let ventas = app.buttons["wa.chat.\(p.ventasKey)"]
+        XCTAssertTrue(ventas.waitForExistence(timeout: 10))
+        sleep(1); shot("p04-whatsapp-cabecera-compacta")
+        app.buttons["wa.more"].tap()
+        XCTAssertTrue(app.buttons["wa.more.reorganize"].waitForExistence(timeout: 4), "Reorganizar en ⋯")
+        XCTAssertTrue(app.switches["wa.more.showHidden"].exists || app.buttons["wa.more.showHidden"].exists, "Mostrar ocultos en ⋯")
+        shot("p05-whatsapp-menu-mas")
+        app.buttons["wa.more.accounts"].tap()
+        XCTAssertTrue(app.switches["wa.sendToggle.\(p.personal)"].waitForExistence(timeout: 6), "«Responder desde chaggu» en la hoja de cuentas")
+        XCTAssertTrue(app.buttons["Desconectar"].exists)
+        shot("p06-hoja-cuentas")
+        app.buttons["wa.accounts.done"].tap()
+        sleep(1)
+
+        // 3. Tocar un chat de la pantalla WhatsApp abre los mensajes.
+        ventas.tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "descuento por volumen")).firstMatch.waitForExistence(timeout: 10), "mensajes del chat")
+        sleep(1); shot("p07-whatsapp-chat-mensajes")
+        back(app)
+
+        // 4. Deslizar a la derecha: «Fijar en WhatsApp» → arriba con 📌.
+        let familia = app.buttons["wa.chat.\(p.familiaKey)"]
+        XCTAssertTrue(familia.waitForExistence(timeout: 8))
+        familia.swipeRight()
+        let pinWa = app.buttons["wa.swipe.pin.\(p.familiaKey)"]
+        XCTAssertTrue(pinWa.waitForExistence(timeout: 5))
+        pinWa.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["wa.pinned.\(p.familiaKey)"].waitForExistence(timeout: 8), "📌 fijado en WhatsApp")
+        sleep(2)
+        let rows = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'wa.chat.'")).allElementsBoundByIndex
+        XCTAssertEqual(rows.min { $0.frame.minY < $1.frame.minY }?.identifier, "wa.chat.\(p.familiaKey)", "el fijado sale primero")
+        shot("p08-fijado-en-whatsapp-arriba")
+
+        // 5. «💼 Solo trabajo»: se esconden familia, amigos y comunidad.
+        app.buttons["wa.workOnly"].tap()
+        XCTAssertTrue(app.buttons["wa.workOnly"].isSelected)
+        XCTAssertTrue(waitGone(app.buttons["wa.chat.\(p.familiaKey)"]), "familia fuera")
+        XCTAssertTrue(app.buttons["wa.chat.\(p.ventasKey)"].exists, "trabajo se queda")
+        XCTAssertTrue(app.buttons["wa.chat.\(p.pedidosKey)"].exists, "clientes se queda")
+        XCTAssertTrue(app.buttons["wa.workOnly"].label.contains("4"), app.buttons["wa.workOnly"].label)
+        shot("p09-solo-trabajo")
+        back(app)
+        app.tabBars.buttons["DMs"].tap()
+        XCTAssertTrue(app.buttons["wa.row.\(p.lauraKey)"].waitForExistence(timeout: 10), "Laura (trabajo) en DMs")
+        XCTAssertFalse(app.buttons["wa.row.\(p.amigoKey)"].exists, "Amigo Fútbol (amigos) escondido en DMs")
+        shot("p10-dms-solo-trabajo")
+        app.tabBars.buttons["Grupos"].tap()
+        sleep(1)
+
+        // 6. Correo: «📌 Fijar en Correo» y «📌 Fijar en la pantalla principal».
+        let mailAccess = app.buttons.matching(identifier: "access.mail").allElementsBoundByIndex.first(where: \.isHittable)
+        XCTAssertNotNil(mailAccess); mailAccess?.tap()
+        let g1 = app.buttons["mail.row.g1"]
+        XCTAssertTrue(g1.waitForExistence(timeout: 15))
+        g1.press(forDuration: 1.0)
+        XCTAssertTrue(app.buttons["mail.menu.pinMail"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["mail.menu.pinMain"].exists)
+        shot("p11-correo-menu-pines")
+        app.buttons["mail.menu.pinMail"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["mail.pinnedHeader"].waitForExistence(timeout: 8), "sección Fijados arriba en Correo")
+        let pinnedRow = app.buttons["mail.pinned.\(p.mailThread)"]
+        XCTAssertTrue(pinnedRow.waitForExistence(timeout: 5))
+        sleep(1); shot("p12-correo-fijados")
+        pinnedRow.tap()
+        XCTAssertTrue(app.buttons["mail.preview.more"].waitForExistence(timeout: 8), "⋯ en el correo abierto")
+        app.buttons["mail.preview.more"].tap()
+        XCTAssertTrue(app.buttons["mail.menu.pinMain"].waitForExistence(timeout: 4))
+        shot("p13-correo-abierto-menu")
+        app.buttons["mail.menu.pinMain"].tap()
+        sleep(1)
+        app.buttons["Cerrar"].firstMatch.tap()
+        sleep(1)
+        back(app)
+        // Sale en Grupos y en DMs (las dos pestañas viven a la vez): se toca el que está a la vista.
+        XCTAssertTrue(app.buttons["mailpin.row.\(p.mailThread)"].firstMatch.waitForExistence(timeout: 10), "el correo sale en Fijados de Grupos")
+        sleep(1); shot("p14-grupos-correo-fijado")
+        let mailPin = app.buttons.matching(identifier: "mailpin.row.\(p.mailThread)").allElementsBoundByIndex.first(where: \.isHittable)
+        XCTAssertNotNil(mailPin)
+        mailPin?.tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "comité")).firstMatch.waitForExistence(timeout: 10), "abre ese correo")
+        shot("p15-correo-desde-principal")
+        app.buttons["Cerrar"].firstMatch.tap()
+        sleep(1)
+
+        // 7. Business con «Responder desde chaggu»: compositor y envío (sin puente queda «Enviando…»).
+        let access2 = app.buttons.matching(identifier: "access.whatsapp").allElementsBoundByIndex.first(where: \.isHittable)
+        access2?.tap()
+        let pedidos = app.buttons["wa.chat.\(p.pedidosKey)"]
+        XCTAssertTrue(pedidos.waitForExistence(timeout: 10))
+        pedidos.tap()
+        let composer = app.textViews["wa.composer"].exists ? app.textViews["wa.composer"] : app.textFields["wa.composer"]
+        XCTAssertTrue(composer.waitForExistence(timeout: 10), "compositor")
+        composer.tap(); composer.typeText("Sí, tenemos talla M")
+        app.buttons["wa.sendButton"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["wa.pending"].waitForExistence(timeout: 20), "burbuja «Enviando…»")
+        sleep(1); shot("p16-business-compositor-enviando")
+        back(app)
+        // Deja «Solo trabajo» apagado y el chat fijado como estaban.
+        if app.buttons["wa.workOnly"].waitForExistence(timeout: 5) { app.buttons["wa.workOnly"].tap() }
     }
 }

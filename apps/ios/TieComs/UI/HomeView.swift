@@ -29,8 +29,8 @@ struct HomeView: View {
     @State private var viewMode = GroupsViewMode.load()
     /// Grupo por archivar (confirmación).
     @State private var archiving: ConversationDTO?
-    /// Chat de WhatsApp de la bandeja abierto (su hoja).
-    @State private var waOpen: WaChatDTO?
+    /// Correo fijado en la pantalla principal que se abrió (su vista previa).
+    @State private var mailOpen: MailPinDTO?
 
     /// Asuntos abiertos por conversación (sin los personales), en orden de urgencia.
     static func openByConversation(_ all: [String: IssueDTO]) -> [String: [IssueDTO]] {
@@ -56,7 +56,7 @@ struct HomeView: View {
                 // Los personales no tienen grupo: no van bajo ninguna fila.
                 let open = Self.openByConversation(store.issues)
                 // WhatsApp movido a Grupos: mismas reglas de orden y separadores (sin espacio elegido ni en Menciones/Tareas).
-                let wa = store.workspaceFilter == nil ? WaInbox.rows(store.waInbox, place: WaInbox.groups, query: query, filter: tab) : []
+                let wa = store.workspaceFilter == nil ? WaInbox.rows(store.waInbox, place: WaInbox.groups, query: query, filter: tab, workOnly: store.waWorkOnly) : []
                 // Recordatorios vencidos: chip «🔔 N» al final de los filtros (antes, una fila propia).
                 let due = store.reminders.filter { (ISODate.parse($0.remindAt) ?? .distantFuture) <= Date() }.count
                 List {
@@ -71,7 +71,7 @@ struct HomeView: View {
                     HomeTabs(d: d, selected: $tab, cases: HomeFilter.groupCases, groupsOnly: true,
                              leading: store.channels.hasAny ? AnyView(ChannelAccessChips()) : nil,
                              trailing: due > 0 ? AnyView(DueRemindersChip(due: due)) : nil,
-                             extraCount: { t in WaInbox.rows(store.waInbox, place: WaInbox.groups, filter: t).count })
+                             extraCount: { t in WaInbox.rows(store.waInbox, place: WaInbox.groups, filter: t, workOnly: store.waWorkOnly).count })
                         .listRowBackground(Color.clear)
                         .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
                     // Correo en el chat: «Comenta tus correos con el equipo · Conectar» (como Hoy en la web).
@@ -103,7 +103,13 @@ struct HomeView: View {
                         // Lista: una sola lista con el orden único y separadores discretos Fijados · Sin leer · Recientes.
                         // Los chats de WhatsApp movidos a Grupos se intercalan en el mismo orden.
                         let split = InboxBucket.split(flat, conv: \.conv, extraUnread: { $0.tree.derivedUnread + $0.tree.derivedMentions })
-                        ForEach(WaInbox.mix(split, wa: wa, activity: { HomeOrder.activity($0.conv) }, urgent: { $0.conv.unreadMentions > 0 }), id: \.bucket) { b in
+                        let buckets = WaInbox.mix(split, wa: wa, activity: { HomeOrder.activity($0.conv) }, urgent: { $0.conv.unreadMentions > 0 })
+                        // Correos fijados en la pantalla principal: en «Fijados», junto a los chats fijados.
+                        let mailPins = tab == .all && !searching && store.workspaceFilter == nil && !MailPins.main(store.mailPins).isEmpty
+                        if mailPins && !buckets.contains(where: { $0.bucket == .pinned }) {
+                            Section { MailMainPinRows(open: $mailOpen) } header: { HomeHeader(title: L(InboxBucket.pinned.labelKey), identifier: "grp.bucket.pinned") }
+                        }
+                        ForEach(buckets, id: \.bucket) { b in
                             Section {
                                 ForEach(b.items) { item in
                                     switch item {
@@ -112,6 +118,7 @@ struct HomeView: View {
                                     case .wa(let w): waRow(w)
                                     }
                                 }
+                                if b.bucket == .pinned && mailPins { MailMainPinRows(open: $mailOpen) }
                             } header: { HomeHeader(title: L(b.bucket.labelKey), identifier: "grp.bucket.\(b.bucket.rawValue)") }
                         }
                         if searching { QuickSearchSections(d: d, query: query, showGroups: false) }
@@ -123,9 +130,11 @@ struct HomeView: View {
                                 ForEach(wa) { w in waRow(w) }
                             } header: { HomeHeader(title: "WhatsApp", identifier: "grp.section.whatsapp") }
                         }
-                        if !tree.pinned.isEmpty {
+                        let mailPinsTree = tab == .all && !searching && store.workspaceFilter == nil && !MailPins.main(store.mailPins).isEmpty
+                        if !tree.pinned.isEmpty || mailPinsTree {
                             Section {
                                 ForEach(tree.pinned) { c in convLink(d, c, indent: 0, showWs: true) }
+                                if mailPinsTree { MailMainPinRows(open: $mailOpen) }
                             } header: { HomeHeader(title: "📌 " + L("side.pinned")) }
                         }
                         ForEach(tree.sections) { s in section(d, s, tree: tree, open: open, searching: searching) }
@@ -153,7 +162,7 @@ struct HomeView: View {
                     guard store.tab == .home else { return }
                     await store.channels.refresh(store)
                 }
-                .sheet(item: $waOpen) { w in WaChatSheet(chat: w) { store.upsertWaInbox($0) } }
+                .mailPinSheet($mailOpen, store: store)
             } else {
                 ProgressView()
             }
@@ -422,13 +431,12 @@ struct HomeView: View {
         HomeCollapse.save(collapsed)
     }
 
-    /// Fila de un chat de WhatsApp en Grupos: abre su hoja; pulsación larga y deslizar para fijar, mover o sacar.
+    /// Fila de un chat de WhatsApp en Grupos: abre sus mensajes; pulsación larga y deslizar para fijar, mover o sacar.
     private func waRow(_ w: WaChatDTO) -> some View {
-        Button { waOpen = w } label: { WaInboxRow(chat: w).contentShape(Rectangle()) }
-            .buttonStyle(RowPressStyle())
+        NavigationLink(value: Route.waChat(w)) { WaInboxRow(chat: w, multi: store.waInboxMultiAccount).contentShape(Rectangle()) }
             .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 12))
             .accessibilityIdentifier("wa.row.\(w.inboxKey)")
-            .contextMenu { WaInboxMenuItems(chat: w, onOpen: { waOpen = w }) }
+            .contextMenu { WaChatMenuItems(chat: w, full: false) }
             .pinSwipe(pinned: w.inboxPinnedAt != nil, id: w.inboxKey) { store.toggleWaPin(w) }
     }
 

@@ -176,17 +176,33 @@ struct MailBrowser: View {
             Section { controls }
                 .listRowBackground(Color.clear)
                 .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+            // «📌 Fijar en Correo»: las conversaciones fijadas de esta cuenta, arriba de la bandeja (sin buscar ni filtrar).
+            let pinned = !f.filtered && f.box != "sent" ? MailPins.mail(store.mailPins, provider: p) : []
+            let pinnedKeys = Set(pinned.map(\.threadKey))
+            if !pinned.isEmpty {
+                Section {
+                    ForEach(pinned) { pin in
+                        let m = items?.first { MailPins.threadKey($0) == pin.threadKey } ?? pin.listItem
+                        Button { preview = m } label: { MailRow(item: m) }
+                            .buttonStyle(.plain)
+                            .contextMenu { MailPinMenuItems(item: m) }
+                            .accessibilityIdentifier("mail.pinned.\(pin.threadKey)")
+                    }
+                } header: { Text("📌 " + L("mail.pinned")).textCase(nil).accessibilityIdentifier("mail.pinnedHeader") }
+            }
             Section {
                 if let error { Text(error).font(.footnote).foregroundStyle(.red) }
                 if items == nil { HStack { Spacer(); ProgressView(); Spacer() } }
                 if items?.isEmpty == true && error == nil {
                     Text(f.filtered ? L("mail.noResults") : L("mail.empty")).font(.subheadline).foregroundStyle(Theme.textSecondary)
                 }
-                ForEach(items ?? []) { m in
+                ForEach((items ?? []).filter { !pinnedKeys.contains(MailPins.threadKey($0)) }) { m in
                     Button { preview = m } label: { MailRow(item: m, showDir: f.box != "inbox", query: f.q) }
                         .buttonStyle(.plain)
                         .contextMenu {
                             Button { preview = m } label: { Label(conversationId == nil ? L("mail.bring") : L("mail.pickHere"), systemImage: "bubble.left.and.text.bubble.right") }
+                            Divider()
+                            MailPinMenuItems(item: m)
                         }
                         .accessibilityIdentifier("mail.row.\(m.id)")
                 }
@@ -214,6 +230,7 @@ struct MailBrowser: View {
         .scrollDismissesKeyboard(.interactively)
         .refreshable { await load(fresh: true) }
         .task(id: cacheKey) { await show() }
+        .task { await store.loadMailPins() }
         .task(id: qText) {
             // Escribir busca solo, a los 400 ms.
             let t = qText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -480,7 +497,16 @@ struct MailPreviewSheet: View {
             }
             .navigationTitle(sharing ? L("mail.shareTitle") : (item.subject.isEmpty ? L("mail.noSubject") : item.subject))
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button(L("common.close")) { dismiss() } } }
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button(L("common.close")) { dismiss() } }
+                if !sharing && !provider.isWhatsApp {
+                    ToolbarItem(placement: .primaryAction) {
+                        Menu { MailPinMenuItems(item: full?.item ?? item) } label: { Image(systemName: "ellipsis.circle") }
+                            .accessibilityLabel(L("wa.more"))
+                            .accessibilityIdentifier("mail.preview.more")
+                    }
+                }
+            }
         }
         .task { do { full = try await store.getMail(provider, item.id) } catch { self.error = L10n.errorText(error) } }
     }
@@ -768,6 +794,94 @@ struct WaShareSheet: View {
                 store.show(MailShareText.done(ids.count))
                 dismiss()
             } catch { store.show(L10n.errorText(error)) }
+        }
+    }
+}
+
+// MARK: - Correos fijados
+
+/// Las dos opciones de fijar una conversación de correo, con su estado: «📌 Fijar en la pantalla principal» (Grupos y DMs)
+/// y «📌 Fijar en Correo» (sección «Fijados» arriba de la bandeja).
+struct MailPinMenuItems: View {
+    @Environment(AppStore.self) private var store
+    let item: MailListItemDTO
+    var body: some View {
+        let pin = MailPins.find(store.mailPins, item)
+        let onMain = pin?.onMain == true, onMail = pin?.onMail == true
+        Button { run(main: !onMain) } label: {
+            if onMain { Label(L("mail.unpinMain"), systemImage: "pin.slash") } else { Text(L("mail.pinMain")) }
+        }
+        .accessibilityIdentifier("mail.menu.pinMain")
+        Button { run(mail: !onMail) } label: {
+            if onMail { Label(L("mail.unpinMail"), systemImage: "pin.slash") } else { Text(L("mail.pinMail")) }
+        }
+        .accessibilityIdentifier("mail.menu.pinMail")
+    }
+
+    private func run(main: Bool? = nil, mail: Bool? = nil) {
+        Haptics.tap()
+        Task {
+            do {
+                try await store.setMailPin(item, main: main, mail: mail)
+                store.show((main ?? mail ?? false) ? L("toast.pinned") : L("toast.unpinned"))
+            } catch { store.show(L10n.errorText(error)) }
+        }
+    }
+}
+
+/// Fila de un correo fijado en la pantalla principal: ícono de Gmail/Outlook, asunto y remitente. Tocar abre el correo.
+struct MailPinRow: View {
+    let pin: MailPinDTO
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            MailProviderIcon(provider: pin.provider, size: 28).frame(width: 30, height: 30).accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(pin.subject.isEmpty ? L("mail.noSubject") : pin.subject)
+                        .font(.subheadline.weight(.medium)).foregroundStyle(Theme.textPrimary).lineLimit(1)
+                    Spacer(minLength: 4)
+                    Text("📌").font(.caption2).accessibilityHidden(true)
+                }
+                HStack(spacing: 6) {
+                    Text(pin.from?.display ?? pin.provider.label).font(.caption).foregroundStyle(Theme.textSecondary).lineLimit(1)
+                    Spacer(minLength: 4)
+                    Text(MailUI.date(pin.date)).font(.caption2).foregroundStyle(Theme.textSecondary)
+                }
+            }
+        }
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel([pin.provider.label, pin.subject.isEmpty ? L("mail.noSubject") : pin.subject, pin.from?.display, L("side.pinned")]
+            .compactMap { $0 }.joined(separator: ", "))
+    }
+}
+
+/// Los correos fijados en la pantalla principal (Grupos y DMs): filas que abren el correo, con menú y deslizar para quitar.
+struct MailMainPinRows: View {
+    @Environment(AppStore.self) private var store
+    @Binding var open: MailPinDTO?
+    var body: some View {
+        ForEach(MailPins.main(store.mailPins)) { p in
+            Button { open = p } label: { MailPinRow(pin: p) }
+                .buttonStyle(RowPressStyle())
+                .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 12))
+                .accessibilityIdentifier("mailpin.row.\(p.threadKey)")
+                .contextMenu { MailPinMenuItems(item: p.listItem) }
+                .pinSwipe(pinned: true, id: "mail.\(p.threadKey)") {
+                    Task { do { try await store.setMailPin(p.listItem, main: false) } catch { store.show(L10n.errorText(error)) } }
+                }
+        }
+    }
+}
+
+extension View {
+    /// Hoja del correo fijado que se tocó en la pantalla principal.
+    func mailPinSheet(_ open: Binding<MailPinDTO?>, store: AppStore) -> some View {
+        sheet(item: open) { p in
+            MailPreviewSheet(provider: p.provider, item: p.listItem, conversationId: nil) { sharedIn in
+                open.wrappedValue = nil
+                store.navigate(to: .conversation(sharedIn))
+            }
         }
     }
 }

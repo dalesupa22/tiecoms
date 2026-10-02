@@ -39,10 +39,12 @@ enum WaInbox {
     }
 
     /// Los de una sección (Grupos o DMs), con el filtro de chips y la búsqueda. «Menciones» y «Tareas» no aplican a WhatsApp.
-    static func rows(_ all: [WaChatDTO], place: String, query: String = "", filter: HomeFilter = .all) -> [WaChatDTO] {
+    /// `workOnly` («💼 Solo trabajo»): sin familia, amigos, comunidad ni otros, salvo los fijados en la pantalla principal.
+    static func rows(_ all: [WaChatDTO], place: String, query: String = "", filter: HomeFilter = .all, workOnly: Bool = false) -> [WaChatDTO] {
         let q = query.trimmingCharacters(in: .whitespaces).folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
         return all.filter { w in
             guard w.inboxPlace == place, !w.hidden else { return false }
+            if workOnly && w.inboxPinnedAt == nil && !WaWorkOnly.categories.contains(w.category) { return false }
             switch filter {
             case .all: break
             case .unread: if w.unread <= 0 { return false }
@@ -80,6 +82,9 @@ enum WaInbox {
     /// Lo que se manda en el PATCH para moverlo a una sección (o sacarlo con nil).
     static func placePatch(_ place: String?) -> [String: Any] { ["inboxPlace": place ?? NSNull()] }
     static func pinPatch(_ pinned: Bool) -> [String: Any] { ["inboxPinned": pinned] }
+    /// «📌 Fijar en WhatsApp»: arriba en la pantalla WhatsApp (no toca la bandeja).
+    static func waPinPatch(_ pinned: Bool) -> [String: Any] { ["pinned": pinned] }
+    static func hidePatch(_ hidden: Bool) -> [String: Any] { ["hidden": hidden] }
 
     /// Aplica el cambio en local (optimista), igual que el servidor: fijar sin estar en la bandeja lo mueve a la sugerida;
     /// sacarlo quita también el fijado.
@@ -96,6 +101,19 @@ enum WaInbox {
             } else { x.inboxPinnedAt = nil }
         }
         return x
+    }
+}
+
+/// «💼 Solo trabajo» en la pantalla WhatsApp (y en sus filas de Grupos/DMs): solo Trabajo y Clientes. Por dispositivo.
+enum WaWorkOnly {
+    static let key = "tc.wa.workOnly"
+    static let categories: Set<WaCategory> = [.trabajo, .clientes]
+    static func load(_ defaults: UserDefaults = .standard) -> Bool { defaults.bool(forKey: key) }
+    static func save(_ on: Bool, _ defaults: UserDefaults = .standard) { defaults.set(on, forKey: key) }
+    static func filter(_ chats: [WaChatDTO], on: Bool) -> [WaChatDTO] { on ? chats.filter { categories.contains($0.category) } : chats }
+    /// Cuántos chats hay en total (o solo de Trabajo y Clientes) según los contadores del API.
+    static func total(_ counts: [String: WaChatsPage.Count], on: Bool) -> Int {
+        counts.filter { !on || categories.contains(WaCategory(rawValue: $0.key) ?? .otros) }.values.reduce(0) { $0 + $1.total }
     }
 }
 
@@ -138,6 +156,51 @@ extension AppStore {
             upsertWaInbox(up.inInbox || !pinned ? up : WaInbox.applying(up, pinned: pinned))
             return up
         } catch { if revision == waPrivacy.revision && stamp == sessionStamp { applyWaInbox(before) }; throw error }
+    }
+}
+
+extension AppStore {
+    /// «📌 Fijar en WhatsApp» / «Quitar de fijados en WhatsApp» (`pinned`). Si el chat también está en la bandeja, su fila se actualiza.
+    @discardableResult
+    func waSetPinned(_ c: WaChatDTO, _ pinned: Bool) async throws -> WaChatDTO {
+        _ = try requireWaSource(c.inboxKey)
+        var up = try await waPatchChat(c, WaInbox.waPinPatch(pinned))
+        if up.jid.isEmpty { up = c; up.pinned = pinned }
+        if waInbox.contains(where: { $0.id == up.id }) { upsertWaInbox(up) }
+        return up
+    }
+
+    /// Ocultar o volver a mostrar un chat (también lo saca de la bandeja mientras esté oculto).
+    @discardableResult
+    func waSetHidden(_ c: WaChatDTO, _ hidden: Bool) async throws -> WaChatDTO {
+        _ = try requireWaSource(c.inboxKey)
+        let up = try await waPatchChat(c, WaInbox.hidePatch(hidden))
+        if hidden { waInbox.removeAll { $0.id == c.id } } else { upsertWaInbox(up) }
+        return up
+    }
+
+    /// Responder un chat desde chaggu (POST …/send {text}); solo si la cuenta tiene «Responder desde chaggu».
+    func waSend(_ c: WaChatDTO, text: String) async throws -> WaSendResult {
+        _ = try requireWaSource(c.inboxKey)
+        return try await api.request("/whatsapp/chats/\(c.accountId)/\(waEnc(c.jid))/send", method: "POST", json: ["text": text])
+    }
+
+    /// «Responder desde chaggu» en una cuenta (PATCH /whatsapp/accounts/:id {sendEnabled}).
+    func waSetSendEnabled(_ accountId: String, _ on: Bool) async throws -> WaAccountDTO {
+        try await api.request("/whatsapp/accounts/\(accountId)", method: "PATCH", json: ["sendEnabled": on])
+    }
+
+    private func waEnc(_ s: String) -> String { s.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed.subtracting(CharacterSet(charactersIn: "/"))) ?? s }
+}
+
+/// Respuesta de POST …/send: sent, queued (el puente lo manda en cuanto pueda) o failed.
+struct WaSendResult: Decodable, Equatable, Sendable {
+    var id: String
+    var status: String
+    var error: String?
+    init(from decoder: Decoder) throws {
+        let c = try container(decoder)
+        id = c.v("id", ""); status = c.v("status", "queued"); error = c.o("error")
     }
 }
 

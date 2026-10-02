@@ -418,4 +418,97 @@ extension WaInboxGgTests {
         for bad in ["luis", "a@b", "a@@b.co", "@b.co", "a@b.", "a@.co"] { XCTAssertFalse(GgEmails.valid(bad), bad) }
         XCTAssertEqual(GgEmails.invalid(["a@b.co", "luis"]), ["luis"])
     }
+
+    // MARK: 2-oct-2026: dos pines, «💼 Solo trabajo» y pines de correo
+
+    func testWaTwoPinsPatchesAndAccountSendEnabled() throws {
+        XCTAssertEqual(WaInbox.pinPatch(true) as? [String: Bool], ["inboxPinned": true], "«Fijar en la pantalla principal»")
+        XCTAssertEqual(WaInbox.waPinPatch(false) as? [String: Bool], ["pinned": false], "«Fijar en WhatsApp»")
+        XCTAssertEqual(WaInbox.hidePatch(true) as? [String: Bool], ["hidden": true])
+        let a = try dec(WaAccountDTO.self, #"{"id":"acc1","label":"danny","sendEnabled":true,"status":"connected"}"#)
+        XCTAssertTrue(a.sendEnabled)
+        XCTAssertFalse(try dec(WaAccountDTO.self, #"{"id":"acc1"}"#).sendEnabled, "servidor anterior = solo lectura")
+        // La ruta del chat lleva el DTO (Hashable).
+        let c = try dec(WaChatDTO.self, wa("1"))
+        XCTAssertEqual(Route.waChat(c), Route.waChat(c))
+        var other = c; other.pinned = true
+        XCTAssertNotEqual(Route.waChat(c), Route.waChat(other))
+    }
+
+    func testWorkOnlyFiltersCategoriesButKeepsMainPinned() throws {
+        func chat(_ jid: String, _ cat: String, pinned: String? = nil) throws -> WaChatDTO {
+            var j = wa(jid, place: "groups", pinned: pinned)
+            j.removeLast(); j += #","category":"\#(cat)"}"#
+            return try dec(WaChatDTO.self, j)
+        }
+        let all = try [chat("t", "trabajo"), chat("c", "clientes"), chat("f", "familia"), chat("a", "amigos"), chat("o", "otros"),
+                       chat("p", "familia", pinned: "2026-10-01T08:00:00.000Z")]
+        XCTAssertEqual(Set(WaWorkOnly.filter(all, on: true).map(\.jid)), ["t", "c"], "pantalla WhatsApp: solo trabajo y clientes")
+        XCTAssertEqual(WaWorkOnly.filter(all, on: false).count, 6)
+        XCTAssertEqual(Set(WaInbox.rows(all, place: "groups", workOnly: true).map(\.jid)), ["t", "c", "p"], "la fijada en principal siempre se ve")
+        XCTAssertEqual(WaInbox.rows(all, place: "groups").count, 6)
+        let counts = try dec([String: WaChatsPage.Count].self, #"{"trabajo":{"total":3,"unread":1},"clientes":{"total":2,"unread":0},"familia":{"total":7,"unread":0}}"#)
+        XCTAssertEqual(WaWorkOnly.total(counts, on: true), 5)
+        XCTAssertEqual(WaWorkOnly.total(counts, on: false), 12)
+        let d = UserDefaults(suiteName: "wa-work-only-test")!
+        d.removePersistentDomain(forName: "wa-work-only-test")
+        XCTAssertFalse(WaWorkOnly.load(d))
+        WaWorkOnly.save(true, d)
+        XCTAssertTrue(WaWorkOnly.load(d), "queda como lo dejó")
+        d.removePersistentDomain(forName: "wa-work-only-test")
+    }
+
+    func testMailPinDecodeAndBootstrap() throws {
+        let p = try dec(MailPinDTO.self, #"{"provider":"google","threadKey":"t1","messageId":"m2","subject":"Contrato","from":{"name":"Ana","email":"ana@x.co"},"date":"2026-10-01T10:00:00.000Z","mainPinnedAt":"2026-10-02T10:00:00.000Z","mailPinnedAt":null}"#)
+        XCTAssertEqual(p.id, "google|t1")
+        XCTAssertTrue(p.onMain); XCTAssertFalse(p.onMail)
+        XCTAssertEqual(p.from?.display, "Ana")
+        XCTAssertEqual(p.listItem.id, "m2", "tocarlo abre ese correo")
+        XCTAssertEqual(p.listItem.threadId, "t1")
+        XCTAssertNil(try dec(BootstrapDTO.self, #"{"me":{"id":"a","name":"A"}}"#).mailPins, "servidor anterior")
+        let b = try dec(BootstrapDTO.self, #"{"me":{"id":"a","name":"A"},"mailPins":[{"provider":"microsoft","threadKey":"x","messageId":"x"},{"provider":"rara"}]}"#)
+        XCTAssertEqual(b.mailPins?.map(\.provider), [.microsoft])
+    }
+
+    func testMailPinPutBody() throws {
+        var m = MailListItemDTO(provider: .google, id: "m1", from: MailAddressDTO(name: nil, email: "a@b.co"), to: [], subject: "Hola", snippet: "", date: "2026-10-01T10:00:00.000Z")
+        // Sin hilo: el id del correo hace de threadKey; solo va el pin que cambia.
+        var b = MailPins.body(m, main: true)
+        XCTAssertEqual(b["provider"] as? String, "google")
+        XCTAssertEqual(b["threadKey"] as? String, "m1")
+        XCTAssertEqual(b["messageId"] as? String, "m1")
+        XCTAssertEqual(b["subject"] as? String, "Hola")
+        XCTAssertEqual(b["date"] as? String, "2026-10-01T10:00:00.000Z")
+        XCTAssertEqual(b["main"] as? Bool, true)
+        XCTAssertNil(b["mail"], "ausente = no cambia")
+        let from = b["from"] as? [String: Any]
+        XCTAssertEqual(from?["email"] as? String, "a@b.co")
+        XCTAssertTrue(from?["name"] is NSNull)
+        m.threadId = "th9"; m.from = nil; m.date = nil
+        b = MailPins.body(m, mail: false)
+        XCTAssertEqual(b["threadKey"] as? String, "th9")
+        XCTAssertEqual(b["mail"] as? Bool, false)
+        XCTAssertNil(b["main"])
+        XCTAssertTrue(b["from"] is NSNull); XCTAssertTrue(b["date"] is NSNull)
+        XCTAssertNoThrow(try JSONSerialization.data(withJSONObject: b))
+    }
+
+    func testMailPinsApplyingAndLists() throws {
+        var m = MailListItemDTO(provider: .google, id: "m1", from: nil, to: [], subject: "A", snippet: "", date: nil)
+        m.threadId = "t1"
+        var pins = MailPins.applying([], m, main: true, now: "2026-10-02T01:00:00.000Z")
+        XCTAssertEqual(MailPins.main(pins).map(\.threadKey), ["t1"])
+        XCTAssertEqual(MailPins.mail(pins, provider: .google), [])
+        pins = MailPins.applying(pins, m, mail: true, now: "2026-10-02T02:00:00.000Z")
+        XCTAssertEqual(pins.count, 1, "mismo hilo, una fila")
+        XCTAssertEqual(pins[0].mainPinnedAt, "2026-10-02T01:00:00.000Z", "fijar otra vez no cambia la fecha")
+        XCTAssertEqual(MailPins.mail(pins, provider: .google).count, 1)
+        XCTAssertEqual(MailPins.mail(pins, provider: .microsoft).count, 0)
+        // Otro correo del mismo hilo encuentra el pin.
+        var reply = m; reply.id = "m2"
+        XCTAssertNotNil(MailPins.find(pins, reply))
+        pins = MailPins.applying(pins, m, main: false)
+        pins = MailPins.applying(pins, m, mail: false)
+        XCTAssertEqual(pins, [], "sin pines, la fila desaparece (como el servidor)")
+    }
 }

@@ -248,6 +248,31 @@ extension AppStore {
         return MailShareResult.decode(data).map { putMail($0) }
     }
 
+    // MARK: Pines (migr. 096)
+
+    /// GET /mail/pins → {pins}. Un servidor sin la ruta (404) deja la lista como estaba.
+    func loadMailPins() async {
+        struct R: Decodable { var pins: [MailPinDTO] }
+        let stamp = sessionStamp
+        guard let r: R = try? await api.request("/mail/pins"), (try? requireSession(stamp)) != nil else { return }
+        if r.pins != mailPins { mailPins = r.pins }
+    }
+
+    /// PUT /mail/pins: «📌 Fijar en la pantalla principal» (`main`) y «📌 Fijar en Correo» (`mail`). Optimista: si falla, vuelve.
+    func setMailPin(_ m: MailListItemDTO, main: Bool? = nil, mail: Bool? = nil) async throws {
+        struct R: Decodable { var pins: [MailPinDTO] }
+        let before = mailPins, stamp = sessionStamp
+        mailPins = MailPins.applying(mailPins, m, main: main, mail: mail)
+        do {
+            let r: R = try await api.request("/mail/pins", method: "PUT", json: MailPins.body(m, main: main, mail: mail))
+            try requireSession(stamp)
+            mailPins = r.pins
+        } catch {
+            if stamp == sessionStamp { mailPins = before }
+            throw error
+        }
+    }
+
     // MARK: Conectar
 
     func cancelMailAuthorization() {

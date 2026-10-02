@@ -532,6 +532,8 @@ struct BootstrapDTO: Codable, Equatable, Sendable {
     var missedCalls: Int?
     /// Chats de WhatsApp movidos a la bandeja (contrato 1-oct-2026). nil = servidor anterior.
     var waInbox: [WaChatDTO]?
+    /// Correos fijados (migr. 096). nil = servidor anterior.
+    var mailPins: [MailPinDTO]?
 
     /// Llamadas de voz y video (docs/LLAMADAS.md): sin esto no hay botones, franja ni pestaña.
     var callsEnabled: Bool { features?.calls == true }
@@ -544,6 +546,7 @@ struct BootstrapDTO: Codable, Equatable, Sendable {
         myActiveCall = c.o("myActiveCall")
         missedCalls = c.intOpt("missedCalls")
         waInbox = c.contains(AnyKey("waInbox")) ? c.lossyArray("waInbox") : nil
+        mailPins = c.contains(AnyKey("mailPins")) ? c.lossyArray("mailPins") : nil
         contract = c.v("contract", "")
         serverTime = c.v("serverTime", "")
         me = try c.decode(UserDTO.self, forKey: AnyKey("me"))

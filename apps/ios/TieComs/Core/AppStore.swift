@@ -46,6 +46,8 @@ enum Route: Hashable {
     case mail(String, mode: String)
     /// La lista de Gmail/Outlook. Con `conversationId` (desde el ＋ del chat) el destino ya viene elegido.
     case mailBox(conversationId: String?)
+    /// Un chat de WhatsApp: sus mensajes con el compositor; los ajustes van en ⋯.
+    case waChat(WaChatDTO)
 }
 
 /// Barra inferior (docs/GRUPOS.md): Grupos (`home`) · DMs · Asuntos · Calendario · Llamadas (solo con `features.calls`) · Tú (`settings`).
@@ -102,6 +104,8 @@ final class AppStore {
     /// Chats de WhatsApp en la bandeja (bootstrap.waInbox + evento wa.inbox), mezclados en Grupos o DMs.
     var waInbox: [WaChatDTO] = []
     var waPrivacy = WaPrivacy()
+    /// «💼 Solo trabajo» de la pantalla WhatsApp (también filtra sus filas en Grupos/DMs). Se recuerda en el dispositivo.
+    var waWorkOnly = WaWorkOnly.load() { didSet { if waWorkOnly != oldValue { WaWorkOnly.save(waWorkOnly) } } }
     /// gg dentro del chat (contrato 1-oct-2026, parte B): historial por fuente, pendientes y si el API lo tiene.
     let ggSide = GgSideCenter()
     /// Accesos con logo de Grupos/DMs: WhatsApp y correo conectados y sus no leídos (caché de 60 s).
@@ -118,6 +122,8 @@ final class AppStore {
     var mailRevision = 0
     /// Últimas conexiones de correo conocidas (para la invitación de Hoy); nil = aún no se pidieron.
     var mailConnectionsKnown: [MailConnectionDTO]?
+    /// Correos fijados (bootstrap.mailPins y PUT /mail/pins): en la pantalla principal y arriba en Correo.
+    var mailPins: [MailPinDTO] = []
     /// Aviso breve (toast).
     var toast: String?
     /// «Deshacer» del aviso actual (completar o descartar un asunto); se borra al cambiar el aviso.
@@ -609,7 +615,7 @@ final class AppStore {
         pending = []
         typing = [:]
         issues = [:]; pins = [:]; topics = [:]; taskCardComments = [:]; reminders = []; events = [:]; scheduled = []
-        mails = [:]; mailsMissing = []; mailWanted = []; mailConnectionsKnown = nil
+        mails = [:]; mailsMissing = []; mailWanted = []; mailConnectionsKnown = nil; mailPins = []
         blockedUserIds = []
         localDndUntil = nil; dndLocalOnly = false; dndExpiryTask?.cancel(); dndExpiryTask = nil
         homePath = []; dmsPath = []; issuesPath = []; agendaPath = []; settingsPath = []; callsPath = []
@@ -676,6 +682,8 @@ final class AppStore {
         applyMissedCalls(d.callsEnabled ? (d.missedCalls ?? 0) : 0)
         // Servidor anterior (sin waInbox): la bandeja queda como estaba.
         if let wa = d.waInbox { applyWaInbox(wa) }
+        // Servidor anterior (sin mailPins): se dejan los que hubiera.
+        if let pins = d.mailPins, pins != mailPins { mailPins = pins }
     }
 
     func scheduleBootstrap(signal: String? = nil) {

@@ -596,15 +596,15 @@ struct DMsView: View {
     @State private var query = ""
     @State private var newChat = false
     @State private var issuesFor: String?
-    /// Chat de WhatsApp de la bandeja abierto (su hoja).
-    @State private var waOpen: WaChatDTO?
+    /// Correo fijado en la pantalla principal que se abrió (su vista previa).
+    @State private var mailOpen: MailPinDTO?
 
     var body: some View {
         Group {
             if let d = store.data {
                 let list = Naming.dms(d, query: query)
                 // WhatsApp movido a DMs: se mezcla con el mismo orden y separadores.
-                let wa = WaInbox.rows(store.waInbox, place: WaInbox.dms, query: query)
+                let wa = WaInbox.rows(store.waInbox, place: WaInbox.dms, query: query, workOnly: store.waWorkOnly)
                 let searching = !query.trimmingCharacters(in: .whitespaces).isEmpty
                 let threadUnread = Naming.chatThreadUnread(d)
                 List {
@@ -636,7 +636,13 @@ struct DMsView: View {
                     } else {
                         // Orden único con separadores discretos Fijados · Sin leer · Recientes (1.6.4).
                         let split = InboxBucket.split(list, conv: { $0 }, extraUnread: { threadUnread[$0.id] ?? 0 })
-                        ForEach(WaInbox.mix(split, wa: wa, activity: HomeOrder.activity, urgent: { $0.unreadMentions > 0 }), id: \.bucket) { b in
+                        let buckets = WaInbox.mix(split, wa: wa, activity: HomeOrder.activity, urgent: { $0.unreadMentions > 0 })
+                        // Correos fijados en la pantalla principal: en «Fijados», junto a los chats fijados.
+                        let mailPins = !MailPins.main(store.mailPins).isEmpty
+                        if mailPins && !buckets.contains(where: { $0.bucket == .pinned }) {
+                            Section { MailMainPinRows(open: $mailOpen) } header: { HomeHeader(title: L(InboxBucket.pinned.labelKey), identifier: "dm.bucket.pinned") }
+                        }
+                        ForEach(buckets, id: \.bucket) { b in
                             Section {
                                 ForEach(b.items) { item in
                                     switch item {
@@ -644,6 +650,7 @@ struct DMsView: View {
                                     case .wa(let w): waRow(w)
                                     }
                                 }
+                                if b.bucket == .pinned && mailPins { MailMainPinRows(open: $mailOpen) }
                             } header: { HomeHeader(title: L(b.bucket.labelKey), identifier: "dm.bucket.\(b.bucket.rawValue)") }
                         }
                     }
@@ -657,7 +664,7 @@ struct DMsView: View {
                 .scrollContentBackground(.hidden)
                 .animation(.spring(response: 0.45, dampingFraction: 0.9), value: list.map(\.id) + wa.map(\.inboxKey))
                 .overlay {
-                    if list.isEmpty && wa.isEmpty && (!searching || QuickSearch.run(d, query: query).isEmpty) {
+                    if list.isEmpty && wa.isEmpty && (searching || MailPins.main(store.mailPins).isEmpty) && (!searching || QuickSearch.run(d, query: query).isEmpty) {
                         if !searching {
                             ContentUnavailableView {
                                 Label(L("dm.empty"), systemImage: "bubble.left.and.bubble.right")
@@ -672,7 +679,7 @@ struct DMsView: View {
                     guard store.tab == .dms else { return }
                     await store.channels.refresh(store)
                 }
-                .sheet(item: $waOpen) { w in WaChatSheet(chat: w) { store.upsertWaInbox($0) } }
+                .mailPinSheet($mailOpen, store: store)
             } else {
                 ProgressView()
             }
@@ -697,13 +704,12 @@ struct DMsView: View {
         .contextMenu { ConversationMenuItems(conv: c) }
     }
 
-    /// Fila de un chat de WhatsApp en DMs: abre su hoja; pulsación larga y deslizar para fijar, mover o sacar.
+    /// Fila de un chat de WhatsApp en DMs: abre sus mensajes; pulsación larga y deslizar para fijar, mover o sacar.
     private func waRow(_ w: WaChatDTO) -> some View {
-        Button { waOpen = w } label: { WaInboxRow(chat: w).contentShape(Rectangle()) }
-            .buttonStyle(RowPressStyle())
+        NavigationLink(value: Route.waChat(w)) { WaInboxRow(chat: w, multi: store.waInboxMultiAccount).contentShape(Rectangle()) }
             .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 12))
             .accessibilityIdentifier("wa.row.\(w.inboxKey)")
-            .contextMenu { WaInboxMenuItems(chat: w, onOpen: { waOpen = w }) }
+            .contextMenu { WaChatMenuItems(chat: w, full: false) }
             .pinSwipe(pinned: w.inboxPinnedAt != nil, id: w.inboxKey) { store.toggleWaPin(w) }
     }
 }

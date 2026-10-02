@@ -307,6 +307,8 @@ enum WaCategory: String, Codable, CaseIterable, Sendable {
 struct WaAccountDTO: Codable, Equatable, Identifiable, Sendable {
     var privacyReady: Bool?
     var id: String
+    /// «Responder desde chaggu» activado en esta cuenta (apagado = solo lectura). Ausente en servidores anteriores.
+    var sendEnabled: Bool
     var label: String
     var kind: String
     var status: String
@@ -329,6 +331,7 @@ struct WaAccountDTO: Codable, Equatable, Identifiable, Sendable {
         let c = try container(decoder)
         id = try c.decode(String.self, forKey: AnyKey("id"))
         privacyReady = c.o("privacyReady")
+        sendEnabled = c.v("sendEnabled", false)
         label = c.v("label", "")
         kind = c.v("kind", "personal")
         status = c.v("status", "pending")
@@ -346,7 +349,7 @@ struct WaAccountDTO: Codable, Equatable, Identifiable, Sendable {
     }
 }
 
-struct WaChatDTO: Codable, Equatable, Identifiable, Sendable {
+struct WaChatDTO: Codable, Hashable, Identifiable, Sendable {
     var accountId: String
     var accountLabel: String
     var accountKind: String

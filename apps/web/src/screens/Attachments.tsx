@@ -94,29 +94,40 @@ export async function downloadAttachment(a: AttachmentDTO) {
 /** Clipboard uses a PNG image; downloading always preserves the original (including GIF animation). */
 export async function copyAttachmentImage(a: AttachmentDTO) {
   const es = getLang() !== 'en';
+  const session = client.getSessionIdentity();
+  const sameSession = () => { if (session !== client.getSessionIdentity()) throw new Error('Session changed'); };
   try {
     if (a.sizeBytes > 24 * 1024 * 1024 || (a.width && a.height && a.width * a.height > 20_000_000)) throw new Error(es ? 'Imagen demasiado grande para copiar. Descarga el original.' : 'Image too large to copy. Download the original.');
     const png = async () => {
       const blob = await client.fetchBlob(a.url);
-      if (blob.type === 'image/png') return blob;
+      sameSession();
+      if (blob.size > 24 * 1024 * 1024) throw new Error(es ? 'Imagen demasiado grande para copiar. Descarga el original.' : 'Image too large to copy. Download the original.');
+      if (blob.type === 'image/png') {
+        const bytes = new DataView(await blob.slice(0, 24).arrayBuffer());
+        if (bytes.byteLength < 24 || bytes.getUint32(0) !== 0x89504e47 || bytes.getUint32(4) !== 0x0d0a1a0a || bytes.getUint32(16) * bytes.getUint32(20) > 20_000_000) throw new Error(es ? 'La imagen no se puede copiar. Descarga el original.' : 'This image cannot be copied. Download the original.');
+        sameSession(); return blob;
+      }
       const bitmap = await createImageBitmap(blob);
       try {
         if (bitmap.width * bitmap.height > 20_000_000) throw new Error('Image too large');
         const canvas = document.createElement('canvas'); canvas.width = bitmap.width; canvas.height = bitmap.height;
         const context = canvas.getContext('2d'); if (!context) throw new Error('Canvas unavailable'); context.drawImage(bitmap, 0, 0);
-        return await new Promise<Blob>((resolve, reject) => canvas.toBlob((b) => b ? resolve(b) : reject(new Error('Image unavailable')), 'image/png'));
+        const result = await new Promise<Blob>((resolve, reject) => canvas.toBlob((b) => b ? resolve(b) : reject(new Error('Image unavailable')), 'image/png'));
+        if (result.size > 24 * 1024 * 1024) throw new Error(es ? 'Imagen demasiado grande para copiar. Descarga el original.' : 'Image too large to copy. Download the original.');
+        sameSession(); return result;
       } finally { bitmap.close(); }
     };
     if ('__TAURI_INTERNALS__' in window) {
       const { invoke } = await import('@tauri-apps/api/core');
-      const blob = await png(); await invoke('copy_image', { png: Array.from(new Uint8Array(await blob.arrayBuffer())) });
+      const blob = await png(); const bytes = Array.from(new Uint8Array(await blob.arrayBuffer())); sameSession(); await invoke('copy_image', { png: bytes });
     } else {
       if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') throw new Error(es ? 'Este navegador no permite copiar imágenes. Abre o descarga el original.' : 'This browser cannot copy images. Open or download the original.');
       // Start clipboard permission during the gesture, before the authenticated image fetch.
       await navigator.clipboard.write([new ClipboardItem({ 'image/png': png() })]);
     }
+    sameSession();
     toast(es ? (a.contentType.includes('gif') ? 'Imagen copiada (fotograma del GIF)' : 'Imagen copiada') : (a.contentType.includes('gif') ? 'Image copied (GIF frame)' : 'Image copied'));
-  } catch (e) { toast(e instanceof Error ? e.message : es ? 'No se pudo copiar la imagen' : 'Could not copy image'); }
+  } catch (e) { if (session === client.getSessionIdentity()) toast(e instanceof Error ? e.message : es ? 'No se pudo copiar la imagen' : 'Could not copy image'); }
 }
 const imageMenu = (a: AttachmentDTO) => [
   { label: getLang() === 'en' ? 'Copy image' : 'Copiar imagen', icon: '⧉', onSelect: () => void copyAttachmentImage(a) },

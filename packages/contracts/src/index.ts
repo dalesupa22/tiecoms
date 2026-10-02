@@ -1782,7 +1782,7 @@ export const GgSideSource = z.string().regex(/^(c:[0-9a-f-]{36}|wa:[0-9a-f-]{36}
 export const GgSideQuery = z.object({ source: GgSideSource });
 export const GgSideSourceInput = z.object({ source: GgSideSource });
 export const GgCalendarWindow = z.object({from:z.iso.datetime({offset:true}),to:z.iso.datetime({offset:true}),durationMin:z.number().int().min(15).max(240),timezone:z.string().min(1).max(64),startHour:z.number().int().min(0).max(23).optional(),endHour:z.number().int().min(1).max(24).optional()}).refine(v=>(v.endHour ?? 18)>(v.startHour ?? 9),'Invalid daily hours');
-export interface GgCalendarSlotsDTO {status:'ready'|'needs_connect'|'reconnect'|'error'|'needs_clarification';provider:'google'|'microsoft'|null;checkedAt:string|null;timezone:string|null;slots:{startsAt:string;endsAt:string}[];calendar?:'primary'|null;scope?:'owned-primary-and-chaggu'|null}
+export interface GgCalendarSlotsDTO {status:'ready'|'needs_connect'|'reconnect'|'error'|'needs_clarification';provider:'google'|'microsoft'|null;checkedAt:string|null;timezone:string|null;slots:{startsAt:string;endsAt:string}[];calendar?:'primary'|null;scope?:'owned-primary-and-chaggu'|null;startHour?:number;endHour?:number}
 export const GgSideAskInput = z.object({ source: GgSideSource, text: z.string().trim().min(1).max(2000), quotedMessageIds: z.array(z.string().min(1).max(200)).max(20).optional(), calendar:GgCalendarWindow.optional() });
 export const GgSideTone = z.enum(['me', 'shorter', 'formal', 'more']);
 export const GgSideReplyInput = z.object({ source: GgSideSource, tone: GgSideTone.optional(), quotedMessageIds: z.array(z.string().min(1).max(200)).max(20).optional() });

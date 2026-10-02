@@ -29,5 +29,11 @@ describe('nocturna core',()=>{
     expect(c.request.mock.calls.length).toBeLessThanOrEqual(10);
     await c.loadOlder('chat');expect(c.state.conversations.chat.messages[0].seq).toBe(1);
   });
+  it('a downloaded blob cannot cross an account transition during response streaming',async()=>{
+    const c:any=new TieComsClient(options);let complete:any;let started:any;const reading=new Promise(r=>started=r);
+    c.raw=async()=>({status:200,ok:true,blob:()=>{started();return new Promise(r=>complete=r);}});
+    const result=c.fetchBlob('/api/v1/attachments/private');const rejected=expect(result).rejects.toMatchObject({code:'session_changed'});
+    await reading;c.sessionGeneration++;complete(new Blob(['private bytes']));await rejected;
+  });
 
 });

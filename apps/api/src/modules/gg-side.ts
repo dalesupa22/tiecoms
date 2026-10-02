@@ -12,6 +12,7 @@
  *  - Lo que usa IA exige users.ai_consent_at (403 ai_consent_required).
  */
 import { calendarSlots } from './gg-calendar.ts';
+import { inferredCalendarWindow } from '../calendar-window.ts';
 import { z } from 'zod';
 import { GgCalendarWindow,type GgCalendarSlotsDTO } from '@tiecoms/contracts';
 import { randomUUID } from 'node:crypto';
@@ -174,7 +175,7 @@ async function ask(sys: string, user: string, history: { role: 'user' | 'assista
 async function quotedOf(userId: string, s: Src, ids?: string[]) {
   if (!ids?.length) return [];
   const got = await sourceMessages(userId, s, { ids: [...new Set(ids)].slice(0, 20), limit: 20 });
-  return got.map((m) => ({ id: m.id, author: m.mine ? 'Tú' : m.author ?? 'Alguien', text: m.text.slice(0, 1000) }));
+  return got.map((m) => ({ id: m.id, author: m.mine ? 'Tú' : m.author ?? 'Alguien', text: m.text.slice(0, 1000), at: m.at }));
 }
 const quotedBlock = (q: { author: string; text: string }[]) =>
   q.length ? `\n<<<CITADOS\n${q.map((x) => `${x.author}: ${clean(x.text)}`).join('\n')}\nCITADOS>>>` : '';
@@ -251,7 +252,8 @@ export async function askSide(userId: string, input: { source: string; text: str
   const history = await threadHistory(userId, s.key, st.session);
   const userMsg = await save(userId, s.key, st.session, 'user', input.text, quoted.length ? quoted : null, null);
   const msgs = await sourceMessages(userId, s);
-  const calendar=await calendarForGesture(userId,input.source,input.quotedMessageIds ?? [],input.calendar,input.text);
+  const ownRelativeDate=/(?:pr[oó]xima semana|semana que viene|next week|ma[ñn]ana|tomorrow)/i.test(input.text);
+  const calendar=await calendarForGesture(userId,input.source,input.quotedMessageIds ?? [],input.calendar,[input.text,...quoted.map(q=>q.text)].join('\n'),ownRelativeDate || !quoted.length ? Date.now() : Date.parse(quoted[quoted.length-1]!.at));
   const shape = '{"answer": string, "followUps": [string, string, string], "drafts": [{"style": "short"|"warm"|"action", "text": string}] }  (drafts solo si te piden redactar una respuesta; si no, [])';
   const sys = `${system('responder la pregunta de la persona sobre este chat. Al final propone 2 a 4 siguientes preguntas (followUps).', s, me, shape)}\n\n${dataBlock(msgs, me)}\nCALENDARIO VERIFICADO POR EL SERVIDOR: ${JSON.stringify(calendar)}. Solo si ready hay horarios comprobados; si no, pide conectar o completar rango/duración/zona. Nunca digas que revisaste la agenda sin checkedAt.`;
   const { raw } = await ask(sys, `${me} pregunta: ${input.text.slice(0, 2000)}${quotedBlock(quoted)}`, history);
@@ -298,7 +300,7 @@ export async function suggest(userId: string, input: { source: string; messageId
   const shape = '{"suggestions": [{"kind": "reply"|"task"|"reminder"|"message_person"|"summary", "title": string, "detail": string|null, "draft": string|null, "params": {"assigneeName": string|null, "due": "YYYY-MM-DD"|null, "personName": string|null}, "forMessageIds": [string]}]}';
   const sys = `${system('proponer de 2 a 6 cosas que la persona puede hacer con los mensajes citados (responder, crear tarea con responsable y fecha si salen del texto, recordatorio, escribirle a alguien, resumir). Sin repetir, de la que más encaja a la que menos. forMessageIds: ids de los mensajes citados a los que aplica.', s, me, shape)}\n\n${dataBlock(msgs, me)}`;
   const { raw } = await ask(sys, `Mensajes citados:\n<<<CITADOS\n${picked.map((m) => `[${m.id}] ${m.mine ? 'Tú' : m.author ?? 'Alguien'}: ${clean(m.text)}`).join('\n')}\nCITADOS>>>`);
-  const calendar=await calendarForGesture(userId,input.source,input.messageIds,input.calendar,picked.map(m=>m.text).join('\n'));
+  const calendar=await calendarForGesture(userId,input.source,input.messageIds,input.calendar,picked.map(m=>m.text).join('\n'),Date.parse(picked[picked.length-1]!.at));
   const valid = new Set(picked.map((m) => m.id));
   let list = suggestions(parseJson(raw)?.suggestions, valid);
   // Mínimo 2: si el modelo no dio, lo de siempre (responder y resumir).
@@ -309,7 +311,7 @@ export async function suggest(userId: string, input: { source: string; messageId
   for (const b of base) if (list.length < 2 && !list.some((x) => x.kind === b.kind)) list.push(b);
   list = list.map((x) => (x.forMessageIds.length ? x : { ...x, forMessageIds: [...valid] }));
   const quoted = picked.map((m) => ({ id: m.id, author: m.mine ? 'Tú' : m.author ?? 'Alguien', text: m.text.slice(0, 1000) }));
-  await save(userId, s.key, st.session, 'gg', `Esto puedo hacer con ${picked.length === 1 ? 'este mensaje' : `estos ${picked.length} mensajes`}:`, quoted, { suggestions: list,...(calendar ? {calendar} : {}) });
+  await save(userId, s.key, st.session, 'gg', `Esto puedo hacer con ${picked.length === 1 ? 'este mensaje' : `estos ${picked.length} mensajes`}:` + calendarText(calendar), quoted, { suggestions: list,...(calendar ? {calendar} : {}) });
   return { suggestions: list,...(calendar ? {calendar} : {}) };
 }
 
@@ -333,8 +335,24 @@ export async function pendingCounts(userId: string, sourcesCsv: string) {
 }
 
 /** Exactly one fresh provider check per explicit gesture; no speculative dates or background checks. */
-async function calendarForGesture(userId:string,source:string,messageIds:string[],window:z.infer<typeof GgCalendarWindow>|undefined,text:string):Promise<GgCalendarSlotsDTO|null> {
+async function calendarForGesture(userId:string,source:string,messageIds:string[],window:z.infer<typeof GgCalendarWindow>|undefined,text:string,reference=Date.now()):Promise<GgCalendarSlotsDTO|null> {
   if(window) return await calendarSlots(userId,{source,messageIds,...window}) as GgCalendarSlotsDTO;
-  if(/(?:agenda|agendar|reuni[oó]n|meeting|calendar|horario|disponibilidad|schedule|free.?time)/i.test(text)) return {status:'needs_clarification',provider:null,checkedAt:null,timezone:null,slots:[]};
+  if(/(?:agenda|agendar|reuni[oó]n|meeting|calendar|horario|disponibilidad|libres?|fechas?|dates?|schedule|free.?time)/i.test(text)) {
+    const tz=(await pool.query('SELECT sleep_tz FROM users WHERE id=$1',[userId])).rows[0]?.sleep_tz;
+    const inferred=tz ? inferredCalendarWindow(text,tz,reference) : null;
+    if(inferred) return await calendarSlots(userId,{source,messageIds,...inferred}) as GgCalendarSlotsDTO;
+    return {status:'needs_clarification',provider:null,checkedAt:null,timezone:null,slots:[]};
+  }
   return null;
+}
+
+function calendarText(calendar:GgCalendarSlotsDTO|null) {
+  if(!calendar) return '';
+  if(calendar.status==='needs_connect'||calendar.status==='reconnect') return '\n\nPara comprobar tus horarios, conecta o vuelve a autorizar tu calendario en Ajustes.';
+  if(calendar.status!=='ready') return '\n\nUsa «Ver disponibilidad / agendar» para precisar fechas, duración y zona horaria. No he confirmado horarios todavía.';
+  const format=(iso:string)=>new Date(iso).toLocaleString('es-CO',{timeZone:calendar.timezone ?? 'UTC',weekday:'long',day:'numeric',month:'long',hour:'2-digit',minute:'2-digit'});
+  if(!calendar.slots.length) return `\n\nRevisé tu calendario principal y Chaggu (${calendar.timezone}); no encontré huecos en la jornada de búsqueda.`;
+  const mins=Math.round((Date.parse(calendar.slots[0]!.endsAt)-Date.parse(calendar.slots[0]!.startsAt))/60000);
+  const hours=calendar.startHour===undefined ? '' : `, jornada ${String(calendar.startHour).padStart(2,'0')}:00–${String(calendar.endHour ?? 18).padStart(2,'0')}:00`;
+  return `\n\nHorarios libres comprobados en tu calendario principal y Chaggu (${calendar.timezone}). Propuestas de ${mins} minutos${hours}:\n`+calendar.slots.map(s=>`• ${format(s.startsAt)} – ${new Date(s.endsAt).toLocaleTimeString('es-CO',{timeZone:calendar.timezone ?? 'UTC',hour:'2-digit',minute:'2-digit'})}`).join('\n')+'\nUsa «Ver disponibilidad / agendar» para ajustar la duración, elegir e invitar. Aún no se ha creado una reunión.';
 }

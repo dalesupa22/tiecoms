@@ -1698,12 +1698,17 @@ export class TieComsClient {
   }
   /** Descarga autenticada (Bearer) de una ruta del API, p. ej. AttachmentDTO.url. */
   async fetchBlob(apiPath: string): Promise<Blob> {
+    const generation = this.sessionGeneration;
     const path = apiPath.replace(/^\/api\/v1/, '');
     if (this.accessToken && Date.now() > this.accessExp - 30_000) await this.refresh();
+    this.assertSession(generation);
     let res = await this.raw(path);
-    if (res.status === 401 && (await this.refresh())) res = await this.raw(path);
+    this.assertSession(generation);
+    if (res.status === 401 && (await this.refresh())) { this.assertSession(generation); res = await this.raw(path); this.assertSession(generation); }
     if (!res.ok) throw await parseError(res);
-    return res.blob();
+    const blob = await res.blob();
+    this.assertSession(generation);
+    return blob;
   }
 
   /** Conversación lateral privada desde un mensaje (no publica nada en el origen). */

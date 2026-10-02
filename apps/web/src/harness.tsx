@@ -192,6 +192,7 @@ Object.assign(waChats[0]!, { inboxPlace: 'groups', inboxPinnedAt: iso(D), accoun
 Object.assign(waChats[1]!, { inboxPlace: 'groups', inboxPinnedAt: null, accountStatus: 'connected' });
 Object.assign(waChats[7]!, { inboxPlace: 'dms', inboxPinnedAt: null, accountStatus: q.get('waoff') ? 'logged_out' : 'connected' });
 data.waInbox = waChats.filter((c: any) => c.inboxPlace) as any;
+data.mailPins = [{ provider: 'google', threadKey: 'th-coop', messageId: 'm-coop', subject: 'Propuesta Coopcentral', from: { name: 'Jorge Pérez', email: 'jorge@coopcentral.com' }, date: iso(3 * H), mainPinnedAt: iso(H), mailPinnedAt: null }];
 // «gg de este chat» sin backend: un hilo por fuente y respuestas fijas (?consent=0 para ver el permiso).
 if (q.get('consent') !== '0') data.me.aiConsent = true;
 const ggThreads: Record<string, any[]> = {};
@@ -246,6 +247,16 @@ const memeItems = [['#444', 'Drake', 2], ['#555', 'Distracted', 3], ['#666', 'Su
   if (/^\/conversations\/[^/]+\/gifs$/.test(path) && init.method === 'POST') return { attachment: att(`gif-${Date.now()}`, 'gato.gif', 'image/gif', 90_000), attribution: 'GIF: «gato» · Ana · CC BY-SA 4.0 · Wikimedia Commons (vía Openverse)' };
   if (/^\/attachments\/[^/]+\/link$/.test(path) && init.method === 'POST') { const id = path.split('/')[2]; const a = g.flatMap((m) => m.attachments ?? []).find((x) => x.id === id); return { url: `${location.origin}/archivo/demo-${id}-token-0123456789`, name: a?.name ?? 'archivo', expiresAt: new Date(now + 7 * D).toISOString() }; }
   if (path.startsWith('/file-links/') && init.method === 'DELETE') return { ok: true };
+  if (path === '/mail/pins' && init.method === 'PUT') {
+    const j = init.json; const list = [...((client.getState().data as any)?.mailPins ?? [])];
+    const at = list.findIndex((p: any) => p.provider === j.provider && p.threadKey === j.threadKey);
+    const prev = at >= 0 ? list[at] : { provider: j.provider, threadKey: j.threadKey, mainPinnedAt: null, mailPinnedAt: null };
+    const now = new Date().toISOString();
+    const next = { ...prev, messageId: j.messageId, subject: j.subject, from: j.from ?? null, date: j.date ?? null,
+      mainPinnedAt: j.main === undefined ? prev.mainPinnedAt : j.main ? prev.mainPinnedAt ?? now : null, mailPinnedAt: j.mail === undefined ? prev.mailPinnedAt : j.mail ? prev.mailPinnedAt ?? now : null };
+    if (at >= 0) list[at] = next; else list.unshift(next);
+    return { pins: list.filter((p: any) => p.mainPinnedAt || p.mailPinnedAt) };
+  }
   if (/^\/whatsapp\/accounts\/[^/]+$/.test(path) && init.method === 'PATCH') { const a = (waAccounts as any[]).find((x) => path.endsWith(x.id))!; Object.assign(a, init.json); return a; }
   if (path === '/whatsapp/accounts' && !init.method) return { accounts: waAccounts, max: 5 };
   if (path.startsWith('/whatsapp/chats?')) {

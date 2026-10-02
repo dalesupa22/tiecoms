@@ -4,7 +4,10 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { MailConnectionDTO, MailListItemDTO, MailMessageDTO, MailProvider, MessageDTO, SharedMailDTO, SharedMailCommentDTO } from '@tiecoms/contracts';
 import { client, useClient } from '../app-client.ts';
 import { errorText, locale, t } from '../i18n.ts';
-import { openMenuAt, toast } from '../menu.tsx';
+import { menuProps, openMenuAt, toast } from '../menu.tsx';
+import { MailPinButton, MailPinRows, mailPinItems } from './MailPins.tsx';
+/** Los pines al momento de abrir el menú (sin suscribirse). */
+const pinsNow = () => client.getState().data?.mailPins ?? [];
 import { navigate, queryParam } from '../router.ts';
 import { Avatar, Modal, conversationTitle, initials, orgById, personById, personColor } from '../ui.tsx';
 import { openDialog, quickTimes } from '../actions.tsx';
@@ -264,12 +267,14 @@ export function MailBrowser({ connections, onPick, pickLabel, compact, inPane, o
       <div className="mail-res-h"><button className="link-btn mail-refresh" disabled={busy} title={t('mail.refresh')} aria-label={t('mail.refresh')} onClick={() => void load(undefined, true)}>{busy ? '…' : '↻'}</button> {filtered ? (items ? t('mail.results', { n: items.length + (next ? '+' : ''), name: LABEL[provider!] }) : t('mail.searching')) : (f.box === 'inbox' && category && category !== 'any' ? `${t('mail.latest.inbox')} · ${t(`mail.cat.${category}` as 'mail.cat.any')}` : t(`mail.latest.${f.box}`))}</div>
       {error && <div className="error" style={{ padding: '8px 12px' }}>{error}</div>}
       <div className="mail-list">
+        {/* Fijados en Correo (2-oct-2026): arriba de la bandeja, sin buscar ni filtrar. */}
+        {!filtered && f.box === 'inbox' && <MailPinRows where="mail" provider={provider!} onOpen={(p, item) => (onOpen ? onOpen(p, item) : setPreview(item))} />}
         {items === null && <div className="hint" style={{ padding: 16 }}>{t('common.loading')}</div>}
         {items?.length === 0 && !error && <div className="empty" style={{ padding: 16 }}>{filtered ? t('mail.noResults') : t('mail.empty')}</div>}
         {items?.map((m) => {
           const other = m.box === 'sent' ? m.to[0] : m.from;
           return (
-            <div key={m.id} className={`mail-row ${m.unread ? 'is-unread' : ''}`} {...(compact && !inPane ? {} : { draggable: true, onDragStart: (e: React.DragEvent) => setDrag(e, 'mail', { provider: provider!, id: m.id, subject: m.subject, from: who(other) }, m.subject || t('mail.noSubject')) })} onMouseEnter={() => prefetch(m)} onMouseLeave={() => { if (hover.current) clearTimeout(hover.current); }} onTouchStart={() => prefetch(m)}>
+            <div key={m.id} className={`mail-row ${m.unread ? 'is-unread' : ''}`} {...menuProps(() => mailPinItems(m, pinsNow()))} {...(compact && !inPane ? {} : { draggable: true, onDragStart: (e: React.DragEvent) => setDrag(e, 'mail', { provider: provider!, id: m.id, subject: m.subject, from: who(other) }, m.subject || t('mail.noSubject')) })} onMouseEnter={() => prefetch(m)} onMouseLeave={() => { if (hover.current) clearTimeout(hover.current); }} onTouchStart={() => prefetch(m)}>
               <button className="mail-row-main" onClick={() => (onOpen ? onOpen(provider!, m) : setPreview(m))}>
                 <span className="avatar" style={{ width: 32, height: 32, fontSize: 12, background: personColor(other?.email ?? m.id) }} aria-hidden>{initials(who(other) || '?')}</span>
                 <span className="grow" style={{ minWidth: 0 }}>
@@ -279,6 +284,7 @@ export function MailBrowser({ connections, onPick, pickLabel, compact, inPane, o
                 </span>
               </button>
               {!compact && !inPane && <PinToGrid payload={{ kind: 'mail', provider: provider!, id: m.id, subject: m.subject, from: who(other) }} name={m.subject || t('mail.noSubject')} />}
+              <MailPinButton m={m} />
               <button className="btn small primary mail-pick" onClick={() => onPick(provider!, m)}>{pickLabel}</button>
             </div>
           );

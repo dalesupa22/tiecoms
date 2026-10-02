@@ -831,6 +831,7 @@ export const MailPinInput = z.object({
   subject: z.string().max(300).default(''), from: z.object({ name: z.string().max(200).nullable().optional(), email: z.string().max(254) }).nullable().optional(),
   date: z.iso.datetime({ offset: true }).nullable().optional(), main: z.boolean().optional(), mail: z.boolean().optional(),
 });
+export type MailPinInputDTO = z.input<typeof MailPinInput>;
 /** Correo completo leído en vivo (vista previa antes de compartir). */
 export interface MailMessageDTO extends MailListItemDTO { cc: MailAddressDTO[]; body: string; attachments: MailAttachmentInfoDTO[] }
 export const MailListQuery = z.object({

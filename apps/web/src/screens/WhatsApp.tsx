@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { WaAccountDTO, WaCategory, WaChatDTO, WaKind, WaMessageDTO } from '@tiecoms/contracts';
+import { isWorkChat, setWorkOnly, useWorkOnly } from '../wa-work-only.ts';
 import { client, useClient } from '../app-client.ts';
 import { errorText, locale, t } from '../i18n.ts';
 import { copyText, toast } from '../menu.tsx';
@@ -107,7 +108,8 @@ export function WhatsAppScreen() {
 
   const connected = accounts?.filter((a) => a.status === 'connected') ?? [];
   const privacySyncing = accounts?.some((a) => (accountId === 'all' || accountId === a.id) && a.privacyReady === false) ?? false;
-  const visibleChats = chats.filter((c) => client.isWaChatVisible(c.accountId, c.jid));
+  const workOnly = useWorkOnly();
+  const visibleChats = chats.filter((c) => client.isWaChatVisible(c.accountId, c.jid) && (!workOnly || isWorkChat(c)));
   const visibleOpen = open && client.isWaChatVisible(open.accountId, open.jid) ? open : null;
   const total = Object.values(counts).reduce((n, c) => n + (c?.total ?? 0), 0);
 
@@ -161,6 +163,7 @@ export function WhatsAppScreen() {
             <button className="btn small" onClick={organize} title={t('wa.reorganizeHint')}>✦ {t('wa.reorganize')}</button>
           </div>
           <div className="wa-cats" role="tablist">
+            <button className={`wa-work-only ${workOnly ? 'on' : ''}`} aria-pressed={workOnly} title={t('wa.workOnlyHint')} onClick={() => setWorkOnly(!workOnly)}>{t('wa.workOnly')} <span className="muted">{(counts.trabajo?.total ?? 0) + (counts.clientes?.total ?? 0)}</span></button>
             <button className={category === 'all' ? 'on' : ''} onClick={() => setCategory('all')}>{t('wa.cat.all')} <span className="muted">{total}</span></button>
             {CATEGORIES.map((c) => (
               <button key={c} className={category === c ? 'on' : ''} onClick={() => setCategory(c)}>

@@ -32,6 +32,7 @@ import { CallsScreen } from './Call.tsx';
 import { captureWaPrivacy, openWaDialog, openWaMenuAt, showWaDialogUntilClosed, useWaPrivacy, waMenuProps, waPrivacySyncing, waPrivacyUnavailable } from '../wa-privacy-ui.tsx';
 import { waPrivacyAffected } from '../wa-privacy.ts';
 import './FileLinks.css';
+import { isWorkChat, setWorkOnly, useWorkOnly } from '../wa-work-only.ts';
 import { createFileLink, fileLinkDate, fileLinkText, isFileDrag, readFileDrag, revokeFileLink, type FileLink } from '../file-links.ts';
 
 export function SectionPane({ kind, frame }: { kind: 'agenda' | 'trazo' | 'calls'; frame: PaneFrame }) {
@@ -490,7 +491,8 @@ export function WaListPane({ frame }: { frame: PaneFrame }) {
   }, [q, groups, accountId, revision, active]);
   const connected = accounts?.some((a) => a.status === 'connected') ?? false;
   const privacySyncing = accounts?.some((a) => (!accountId || accountId === a.id) && a.privacyReady === false) ?? false;
-  const visibleChats = chats?.filter((c) => client.isWaChatVisible(c.accountId, c.jid)) ?? null;
+  const workOnly = useWorkOnly();
+  const visibleChats = chats?.filter((c) => client.isWaChatVisible(c.accountId, c.jid) && (!workOnly || isWorkChat(c))) ?? null;
   const visibleOpen = open && client.isWaChatVisible(open.accountId, open.jid) ? open : null;
   const toggleChatPin = async (chat: WaChatDTO) => {
     if (pinBusy) return;
@@ -538,6 +540,7 @@ export function WaListPane({ frame }: { frame: PaneFrame }) {
                   <button className={!groups ? 'on' : ''} onClick={() => setGroups(false)}>{t('grid.allKinds')}</button>
                   <button className={groups ? 'on' : ''} onClick={() => setGroups(true)}>{t('grid.groupsOnly')}</button>
                 </div>
+                <button className={`btn small wa-work-only ${workOnly ? 'is-on' : ''}`} aria-pressed={workOnly} title={t('wa.workOnlyHint')} onClick={() => setWorkOnly(!workOnly)}>{t('wa.workOnly')}</button>
               </div>
               {accounts.length > 1 && <select className="input" aria-label={locale().startsWith('en') ? 'Account' : 'Cuenta'} value={accountId} onChange={(e) => setAccountId(e.target.value)}><option value="">{locale().startsWith('en') ? 'All accounts' : 'Todas las cuentas'}</option>{accounts.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}</select>}
               <div className="pane-list" aria-busy={loading}>

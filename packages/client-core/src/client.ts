@@ -1401,6 +1401,12 @@ export class TieComsClient {
     this.putWaInbox(chat);
     return chat;
   }
+  /** Fijar una conversación de correo en la pantalla principal (main) y/o en Correo (mail). La lista queda en data.mailPins. */
+  async setMailPin(input: import('@tiecoms/contracts').MailPinInputDTO) {
+    const r = await this.request<{ pins: import('@tiecoms/contracts').MailPinDTO[] }>('/mail/pins', { method: 'PUT', json: input });
+    if (this.state.data) this.set({ data: { ...this.state.data, mailPins: r.pins } });
+    return r.pins;
+  }
   /** Leí un chat de WhatsApp de la bandeja: su contador se apaga aquí sin esperar el aviso. */
   markWaInboxRead(accountId: string, jid: string) {
     const c = this.state.data?.waInbox?.find((x) => x.accountId === accountId && x.jid === jid);

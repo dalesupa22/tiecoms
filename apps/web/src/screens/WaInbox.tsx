@@ -28,11 +28,25 @@ async function setInbox(w: Pick<WaChatDTO, 'accountId' | 'jid'>, patch: { inboxP
   } catch (e) { if (valid()) toast(errorText(e)); return null; }
 }
 
+/** «📌 Fijar en WhatsApp» (arriba en la pantalla WhatsApp): independiente del fijado en la pantalla principal (2-oct-2026). */
+async function setWaPinned(w: Pick<WaChatDTO, 'accountId' | 'jid'>, pinned: boolean) {
+  const valid = captureWaPrivacy(w.accountId, w.jid);
+  if (!valid()) return null;
+  try {
+    const up = await client.request<WaChatDTO>(`/whatsapp/chats/${w.accountId}/${encodeURIComponent(w.jid)}`, { method: 'PATCH', json: { pinned } });
+    return valid() ? up : null;
+  } catch (e) { if (valid()) toast(errorText(e)); return null; }
+}
+const waPinItem = (w: WaChatDTO, onChanged?: (c: WaChatDTO) => void): MenuItem => ({
+  label: w.pinned ? t('wa.unpin') : t('wa.pin').replace(/^📌\s*/, ''), icon: '📌', onSelect: () => void setWaPinned(w, !w.pinned).then((up) => { if (up) onChanged?.(up); }),
+});
+
 /** Menú de la fila en Grupos/DMs: fijar o quitar, pasar a la otra sección y sacar de la lista principal. */
 export function waInboxMenu(w: WaChatDTO): MenuItem[] {
   const pinned = !!w.inboxPinnedAt;
   return guardWaMenu(w, [
     { label: pinned ? t('wa.inboxUnpin') : t('wa.inboxPin'), icon: '📌', onSelect: () => void setInbox(w, { inboxPinned: !pinned }) },
+    waPinItem(w),
     w.inboxPlace === 'groups'
       ? { label: t('wa.moveDms'), icon: '✉', onSelect: () => void setInbox(w, { inboxPlace: 'dms' }) }
       : { label: t('wa.moveGroups'), icon: '👥', onSelect: () => void setInbox(w, { inboxPlace: 'groups' }) },
@@ -60,7 +74,8 @@ export function waMainListMenu(w: WaChatDTO, onChanged?: (c: WaChatDTO) => void)
     { label: t('wa.moveToInbox'), icon: '⤴', items: [place(sug), place(sug === 'groups' ? 'dms' : 'groups')] },
     w.inboxPinnedAt
       ? { label: t('wa.inboxUnpin'), icon: '📌', onSelect: run({ inboxPinned: false }) }
-      : { label: `📌 ${t('wa.pinTop')}`, onSelect: run({ inboxPinned: true }, t('wa.movedToast')) },
+      : { label: t('wa.pinTop'), icon: '📌', onSelect: run({ inboxPinned: true }, t('wa.movedToast')) },
+    waPinItem(w, onChanged),
     ...(w.inboxPlace ? [{ label: t('wa.removeFromInbox'), icon: '⤺', danger: true, onSelect: run({ inboxPlace: null }, t('wa.removedToast')) }] : []),
   ]);
 }

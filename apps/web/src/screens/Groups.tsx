@@ -20,6 +20,8 @@ import { StackedAvatars } from './Chats.tsx';
 import { companyLine } from '../quick-search.ts';
 import { QuickActions, QuickSearchField, QuickSearchSections, openNewMessage } from './Quick.tsx';
 import { matchesTab, type HomeTab } from './Shell.tsx';
+import { isWorkChat, useWorkOnly } from '../wa-work-only.ts';
+import { MailPinRows } from './MailPins.tsx';
 import { activityOf, compareConversations, pendingOf, treeOnlyPending, waAsConversation, waInboxFor, withSeparators, withTree } from '../home-order.ts';
 import { WaRow } from './WaInbox.tsx';
 import type { WaChatDTO } from '@tiecoms/contracts';
@@ -427,7 +429,9 @@ type MixItem = { c: ConversationDTO; wa?: WaChatDTO };
 /** Filas de WhatsApp de la bandeja para una sección, ya vistas como conversación y filtradas por el chip (Sin leer, etc.). */
 function useWaRows(place: 'groups' | 'dms' | 'all', tab: HomeTab): MixItem[] {
   const list = useClient((s) => s.data?.waInbox);
-  return useMemo(() => waInboxFor(list, place).map((wa) => ({ c: waAsConversation(wa), wa })).filter((x) => matchesTab(x.c, tab)), [list, place, tab]);
+  // «Solo trabajo» también aquí; lo fijado en la pantalla principal se ve siempre (isWorkChat).
+  const workOnly = useWorkOnly();
+  return useMemo(() => waInboxFor(list, place).filter((wa) => !workOnly || isWorkChat(wa)).map((wa) => ({ c: waAsConversation(wa), wa })).filter((x) => matchesTab(x.c, tab)), [list, place, tab, workOnly]);
 }
 
 export function DmsList({ tab = 'all', activeConv = null }: { tab?: HomeTab; activeConv?: string | null }) {
@@ -442,6 +446,7 @@ export function DmsList({ tab = 'all', activeConv = null }: { tab?: HomeTab; act
   return (
     <>
       {tab === 'all' && <AssistantRows activeConv={activeConv} />}
+      {tab === 'all' && <MailPinRows where="main" />}
       <Separated items={items} convOf={(x) => x.c} render={(x) => x.wa
         ? <WaRow key={x.c.id} w={x.wa} preview={false} active={activeConv === x.c.id} />
         : <ConvItem key={x.c.id} c={x.c} showOrg active={activeConv === x.c.id} />} />
@@ -519,11 +524,11 @@ export function AllList({ tab = 'all', activeConv = null }: { tab?: HomeTab; act
     ...wa,
   ].sort((a, b) => compareConversations(a.c, b.c)), [d, issues, tab, wa]);
   if (!items.length) return <div className="hint" style={{ padding: '8px 10px' }}>{t('inbox.nothing')}</div>;
-  return <Separated items={items} convOf={(x) => x.c}
+  return <>{tab === 'all' && <MailPinRows where="main" />}<Separated items={items} convOf={(x) => x.c}
     render={(x) => x.wa ? <WaRow key={x.c.id} w={x.wa} active={activeConv === x.c.id} />
       : x.group
       ? <GroupEntry key={x.c.id} g={x.group.g} ws={x.group.ws} label={x.group.label} preview showOrg issuesOpen={issuesOpen} active={activeConv === x.c.id} />
-      : <ConvItem key={x.c.id} c={x.c} preview showOrg active={activeConv === x.c.id} />} />;
+      : <ConvItem key={x.c.id} c={x.c} preview showOrg active={activeConv === x.c.id} />} /></>;
 }
 
 // ---------- Selector de vista «Lista | Árbol» (por dispositivo) ----------

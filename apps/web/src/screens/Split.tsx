@@ -85,7 +85,7 @@ export function GridArea({ id, search = '', side }: { id: string | null; search?
   const active = id ?? (activeStore && list.includes(activeStore) ? activeStore : list[0] ?? null);
   const [drop, setDrop] = useState<{ over: string | null; kind: DragKind } | null>(null);
   useEffect(() => {
-    const end = () => setDrop(null), dropEnd = () => queueMicrotask(end), key = (e: KeyboardEvent) => { if(e.key === 'Escape') end(); };
+    const end = () => setDrop(null), dropEnd = () => setTimeout(end, 0), key = (e: KeyboardEvent) => { if(e.key === 'Escape') end(); };
     addEventListener('dragend',end); addEventListener('drop',dropEnd); addEventListener('blur',end); addEventListener('keydown',key);
     return () => { removeEventListener('dragend',end); removeEventListener('drop',dropEnd); removeEventListener('blur',end); removeEventListener('keydown',key); };
   }, []);

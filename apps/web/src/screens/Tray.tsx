@@ -137,7 +137,10 @@ export function DragTray({ gridVisible }: { gridVisible: boolean }) {
       if (k) timer = setTimeout(() => { if (!e.defaultPrevented && token === generation) setDragging(k); }, 0);
     };
     // Capture observes even stopped drops; defer teardown until the target consumed its payload.
-    const drop = () => { const token = generation; queueMicrotask(() => { if (token === generation) end(); }); };
+    // Con queueMicrotask la bandeja se cerraba ENTRE escuchadores del mismo drop (la microtarea corre al vaciarse la pila),
+    // React la desmontaba antes de entregar el drop a la fila y el mensaje no se compartía (2-oct-2026). setTimeout espera
+    // a que termine todo el evento.
+    const drop = () => { const token = generation; setTimeout(() => { if (token === generation) end(); }, 0); };
     const key = (e: KeyboardEvent) => { if (e.key === 'Escape') end(); };
     const visibility = () => { if (document.hidden) end(); };
     document.addEventListener('dragstart', start);

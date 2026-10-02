@@ -1,0 +1,7 @@
+/* ---------- Correos fijados (MailPins.tsx) y «Solo trabajo» de WhatsApp ---------- */
+.mail-pins { margin: 2px 0 6px; }
+.mail-pin-row { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; }
+.mail-pin-btn { opacity: .45; }
+.mail-pin-btn.is-on, .mail-pin-btn:hover { opacity: 1; }
+.mail-row:not(:hover) .mail-pin-btn:not(.is-on) { visibility: hidden; }
+.wa-work-only.is-on, .wa-cats .wa-work-only.on { background: var(--ink); color: var(--paper); }

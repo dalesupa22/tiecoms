@@ -9,6 +9,7 @@ import { installSoundUnlock } from './sound.ts';
 import { t, useLang } from './i18n.ts';
 import { asset, navigate, parse, usePath } from './router.ts';
 import { AuthScreen, ConfirmSignupScreen, SsoReturnScreen } from './screens/Auth.tsx';
+import { McpAuthorizeScreen } from './screens/McpAuthorize.tsx';
 import { ConversationArea, GridScreen } from './screens/Split.tsx';
 import { DragTray } from './screens/Tray.tsx';
 import { useGridSide } from './split.ts';
@@ -62,7 +63,7 @@ export function App() {
   const gridSide = useGridSide();
 
   useEffect(() => {
-    if (status === 'anonymous' && !['login', 'signup', 'invite', 'sso', 'guestCall', 'fileLink', 'room', 'booking', 'bookingManage', 'bookingHome', 'confirmSignup'].includes(route.name)) navigate(`/login${path !== '/' ? `?next=${encodeURIComponent(path)}` : ''}`, true);
+    if (status === 'anonymous' && !['login', 'signup', 'invite', 'sso', 'guestCall', 'fileLink', 'room', 'booking', 'bookingManage', 'bookingHome', 'confirmSignup'].includes(route.name)) navigate(`/login${path !== '/' ? `?next=${encodeURIComponent(route.name === 'mcpAuthorize' ? path + location.search : path)}` : ''}`, true);
     // Con sesión desde antes, el enlace de una invitación a la empresa (/signup?org=…) se acepta en /invite/… (también
     // entra a sus grupos). Si la sesión acaba de nacer aquí mismo (se registró con el enlace), ya entró: sigue normal.
     const org = route.name === 'signup' ? new URLSearchParams(location.search).get('org') : null;
@@ -84,6 +85,7 @@ export function App() {
   if (route.name === 'invite') return <InviteScreen key={lang} token={route.token} />;
   if (status === 'anonymous') return <AuthScreen key={lang} mode={route.name === 'signup' ? 'signup' : 'login'} after={nextParam()} />;
   if (route.name === 'login' || route.name === 'signup') return null;
+  if (route.name === 'mcpAuthorize') return <McpAuthorizeScreen key={lang} />;
 
   return (
     <>

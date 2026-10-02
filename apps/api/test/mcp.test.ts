@@ -101,3 +101,105 @@ describe('conector MCP', () => {
     expect((await rpc(t.json.token, 'ping')).status).toBe(401);
   });
 });
+
+describe('conector MCP: OAuth, tickets y calendario', () => {
+  let danny: Awaited<ReturnType<typeof signup>>, laura: typeof danny, externo: typeof danny;
+  let tDanny: string, tLaura: string, tExterno: string;
+  const verifier = randomUUID() + randomUUID();
+  const challenge = (v: string) => import('node:crypto').then((c) => c.createHash('sha256').update(v).digest('base64url'));
+  const form = (path: string, body: Record<string, string>) => fetch(`${API}${path}`, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams(body) })
+    .then(async (r) => ({ status: r.status, json: (await r.json()) as any }));
+
+  async function oauth(user: typeof danny) {
+    const reg = await call('/api/mcp/oauth/register', { body: { client_name: 'Claude', redirect_uris: ['http://127.0.0.1:33418/callback'] } });
+    expect(reg.status).toBe(201);
+    const cid = reg.json.client_id;
+    const info = await call(`/api/v1/mcp-oauth/client?client_id=${cid}&redirect_uri=${encodeURIComponent('http://127.0.0.1:33418/callback')}`, { token: user.token });
+    expect(info.json.name).toBe('Claude');
+    const ok = await call('/api/v1/mcp-oauth/approve', { token: user.token, body: { clientId: cid, redirectUri: 'http://127.0.0.1:33418/callback', codeChallenge: await challenge(verifier), codeChallengeMethod: 'S256', state: 'xyz' } });
+    const u = new URL(ok.json.redirect);
+    expect(u.searchParams.get('state')).toBe('xyz');
+    const code = u.searchParams.get('code')!;
+    expect((await form('/api/mcp/oauth/token', { grant_type: 'authorization_code', code, client_id: cid, redirect_uri: 'http://127.0.0.1:33418/callback', code_verifier: 'otro-verificador-que-no-es-el-mismo-de-antes-xx' })).status).toBe(400);
+    const tok = await form('/api/mcp/oauth/token', { grant_type: 'authorization_code', code, client_id: cid, redirect_uri: 'http://127.0.0.1:33418/callback', code_verifier: verifier });
+    // El intento fallido no gasta el código, pero el éxito sí: reusar el código falla.
+    expect(tok.status).toBe(200);
+    expect(tok.json.access_token).toMatch(/^chgmcp_/);
+    expect((await form('/api/mcp/oauth/token', { grant_type: 'authorization_code', code, client_id: cid, redirect_uri: 'http://127.0.0.1:33418/callback', code_verifier: verifier })).status).toBe(400);
+    return { access: tok.json.access_token as string, refresh: tok.json.refresh_token as string, cid };
+  }
+
+  beforeAll(async () => {
+    danny = await signup('Dan');
+    const inv = await call(`/api/v1/organizations/${danny.orgId}/invitations`, { token: danny.token, body: { email: mail('Lau'), role: 'member' } });
+    laura = await signup('Lau', inv.json.token);
+    externo = await signup('Otro');
+    tDanny = (await oauth(danny)).access;
+    tLaura = (await oauth(laura)).access;
+    tExterno = (await oauth(externo)).access;
+  });
+
+  it('descubrimiento y 401 con resource_metadata', async () => {
+    const pr = await call('/.well-known/oauth-protected-resource/api/mcp');
+    expect(pr.json.resource).toMatch(/\/api\/mcp$/);
+    const as = await call('/.well-known/oauth-authorization-server');
+    expect(as.json.code_challenge_methods_supported).toEqual(['S256']);
+    const r = await call('/api/mcp', { body: { jsonrpc: '2.0', id: 1, method: 'ping' } });
+    expect(r.headers.get('www-authenticate')).toContain('resource_metadata=');
+    expect((await call('/api/mcp/oauth/register', { body: { redirect_uris: ['http://evil.example.com/cb'] } })).status).toBe(400);
+  });
+
+  it('el token OAuth es de quien aprobó: whoami y refresco', async () => {
+    expect((await tool(tDanny, 'whoami')).structuredContent.name).toBe('Dan');
+    expect((await tool(tLaura, 'whoami')).structuredContent.name).toBe('Lau');
+    const o = await oauth(danny);
+    const r = await form('/api/mcp/oauth/token', { grant_type: 'refresh_token', refresh_token: o.refresh, client_id: o.cid });
+    expect(r.status).toBe(200);
+    expect((await rpc(o.access, 'ping')).status).toBe(401);
+    expect((await rpc(r.json.access_token, 'ping')).status).toBe(200);
+    const list = await call('/api/v1/me/mcp-tokens', { token: danny.token });
+    expect(list.json.tokens.some((t: any) => t.oauth && t.name === 'Claude')).toBe(true);
+  });
+
+  it('tickets: crear, asignar, cambiar estado, comentar; el externo no los ve', async () => {
+    const chat = (await tool(tDanny, 'send_direct_message', { person: 'Lau', text: 'ticket de prueba' })).structuredContent.chatId;
+    const t = await tool(tDanny, 'create_task', { chat, title: 'Logos en otro orden', assignees: ['Lau'], due_date: '2026-10-10' });
+    expect(t.isError).toBeFalsy();
+    const id = t.structuredContent.task.id;
+    expect(t.structuredContent.task.assignees).toEqual(['Lau']);
+    const mine = await tool(tLaura, 'list_tasks', { mine: true });
+    expect(mine.structuredContent.tasks.map((x: any) => x.id)).toContain(id);
+    const u = await tool(tLaura, 'update_task', { id, status: 'in_progress', assignees: ['Lau', 'Dan'] });
+    expect(u.structuredContent.task.status).toBe('in_progress');
+    expect(u.structuredContent.task.assignees).toHaveLength(2);
+    expect((await tool(tLaura, 'comment_task', { id, text: 'ya quedó' })).isError).toBeFalsy();
+    const d = await tool(tDanny, 'get_task', { id });
+    expect(d.structuredContent.activity.some((e: any) => e.text === 'ya quedó')).toBe(true);
+    expect((await tool(tExterno, 'get_task', { id })).isError).toBe(true);
+    expect((await tool(tExterno, 'update_task', { id, status: 'done' })).isError).toBe(true);
+    expect((await tool(tExterno, 'list_tasks')).structuredContent.tasks).toHaveLength(0);
+  });
+
+  it('calendario: crear, ver, responder y cancelar; el externo no lo ve', async () => {
+    const start = new Date(Date.now() + 2 * 86400_000);
+    const ev = await tool(tDanny, 'create_event', { chat: 'Lau', title: 'Revisión logos', starts_at: start.toISOString(), ends_at: new Date(start.getTime() + 1800_000).toISOString(), invitees: ['Lau'] });
+    expect(ev.isError).toBeFalsy();
+    const id = ev.structuredContent.event.id;
+    const agenda = await tool(tLaura, 'list_calendar');
+    expect(agenda.structuredContent.events.map((e: any) => e.id)).toContain(id);
+    expect((await tool(tLaura, 'rsvp_event', { id, answer: 'yes' })).structuredContent.event.invitees.find((i: any) => i.name === 'Lau (tú)').rsvp).toBe('yes');
+    expect((await tool(tExterno, 'list_calendar')).structuredContent.events).toHaveLength(0);
+    expect((await tool(tExterno, 'update_event', { id, cancel: true })).isError).toBe(true);
+    expect((await tool(tDanny, 'update_event', { id, cancel: true })).structuredContent.event.cancelled).toBe(true);
+  });
+
+  it('sin WhatsApp ni correo conectados lo dice, y prompts/list trae responder_cliente', async () => {
+    expect((await tool(tExterno, 'list_whatsapp_chats')).structuredContent.note).toBeTruthy();
+    expect((await tool(tExterno, 'list_emails')).structuredContent.note).toBeTruthy();
+    expect((await tool(tExterno, 'send_whatsapp', { chat: 'cualquiera', text: 'hola' })).isError).toBe(true);
+    const p = await rpc(tDanny, 'prompts/list');
+    expect(p.json.result.prompts[0].name).toBe('responder_cliente');
+    const i = await rpc(tDanny, 'initialize', { protocolVersion: '2025-06-18' });
+    expect(i.json.result.instructions).toContain('REGLA DE TICKETS');
+  });
+});

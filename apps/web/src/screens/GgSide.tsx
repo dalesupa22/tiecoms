@@ -69,7 +69,8 @@ export function GgButton({ on, onClick }: { source: string; on: boolean; onClick
   const label = t('ggs.button');
   return (
     <button className={`gg-head-btn ${on ? 'is-on' : ''}`} onClick={onClick} title={label} aria-label={label} aria-pressed={on}>
-      <GgMark size={24} />
+      {/* Pequeñito y amigable (2-oct-2026): la entrada principal es «✨ Seguir con gg» abajo; este es el sello. */}
+      <GgMark size={20} />
     </button>
   );
 }

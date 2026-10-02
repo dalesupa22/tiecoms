@@ -13,6 +13,11 @@
  *   node ops.js app-version <ios|android> <versión> <build> [minBuild] ["notas es"] ["notas en"]   última versión publicada (docs/ACTUALIZAR.md)
  *   node ops.js app-version <mac|windows> <versión> [url de descarga]     escritorio: el build sale de la versión (0.3.0 → 300)
  *   node ops.js app-version <ios|android>                  muestra la registrada
+ *   node ops.js create-agent <correo dueño> "<nombre>" <conversationId,...> ["<empresa>"] ["<cargo>"]
+ *       agente miembro (users.kind='agent', docs/AGENTES.md): entra a la empresa y a esos grupos; idempotente por nombre
+ *       dentro de la empresa. Si es nuevo imprime su token MCP (`chgmcp_`) UNA vez.
+ *   node ops.js agent-token <correo dueño> "<nombre>" ["<empresa>"]   token MCP nuevo para un agente existente (rotar)
+ *   node ops.js agents                                     agentes miembro, su empresa, dueño y grupos (solo lectura)
  *       imprime el JSON con el token (y el secreto de salida) UNA vez: redirígelo a un archivo protegido.
  */
 import { BookingPageInput, CreateGroupInput, CreateIntegrationInput } from '@tiecoms/contracts';
@@ -21,8 +26,11 @@ import { createIntegration } from './modules/integrations.ts';
 import { importEvents } from './modules/calendar.ts';
 import { appendEvent, toMessageDTO } from './modules/messages.ts';
 import { CreateEventInput } from '@tiecoms/contracts';
-import { enqueueOutbox, pool, tx } from './db.ts';
+import { audit, enqueueOutbox, pool, tx } from './db.ts';
 import { createPage, myPages, updatePage } from './modules/booking.ts';
+import { addMembers } from './modules/workspaces.ts';
+import { createToken } from './modules/mcp.ts';
+import { AddMembersInput } from '@tiecoms/contracts';
 
 async function userId(email: string): Promise<string> {
   const { rows } = await pool.query('SELECT id FROM users WHERE email = $1 AND disabled_at IS NULL', [email]);
@@ -36,6 +44,22 @@ async function orgOf(uid: string, name: string): Promise<string> {
   const { rows } = await pool.query('SELECT o.id FROM organizations o JOIN organization_memberships om ON om.org_id = o.id AND om.user_id = $1 WHERE o.name = $2', [uid, name]);
   if (rows.length !== 1) throw new Error(`La persona no está en una única empresa llamada «${name}»`);
   return rows[0].id;
+}
+
+// Agente miembro: una cuenta kind='agent' sin correo ni contraseña, de una empresa, con dueño (auditoría
+// 'agent.created' con actor = dueño). Habla por el MCP con su propio token: ve y escribe solo lo que su membresía permite.
+async function findAgent(orgId: string, name: string): Promise<string | null> {
+  const { rows } = await pool.query(
+    "SELECT u.id FROM users u JOIN organization_memberships om ON om.user_id = u.id AND om.org_id = $1 WHERE u.kind = 'agent' AND u.disabled_at IS NULL AND lower(u.name) = lower($2)",
+    [orgId, name],
+  );
+  return rows[0]?.id ?? null;
+}
+async function ownerOrg(owner: string, company?: string): Promise<string> {
+  if (company) return orgOf(owner, company);
+  const { rows } = await pool.query('SELECT primary_org_id FROM users WHERE id = $1', [owner]);
+  if (!rows[0]?.primary_org_id) throw new Error('El dueño no tiene empresa principal: indica la empresa');
+  return rows[0].primary_org_id;
 }
 try {
   if (command === 'members' && a) {
@@ -130,6 +154,50 @@ try {
     }
     const { rows } = await pool.query('SELECT * FROM app_releases WHERE platform = $1', [a]);
     console.log(JSON.stringify(rows[0], null, 1));
+  } else if (command === 'create-agent' && a && b && c) {
+    const owner = await userId(a);
+    const orgId = await ownerOrg(owner, d);
+    const title = process.argv[7] || 'Agente';
+    let agent = await findAgent(orgId, b);
+    const isNew = !agent;
+    if (!agent) {
+      agent = await tx(async (cx) => {
+        const id = (await cx.query("INSERT INTO users (kind, name, primary_org_id) VALUES ('agent', $1, $2) RETURNING id", [b, orgId])).rows[0].id as string;
+        await cx.query("INSERT INTO organization_memberships (org_id, user_id, role, title, area) VALUES ($1,$2,'member',$3,'Agentes')", [orgId, id, title]);
+        await audit(cx, owner, 'agent.created', { type: 'user', id }, { orgId, name: b });
+        return id;
+      });
+    }
+    // Cada grupo lo suma alguien que lo pueda administrar: el dueño, o si no, quien creó el grupo (queda en el aviso del chat).
+    const groups: Record<string, unknown> = {};
+    for (const conv of c.split(',').map((x) => x.trim()).filter(Boolean)) {
+      const creator = (await pool.query('SELECT created_by FROM conversations WHERE id = $1', [conv])).rows[0]?.created_by as string | undefined;
+      let r: unknown;
+      for (const actor of [owner, creator].filter((x, i, l): x is string => !!x && l.indexOf(x) === i)) {
+        try { r = await addMembers(actor, conv, AddMembersInput.parse({ userIds: [agent], history: 'now' })); break; }
+        catch (e: any) { r = { error: e?.message ?? String(e) }; }
+      }
+      groups[conv] = r;
+    }
+    const token = isNew ? await createToken(agent, `Agente ${b}`) : null;
+    console.log(JSON.stringify({ agentId: agent, name: b, orgId, isNew, groups, ...(token ? { mcpToken: token.token, endpoint: 'https://app.chaggu.com/api/mcp' } : {}) }, null, 1));
+  } else if (command === 'agent-token' && a && b) {
+    const owner = await userId(a);
+    const agent = await findAgent(await ownerOrg(owner, c), b);
+    if (!agent) throw new Error(`No hay un agente «${b}» en esa empresa`);
+    const token = await createToken(agent, `Agente ${b}`);
+    console.log(JSON.stringify({ agentId: agent, mcpToken: token.token, endpoint: 'https://app.chaggu.com/api/mcp' }, null, 1));
+  } else if (command === 'agents') {
+    const { rows } = await pool.query(
+      `SELECT u.id, u.name, o.name AS org, om.title, ow.email AS owner,
+              (SELECT array_agg(cv.name ORDER BY cv.name) FROM conversation_memberships m JOIN conversations cv ON cv.id = m.conversation_id
+                WHERE m.user_id = u.id AND m.removed_at IS NULL AND cv.archived_at IS NULL) AS groups,
+              (SELECT max(t.last_used_at) FROM mcp_tokens t WHERE t.user_id = u.id AND t.revoked_at IS NULL) AS last_used_at
+         FROM users u JOIN organization_memberships om ON om.user_id = u.id JOIN organizations o ON o.id = om.org_id
+         LEFT JOIN audit_events al ON al.target_id = u.id AND al.action = 'agent.created' LEFT JOIN users ow ON ow.id = al.actor_id
+        WHERE u.kind = 'agent' AND u.disabled_at IS NULL ORDER BY o.name, u.name`,
+    );
+    console.log(JSON.stringify(rows, null, 1));
   } else {
     throw new Error('Uso: ops.js members <dominio> | groups <correo> | create-group <correo> "<nombre>" [correos] | create-integration <correo> <conversationId> "<nombre>" [url]');
   }

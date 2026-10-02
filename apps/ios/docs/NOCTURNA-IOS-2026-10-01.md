@@ -1,5 +1,7 @@
 # Tanda nocturna iOS — 1.7.8 (48)
 
+Disponible en TestFlight interno: 1.7.8(48), VALID e IN_BETA_TESTING; grupo Chaggu Internal con cinco testers conservados. Apple confirma buildAudienceType=INTERNAL_ONLY.
+
 Rama temporal/nocturna-ios-20261001, basada en origin/ios-wa-gg (832ad08). Implementación nativa que conserva la bandeja WhatsApp/gg de 1.7.7(47). Solo TestFlight interno. El número 48 se reservó después de verificar App Store Connect: máximo 47 VALID, pública 1.7.5 y submission vigente WAITING_FOR_REVIEW; grupos Internal y External con cinco testers cada uno. No se modifican la revisión pública, testers ni app_releases.
 
 | Requisitos | Cambio nativo | Evidencia local |
@@ -41,7 +43,7 @@ Capturas son simulador iOS 26.1 con componentes de producción y etiquetas QA lo
 
 ## Distribución y límites
 
-ExportOptions.internal.plist fija testFlightInternalTestingOnly=true para impedir distribuir este artefacto por TestFlight externo o App Store. Archive/IPA/hash/recibos sanitizados y estado posterior se guardan en release-assets/1.7.8/ios fuera del Git. El snapshot anterior con relaciones de testers es privado; nunca se incluyen credenciales o nombres/correos de testers en documentación.
+ExportOptions.internal.plist fija testFlightInternalTestingOnly=true para impedir distribuir este artefacto por TestFlight externo o App Store. Archive y export firmados, validación Apple y subida única completados. IPA de 22,142,240 bytes; SHA256 `06363a64e0f4d1ddd78a0874cd70051f24fca170822d1d9d484aa9535401a81c`. Build/delivery `9659d78d-524e-48f7-ac1b-270ccfbeada4`. [Recibo sanitizado](TESTFLIGHT-RECIBO-2026-10-01.json). Snapshot posterior confirma testers conservados, builds externos y build público intactos; pública 1.7.5 y submission siguen WAITING_FOR_REVIEW. Archive/IPA y snapshots privados se guardan en release-assets/1.7.8/ios fuera del Git; no se publicó app_releases. El snapshot anterior con relaciones de testers es privado; nunca se incluyen credenciales o nombres/correos de testers en documentación.
 
 Aún no se acredita instalación/recepción en iPhone físico, APNs, micrófono/interrupción real, codecs OGG/Opus de dispositivos, llamada Chime con varios invitados, ni un calendario OAuth del usuario. Se mantiene el error real del reproductor; no se convierte cualquier extensión .ogg en una promesa de compatibilidad. El backend puede ofrecer una variante AAC estándar por su pipeline.
 

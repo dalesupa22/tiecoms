@@ -1,0 +1,42 @@
+{
+  "checkedAt": "2026-10-02T03:47:58.721Z",
+  "bundleId": "com.chaggu.app",
+  "appId": "6816439007",
+  "buildId": "9659d78d-524e-48f7-ac1b-270ccfbeada4",
+  "version": "1.7.8",
+  "build": 48,
+  "processingState": "VALID",
+  "internalOnly": true,
+  "buildAudienceType": "INTERNAL_ONLY",
+  "internalBuildState": "IN_BETA_TESTING",
+  "internalGroup": {
+    "id": "b5a91c3a-501c-4e0f-8b74-e2a66a1d66cf",
+    "name": "Chaggu Internal",
+    "testerCount": 5,
+    "containsBuild": true
+  },
+  "testersPreserved": true,
+  "externalBuildsPreserved": true,
+  "publicBuildPreserved": true,
+  "public": [
+    {
+      "version": "1.7.5",
+      "state": "WAITING_FOR_REVIEW"
+    }
+  ],
+  "activeReview": [
+    {
+      "id": "c5c7bfbd-211e-42ab-8f3b-7c63d0a71527",
+      "state": "WAITING_FOR_REVIEW"
+    }
+  ],
+  "artifact": {
+    "sha256": "06363a64e0f4d1ddd78a0874cd70051f24fca170822d1d9d484aa9535401a81c",
+    "sizeBytes": 22142240,
+    "sourceCommit": "1807e97",
+    "validation": "SUCCEEDED",
+    "upload": "SUCCEEDED",
+    "deliveryUUID": "9659d78d-524e-48f7-ac1b-270ccfbeada4",
+    "TFInternalTestingOnly": true
+  }
+}

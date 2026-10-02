@@ -195,6 +195,8 @@ struct ConversationView: View {
     @State private var positioningFailed = false
     // gg dentro del chat (contrato 1-oct-2026, parte B).
     @State private var gg = GgChatState()
+    /// Ancho de la pantalla del chat, para que el nombre en la cabecera quepa con los botones (headerTitleWidth).
+    @State private var screenWidth: CGFloat = 393
 
     @ViewBuilder private var chatPresentation: some View {
         let _ = PerfCounters.bump("chat.body")
@@ -247,6 +249,13 @@ struct ConversationView: View {
         .sheet(item: $sheet) { s in sheetView(s) }
         .modifier(GgChatSheets(gg: $gg, source: ggSource, conversationId: conversationId, chatTitle: store.data.flatMap { d in store.meta(conversationId).map { Naming.title(d, $0) } } ?? "",
                                messages: store.conversations[conversationId]?.messages ?? [], onDraft: putGgDraft))
+        // El número del botón gg (y saber que el servidor tiene gg). Se había perdido en 1.7.8 y el botón no salía (2-oct-2026).
+        .task(id: conversationId) {
+            guard !embedded else { return }
+            await store.ggSidePending([ggSource])
+            // Mensajes nuevos de otra persona: el API recalcula el número (con tope por fuente).
+            if let d = store.data, lastIsFromOther(d) { await store.ggSideRefreshPending(ggSource) }
+        }
     }
 
     private var composerLifecycle: some View {
@@ -504,6 +513,8 @@ struct ConversationView: View {
         }
         .frame(width: available.size.width, height: available.size.height, alignment: .top)
         .clipped()
+        .onAppear { screenWidth = available.size.width }
+        .onChange(of: available.size.width) { _, w in screenWidth = w }
         }
         // Anchor input above the keyboard even when landscape/accessibility chrome needs more room.
         .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -539,18 +550,20 @@ struct ConversationView: View {
                         if !sub.isEmpty { Text(sub).font(.caption2).foregroundStyle(Theme.textSecondary).lineLimit(1).truncationMode(.tail)
                             .accessibilityIdentifier("chat.header.company") }
                     }
-                    // Sin tope, un subtítulo largo (chat grupal con varias empresas) se recorta por ambos lados.
-                    .frame(maxWidth: 250)
+                    // Ancho según lo que queda entre ‹ y la píldora de botones: el nombre termina en «…» en vez de
+                    // recortarse a los lados o montarse sobre la flecha de volver (2-oct-2026).
+                    .frame(maxWidth: headerTitleWidth(c))
                 }
                 .accessibilityLabel([Naming.title(d, c), headerSubtitle(d, c)].filter { !$0.isEmpty }.joined(separator: ", "))
                 .accessibilityHint(L("chat.details"))
                 .accessibilityIdentifier("chat.header")
             }
-            // gg entre el nombre y la píldora de 📞/🎥/🔍/⋯ (sin mover nada; si no cabe, el nombre se corta).
-            if store.ggSide.available == true {
+            // gg en todos los chats, entre el nombre y la píldora de 📞/🎥/🔍/⋯ (como en la web: se ve salvo que el servidor no
+            // tenga gg). Si no cabe todo, el nombre termina en «…» (headerTitleWidth).
+            if store.ggSide.available != false {
                 ToolbarItem(placement: .topBarTrailing) { GgHeaderButton(source: ggSource) { gg.open = true } }
             }
-            ToolbarItem(placement: .topBarTrailing) { CallHeaderButtons(conv: c) }
+            ToolbarItem(placement: .topBarTrailing) { CallHeaderButtons(conv: c, compact: true) }
             ToolbarItem(placement: .topBarTrailing) {
                 Button { openSearch() } label: { Image(systemName: "magnifyingglass") }
                     .accessibilityLabel(L("search.inChat"))
@@ -573,6 +586,15 @@ struct ConversationView: View {
             }
             }
         }
+    }
+
+    /// Lo que puede medir el nombre en la cabecera: el ancho de la pantalla menos ‹ y la píldora (gg, 📞, 🎥, 🔍, ⋯).
+    private func headerTitleWidth(_ c: ConversationDTO) -> CGFloat {
+        let calls = store.data?.callsEnabled == true && c.canPost ? 1 : 0
+        let slots = CGFloat((store.ggSide.available != false ? 1 : 0) + calls + 2)
+        // Medido en iPhone 17 (iOS 26): cada botón de la píldora ocupa ≈ 52 pt; ‹ ≈ 60 pt.
+        let trailing = slots * 52 + 16, leading: CGFloat = 60
+        return max(72, min(250, screenWidth - leading - trailing - 12))
     }
 
     /// Línea bajo el título del chat: la empresa en un grupo (sin repetirla si el nombre ya la trae).

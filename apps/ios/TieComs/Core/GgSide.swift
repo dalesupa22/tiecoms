@@ -207,10 +207,16 @@ extension AppStore {
             if ggSide.available != true { ggSide.available = true }
             return r
         } catch let e as ApiRequestError where e.status == 404 {
-            // Servidor sin gg en el chat: el botón se esconde. Una vez que respondió bien, un 404 suelto no lo esconde.
-            if ggSide.available == nil { ggSide.available = false }
+            // Solo un servidor SIN la ruta de gg esconde el botón. Un 404 de un chat (p. ej. un WhatsApp bloqueado o borrado)
+            // escondía gg en TODOS los chats hasta reiniciar la app (2-oct-2026).
+            if Self.ggRouteMissing(e) { ggSide.available = false }
             throw e
         }
+    }
+
+    /// 404 de «Ruta no encontrada» (el API no tiene gg), no de un chat que no existe.
+    nonisolated static func ggRouteMissing(_ e: ApiRequestError) -> Bool {
+        e.status == 404 && (e.code == "route_not_found" || e.message.contains("Ruta no encontrada") || e.message.lowercased().contains("route"))
     }
 
     /// Número del botón (GET /gg/side/pending, sin IA). Un 404 esconde el botón.
@@ -232,7 +238,7 @@ extension AppStore {
             let r: R = try await ggGuard { try await api.request("/gg/side/pending?sources=\(want.map(GgSource.query).joined(separator: ","))") }
             for s in want where !s.hasPrefix("wa:") || (revision == waPrivacy.revision && waPrivacy.allows(s)) { ggSide.pending[s] = max(0, r.map[s] ?? 0) }
         } catch let e as ApiRequestError where e.status == 404 {
-            if ggSide.available == nil { ggSide.available = false }
+            if Self.ggRouteMissing(e) { ggSide.available = false }
         } catch {}
     }
 

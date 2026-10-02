@@ -176,4 +176,34 @@ final class WaGgUITests: XCTestCase {
         shot("14-borrador-en-compositor")
 
     }
+
+    /// 2-oct-2026: gg en TODOS los chats y la cabecera sin cortes feos (nombre con «…», 📞 🎥 🔍 ⋯ y gg visibles).
+    /// Fixture: grupos-fixture.mjs + `longGroup` (un grupo de nombre largo). `TEST_RUNNER_TC_FIXTURE_CABECERA=/ruta.json`.
+    func testCabeceraConGgEnTodosLosChats() throws {
+        struct F: Decodable { struct P: Decodable { var email: String }; var apiUrl: String; var password: String; var a: P; var generalId: String; var longGroup: String; var pagosId: String }
+        guard let path = ProcessInfo.processInfo.environment["TC_FIXTURE_CABECERA"], !path.isEmpty else { throw XCTSkip("Sin TC_FIXTURE_CABECERA") }
+        let f = try JSONDecoder().decode(F.self, from: Data(contentsOf: URL(fileURLWithPath: path)))
+        guard f.apiUrl.contains("localhost") || f.apiUrl.contains("127.0.0.1") else { throw XCTSkip("solo API local") }
+        let app = login(Fixture(apiUrl: f.apiUrl, password: f.password, a: .init(email: f.a.email, id: ""), generalId: f.generalId, waGroupKey: "", waDmKey: ""))
+        for (name, id) in [("largo", f.longGroup), ("general", f.generalId), ("pagos", f.pagosId)] {
+            if app.tabBars.buttons["Grupos"].exists { app.tabBars.buttons["Grupos"].tap() }
+            let row = app.buttons["conv.row.\(id)"]
+            if !row.waitForExistence(timeout: 6), app.tabBars.buttons["DMs"].exists { app.tabBars.buttons["DMs"].tap() }
+            XCTAssertTrue(row.waitForExistence(timeout: 12), "fila del chat \(name)")
+            row.tap()
+            XCTAssertTrue(app.buttons["chat.gg"].waitForExistence(timeout: 10), "botón gg en \(name)")
+            sleep(1); shot("cabecera-\(name)")
+            XCTAssertTrue(app.buttons["chat.search"].exists, "buscar en \(name)")
+            XCTAssertTrue(app.buttons["chat.menu"].exists, "⋯ en \(name)")
+            XCTAssertTrue(app.buttons["call.start"].exists, "📞 en \(name)")
+            let header = app.descendants(matching: .any)["chat.header"]
+            XCTAssertTrue(header.exists, "nombre en \(name)")
+            // El nombre no se monta sobre ‹ ni sobre los botones.
+            let back = app.navigationBars.buttons.element(boundBy: 0)
+            if back.exists { XCTAssertGreaterThanOrEqual(header.frame.minX, back.frame.maxX - 1, "nombre sobre ‹ en \(name)") }
+            XCTAssertLessThanOrEqual(header.frame.maxX, app.buttons["chat.gg"].frame.minX + 1, "nombre sobre gg en \(name)")
+            if back.exists { back.tap() }
+            sleep(1)
+        }
+    }
 }

@@ -22,8 +22,19 @@ private func elapsed(since iso: String, now: Date) -> Int {
 struct CallHeaderButtons: View {
     @Environment(AppStore.self) private var store
     let conv: ConversationDTO
+    /// En la cabecera del chat: un solo 📞 que pregunta voz o video (deja sitio al nombre y a gg; 2-oct-2026).
+    var compact = false
     var body: some View {
-        if store.data?.callsEnabled == true, conv.canPost {
+        if store.data?.callsEnabled == true, conv.canPost, compact {
+            Menu {
+                Button { start("audio") } label: { Label(L("call.audio"), systemImage: "phone") }
+                    .accessibilityIdentifier("call.start.audio")
+                Button { start("video") } label: { Label(L("call.video"), systemImage: "video") }
+                    .accessibilityIdentifier("call.start.video")
+            } label: { Image(systemName: "phone") }
+            .accessibilityLabel(L("call.audio"))
+            .accessibilityIdentifier("call.start")
+        } else if store.data?.callsEnabled == true, conv.canPost {
             HStack(spacing: 14) {
                 Button { start("audio") } label: { Image(systemName: "phone") }
                     .accessibilityLabel(L("call.audio"))

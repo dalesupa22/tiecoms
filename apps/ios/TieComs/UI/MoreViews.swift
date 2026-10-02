@@ -509,7 +509,7 @@ struct WaChatSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button(L("common.close")) { dismiss() } }
-                if store.ggSide.available == true {
+                if store.ggSide.available != false {
                     ToolbarItem(placement: .primaryAction) { GgHeaderButton(source: source) { ggOpen = true } }
                 }
             }
@@ -525,6 +525,8 @@ struct WaChatSheet: View {
                 do { let result = try await store.waMessages(chat); guard !Task.isCancelled else { return }; messages = result }
                 catch { messages = []; if !store.waPrivacy.allows(source) { clearPrivateState(); dismiss() } }
             }
+            // El número del botón gg de este chat (se había perdido en 1.7.8).
+            .task(id: source) { if store.waPrivacy.allows(source) { await store.ggSidePending([source]) } }
             .sheet(item: $sharing) { m in WaShareSheet(chat: chat, message: m) }
             .sheet(isPresented: $ggOpen, onDismiss: { ggAsk = nil; runQueue() }) {
                 GgSideSheet(source: source, chatTitle: chat.name, quotes: $ggQuotes, initialAsk: ggAsk) { ggQueue = [$0] }

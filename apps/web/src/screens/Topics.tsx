@@ -1,4 +1,5 @@
 import { scrollWithin } from '../scroll-within.ts';
+import './TopicActive.css';
 import { useEffect, useRef, useState } from 'react';
 import { TOPIC_COLORS, TOPIC_LIMIT, type ConversationDTO, type MessageDTO, type TopicColor, type TopicDTO } from '@tiecoms/contracts';
 import { client, useClient } from '../app-client.ts';

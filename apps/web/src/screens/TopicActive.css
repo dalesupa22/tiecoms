@@ -1,0 +1,8 @@
+/* ---------- El tema en el que estás, a simple vista (2-oct-2026) ----------
+   Antes solo se notaba por la altura, y la cabecera compacta la igualó (ChatHeader.css). Ahora: colores invertidos
+   (el fuerte de fondo, el suave de letra; sirve en claro y oscuro) y los demás un poco apagados. */
+.topic-dock .topic-flag.is-on { background: var(--tp-ink); color: var(--tp-bg); font-weight: 700; box-shadow: inset 5px 0 0 color-mix(in srgb, var(--tp-bg) 45%, transparent); }
+.topic-dock .topic-flag.c-plain.is-on { background: var(--ink); color: var(--paper); }
+.topic-dock .topic-flag.is-on .topic-unread { background: var(--tp-bg); color: var(--tp-ink); }
+.topic-dock:has(.topic-flag.is-on) .topic-flag:not(.is-on):not(:hover):not(.is-new) { opacity: .62; }
+.topic-dock .topic-flag:not(.is-on):hover { opacity: 1; }

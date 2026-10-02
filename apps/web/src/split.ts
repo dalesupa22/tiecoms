@@ -10,7 +10,7 @@
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { navigate } from './router.ts';
 import { MAX_PANES_DEFAULT, TASKS_KEY, isChatKey, placeIntoGrid, replaceIndex, splitMain } from './grid-keys.ts';
-import { layoutAfterPlacement } from './grid-span-layout.ts';
+import { layoutAfterPlacement, sanitizePanePositions, type PanePosition } from './grid-span-layout.ts';
 
 export const MAX_PANES = MAX_PANES_DEFAULT;
 /** Desde qué ancho de ventana hay paneles (la app de Mac abre en ~1000 px: con 1100 no aparecían). */
@@ -82,12 +82,16 @@ export function collapsePane() {
 }
 export type GridLayout = 'classic' | 'tall-center' | 'tall-left' | 'tall-right' | 'custom';
 const LAYOUT_KEY = 'chaggu:grid-layout-v1';
-const savedLayout = read<{ version?: number; kind?: GridLayout; order?: string[]; tall?: string[]; wide?: string[] }>(LAYOUT_KEY, {});
+const savedLayout = read<{ version?: number; kind?: GridLayout; order?: string[]; tall?: string[]; wide?: string[]; positions?: Record<string, PanePosition>; columns?: number[] }>(LAYOUT_KEY, {});
 let layout: GridLayout = savedLayout.version === 1 && ['classic', 'tall-center', 'tall-left', 'tall-right', 'custom'].includes(savedLayout.kind ?? '') ? savedLayout.kind! : 'classic';
 let layoutOrder: string[] = Array.isArray(savedLayout.order) ? savedLayout.order.filter((x): x is string => typeof x === 'string') : [];
 let tallPanes: string[] = Array.isArray(savedLayout.tall) ? savedLayout.tall.filter((x): x is string => typeof x === 'string') : [TASKS_KEY];
 let widePanes: string[] = Array.isArray(savedLayout.wide) ? savedLayout.wide.filter((x): x is string => typeof x === 'string') : [];
-const saveLayout = () => write(LAYOUT_KEY, { version: 1, kind: layout, order: layoutOrder, tall: tallPanes, wide: widePanes });
+let panePositions: Record<string, PanePosition> = sanitizePanePositions(savedLayout.positions, panes);
+let columnSizes = Array.isArray(savedLayout.columns) ? savedLayout.columns.slice(0, 10).filter((n) => Number.isFinite(n) && n > 0 && n <= 1) : [];
+export const useGridColumnSizes = () => useSyncExternalStore(subscribe, () => columnSizes);
+export const usePanePositions = () => useSyncExternalStore(subscribe, () => panePositions);
+const saveLayout = () => write(LAYOUT_KEY, { version: 1, kind: layout, order: layoutOrder, tall: tallPanes, wide: widePanes, positions: panePositions, columns: columnSizes });
 export const useGridLayout = () => useSyncExternalStore(subscribe, () => layout);
 export const useLayoutOrder = () => useSyncExternalStore(subscribe, () => layoutOrder);
 export const useTallPanes = () => useSyncExternalStore(subscribe, () => tallPanes);
@@ -99,6 +103,32 @@ export function setPaneSize(key: string, rows: 1 | 2, columns: 1 | 2, currentTal
   tallPanes = [...tall].filter((k) => panes.includes(k));
   widePanes = [...wide].filter((k) => panes.includes(k));
   layoutOrder = currentOrder.filter((k) => panes.includes(k));
+  panePositions = sanitizePanePositions(panePositions, panes);
+  if (panePositions[key]) layoutOrder = [key, ...layoutOrder.filter((k) => k !== key)];
+  layout = 'custom'; saveLayout(); emit();
+}
+/** A free-cell drop preserves the visible destination, including an intentionally empty row. */
+export function placeGridPane(key: string, position: PanePosition, currentPositions: Readonly<Record<string, PanePosition>>, currentTall: readonly string[], currentWide: readonly string[], currentOrder: readonly string[], widths: readonly number[]) {
+  if (!panes.includes(key)) return;
+  panePositions = sanitizePanePositions({ ...currentPositions, [key]: position }, panes);
+  const total = widths.reduce((a, b) => a + b, 0);
+  if (total > 0 && widths.length <= 10 && widths.every((w) => Number.isFinite(w) && w > 0)) columnSizes = widths.map((w) => w / total);
+  layoutOrder = [key, ...currentOrder.filter((k) => k !== key)].filter((k) => panes.includes(k));
+  tallPanes = currentTall.filter((k) => panes.includes(k));
+  widePanes = currentWide.filter((k) => panes.includes(k));
+  layout = 'custom'; saveLayout(); emit();
+}
+/** Continuous track sizing and initial preset conversion are one layout transaction. */
+export function setGridGeometry(positions: Record<string, PanePosition>, tall: string[], wide: string[], order: string[], widths: number[], row: number) {
+  panePositions = sanitizePanePositions(positions, panes);
+  tallPanes = tall.filter((k) => panes.includes(k)); widePanes = wide.filter((k) => panes.includes(k));
+  layoutOrder = order.filter((k) => panes.includes(k));
+  const total = widths.reduce((a, b) => a + b, 0);
+  if (total > 0 && widths.length <= 10 && widths.every((w) => Number.isFinite(w) && w > 0)) columnSizes = widths.map((w) => w / total);
+  // Shared row persistence stays compatible with the existing row slider.
+  sizes = { ...sizes, row: Math.max(.2, Math.min(.8, row)) };
+  write(SIZE_KEY, sizes);
+  sizeListeners.forEach((listener) => listener());
   layout = 'custom'; saveLayout(); emit();
 }
 export function setPaneRows(key: string, rows: 1 | 2, currentTall: readonly string[]) {
@@ -108,14 +138,14 @@ export function setPaneRows(key: string, rows: 1 | 2, currentTall: readonly stri
   layout = 'custom'; saveLayout(); emit();
 }
 export function setGridLayout(next: GridLayout) {
-  layout = next; saveLayout(); emit();
+  layout = next; if (next !== 'custom') panePositions = {}; saveLayout(); emit();
 }
 export function moveLayoutPane(key: string, index: number) {
   const order = [...layoutOrder.filter((k) => panes.includes(k)), ...panes.filter((k) => !layoutOrder.includes(k))];
   const at = order.indexOf(key);
   if (at < 0 || index < 0 || index >= order.length || at === index) return;
   [order[at], order[index]] = [order[index]!, order[at]!];
-  layoutOrder = order; saveLayout(); emit();
+  layoutOrder = order; panePositions = {}; saveLayout(); emit();
 }
 /** A newly opened/focused pane must not remain in the saved fifth slot of a four-pane preset. */
 function revealLayoutPane(key: string) {
@@ -129,6 +159,8 @@ function revealLayoutPane(key: string) {
 
 function set(next: string[]) {
   panes = next.slice(0, MAX_STORED);
+  panePositions = sanitizePanePositions(panePositions, panes);
+  saveLayout();
   // Lo que ya no está en la cuadrícula deja de estar fijado y de guardar su nombre.
   pinned = new Set([...pinned].filter((k) => panes.includes(k)));
   metas = Object.fromEntries(Object.entries(metas).filter(([k]) => panes.includes(k)));
@@ -257,6 +289,7 @@ export function removePanes(keys: readonly string[]) {
   const removed = new Set(keys);
   const before = [...panes], previousActive = activeKey;
   if (expandedKey && removed.has(expandedKey)) collapsePane();
+  panePositions = Object.fromEntries(Object.entries(panePositions).filter(([key]) => !removed.has(key)));
   layoutOrder = layoutOrder.filter((key) => !removed.has(key));
   tallPanes = tallPanes.filter((key) => !removed.has(key));
   widePanes = widePanes.filter((key) => !removed.has(key));

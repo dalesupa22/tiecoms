@@ -40,6 +40,9 @@ ssh "$HOST" "sudo bash -s -- $REL" <<'REMOTE'
 set -euo pipefail
 REL="$1"
 BASE=/opt/tiecoms
+# Full and static-only releases share the web pointer and must publish serially.
+exec 9>"$BASE/shared/web-deploy.lock"
+flock -n 9 || { echo 'Another deployment is running.' >&2; exit 1; }
 PREV="$(cat $BASE/RELEASE 2>/dev/null || true)"
 mkdir -p $BASE/releases $BASE/web
 tar -C $BASE/releases -xzf /tmp/tiecoms-$REL.tgz && rm -f /tmp/tiecoms-$REL.tgz
@@ -80,6 +83,7 @@ fi
 
 ln -sfn $BASE/releases/$REL/web $BASE/web/current
 echo "$REL" > $BASE/RELEASE
+echo "$REL" > $BASE/WEB_RELEASE
 # Configuración de nginx versionada con la release (solo archivos de TieComs).
 install -m 644 nginx/chaggu-http.conf /etc/nginx/conf.d/chaggu-http.conf
 install -m 755 tiecoms-cert.sh /usr/local/sbin/tiecoms-cert

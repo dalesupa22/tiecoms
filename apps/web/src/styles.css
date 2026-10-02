@@ -2346,3 +2346,34 @@ fieldset.composer { min-inline-size: 0; margin: 0; border: 0; border-top: 1px so
   .pane-size-control > span { font-size: 16px; }
   .pane-pin-label { display: none; }
 }
+
+/* All grid panels share a stable parent, including Tasks when leaving a preset. */
+.split.has-tasks-inline > .split-cell { grid-column: auto; }
+.split-divider-area { position: absolute; inset: 0; pointer-events: none; }
+.split-divider-area.before-tasks { right: calc(clamp(300px, 28%, 440px) + 6px); }
+.split-divider-area .split-handle { pointer-events: auto; }
+.has-pane-gestures .split-cell > .conv > .conv-main > .conv-head,
+.has-pane-gestures .split-cell > .pane-typed > .pane-head,
+.has-pane-gestures .split-cell > .section-pane > .pane-head { cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; }
+.has-pane-gestures .conv-head-title, .has-pane-gestures .pane-title { cursor: grab; }
+.pane-resize-edge, .pane-resize-corner { position: absolute; z-index: 6; touch-action: none; user-select: none; }
+.pane-resize-edge.is-bottom { bottom: 0; left: calc(50% - 28px); width: 56px; height: 9px; cursor: ns-resize; }
+.pane-resize-edge.is-right { right: 0; top: calc(50% - 28px); height: 56px; width: 9px; cursor: ew-resize; }
+.pane-resize-edge::after { content: ''; position: absolute; border-radius: 3px; background: color-mix(in srgb, var(--ink-2) 55%, transparent); }
+.pane-resize-edge.is-bottom::after { width: 32px; height: 3px; left: 12px; bottom: 2px; }
+.pane-resize-edge.is-right::after { height: 32px; width: 3px; top: 12px; right: 2px; }
+.pane-resize-corner { right: 0; bottom: 0; width: 19px; height: 19px; display: grid; place-items: center; cursor: nwse-resize; color: var(--ink-2); background: var(--paper-soft); border-radius: 6px 0 0 0; font-size: 12px; }
+.pane-resize-edge:hover::after, .pane-resize-edge:active::after { background: var(--accent); }
+.pane-resize-corner:hover { color: var(--accent); }
+body.is-pane-moving, body.is-pane-moving * { cursor: grabbing !important; user-select: none !important; }
+body.is-pane-resizing, body.is-pane-resizing * { user-select: none !important; }
+.pane-gesture-preview { position: fixed; z-index: 10000; pointer-events: none; border: 3px dashed var(--accent); border-radius: 8px; background: color-mix(in srgb, var(--accent) 9%, transparent); display: flex; align-items: center; justify-content: center; padding: 14px; box-sizing: border-box; color: var(--accent); font-weight: 700; text-align: center; text-shadow: 0 1px var(--paper), 0 -1px var(--paper); }
+.split-cell.is-gesturing { opacity: .8; }
+.grid-track-handle { position: absolute; z-index: 7; touch-action: none; user-select: none; outline: none; }
+.grid-track-handle.is-col { top: 0; bottom: 0; width: 6px; cursor: col-resize; }
+.grid-track-handle.is-row { height: 6px; cursor: row-resize; }
+.grid-track-handle::after { content: ''; position: absolute; background: color-mix(in srgb, var(--ink-2) 60%, transparent); border-radius: 3px; }
+.grid-track-handle.is-col::after { width: 3px; height: 36px; left: 1px; top: calc(50% - 18px); }
+.grid-track-handle.is-row::after { height: 3px; width: 36px; top: 1px; left: calc(50% - 18px); }
+.grid-track-handle:hover, .grid-track-handle:focus-visible { background: color-mix(in srgb, var(--accent) 25%, transparent); }
+.grid-track-handle:focus-visible::after, .grid-track-handle:hover::after { background: var(--accent); }

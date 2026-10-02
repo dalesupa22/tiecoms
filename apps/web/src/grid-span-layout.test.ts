@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { gridSpanLayout, layoutAfterPlacement } from './grid-span-layout.ts';
+import { gridSpanLayout, layoutAfterPlacement, sanitizePanePositions } from './grid-span-layout.ts';
 
 describe('two-row pane layout', () => {
   it('fits Agenda and Tasks tall beside two short chats', () => {
@@ -52,5 +52,34 @@ describe('two-row pane layout', () => {
   it('swaps occupied visual slots and retains unrelated tasks and heights', () => {
     expect(layoutAfterPlacement(['b','a','c','tasks:'], ['a','b','c','tasks:'], ['c','b','a','tasks:'], 'c', 0)).toEqual(['b','c','a','tasks:']);
     expect(layoutAfterPlacement(['tasks:','b','a'], ['a','b','tasks:'], ['a','x','tasks:'], 'x', 1)).toEqual(['tasks:','x','a']);
+  });
+});
+
+describe('explicit free grid cells', () => {
+  it('preserves a deliberate empty upper cell and fills the lower one', () => {
+    const layout = gridSpanLayout(['agenda:', 'general', 'diag', 'tasks:'], new Set(['tasks:']), new Set(), { 'agenda:': { column: 3, row: 2 }, general: { column: 1, row: 1 }, diag: { column: 1, row: 2 }, 'tasks:': { column: 2, row: 1 } });
+    expect(layout.cells['agenda:']).toEqual({ column: 3, row: 2, span: 1, width: 1 });
+    expect(layout.columns).toBe(3);
+  });
+  it('resolves all anchor collisions deterministically without overlap or lost panes', () => {
+    const keys = ['agenda:', 'a', 'b', 'tasks:'];
+    for (let mask = 0; mask < 256; mask++) {
+      const tall = new Set(keys.filter((_, i) => mask & (1 << (2 * i))));
+      const wide = new Set(keys.filter((_, i) => mask & (2 << (2 * i))));
+      const positions = Object.fromEntries(keys.map((k, i) => [k, { column: i % 2 + 1, row: i % 2 + 1 }]));
+      const layout = gridSpanLayout(keys, tall, wide, positions), occupied = new Set<string>();
+      expect(Object.keys(layout.cells).sort()).toEqual([...keys].sort());
+      for (const c of Object.values(layout.cells)) for (let col = c.column; col < c.column + c.width; col++) for (let row = c.row; row < c.row + c.span; row++) {
+        expect(occupied.has(`${col}:${row}`)).toBe(false); occupied.add(`${col}:${row}`); expect(row).toBeLessThanOrEqual(2);
+      }
+    }
+  });
+});
+
+describe('saved position compatibility', () => {
+  it('accepts legacy layouts and bounds untrusted saved dimensions and keys', () => {
+    expect(sanitizePanePositions(undefined, ['a'])).toEqual({});
+    expect(sanitizePanePositions({ a: { column: 999999999, row: 2 }, b: { column: 1, row: -1 }, c: { column: 2, row: 2 }, removed: { column: 1, row: 1 } }, ['a', 'b', 'c'])).toEqual({ c: { column: 2, row: 2 } });
+    expect(sanitizePanePositions({ a: null, b: [], c: 'bad' }, ['a', 'b', 'c'])).toEqual({});
   });
 });

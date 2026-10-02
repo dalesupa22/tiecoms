@@ -17,6 +17,20 @@ use tauri_plugin_deep_link::DeepLinkExt;
 use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_opener::OpenerExt;
 
+/// Only bounded PNG data decoded locally, never URLs or files from a caller.
+#[tauri::command]
+fn copy_image(png: Vec<u8>) -> Result<(), String> {
+  if png.len() > 24 * 1024 * 1024 { return Err("Image too large".into()); }
+  if png.len() < 24 || &png[..8] != b"\x89PNG\r\n\x1a\n" { return Err("Invalid PNG".into()); }
+  let width = u32::from_be_bytes(png[16..20].try_into().unwrap());
+  let height = u32::from_be_bytes(png[20..24].try_into().unwrap());
+  if u64::from(width) * u64::from(height) > 20_000_000 { return Err("Image too large".into()); }
+  let image = tauri::image::Image::from_bytes(&png).map_err(|_| "Invalid image")?;
+  if u64::from(image.width()) * u64::from(image.height()) > 20_000_000 { return Err("Image too large".into()); }
+  let mut clipboard = arboard::Clipboard::new().map_err(|e| e.to_string())?;
+  clipboard.set_image(arboard::ImageData { width: image.width() as usize, height: image.height() as usize, bytes: std::borrow::Cow::Borrowed(image.rgba()) }).map_err(|e| e.to_string())
+}
+
 const MAIN: &str = "main";
 const KEYRING_SERVICE: &str = "com.chaggu.desktop";
 const KEYRING_USER: &str = "refresh-token";
@@ -181,7 +195,7 @@ fn main() {
     .plugin(tauri_plugin_opener::init())
     .plugin(tauri_plugin_window_state::Builder::default().build())
     .manage(PendingPath::default())
-    .invoke_handler(tauri::generate_handler![take_pending_path, secret_get, secret_set, set_theme])
+    .invoke_handler(tauri::generate_handler![take_pending_path, secret_get, secret_set, set_theme, copy_image])
     .setup(|app| {
       let handle = app.handle().clone();
 

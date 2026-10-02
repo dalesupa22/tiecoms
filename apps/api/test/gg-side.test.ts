@@ -86,6 +86,7 @@ beforeAll(async () => {
   // WhatsApp de Ana.
   const acc = await call('/whatsapp/accounts', { token: ana.token, body: { label: 'Personal', kind: 'personal' } });
   accountId = acc.json.id;
+  await pool.query(`UPDATE wa_accounts SET privacy_synced_at=now(),lease_owner='fixture',lease_until=now()+interval '1 hour' WHERE id=$1`,[accountId]);
   const s: Session = { id: accountId, userId: ana.id, kind: 'personal', pairPhone: null, sock: null, stopping: false, retries: 0, registered: true, me: null, notifyTimer: null };
   await upsertChats(s, [{ jid: '573001112233@s.whatsapp.net', name: 'Carla', isGroup: false }]);
   const m: MsgRow = { chat: '573001112233@s.whatsapp.net', id: `wa-${run}`, fromMe: false, authorJid: '573001112233@s.whatsapp.net', authorName: 'Carla', kind: 'text', body: '¿Nos vemos mañana?', sentAt: new Date() };

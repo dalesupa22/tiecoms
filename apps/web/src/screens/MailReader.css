@@ -1,0 +1,20 @@
+/* A mail reader is one naturally sized child of the pane's scrolling body. */
+.mail-reader { width: 100%; max-width: 960px; min-width: 0; margin-inline: auto; flex: none; display: flex; flex-direction: column; gap: 12px; }
+.mail-reader > * { flex-shrink: 0; }
+.mail-reader .pane-subject { margin: 0; line-height: 1.35; overflow-wrap: anywhere; }
+.mail-reader .mail-body { max-height: none; overflow: visible; }
+.mail-html { flex-shrink: 0; min-width: 0; }
+.mail-meta-compact { min-width: 0; display: flex; flex-direction: column; gap: 5px; font-size: 12.5px; }
+.mail-meta-sender { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.mail-meta-sender > .muted { flex: none; }
+.mail-sender-address { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.mail-meta-date { display: flex; flex-wrap: wrap; gap: 5px 10px; align-items: baseline; }
+.mail-meta-date > span { display: inline-flex; align-items: center; gap: 4px; }
+.mail-recipients { min-width: 0; }
+.mail-recipients > summary { cursor: pointer; color: var(--muted); width: fit-content; padding-block: 2px; }
+.mail-recipients .mail-meta { margin: 7px 0 0; }
+.mail-recipients > summary:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 3px; border-radius: 3px; }
+/* In a narrow inbox, sharing must not float over the button used to read. */
+.mail-browser.is-pane .mail-row { flex-wrap: wrap; gap: 4px; padding: 0 12px 8px 0; }
+.mail-browser.is-pane .mail-row-main { flex-basis: 100%; padding-bottom: 4px; }
+.mail-browser.is-pane .mail-pick { position: static; transform: none; box-shadow: none; opacity: 1; margin-left: 54px; }

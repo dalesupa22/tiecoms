@@ -13,9 +13,10 @@ import { openDialog } from '../actions.tsx';
 import { ConvAvatar, Modal, conversationTitle } from '../ui.tsx';
 import { activityOf } from '../home-order.ts';
 import { parseKey } from '../grid-keys.ts';
+import { BASE, navigate } from '../router.ts';
 import { type DragPayload, paneOf, pinToSlot, readDrag, shareToChat } from '../grid-actions.ts';
 import {
-  MAX_PANES, type DragKind, dragKindOf, fitsChat, fitsSlot, setDragging, setGridSide, splitAvailable, togglePin, useDragging, useGridSide, useMetas, usePanes, usePinned, useWide,
+  MAX_PANES, type DragKind, dragKindOf, fitsChat, fitsSlot, setDragging, setGridSide, splitAvailable, togglePin, useDragging, useGridSide, useMetas, usePanes, usePinned, useWide, rememberBack,
 } from '../split.ts';
 import { TASKS_KEY, TASKS_SLOT, slots, splitMain } from '../grid-keys.ts';
 import { ProviderIcon, WaIcon } from './Mail.tsx';
@@ -32,6 +33,9 @@ function useSlotLabels() {
     }
     if (ref.kind === 'mail') return { title: metas[key]?.title ?? t('mail.title'), icon: <ProviderIcon provider={ref.provider} size={18} /> };
     if (ref.kind === 'tasks') return { title: t('nav.issues'), icon: <span aria-hidden>☑</span> };
+    if (ref.kind === 'agenda') return { title: t('nav.agenda'), icon: <span aria-hidden>▦</span> };
+    if (ref.kind === 'trazo') return { title: t('nav.trazo'), icon: <span aria-hidden>⑂</span> };
+    if (ref.kind === 'calls') return { title: t('nav.calls'), icon: <span aria-hidden>☎</span> };
     if (ref.kind === 'inbox') return { title: t('nav.mail'), icon: <ProviderIcon provider="google" size={18} /> };
     if (ref.kind === 'wachats') return { title: `WhatsApp · ${t('grid.allChats')}`, icon: <WaIcon size={18} /> };
     return { title: metas[key]?.title ?? 'WhatsApp', icon: <WaIcon size={18} /> };
@@ -125,12 +129,28 @@ export function DragTray({ gridVisible }: { gridVisible: boolean }) {
   // Qué se está arrastrando, por los tipos del dataTransfer. Se avisa un instante después para no mover el DOM en pleno dragstart.
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const start = (e: globalThis.DragEvent) => { const k = e.dataTransfer ? dragKindOf(e.dataTransfer.types) : null; if (k) timer = setTimeout(() => setDragging(k), 0); };
-    const end = () => { clearTimeout(timer); setDragging(null); setOver(null); };
+    let generation = 0;
+    const end = () => { generation++; clearTimeout(timer); setDragging(null); setOver(null); };
+    const start = (e: globalThis.DragEvent) => {
+      end(); const k = e.dataTransfer ? dragKindOf(e.dataTransfer.types) : null;
+      const token = generation;
+      if (k) timer = setTimeout(() => { if (!e.defaultPrevented && token === generation) setDragging(k); }, 0);
+    };
+    // Capture observes even stopped drops; defer teardown until the target consumed its payload.
+    const drop = () => { const token = generation; queueMicrotask(() => { if (token === generation) end(); }); };
+    const key = (e: KeyboardEvent) => { if (e.key === 'Escape') end(); };
+    const visibility = () => { if (document.hidden) end(); };
     document.addEventListener('dragstart', start);
     document.addEventListener('dragend', end);
-    document.addEventListener('drop', end);
-    return () => { document.removeEventListener('dragstart', start); document.removeEventListener('dragend', end); document.removeEventListener('drop', end); clearTimeout(timer); };
+    document.addEventListener('drop', drop, true);
+    document.addEventListener('keydown', key);
+    document.addEventListener('visibilitychange', visibility);
+    window.addEventListener('blur', end); window.addEventListener('popstate', end); window.addEventListener('chaggu:navigate', end);
+    return () => {
+      document.removeEventListener('dragstart', start); document.removeEventListener('dragend', end); document.removeEventListener('drop', drop, true);
+      document.removeEventListener('keydown', key); document.removeEventListener('visibilitychange', visibility);
+      window.removeEventListener('blur', end); window.removeEventListener('popstate', end); window.removeEventListener('chaggu:navigate', end); end();
+    };
   }, []);
   const chats = useMemo(() => (d ? chatChoices(d) : []), [d]);
   if (!d || !dragging || gridVisible || !wide) return null;
@@ -139,19 +159,25 @@ export function DragTray({ gridVisible }: { gridVisible: boolean }) {
   const accept = (ok: boolean, id: string, e: DragEvent) => { if (!ok) return; e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; if (over !== id) setOver(id); };
   const take = (kind: DragKind | null, dt: DataTransfer) => (kind ? readDrag(dt, kind) : null);
   const dropChat = (cid: string, e: DragEvent) => {
-    e.preventDefault(); setOver(null);
+    e.preventDefault(); e.stopPropagation(); setOver(null);
     const p = take(dragKindOf(e.dataTransfer.types), e.dataTransfer); if (!p) return;
     const c = d.conversations.find((x) => x.id === cid);
     void shareToChat(p, cid, c ? conversationTitle(d, c) : '');
   };
   const dropSlot = (i: number, e: DragEvent) => {
-    e.preventDefault(); setOver(null);
+    e.preventDefault(); e.stopPropagation(); setOver(null);
     const p = take(dragKindOf(e.dataTransfer.types), e.dataTransfer); if (!p) return;
-    const name = p.kind === 'chat' ? conversationTitle(d, d.conversations.find((x) => x.id === p.id)!) : '';
-    pinToSlot(p, i, name);
+    const conversation = p.kind === 'chat' ? d.conversations.find((x) => x.id === p.id) : null;
+    const name = conversation ? conversationTitle(d, conversation) : '';
+    if (pinToSlot(p, i, name) >= 0) {
+      rememberBack(location.pathname.slice(BASE.length) || '/');
+      setDragging(null);
+      navigate('/cuadricula');
+    }
   };
   return (
     <div className="tray" role="region" aria-label={t('tray.title')}>
+      <button className="tray-close icon-btn" aria-label={t('common.close')} onClick={() => { setDragging(null); setOver(null); }}>×</button>
       <div className={`tray-zone ${toChat ? '' : 'is-off'}`} data-off={t(dragging === 'section' ? 'tray.noChatSection' : 'tray.noChat')}>
         <h3><span className="tray-n">1</span>{t('grid.toChat')}</h3>
         <div className="tray-chats">

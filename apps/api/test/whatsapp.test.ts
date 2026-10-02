@@ -49,6 +49,8 @@ describe('cuentas', () => {
     expect(b.status).toBe(200);
     expect(a.json.status).toBe('pending');
     personal = a.json; business = b.json;
+    // Synthetic provider fixture: no real socket or app-state hydration.
+    await pool.query(`UPDATE wa_accounts SET privacy_synced_at=now(),lease_owner='fixture',lease_until=now()+interval '1 hour' WHERE id=ANY($1)`,[[personal.id,business.id]]);
     const { rows } = await pool.query('SELECT pair_phone FROM wa_accounts WHERE id = $1', [business.id]);
     expect(rows[0].pair_phone).toBe('573001234567');
     const list = await call('/whatsapp/accounts', { token: ana.token });

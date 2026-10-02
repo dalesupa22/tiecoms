@@ -12,6 +12,8 @@ export function navigate(path: string, replace = false) {
   const to = BASE + path;
   if (to === location.pathname + location.search) return;
   if (replace) history.replaceState(null, '', to); else history.pushState(null, '', to);
+  if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+  window.dispatchEvent(new Event('chaggu:navigate'));
   notify();
 }
 

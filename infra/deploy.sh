@@ -14,7 +14,9 @@ echo "▸ verificando tipos"
 npm run -s typecheck
 echo "▸ compilando $REL"
 npm -w @tiecoms/api run -s build
-npm -w @tiecoms/web run -s build
+# Desktop builds use apps/web/dist with a native API origin. Keep the deploy
+# output isolated so concurrent packaging cannot mix the two artifacts.
+npm -w @tiecoms/web run -s build -- --outDir "$STAGE/web-build" --emptyOutDir
 echo "▸ landing"
 python3 apps/landing/build.py >/dev/null
 
@@ -23,8 +25,11 @@ cp -R apps/api/dist "$STAGE/$REL/api"
 # web/site = landing (www.chaggu.com) · web/app = app (app.chaggu.com).
 mkdir -p "$STAGE/$REL/web"
 cp -R apps/landing/dist "$STAGE/$REL/web/site"
-cp -R apps/web/dist "$STAGE/$REL/web/app"
+cp -R "$STAGE/web-build" "$STAGE/$REL/web/app"
 cp infra/Dockerfile.api infra/compose.yml infra/tiecoms-cert.sh "$STAGE/$REL/"
+# Marks releases whose API enforces WhatsApp privacy. An older API cannot safely
+# serve after the first privacy migration, including during health-check rollback.
+touch "$STAGE/$REL/WA_PRIVACY_V1"
 cp -R infra/nginx "$STAGE/$REL/nginx"
 COPYFILE_DISABLE=1 tar --no-xattrs -C "$STAGE" -czf "$STAGE/$REL.tgz" "$REL"
 
@@ -43,6 +48,13 @@ cd $BASE/releases/$REL
 echo "▸ imagen tiecoms-api:$REL"
 docker build -q -t tiecoms-api:$REL -f Dockerfile.api . >/dev/null
 
+privacy_cutover=0
+if [ -n "$PREV" ] && [ ! -e "$BASE/releases/$PREV/WA_PRIVACY_V1" ]; then
+  privacy_cutover=1
+  echo "▸ corte inicial de privacidad: deteniendo servicios incompatibles antes de migrar"
+  (cd "$BASE/releases/$PREV" && TIECOMS_RELEASE=$PREV docker compose -f compose.yml stop api worker wa)
+fi
+
 echo "▸ migraciones"
 docker run --rm --env-file $BASE/shared/api.env -v $BASE/shared/rds-ca.pem:/run/secrets/rds-ca.pem:ro tiecoms-api:$REL node migrate.js
 
@@ -51,13 +63,18 @@ TIECOMS_RELEASE=$REL docker compose -f compose.yml up -d --remove-orphans
 
 ok=0
 for i in $(seq 1 30); do
-  if curl -fsS http://127.0.0.1:3020/api/health/ready >/dev/null 2>&1; then ok=1; break; fi
+  if curl --connect-timeout 2 --max-time 4 -fsS http://127.0.0.1:3020/api/health/ready >/dev/null 2>&1; then ok=1; break; fi
   sleep 2
 done
 if [ "$ok" != 1 ]; then
-  echo "✗ el API no quedó sano; volviendo a ${PREV:-nada}"
+  echo "✗ el API no quedó sano"
   docker compose -f compose.yml logs --tail 50 api || true
-  if [ -n "$PREV" ]; then (cd $BASE/releases/$PREV && TIECOMS_RELEASE=$PREV docker compose -f compose.yml up -d); fi
+  if [ "$privacy_cutover" = 1 ]; then
+    echo "✗ no se restaura un API sin privacidad; reparar esta entrega antes de reabrir el servicio"
+  elif [ -n "$PREV" ]; then
+    echo "▸ volviendo a $PREV"
+    (cd $BASE/releases/$PREV && TIECOMS_RELEASE=$PREV docker compose -f compose.yml up -d)
+  fi
   exit 1
 fi
 

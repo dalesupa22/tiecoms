@@ -3,7 +3,7 @@
  * (se ven tenues) para que copiar y las menciones sigan usando las mismas posiciones. Las viñetas («- » o «* » al
  * inicio de línea) se pintan como «• » en MessageText.
  */
-const FMT = /(`[^`\n]+`|\*[^\s*](?:[^*\n]*[^\s*])?\*|_[^\s_](?:[^_\n]*[^\s_])?_|~[^\s~](?:[^~\n]*[^\s~])?~)/g;
+const FMT = /(`[^`\n]{1,4000}`|\*[^\s*](?:[^*\n]{0,4000}[^\s*])?\*|_[^\s_](?:[^_\n]{0,4000}[^\s_])?_|~[^\s~](?:[^~\n]{0,4000}[^\s~])?~)/g;
 const FMT_TAG = { '*': 'strong', _: 'em', '~': 's', '`': 'code' } as const;
 export function Formatted({ text }: { text: string }) {
   const parts = text.split(FMT);

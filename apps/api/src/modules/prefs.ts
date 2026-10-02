@@ -1,6 +1,6 @@
 import { conversationAccess, workspaceAccess } from '../access.ts';
 import type { z } from 'zod';
-import type { SleepDTO, SleepInput } from '@tiecoms/contracts';
+import type { AvailabilityDTO, AvailabilityMode, SleepDTO, SleepInput } from '@tiecoms/contracts';
 import { enqueueOutbox, pool, tx } from '../db.ts';
 import { badRequest } from '../errors.ts';
 
@@ -66,8 +66,9 @@ export async function getDnd(userId: string): Promise<string | null> {
 export async function setDnd(userId: string, until: string | null) {
   const value = activeDnd(until);
   return tx(async (c) => {
-    await c.query('UPDATE users SET dnd_until = $2 WHERE id = $1', [userId, value]);
+    await c.query('UPDATE users SET dnd_until = $2, availability_revision=availability_revision+1 WHERE id = $1', [userId, value]);
     await enqueueOutbox(c, 'account.event', { userIds: [userId], event: { type: 'me.dnd', dndUntil: value } });
+    await publishAvailability(c, userId);
     return { dndUntil: value };
   });
 }
@@ -88,12 +89,84 @@ export async function setSleep(userId: string, input: z.infer<typeof SleepInput>
     const tzAuto = input.tzAuto ?? (input.tz ? false : undefined);
     const { rows } = await c.query(
       `UPDATE users SET sleep_on = COALESCE($2, sleep_on), sleep_start = COALESCE($3::time, sleep_start), sleep_end = COALESCE($4::time, sleep_end),
-              sleep_tz = COALESCE($5, sleep_tz), sleep_tz_auto = COALESCE($6, sleep_tz_auto)
+              sleep_tz = COALESCE($5, sleep_tz), sleep_tz_auto = COALESCE($6, sleep_tz_auto), availability_revision=availability_revision+1
         WHERE id = $1 RETURNING sleep_on, sleep_start, sleep_end, sleep_tz, sleep_tz_auto`,
       [userId, input.on ?? null, input.start ?? null, input.end ?? null, input.tz ?? null, tzAuto ?? null],
     );
     const sleep = toSleep(rows[0]);
     await enqueueOutbox(c, 'account.event', { userIds: [userId], event: { type: 'me.sleep', sleep } });
+    await publishAvailability(c, userId);
     return { sleep };
+  });
+}
+
+/** Public effective state only; schedules/reasons remain private. */
+export function effectiveAvailability(r: any): AvailabilityDTO {
+  const manualActive = !!r.availability_mode && (!r.availability_until || new Date(r.availability_until).getTime() > Date.now());
+  const manualSilent = manualActive && ['focus','dnd','rest'].includes(r.availability_mode);
+  const dnd = activeDnd(r.dnd_until);
+  const manualUntil = manualActive && r.availability_until ? new Date(r.availability_until).toISOString() : null;
+  if (dnd) return { mode: manualSilent && manualUntil === dnd ? r.availability_mode : 'dnd', until: dnd, silent: true, revision: Number(r.availability_revision ?? 0) };
+  if (manualSilent) return { mode: r.availability_mode, until: manualUntil, silent: true, revision: Number(r.availability_revision ?? 0) };
+  if (r.sleeping) return { mode: 'rest', until: r.sleep_until ? new Date(r.sleep_until).toISOString() : null, silent: true, revision: Number(r.availability_revision ?? 0) };
+  return { mode: manualActive ? r.availability_mode : null, until: manualUntil, silent: false, revision: Number(r.availability_revision ?? 0) };
+}
+
+export const AVAILABILITY_SQL = `u.availability_mode,u.availability_until,u.availability_revision,u.dnd_until,
+  tiecoms_sleeping(u.sleep_on,u.sleep_start,u.sleep_end,u.sleep_tz) AS sleeping,
+  (((now() AT TIME ZONE u.sleep_tz)::date + u.sleep_end + CASE WHEN u.sleep_end <= (now() AT TIME ZONE u.sleep_tz)::time THEN interval '1 day' ELSE interval '0 day' END) AT TIME ZONE u.sleep_tz) AS sleep_until`;
+
+async function publishAvailability(c: import('../db.ts').Tx, userId: string) {
+  const state = (await c.query(`SELECT ${AVAILABILITY_SQL} FROM users u WHERE u.id=$1`, [userId])).rows[0];
+  await c.query('UPDATE users SET availability_sleeping=$2 WHERE id=$1',[userId,state.sleeping]);
+  // Inverse of the bootstrap directory visibility, including non-reciprocal guest scopes.
+  const audience = await c.query(`SELECT DISTINCT u.id FROM users u WHERE u.disabled_at IS NULL AND (u.id=$1 OR
+    EXISTS (SELECT 1 FROM conversation_memberships mine JOIN conversation_memberships other ON other.conversation_id=mine.conversation_id
+      JOIN conversations chat ON chat.id=mine.conversation_id AND chat.archived_at IS NULL
+      LEFT JOIN workspace_memberships wm ON wm.workspace_id=chat.workspace_id AND wm.user_id=mine.user_id
+      LEFT JOIN workspaces w ON w.id=chat.workspace_id AND w.archived_at IS NULL
+      WHERE mine.user_id=u.id AND other.user_id=$1 AND mine.removed_at IS NULL AND other.removed_at IS NULL
+      AND (chat.workspace_id IS NULL OR (w.id IS NOT NULL AND wm.revoked_at IS NULL AND (wm.expires_at IS NULL OR wm.expires_at>now())))) OR
+    EXISTS (SELECT 1 FROM workspace_memberships mine JOIN workspace_memberships other ON other.workspace_id=mine.workspace_id
+      JOIN workspaces w ON w.id=mine.workspace_id AND w.archived_at IS NULL
+      WHERE mine.user_id=u.id AND other.user_id=$1 AND mine.role<>'guest' AND mine.revoked_at IS NULL AND other.revoked_at IS NULL
+      AND (mine.expires_at IS NULL OR mine.expires_at>now()) AND (other.expires_at IS NULL OR other.expires_at>now())) OR
+    EXISTS (SELECT 1 FROM organization_memberships mine JOIN organization_memberships other ON other.org_id=mine.org_id WHERE mine.user_id=u.id AND other.user_id=$1))`, [userId]);
+  await enqueueOutbox(c, 'account.event', { userIds: audience.rows.map((r) => r.id), event: { type: 'person.availability', userId, availability: effectiveAvailability(state) } });
+  return effectiveAvailability(state);
+}
+
+export async function setAvailability(userId: string, input: { mode: AvailabilityMode | null; until?: string | null }) {
+  const silent = input.mode !== null && ['focus','dnd','rest'].includes(input.mode);
+  const until = input.until ? activeDnd(input.until) : null;
+  if(input.until && !until) throw badRequest('Elige una duración futura');
+  if (silent && !until) throw badRequest('Elige una duración futura para el modo silencioso');
+  return tx(async (c) => {
+    await c.query(`UPDATE users SET
+      dnd_until=CASE WHEN $4 THEN $3::timestamptz WHEN availability_mode IN ('focus','dnd','rest') AND dnd_until=availability_until AND NOT $4 THEN NULL ELSE dnd_until END,
+      availability_mode=$2, availability_until=$3, availability_revision=availability_revision+1 WHERE id=$1`, [userId,input.mode,until,silent]);
+    const state = await publishAvailability(c,userId);
+    const dnd = (await c.query('SELECT dnd_until FROM users WHERE id=$1',[userId])).rows[0];
+    await enqueueOutbox(c,'account.event',{userIds:[userId],event:{type:'me.dnd',dndUntil:activeDnd(dnd.dnd_until)}});
+    return { availability: state };
+  });
+}
+
+/** One minute worker sweep: only changed deadlines/sleep boundaries fan out; server remains authoritative. */
+export async function expireAvailability() {
+  return tx(async c=>{
+    const candidates=await c.query(`SELECT u.id FROM users u WHERE disabled_at IS NULL AND
+      ((availability_mode IS NOT NULL AND availability_until<=now()) OR dnd_until<=now()
+       OR (sleep_on AND tiecoms_sleeping(sleep_on,sleep_start,sleep_end,sleep_tz) IS DISTINCT FROM availability_sleeping)
+       OR (NOT sleep_on AND availability_sleeping IS TRUE)) ORDER BY u.id LIMIT 1000 FOR UPDATE SKIP LOCKED`);
+    for(const {id} of candidates.rows) {
+      await c.query(`UPDATE users SET availability_mode=CASE WHEN availability_until<=now() THEN NULL ELSE availability_mode END,
+        availability_until=CASE WHEN availability_until<=now() THEN NULL ELSE availability_until END,
+        dnd_until=CASE WHEN dnd_until<=now() THEN NULL ELSE dnd_until END,availability_revision=availability_revision+1 WHERE id=$1`,[id]);
+      await publishAvailability(c,id);
+      const row=(await c.query('SELECT dnd_until FROM users WHERE id=$1',[id])).rows[0];
+      await enqueueOutbox(c,'account.event',{userIds:[id],event:{type:'me.dnd',dndUntil:activeDnd(row.dnd_until)}});
+    }
+    return candidates.rowCount ?? 0;
   });
 }

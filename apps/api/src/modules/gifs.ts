@@ -83,7 +83,7 @@ async function getJson(url: string): Promise<any> {
 }
 
 // ---------- Tokens de media ----------
-interface MediaToken { u: string; p: GifProvider; k: MediaKind; a?: string | null; t?: string }
+interface MediaToken { provenance?: import('@tiecoms/contracts').AttachmentProvenanceDTO; u: string; p: GifProvider; k: MediaKind; a?: string | null; t?: string }
 const tokenKey = () => createHash('sha256').update(`chaggu-gifs:${config.jwtSecret}`).digest();
 /** IV derivado del contenido: la misma imagen da siempre el mismo token (el navegador la reutiliza de su caché). */
 export function sealMedia(t: MediaToken): string {
@@ -106,7 +106,7 @@ export function openMedia(token: string): MediaToken | null {
 }
 /** En la query (no en la ruta): Fastify limita los parámetros de ruta a 100 caracteres. */
 const MEDIA_PREFIX = '/api/v1/gifs/media?t=';
-const mint: Mint = (p, u, k, a, title) => `${MEDIA_PREFIX}${sealMedia({ u, p, k, ...(a ? { a } : {}), ...(k === 'f' ? { t: title } : {}) })}`;
+const mint: Mint = (p, u, k, a, title, provenance) => `${MEDIA_PREFIX}${sealMedia({ u, p, k, ...(a ? { a } : {}), ...(k === 'f' ? { t: title, ...(provenance ? { provenance } : {}) } : {}) })}`;
 
 // ---------- Cachés ----------
 /** Respuestas normalizadas (JSON serializado). Búsquedas 10 min; tendencias 1 h; plantillas 6 h. */
@@ -238,6 +238,11 @@ export async function sendGif(userId: string, conversationId: string, input: z.i
   const media = await readMedia(t);
   const ext = media.contentType === 'image/gif' ? 'gif' : media.contentType.split('/')[1]!.replace('jpeg', 'jpg');
   const attachment = await upload(userId, conversationId, { body: media.body, name: gifFileName(t.t ?? 'gif', ext), type: media.contentType });
+  if (t.a) {
+    const provenance = t.provenance ?? { version: 1 as const, provider: t.p, title: t.t ?? 'GIF', attribution: t.a, sourceUrl: null };
+    await pool.query('UPDATE attachments SET provenance=$2 WHERE id=$1', [attachment.id, JSON.stringify(provenance)]);
+    attachment.provenance = provenance;
+  }
   return { attachment, attribution: t.a ?? null };
 }
 

@@ -4,8 +4,14 @@ import { MAX_VOICE_MS } from '@tiecoms/contracts';
 import { client } from '../app-client.ts';
 import { errorText, t, voiceDuration } from '../i18n.ts';
 import { copyText, toast } from '../menu.tsx';
-import { blobUrl } from './Attachments.tsx';
+import { acquireBlob } from './Attachments.tsx';
 import { Modal } from '../ui.tsx';
+
+function VoicePreview({ blob }: { blob: Blob }) {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => { const src = URL.createObjectURL(blob); setUrl(src); return () => URL.revokeObjectURL(src); }, [blob]);
+  return url ? <audio controls preload="metadata" src={url} style={{ width: '100%' }} /> : null;
+}
 
 // ---------- Grabar ----------
 const MIME = ['audio/webm;codecs=opus', 'audio/mp4', 'audio/webm', 'audio/ogg;codecs=opus'];
@@ -34,22 +40,28 @@ interface Rec { recorder: MediaRecorder; stream: MediaStream; ctx: AudioContext;
 export function VoiceRecorder({ conversationId, onSent, viewOnce }: { conversationId: string; onSent?: () => void; /** Una sola vista (tanda 1.7). */ viewOnce?: boolean }) {
   const rec = useRef<Rec | null>(null);
   const origin = useRef({ x: 0, y: 0 });
-  const [state, setState] = useState<'idle' | 'holding' | 'locked' | 'sending'>('idle');
+  const [state, setState] = useState<'idle' | 'starting' | 'holding' | 'locked' | 'sending'>('idle');
   const [elapsed, setElapsed] = useState(0);
   const [live, setLive] = useState<number[]>([]);
   const [cancelHint, setCancelHint] = useState(false);
   const [pending, setPending] = useState<{ blob: Blob; durationMs: number; waveform: number[] } | null>(null);
 
-  useEffect(() => () => { void stop(true); }, []);
+  const gesture = useRef(0);
+  const held = useRef(false);
+  const currentState = useRef(state); currentState.current = state;
+  useEffect(() => { const abort = () => { if (document.hidden) void cancel(); }; document.addEventListener('visibilitychange', abort); return () => { gesture.current++; held.current = false; void stop(true); document.removeEventListener('visibilitychange', abort); }; }, []);
 
-  async function start() {
+  async function start(generation: number) {
     if (typeof MediaRecorder === 'undefined' || !navigator.mediaDevices?.getUserMedia) { toast(t('voice.micUnavailable')); return false; }
     let stream: MediaStream;
     try { stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } }); }
     catch { toast(t('voice.micDenied')); return false; }
+    if (generation !== gesture.current || !held.current) { stream.getTracks().forEach((track) => track.stop()); return false; }
+    let ctx: AudioContext | null = null;
+    try {
     const mime = pickMime();
     const recorder = new MediaRecorder(stream, { ...(mime ? { mimeType: mime } : {}), audioBitsPerSecond: 32_000 });
-    const ctx = new AudioContext();
+    ctx = new AudioContext();
     const analyser = ctx.createAnalyser();
     analyser.fftSize = 512;
     ctx.createMediaStreamSource(stream).connect(analyser);
@@ -70,6 +82,7 @@ export function VoiceRecorder({ conversationId, onSent, viewOnce }: { conversati
     rec.current = r;
     navigator.vibrate?.(15);
     return true;
+    } catch (error) { stream.getTracks().forEach((track) => track.stop()); void ctx?.close().catch(() => {}); throw error; }
   }
 
   function stop(discard: boolean): Promise<{ blob: Blob; durationMs: number; waveform: number[] } | null> {
@@ -109,28 +122,34 @@ export function VoiceRecorder({ conversationId, onSent, viewOnce }: { conversati
       const att = await client.uploadAttachment(conversationId, out.blob, `nota-de-voz.${ext}`, { durationMs: out.durationMs, waveform: out.waveform, aiConsent });
       await client.send(conversationId, '', null, null, { attachments: [att], ...(viewOnce ? { viewOnce: true } : {}) });
       onSent?.();
-    } catch (e) { toast(errorText(e)); } finally { setState('idle'); }
+    } catch (e) { setPending(out); toast(errorText(e)); } finally { setState('idle'); }
   }
-  async function cancel() { await stop(true); setState('idle'); setLive([]); setElapsed(0); setCancelHint(false); toast(t('voice.cancelled')); }
+  async function cancel() { gesture.current++; held.current = false; await stop(true); setState('idle'); setLive([]); setElapsed(0); setCancelHint(false); toast(t('voice.cancelled')); }
 
   const onDown = async (e: RPointerEvent) => {
-    if (state !== 'idle') return;
-    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-    origin.current = { x: e.clientX, y: e.clientY };
-    setState('holding');
-    if (!(await start())) setState('idle');
+    if (currentState.current !== 'idle' || held.current || (e.pointerType === 'mouse' && e.button !== 0)) return;
+    e.preventDefault(); held.current = true; const generation = ++gesture.current;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    origin.current = { x: e.clientX, y: e.clientY }; setState('starting'); currentState.current = 'starting';
+    try { const started = await start(generation); if (generation === gesture.current) setState(started ? 'holding' : 'idle'); }
+    catch (err) { void stop(true); setState('idle'); toast(errorText(err)); }
   };
   const onMove = (e: RPointerEvent) => {
-    if (state !== 'holding') return;
+    if (currentState.current !== 'holding') return;
     const dx = e.clientX - origin.current.x, dy = e.clientY - origin.current.y;
     setCancelHint(dx < -40);
     if (dx < -90) void cancel();
-    else if (dy < -60) { setState('locked'); navigator.vibrate?.(10); }
+    else if (dy < -60) { setState('locked'); currentState.current = 'locked'; navigator.vibrate?.(10); }
   };
-  const onUp = () => { if (state === 'holding') void finish(); };
+  const onUp = () => {
+    held.current = false;
+    if (currentState.current === 'starting') { gesture.current++; void stop(true); setState('idle'); toast(t('voice.hold')); }
+    else if (currentState.current === 'holding') void finish();
+  };
 
   if (pending) return (
     <Modal title={t('ai.voiceTitle')} onClose={() => setPending(null)}>
+      <VoicePreview blob={pending.blob} />
       <p>{t('ai.voiceDisclosure')}</p>
       <p className="small muted">{t('ai.voiceChoice')}</p>
       <div className="modal-actions">
@@ -140,27 +159,22 @@ export function VoiceRecorder({ conversationId, onSent, viewOnce }: { conversati
       </div>
     </Modal>
   );
-  if (state === 'locked' || state === 'holding') {
-    return (
-      <div className={`voice-rec ${cancelHint ? 'is-cancel' : ''}`} role="status" aria-live="polite">
-        <span className="voice-dot" aria-hidden />
-        <span className="voice-time">{voiceDuration(elapsed)}</span>
-        <span className="voice-live" aria-hidden>{live.map((v, i) => <i key={i} style={{ height: `${Math.max(8, Math.min(100, v * 300))}%` }} />)}</span>
-        {state === 'holding'
-          ? <span className="small muted voice-hint">{t('voice.slideCancel')} · {t('voice.slideLock')}</span>
-          : <>
-            <button className="btn ghost small" onClick={() => void cancel()}>{t('voice.discard')}</button>
-            <button className="send" aria-label={t('voice.send')} onClick={() => void finish()}>➤</button>
-          </>}
-        {state === 'holding' && <button className="send is-rec" aria-label={t('voice.recording')} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={() => void cancel()}>🎤</button>}
-      </div>
-    );
-  }
+  const recording = state === 'locked' || state === 'holding' || state === 'starting';
   return (
-    <button className="send mic" disabled={state === 'sending'} title={t('voice.hold')} aria-label={t('voice.hold')}
-      onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onContextMenu={(e) => e.preventDefault()}>
-      {state === 'sending' ? '…' : '🎤'}
-    </button>
+    <div className={recording ? `voice-rec ${cancelHint ? 'is-cancel' : ''}` : 'voice-idle'}>
+      <div className="voice-controls" hidden={!recording} role="status">
+        <span className="voice-dot" aria-hidden /><span className="voice-time">{state === 'starting' ? '…' : voiceDuration(elapsed)}</span>
+        <span className="voice-live" aria-hidden>{live.map((v,i) => <i key={i} style={{height:`${Math.max(8,Math.min(100,v*300))}%`}} />)}</span>
+        {state === 'holding' && <span className="small muted voice-hint">{t('voice.slideCancel')} · {t('voice.slideLock')}</span>}
+        {state === 'locked' && <><button className="btn ghost small" onClick={() => void cancel()}>{t('voice.discard')}</button><button className="send" onClick={() => void finish()} aria-label={t('voice.send')}>➤</button></>}
+      </div>
+      <button className={`send mic ${recording ? 'is-rec' : ''}`} disabled={state === 'sending' || state === 'locked'}
+        style={{ touchAction: 'none', userSelect: 'none' }} title={t('voice.hold')} aria-label={recording ? t('voice.recording') : t('voice.hold')}
+        onClick={(e) => { if (e.detail !== 0 || currentState.current !== 'idle') return; held.current = true; const generation=++gesture.current; setState('starting'); currentState.current='starting'; void start(generation).then((ok)=>{ if(generation===gesture.current) { held.current=false; setState(ok ? 'locked' : 'idle'); } }).catch((error)=>{ void stop(true); held.current=false; setState('idle'); toast(errorText(error)); }); }}
+        onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={() => void cancel()}
+        onLostPointerCapture={() => { if (held.current && currentState.current !== 'locked') void cancel(); }}
+        onContextMenu={(e) => e.preventDefault()}>{state === 'sending' || state === 'starting' ? '…' : '🎤'}</button>
+    </div>
   );
 }
 
@@ -173,6 +187,9 @@ const SPEEDS = [1, 1.5, 2];
 /** Burbuja de voz: play/pausa, onda con progreso, duración, velocidad, transcripción, resumen y asunto sugerido. */
 export function VoiceNote({ a, onCreateIssue }: { a: AttachmentDTO; onCreateIssue?: (title: string) => void }) {
   const audio = useRef<HTMLAudioElement | null>(null);
+  const audioLease = useRef<ReturnType<typeof acquireBlob> | null>(null);
+  const mounted = useRef(true);
+  const loadingAudio = useRef(false);
   const root = useRef<HTMLDivElement>(null);
   const [playing, setPlaying] = useState(false);
   const [pos, setPos] = useState(0);
@@ -185,17 +202,23 @@ export function VoiceNote({ a, onCreateIssue }: { a: AttachmentDTO; onCreateIssu
   const tr = a.transcript;
 
   useEffect(() => {
+    mounted.current = true;
     const el = root.current;
     const h = () => void toggle(true);
     el?.addEventListener('voice:play', h);
-    return () => { el?.removeEventListener('voice:play', h); audio.current?.pause(); };
+    return () => { el?.removeEventListener('voice:play', h); mounted.current = false; audio.current?.pause(); if (audio.current) audio.current.src = ''; audioLease.current?.release(); audioLease.current = null; };
   }, []);
 
   async function toggle(forcePlay = false) {
+    if (loadingAudio.current) return;
     if (playing && !forcePlay) { audio.current?.pause(); return; }
+    loadingAudio.current = true;
     try {
       if (!audio.current) {
-        const el = new Audio(await blobUrl(a.url));
+        const lease = audioLease.current ??= acquireBlob(a.url);
+        const url = await lease.url;
+        if (!mounted.current) return;
+        const el = new Audio(url);
         el.ontimeupdate = () => setPos(el.currentTime * 1000);
         el.onplay = () => setPlaying(true);
         el.onpause = () => setPlaying(false);
@@ -220,7 +243,7 @@ export function VoiceNote({ a, onCreateIssue }: { a: AttachmentDTO; onCreateIssu
         await audio.current.play();
       }
       if (!wasHeard) { markHeard(a.id); setWasHeard(true); }
-    } catch (e) { toast(errorText(e) || t('att.unavailable')); }
+    } catch (e) { audioLease.current?.release(); audioLease.current = null; toast(errorText(e) || t('att.unavailable')); } finally { loadingAudio.current = false; }
   }
   useEffect(() => {
     const el = root.current;

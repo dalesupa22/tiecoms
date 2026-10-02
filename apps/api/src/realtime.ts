@@ -93,6 +93,11 @@ export function createRealtime(httpServer: HttpServer) {
         io.to(`conv:${p.conversationId}`).emit(SOCKET_EVENTS.conversationEvent, p);
         break;
       case 'account.event':
+        if(p.event?.type==='wa.inbox' && p.event.chat?.hidden!==true) {
+          const chat=p.event.chat;
+          const visible=await pool.query('SELECT wa_chat_visible($1,$2) AS visible',[chat.accountId,chat.jid]);
+          if(!visible.rows[0]?.visible) break;
+        }
         io.to((p.userIds as string[]).map((u) => `user:${u}`)).emit(SOCKET_EVENTS.accountEvent, p.event);
         break;
       case 'rooms.join':

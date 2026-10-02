@@ -12,6 +12,7 @@ import {
 } from '@tiecoms/contracts';
 import { ApiRequestError, parseError } from './api.ts';
 import type { KeyValueStorage, SecretStore } from './storage.ts';
+import { matchesWaPrivacy, waPathScope, waRequestScopes, type WaPrivacyEvent, type WaPrivacyState } from './wa-privacy.ts';
 import {
   CACHE_VERSION, LAST_USER_KEY, PREFETCH_CONCURRENCY, bootKey, convIndexKey, convKey, conversationsToCache, prefetchCandidates, runLimited,
   snapshotConversation, usableBoot, usableConversation, type CachedBoot, type CachedConversation,
@@ -82,6 +83,8 @@ export interface ClientState {
   mails: Record<string, import('@tiecoms/contracts').SharedMailDTO>;
   /** Sube cuando el puente de WhatsApp trae chats o mensajes nuevos: la pantalla vuelve a pedir la lista. */
   waRevision: number;
+  /** Revocations are scoped to the linked account; private WA data is never trusted from boot cache. */
+  waPrivacy?: Record<string, WaPrivacyState>;
   /** Sube cuando cambia algún árbol de archivos visible para la persona. */
   driveRevision: number;
   /** «No molestar» guardado solo en este dispositivo porque el servidor no conoce /me/dnd (servidor viejo). */
@@ -94,7 +97,13 @@ export interface ClientState {
 export const isMutedForever = (until: string | null | undefined) => !!until && Date.parse(until) > Date.now() + 366 * 86_400_000;
 export const isActiveUntil = (until: string | null | undefined) => !!until && Date.parse(until) > Date.now();
 /** «No molestar» activo en este momento. */
-export const dndActive = (s: Pick<ClientState, 'data'>) => isActiveUntil(s.data?.me.dndUntil);
+export const dndActive = (s: Pick<ClientState, 'data'>) => {
+  const me=s.data?.me, a=me?.availability;
+  if (isActiveUntil(me?.dndUntil) || (a?.silent && (!a.until || isActiveUntil(a.until)))) return true;
+  const sleep=me?.sleep;
+  if (!sleep?.on) return false;
+  try { const p=new Intl.DateTimeFormat('en-GB',{timeZone:sleep.tz,hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(new Date()); return sleep.start<sleep.end ? p>=sleep.start && p<sleep.end : sleep.start!==sleep.end && (p>=sleep.start || p<sleep.end); } catch { return false; }
+};
 /**
  * Estado de un mensaje de una sola vista para mí: los eventos en vivo llegan iguales para todos, así que se
  * calcula con el autor y openedBy (docs/TANDA-1.7.md §7). null si no es de una sola vista.
@@ -188,12 +197,40 @@ export class TieComsClient {
   private dirtyConvs = new Set<string>();
   private lastBootstrapAt = 0;
   private sharedGets = new Map<string, { generation: number; at: number; promise: Promise<unknown> }>();
+  private waPrivacyEpoch = 0;
+  private waResetEpoch = new Map<string, number>();
+  private waJidEpoch = new Map<string, number>();
+  private waPrivacyListeners = new Set<(event: WaPrivacyEvent) => void>();
 
   constructor(private opts: ClientOptions) {}
 
   // ---------- Estado observable (useSyncExternalStore) ----------
   getState = () => this.state;
   getSessionIdentity = () => `${this.sessionGeneration}:${this.state.data?.me.id ?? ''}`;
+  getWaPrivacyIdentity = (accountId: string, jid?: string) => `${this.getSessionIdentity()}:${this.waResetEpoch.get(accountId) ?? 0}:${jid ? this.waJidEpoch.get(`${accountId}:${jid}`) ?? 0 : this.state.waPrivacy?.[accountId]?.epoch ?? 0}`;
+  getWaPathPrivacyIdentity = (path: string) => { const scope = waPathScope(path); return scope ? this.getWaPrivacyIdentity(scope.accountId, scope.jid) : this.getSessionIdentity(); };
+  isWaChatVisible = (accountId: string, jid?: string) => {
+    const state = this.state.waPrivacy?.[accountId];
+    return state?.ready !== false && (!jid || !state?.blockedJids.includes(jid));
+  };
+  subscribeWaPrivacy = (fn: (event: WaPrivacyEvent) => void) => { this.waPrivacyListeners.add(fn); return () => { this.waPrivacyListeners.delete(fn); }; };
+  /** Also used for a denied open chat, so cached names/content cannot outlive its 404. */
+  invalidateWaPrivacy(event: WaPrivacyEvent) {
+    const previous = this.state.waPrivacy?.[event.accountId] ?? { epoch: 0, blockedJids: [] };
+    ++this.waPrivacyEpoch;
+    if (event.reset) this.waResetEpoch.set(event.accountId, (this.waResetEpoch.get(event.accountId) ?? 0) + 1);
+    for (const jid of event.jids ?? []) this.waJidEpoch.set(`${event.accountId}:${jid}`, (this.waJidEpoch.get(`${event.accountId}:${jid}`) ?? 0) + 1);
+    const next: WaPrivacyState = { ...previous, epoch: previous.epoch + 1, blockedJids: [...new Set([...previous.blockedJids, ...(event.jids ?? [])])], ...(event.reset ? { ready: false } : {}) };
+    const data = this.state.data;
+    for (const path of this.sharedGets.keys()) {
+      const scope = waRequestScopes(path);
+      if (scope && (scope.global || scope.scopes.some((s) => matchesWaPrivacy(event, s)))) this.sharedGets.delete(path);
+    }
+    this.set({ waPrivacy: { ...this.state.waPrivacy, [event.accountId]: next }, waRevision: this.state.waRevision + 1,
+      ...(data ? { data: { ...data, waInbox: (data.waInbox ?? []).filter((chat) => chat.accountId !== event.accountId || (!event.reset && !event.jids?.includes(chat.jid))) } } : {}) });
+    this.waPrivacyListeners.forEach((fn) => fn(event));
+    this.bootDirty = true; this.schedulePersist();
+  }
   subscribe = (fn: () => void) => { this.listeners.add(fn); return () => this.listeners.delete(fn); };
   private set(patch: Partial<ClientState>) {
     this.state = { ...this.state, ...patch };
@@ -226,7 +263,7 @@ export class TieComsClient {
     const store = this.opts.storage;
     if (this.bootDirty) {
       this.bootDirty = false;
-      const boot: CachedBoot = { v: CACHE_VERSION, userId, savedAt: new Date().toISOString(), data };
+      const boot: CachedBoot = { v: CACHE_VERSION, userId, savedAt: new Date().toISOString(), data: { ...data, waInbox: [] } };
       await store.set(bootKey(userId), boot);
       await store.set(LAST_USER_KEY, userId);
     }
@@ -305,20 +342,68 @@ export class TieComsClient {
 
   async request<T>(path: string, init: RequestInit & { json?: unknown } = {}): Promise<T> {
     const generation = this.sessionGeneration;
+    const privacy = waRequestScopes(path, init.json);
+    const privacyIdentity = privacy?.global ? String(this.waPrivacyEpoch) : privacy?.scopes.map((s) => this.getWaPrivacyIdentity(s.accountId, s.jid)).join('|');
+    const assertPrivacy = () => {
+      const current = privacy?.global ? String(this.waPrivacyEpoch) : privacy?.scopes.map((s) => this.getWaPrivacyIdentity(s.accountId, s.jid)).join('|');
+      if (privacyIdentity !== current) throw new ApiRequestError(409, 'wa_privacy_changed', 'Cambió la privacidad de WhatsApp. Vuelve a abrir el chat.');
+      if (privacy?.scopes.some((s) => s.jid && !this.isWaChatVisible(s.accountId, s.jid))) throw new ApiRequestError(404, 'wa_private', 'Chat de WhatsApp no disponible.');
+    };
+    assertPrivacy();
     if (this.accessToken && Date.now() > this.accessExp - 30_000) await this.refresh();
     this.assertSession(generation);
+    assertPrivacy();
     let res = await this.raw(path, init);
     this.assertSession(generation);
+    assertPrivacy();
     if (res.status === 401 && (await this.refresh())) {
       this.assertSession(generation);
+      assertPrivacy();
       res = await this.raw(path, init);
     }
     this.assertSession(generation);
+    assertPrivacy();
     if (res.status === 401) { await this.handleSignedOut(); throw await parseError(res); }
-    if (!res.ok) throw await parseError(res);
+    if (!res.ok) {
+      if (res.status === 404) for (const scope of privacy?.scopes ?? []) if (scope.jid) this.invalidateWaPrivacy({ type: 'wa.privacy', accountId: scope.accountId, jids: [scope.jid] });
+      throw await parseError(res);
+    }
     const result = await res.json() as T;
     this.assertSession(generation);
+    assertPrivacy();
+    this.acceptWaResponse(path, result);
     return result;
+  }
+
+  private acceptWaResponse(path: string, result: unknown) {
+    const pathname = new URL(path, 'http://client.invalid').pathname;
+    const response = result as { accounts?: import('@tiecoms/contracts').WaAccountDTO[]; chats?: import('@tiecoms/contracts').WaChatDTO[] };
+    if (pathname === '/whatsapp/accounts' && Array.isArray(response.accounts)) {
+      const present = new Set(response.accounts.map((account) => account.id));
+      const known = new Set([...Object.keys(this.state.waPrivacy ?? {}), ...(this.state.data?.waInbox ?? []).map((chat) => chat.accountId)]);
+      for (const accountId of known) if (!present.has(accountId) && this.state.waPrivacy?.[accountId]?.ready !== false) this.invalidateWaPrivacy({ type: 'wa.privacy', accountId, reset: true });
+      for (const account of response.accounts) {
+        if (account.privacyReady === false && this.state.waPrivacy?.[account.id]?.ready !== false) this.invalidateWaPrivacy({ type: 'wa.privacy', accountId: account.id, reset: true });
+        else if (account.privacyReady === true && this.state.waPrivacy?.[account.id]?.ready !== true) {
+          const previous = this.state.waPrivacy?.[account.id] ?? { epoch: 0, blockedJids: [] };
+          this.set({ waPrivacy: { ...this.state.waPrivacy, [account.id]: { ...previous, ready: true } } });
+        }
+      }
+    }
+    // Only a fresh authoritative list may restore an explicitly unblocked chat.
+    if (pathname === '/whatsapp/chats' && Array.isArray(response.chats)) {
+      this.authorizeWaChats(response.chats);
+      response.chats = response.chats.filter((chat) => this.isWaChatVisible(chat.accountId, chat.jid));
+    }
+  }
+  private authorizeWaChats(chats: import('@tiecoms/contracts').WaChatDTO[]) {
+    const privacy = { ...this.state.waPrivacy }; let changed = false;
+    for (const chat of chats) {
+      const previous = privacy[chat.accountId];
+      if (!previous || previous.ready === false || !previous.blockedJids.includes(chat.jid)) continue;
+      privacy[chat.accountId] = { ...previous, blockedJids: previous.blockedJids.filter((jid) => jid !== chat.jid) }; changed = true;
+    }
+    if (changed) this.set({ waPrivacy: privacy });
   }
 
   // ---------- Sesión ----------
@@ -339,11 +424,14 @@ export class TieComsClient {
   /** Arranque: intenta reanudar la sesión guardada. */
   async start(): Promise<void> {
     this.set({ status: 'loading' });
+    const generation = this.sessionGeneration;
     // Pinta de inmediato con lo último que se vio en este dispositivo; el bootstrap real lo reemplaza enseguida.
     const cached = await this.readBootCache();
-    const generation = this.sessionGeneration;
-    if (cached && generation === this.sessionGeneration) this.set({ status: 'ready', data: cached.data });
-    if (await this.refresh()) {
+    if (generation !== this.sessionGeneration) return;
+    if (cached && generation === this.sessionGeneration) this.set({ status: 'ready', data: { ...cached.data, waInbox: [] } });
+    const refreshed = await this.refresh();
+    if (generation !== this.sessionGeneration) return;
+    if (refreshed) {
       try { await this.afterLogin(); } catch (e) {
         // Sin red a mitad del arranque: se sigue con la caché y se completa al volver la conexión.
         if (!(cached && generation === this.sessionGeneration && e instanceof TypeError)) throw e;
@@ -474,6 +562,7 @@ export class TieComsClient {
     ++this.sessionGeneration;
     this.refreshing = null;
     this.issueHiddenAt.clear(); this.issueHiddenRevision = 0;
+    this.waPrivacyEpoch = 0; this.waResetEpoch.clear(); this.waJidEpoch.clear();
     this.socket?.removeAllListeners();
     this.socket?.disconnect();
     this.socket = null;
@@ -521,6 +610,7 @@ export class TieComsClient {
   // ---------- Snapshot ----------
   async loadBootstrap() {
     const generation = this.sessionGeneration;
+    const waEpoch = this.waPrivacyEpoch;
     const data = await this.request<BootstrapDTO>('/bootstrap');
     const dndLocalOnly = data.me.dndUntil === undefined;
     if (dndLocalOnly) {
@@ -529,7 +619,21 @@ export class TieComsClient {
       data.me.dndUntil = isActiveUntil(local) ? local : null;
     }
     this.assertSession(generation);
+    // A socket update can arrive while the snapshot is in flight. Preserve its
+    // newer cursor, including intentional unread, without retaining lost access.
+    if (this.state.data?.me.id === data.me.id) {
+      const current = new Map(this.state.data.conversations.map((c) => [c.id, c]));
+      data.conversations = data.conversations.map((c) => {
+        const newer = current.get(c.id);
+        if (!newer || (newer.readRevision ?? 0) <= (c.readRevision ?? 0)) return c;
+        return { ...c, lastReadSeq: newer.lastReadSeq, readRevision: newer.readRevision,
+          unreadMentions: newer.unreadMentions,
+          unread: Math.max(0, c.lastMessageSeq - Math.max(newer.lastReadSeq, c.historyFromSeq)) };
+      });
+    }
     this.lastBootstrapAt = Date.now();
+    if (waEpoch === this.waPrivacyEpoch) this.authorizeWaChats(data.waInbox ?? []);
+    data.waInbox = (data.waInbox ?? []).filter((chat) => this.isWaChatVisible(chat.accountId, chat.jid));
     this.set({ data, dndLocalOnly });
     if (data.myActiveCall) this.putCall(data.myActiveCall);
     this.bootDirty = true; this.schedulePersist();
@@ -594,6 +698,7 @@ export class TieComsClient {
     }
     // Lo que se pidió hace nada (p. ej. el bootstrap de afterLogin y el «ready» del socket) no se repite.
     this.sharedGets.clear();
+    this.set({ waRevision:this.state.waRevision+1 });
     try {
       if (Date.now() - this.lastBootstrapAt > 5000) await this.loadBootstrap();
       for (const c of this.state.data?.conversations ?? []) {
@@ -608,6 +713,13 @@ export class TieComsClient {
     if (e.type === 'scope.changed') { this.scheduleBootstrap(); void this.loadIssues({ open: true }).catch(() => {}); }
     if (e.type === 'prefs.updated') this.scheduleBootstrap();
     if (e.type === 'me.dnd') this.patchMe({ dndUntil: e.dndUntil });
+    if (e.type === 'person.availability') {
+      const d=this.state.data;
+      if (d) {
+        const current=e.userId===d.me.id ? d.me.availability : d.people.find((p)=>p.id===e.userId)?.availability;
+        if (!current || e.availability.revision>=current.revision) this.set({data:{...d,me:e.userId===d.me.id ? {...d.me,availability:e.availability} : d.me,people:d.people.map((p)=>p.id===e.userId ? {...p,availability:e.availability} : p)}});
+      }
+    }
     // Asuntos restringidos ('org' o 'private') llegan por la cuenta, no por la conversación.
     if (e.type === 'issue.updated') { this.putIssues([e.issue]); this.recountIssues(e.issue.conversationId); }
     if (e.type === 'issue.personal') this.putIssues([e.issue]);
@@ -630,6 +742,7 @@ export class TieComsClient {
     if (e.type === 'reminders.changed') void this.loadReminders().catch(() => {});
     if (e.type === 'scheduled.updated') this.putScheduled(e.scheduled);
     if (e.type === 'whatsapp.updated') this.set({ waRevision: this.state.waRevision + 1 });
+    if (e.type === 'wa.privacy') this.invalidateWaPrivacy(e);
     // WhatsApp en la bandeja: la fila se reemplaza al vuelo (se movió, fijó, sacó o le entró un mensaje).
     if (e.type === 'wa.inbox') this.putWaInbox(e.chat);
     if (e.type === 'drive.updated') this.set({ driveRevision: this.state.driveRevision + 1 });
@@ -642,8 +755,8 @@ export class TieComsClient {
       this.opts.onNotice?.({ kind: 'eventSoon', event: e.event, minutes: e.minutes });
     }
     if (e.type === 'read.updated') {
-      const c = this.state.data?.conversations.find((x) => x.id === e.conversationId);
-      if (c && e.seq > c.lastReadSeq) this.patchConversationMeta(c.id, { lastReadSeq: e.seq, unread: Math.max(0, c.lastMessageSeq - Math.max(e.seq, c.historyFromSeq)), ...(e.seq >= c.lastMessageSeq ? { unreadMentions: 0 } : {}) });
+      if (e.readRevision === undefined) this.scheduleBootstrap();
+      else this.applyConfirmedRead(e.conversationId,e.seq,e.readRevision);
     }
   }
 
@@ -891,7 +1004,7 @@ export class TieComsClient {
     return operation.promise;
   }
 
-  async loadOlder(id: string) {
+  async loadOlder(id: string, limit = 50) {
     const local = this.state.conversations[id];
     if (!local?.loaded || !local.hasMore || local.loading) return false;
     const before = local.messages[0]?.seq;
@@ -899,8 +1012,10 @@ export class TieComsClient {
     const generation = this.sessionGeneration;
     this.setConv(id, { loading: true });
     try {
-      const page = await this.request<{ messages: MessageDTO[]; hasMore: boolean }>(`/conversations/${id}/messages?before=${before}&limit=50`);
-      const cur = this.state.conversations[id]!;
+      const page = await this.request<{ messages: MessageDTO[]; hasMore: boolean }>(`/conversations/${id}/messages?before=${before}&limit=${Math.min(100, Math.max(1, limit))}`);
+      this.assertSession(generation);
+      const cur = this.state.conversations[id];
+      if (!cur?.loaded) return false;
       const older = page.messages.filter((m) => m.seq < before);
       this.setConv(id, { messages: [...older, ...cur.messages], hasMore: page.hasMore, loading: false });
       return older.length > 0 || !page.hasMore;
@@ -917,8 +1032,8 @@ export class TieComsClient {
     this.readTimers.set(id, setTimeout(() => {
       this.readTimers.delete(id);
       if (generation !== this.sessionGeneration) return;
-      void this.request<{ lastReadSeq: number }>(`/conversations/${id}/read`, { method: 'POST', json: { seq } })
-        .then((result) => this.applyConfirmedRead(id, result.lastReadSeq)).catch(() => {});
+      void this.request<{ lastReadSeq: number; readRevision?: number }>(`/conversations/${id}/read`, { method: 'POST', json: { seq } })
+        .then((result) => { if (generation===this.sessionGeneration) this.applyConfirmedRead(id,result.lastReadSeq,result.readRevision); }).catch(() => {});
     }, 400));
   }
 
@@ -1130,9 +1245,11 @@ export class TieComsClient {
     await this.request(`/workspaces/${id}/prefs`, { method: 'PUT', json: { pinned } });
   }
   async markUnread(conversationId: string, seq: number) {
-    const r = await this.request<{ lastReadSeq: number }>(`/conversations/${conversationId}/unread`, { method: 'POST', json: { seq } });
+    const generation=this.sessionGeneration;
+    const r = await this.request<{ lastReadSeq: number; readRevision?: number }>(`/conversations/${conversationId}/unread`, { method: 'POST', json: { seq } });
+    this.assertSession(generation);
     const c = this.state.data?.conversations.find((x) => x.id === conversationId);
-    if (c) this.patchConversationMeta(conversationId, { lastReadSeq: r.lastReadSeq, unread: Math.max(0, c.lastMessageSeq - Math.max(r.lastReadSeq, c.historyFromSeq)) });
+    if (c) { if (r.readRevision===undefined) this.scheduleBootstrap(); else this.applyConfirmedRead(conversationId,r.lastReadSeq,r.readRevision); }
   }
   /** Derivadas de un grupo que cuentan como sus pendientes (hilos, ramas, internas; no sidechats). */
   derivedOf(conversationId: string) {
@@ -1143,24 +1260,29 @@ export class TieComsClient {
    * este cliente conoce (lo que llegue después sigue sin leer). El servidor avisa a mis otros dispositivos.
    */
   async markTreeRead(conversationId: string) {
+    const generation=this.sessionGeneration;
     const all = [this.state.data?.conversations.find((x) => x.id === conversationId), ...this.derivedOf(conversationId)]
       .filter((c): c is NonNullable<typeof c> => !!c && (c.unread > 0 || (c.unreadMentions ?? 0) > 0 || c.lastReadSeq < c.lastMessageSeq));
     if (!all.length) return;
     const items = all.map((c) => ({ conversationId: c.id, seq: c.lastMessageSeq }));
-    const result = await this.request<{ marked: { conversationId: string; lastReadSeq: number }[] }>(`/conversations/${conversationId}/read-tree`, { method: 'POST', json: { items } });
-    for (const m of result.marked) this.applyConfirmedRead(m.conversationId, m.lastReadSeq);
+    const result = await this.request<{ marked: { conversationId: string; lastReadSeq: number; readRevision?:number }[] }>(`/conversations/${conversationId}/read-tree`, { method: 'POST', json: { items } });
+    this.assertSession(generation);
+    for (const m of result.marked) this.applyConfirmedRead(m.conversationId, m.lastReadSeq,m.readRevision);
   }
   async markConversationRead(conversationId: string) {
+    const generation=this.sessionGeneration;
     const c = this.state.data?.conversations.find((x) => x.id === conversationId);
     if (!c) return;
-    const result = await this.request<{ lastReadSeq: number }>(`/conversations/${conversationId}/read`, { method: 'POST', json: { seq: c.lastMessageSeq } });
-    this.applyConfirmedRead(conversationId, result.lastReadSeq);
+    const result = await this.request<{ lastReadSeq: number; readRevision?: number }>(`/conversations/${conversationId}/read`, { method: 'POST', json: { seq: c.lastMessageSeq } });
+    this.assertSession(generation);
+    this.applyConfirmedRead(conversationId,result.lastReadSeq,result.readRevision);
   }
-  private applyConfirmedRead(id: string, seq: number) {
+  private applyConfirmedRead(id: string, seq: number, readRevision?: number) {
     const c = this.state.data?.conversations.find((x) => x.id === id);
     if (!c) return;
-    const lastReadSeq = Math.max(c.lastReadSeq, seq);
-    this.patchConversationMeta(id, { lastReadSeq, unread: Math.max(0, c.lastMessageSeq - Math.max(lastReadSeq, c.historyFromSeq)), ...(lastReadSeq >= c.lastMessageSeq ? { unreadMentions: 0 } : {}) });
+    if (readRevision!==undefined && readRevision<(c.readRevision ?? 0)) return;
+    const lastReadSeq = readRevision!==undefined ? seq : Math.max(c.lastReadSeq,seq);
+    this.patchConversationMeta(id, { ...(readRevision!==undefined ? {readRevision} : {}), lastReadSeq, unread: Math.max(0, c.lastMessageSeq - Math.max(lastReadSeq, c.historyFromSeq)), ...(lastReadSeq >= c.lastMessageSeq ? { unreadMentions: 0 } : {}) });
   }
   private patchPreviewIfLast(m: MessageDTO) {
     const c = this.state.data?.conversations.find((x) => x.id === m.conversationId);
@@ -1268,7 +1390,7 @@ export class TieComsClient {
     if (!d) return;
     const same = (x: import('@tiecoms/contracts').WaChatDTO) => x.accountId === chat.accountId && x.jid === chat.jid;
     const rest = (d.waInbox ?? []).filter((x) => !same(x));
-    this.set({ data: { ...d, waInbox: chat.inboxPlace && !chat.hidden ? [...rest, chat] : rest } });
+    this.set({ data: { ...d, waInbox: chat.inboxPlace && !chat.hidden && this.isWaChatVisible(chat.accountId, chat.jid) ? [...rest, chat] : rest } });
   }
   /**
    * WhatsApp en la bandeja (docs/WA-BANDEJA-GG-CHAT.md): mover a Grupos/DMs ('auto' = la sugerida), sacar (null)
@@ -1675,12 +1797,30 @@ export class TieComsClient {
   }
   /** Descarga autenticada (Bearer) de una ruta del API, p. ej. AttachmentDTO.url. */
   async fetchBlob(apiPath: string): Promise<Blob> {
+    const generation = this.sessionGeneration;
+    const privacyIdentity = this.getWaPathPrivacyIdentity(apiPath);
+    const scope = waPathScope(apiPath);
+    const assertPrivacy = () => {
+      if (privacyIdentity !== this.getWaPathPrivacyIdentity(apiPath)) throw new ApiRequestError(409, 'wa_privacy_changed', 'El archivo de WhatsApp ya no está disponible.');
+      if (scope && !this.isWaChatVisible(scope.accountId, scope.jid)) throw new ApiRequestError(404, 'wa_private', 'Archivo de WhatsApp no disponible.');
+    };
+    assertPrivacy();
     const path = apiPath.replace(/^\/api\/v1/, '');
     if (this.accessToken && Date.now() > this.accessExp - 30_000) await this.refresh();
+    this.assertSession(generation);
+    assertPrivacy();
     let res = await this.raw(path);
-    if (res.status === 401 && (await this.refresh())) res = await this.raw(path);
-    if (!res.ok) throw await parseError(res);
-    return res.blob();
+    this.assertSession(generation);
+    assertPrivacy();
+    if (res.status === 401 && (await this.refresh())) { this.assertSession(generation); assertPrivacy(); res = await this.raw(path); this.assertSession(generation); assertPrivacy(); }
+    if (!res.ok) {
+      if (res.status === 404 && scope) this.invalidateWaPrivacy({ type: 'wa.privacy', accountId: scope.accountId, jids: [scope.jid!] });
+      throw await parseError(res);
+    }
+    const blob = await res.blob();
+    this.assertSession(generation);
+    assertPrivacy();
+    return blob;
   }
 
   /** Conversación lateral privada desde un mensaje (no publica nada en el origen). */
@@ -1709,15 +1849,30 @@ export class TieComsClient {
 
   /** Carga hacia atrás hasta tener el mensaje con ese seq (para saltar a un mensaje de origen). */
   async ensureMessage(conversationId: string, seq: number) {
+    const generation=this.sessionGeneration;
     await this.openConversation(conversationId);
-    for (let guard = 0; guard < 40; guard++) {
-      const c = this.state.conversations[conversationId];
-      if (!c?.loaded) return false;
-      if (c.messages.some((m) => m.seq === seq)) return true;
-      if (!c.hasMore || (c.messages[0]?.seq ?? 0) <= seq) return false;
-      await this.loadOlder(conversationId);
+    this.assertSession(generation);
+    if (this.state.conversations[conversationId]?.messages.some((m)=>m.seq===seq)) return true;
+    // Keep one continuous window. Merging a distant /around page would leave an
+    // unread gap that loadOlder cannot fill, and could advance the read cursor past it.
+    // An explicit jump may load at most 2,000 messages; callers offer Retry beyond that.
+    for (let guard=0; guard<20; guard++) {
+      this.assertSession(generation);
+      const current=this.state.conversations[conversationId];
+      if(!current?.loaded) return false;
+      if(current.messages.some((message)=>message.seq===seq)) return true;
+      if(!current.hasMore || (current.messages[0]?.seq ?? 0)<=seq) return false;
+      if(!await this.loadOlder(conversationId,100)) return false;
     }
-    return false;
+    return this.state.conversations[conversationId]?.messages.some((message)=>message.seq===seq) ?? false;
+  }
+
+  patchPersonalPreferences(input: import('zod').z.infer<typeof import('@tiecoms/contracts').PersonalPreferencesPatchInput>) {
+    return this.request<import('@tiecoms/contracts').PersonalPreferencesDTO>('/me/personal-preferences',{method:'PATCH',json:input});
+  }
+  async setAvailability(input: {mode:import('@tiecoms/contracts').AvailabilityMode|null;until?:string|null}) {
+    const r=await this.request<{availability:import('@tiecoms/contracts').AvailabilityDTO}>('/me/availability',{method:'PUT',json:input});
+    this.patchMe({availability:r.availability}); return r.availability;
   }
 
   // ---------- Espacios, grupos, invitaciones ----------

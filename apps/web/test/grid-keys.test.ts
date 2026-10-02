@@ -42,8 +42,15 @@ describe('fijar en un cuadrito', () => {
     expect(placeInto(['a', 'b'], 'x', 1, none, 4)).toEqual({ panes: ['a', 'x'], at: 1, replaced: 'b' });
     expect(placeInto(['a', 'b'], 'x', 1, new Set(['b']), 4)).toBeNull();
   });
-  it('si ya estaba abierto se queda donde estaba', () => {
-    expect(placeInto(['a', 'x'], 'x', 0, none, 4)).toEqual({ panes: ['a', 'x'], at: 1, replaced: null });
+  it('mueve un panel abierto al destino conservando ambos paneles', () => {
+    expect(placeInto(['a', 'x'], 'x', 0, none, 4)).toEqual({ panes: ['x', 'a'], at: 0, replaced: null });
+    expect(placeInto(['a', 'x'], 'x', 1, none, 4)).toEqual({ panes: ['a', 'x'], at: 1, replaced: null });
+    expect(placeInto(['a', 'x'], 'x', 0, new Set(['a']), 4)).toBeNull();
+    expect(placeInto(['x', 'a', 'b'], 'x', 3, new Set(['x', 'b']), 4)).toEqual({ panes: ['a', 'b', 'x'], at: 2, replaced: null });
+    expect(placeInto(['x', 'a'], 'x', 3, new Set(['a']), 4)).toEqual({ panes: ['a', 'x'], at: 1, replaced: null });
+  });
+  it('rechaza destinos inválidos sin alterar la cuadrícula', () => {
+    for (const at of [-1, NaN, 1.5, 4]) expect(placeInto(['x'], 'x', at, none, 4)).toBeNull();
   });
   it('con 4 llenos y un hueco más allá no entra', () => {
     expect(placeInto(['a', 'b', 'c', 'd'], 'x', 4, none, 4)).toBeNull();

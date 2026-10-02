@@ -1,5 +1,8 @@
+import { PaneSizeControl, type PaneSizing } from './PaneSizeControl.tsx';
+import { showDialogUntilClosed } from '../actions.tsx';
+import { LONG_TEXT_LIMIT, textFile } from '../rich-text.ts';
 import { usePersonalPreferences, chatAppearanceStyle } from '../personal-prefs.ts';
-import { PersonalChatControls } from './PersonalChats.tsx';
+import { PersonalChatDialog } from './PersonalChats.tsx';
 import { isTaskActivity } from '../chat-activity.ts';
 import { TOPIC_ALL, filterForEntry, filterForMessage, topicUnreadCounts } from '../topic-order.ts';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
@@ -17,7 +20,7 @@ import { contextHandler, copyText, menuProps, openMenuAt, toast, type MenuItem }
 import { navigate, queryParam } from '../router.ts';
 import { MAX_PANES, ZOOM_MAX, ZOOM_MIN, convZoomNow, setConvZoom, splitAvailable, useConvZoom } from '../split.ts';
 import { SplitPicker } from './SplitPicker.tsx';
-import { Avatar, ConvAvatar, Modal, OrgMark, conversationSubtitle, conversationTitle, dayLabel, isGgChat, isSelfChat, orgById, personById, personColor, personInk } from '../ui.tsx';
+import { directOtherId, Avatar, ConvAvatar, Modal, OrgMark, conversationSubtitle, conversationTitle, dayLabel, isGgChat, isSelfChat, orgById, personById, personColor, personInk } from '../ui.tsx';
 import { PhotoCropDialog, pickImage } from './PhotoCrop.tsx';
 import { AttachmentsView, DraftTray, pickFiles, useDrafts } from './Attachments.tsx';
 import { VoiceRecorder } from './Voice.tsx';
@@ -48,6 +51,8 @@ import { claimFileDrag, clipboardFiles, installFileDropGuard, isFileDrag } from 
 
 import { GifButton, openGifPicker } from './Gifs.tsx';
 import { parseGifCommand } from '../gifs.ts';
+import { ChatHeaderPopover } from './ChatHeaderPopover.tsx';
+import { startCall } from '../call.ts';
 
 type Row =
   | { kind: 'day'; key: string; label: string }
@@ -62,7 +67,7 @@ const draftKey = (id: string) => `tiecoms:draft:${id}`;
 const excerpt = (s: string, n = 90) => s.replace(/\s+/g, ' ').trim().slice(0, n);
 
 /** Panel dentro de la vista en paralelo (Split.tsx): activo = el del URL; count = cuántos hay abiertos. */
-export interface PaneProps { active: boolean; count: number; onClose: () => void; onOnly: () => void; pinned?: boolean; onPin?: () => void; onTint?: (anchor: HTMLElement) => void }
+export interface PaneProps { size?: PaneSizing; active: boolean; count: number; onClose: () => void; onOnly: () => void; pinned?: boolean; onPin?: () => void; onTint?: (anchor: HTMLElement) => void }
 
 export function ConversationScreen({ id, embedded, pane, search }: { id: string; embedded?: { onClose: () => void; anchor?: MessageDTO | null; onSeeAnchor?: () => void }; pane?: PaneProps; search?: string }) {
   const d = useClient((s) => s.data)!;
@@ -98,6 +103,7 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
   const [ggRequest, setGgRequest] = useState<{ key: number; kind: 'reply' | 'ask'; text?: string; ids?: string[] } | null>(null);
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [suggestFor, setSuggestFor] = useState<string[] | null>(null);
+  const [longSending, setLongSending] = useState(false);
   const [ggDraft, setGgDraft] = useState(false);
   // ?issue=<id>: se abre directo el asunto (desde el árbol de Grupos).
   const [openIssue, setOpenIssue] = useState<string | null>(() => queryParam('issue'));
@@ -251,7 +257,7 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
     atBottom.current = false;
     // Los temas se esperan antes de decidir: si aún no habían llegado, el chat quedaba siempre en «General».
     void Promise.all([client.ensureMessage(id, seq), activeTopicIdsNow(id)]).then(([found, activeIds]) => {
-      if (!found) return;
+      if (!found) { toast(locale().startsWith('en') ? 'Message unavailable. Try again.' : 'Mensaje no disponible. Intenta de nuevo.'); return; }
       // Saltar a un mensaje (burbuja, notificación, mención, búsqueda, enlace): el filtro pasa a su tema, o a «Todo»
       // si no tiene; si ya estaba en «Todo», se queda ahí (topic-order.ts › filterForMessage).
       const target = client.getState().conversations[id]?.messages.find((m) => m.seq === seq);
@@ -264,7 +270,7 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
       scrollToSeq.current = seq;
       setJumpTick((n) => n + 1);
       setTimeout(() => setHighlight(null), 2800);
-    });
+    }).catch((e) => toast(errorText(e)));
   };
 
   /**
@@ -315,7 +321,8 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
   useEffect(() => { try { if (text) localStorage.setItem(draftKey(id), text); else localStorage.removeItem(draftKey(id)); } catch {} }, [id, text]);
   // El rótulo «Borrador de gg» se va cuando la caja queda vacía (se envió o se borró).
   useEffect(() => { if (!text.trim()) setGgDraft(false); }, [text]);
-  useEffect(() => { setSelected(new Set()); setGgQuotes([]); setGgOpen(false); }, [id]);
+  useEffect(() => { setSelected(new Set()); setGgQuotes([]); setGgRequest(null); setSuggestFor(null); setGgOpen(false); }, [id]);
+  useEffect(() => { if (!ggOpen) return; const escape = (event: globalThis.KeyboardEvent) => { if (event.key !== 'Escape' || document.querySelector('.modal, .ctx-menu')) return; if (document.activeElement instanceof HTMLElement) document.activeElement.blur(); setGgOpen(false); setSelected(new Set()); setGgQuotes([]); setGgRequest(null); setSuggestFor(null); }; window.addEventListener('keydown', escape); return () => window.removeEventListener('keydown', escape); }, [ggOpen]);
 
   useEffect(() => { if (local?.loaded && liveFrom.current == null) liveFrom.current = conv?.lastMessageSeq ?? 0; }, [local?.loaded]);
   // Medición: desde que se monta el chat hasta que sus mensajes están a la vista (perf.ts).
@@ -434,7 +441,8 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
   /** Recalcula la posición (tras cada scroll): abajo o lejos, línea de nuevos arriba, menciones ya vistas y marcar leído. */
   function updateNav() {
     const el = scroller.current;
-    if (!el) return;
+    if (!el || !el.getClientRects().length || el.closest('[hidden]')) return;
+    if (new URLSearchParams(location.search).has('provider')) return;
     const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
     const bottom = dist < 60;
     if (!placing.current) {
@@ -511,7 +519,13 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
     if (seq == null) return;
     jumpTo(seq);
   };
-  const jumpToNewLine = () => document.getElementById(`new-${id}`)?.scrollIntoView({ block: 'start', behavior: 'instant' });
+  const jumpToNewLine = () => {
+    input.current?.blur();
+    const visiblePending = rows.find((row) => row.kind === 'msg' && row.m.seq > (entry?.readFrom ?? 0));
+    // Keep topic/activity filters: an unread from another topic must not silently change context.
+    if (visiblePending?.kind === 'msg') jumpTo(visiblePending.m.seq);
+    else toast(locale().startsWith('en') ? 'No unread messages in this filter. Choose All to see other topics.' : 'No hay pendientes en este filtro. Elige Todo para ver otros temas.');
+  };
 
   /** GIF o meme elegido en el selector (Gifs.tsx): sale como un mensaje con la imagen adjunta y la atribución. */
   const sendMedia = (attachment: AttachmentDTO, body: string) => {
@@ -523,13 +537,23 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
     setViewOnce(false);
     input.current?.focus();
   };
-  const send = () => {
+  const send = async () => {
+    if (longSending) return;
     // «/gif gato»: abre el selector con esa búsqueda en vez de enviar el texto.
     const gifQuery = drafts.drafts.length || privateReply ? null : parseGifCommand(text);
     if (gifQuery !== null) { setText(''); openGifPicker({ conversationId: id, query: gifQuery, onSend: sendMedia }); return; }
     const body = text.trim();
     if (drafts.busy) { toast(t('att.uploading')); return; }
-    const attachments = drafts.ready;
+    let attachments = drafts.ready;
+    let outgoingText = text;
+    if (text.length > LONG_TEXT_LIMIT) {
+      if (attachments.length >= 10 || viewOnce) { toast(locale().startsWith('en') ? 'Remove an attachment or turn off view once before sending long text.' : 'Quita un adjunto o desactiva una sola vista para enviar texto largo.'); return; }
+      try {
+        const file = textFile(text); setLongSending(true);
+        const attachment = await client.uploadAttachment(id, file, file.name);
+        attachments = [...attachments, attachment]; outgoingText = locale().startsWith('en') ? 'Full message attached' : 'Mensaje completo adjunto';
+      } catch (e) { toast(errorText(e)); return; } finally { setLongSending(false); }
+    }
     if ((!body && !attachments.length) || !conv.canPost) return;
     const once = viewOnce && !privateReply;
     if (once && !viewOnceAllowed(attachments)) { toast(t('once.onlyMedia')); return; }
@@ -537,8 +561,8 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
     if (privateReply) {
       // «Responder en privado»: el directo lleva la referencia al mensaje original (el servidor pone la cita).
       const author = personById(d, privateReply.authorId)?.name ?? null;
-      void client.send(id, body, null, { source: 'tiecoms', author, sentAt: privateReply.createdAt, fromConversationId: privateReply.conversationId, messageId: privateReply.id }, { attachments });
-    } else void client.send(id, text, replyTo?.id ?? null, null, { attachments, mentions: once ? [] : mentionsFor(text, tokens), topicId: activeFilter, refs: once ? [] : refsFor(text, refTokens), viewOnce: once });
+      void client.send(id, outgoingText.trim(), null, { source: 'tiecoms', author, sentAt: privateReply.createdAt, fromConversationId: privateReply.conversationId, messageId: privateReply.id }, { attachments });
+    } else void client.send(id, outgoingText, replyTo?.id ?? null, null, { attachments, mentions: once || outgoingText !== text ? [] : mentionsFor(text, tokens), topicId: activeFilter, refs: once || outgoingText !== text ? [] : refsFor(text, refTokens), viewOnce: once });
     drafts.clear();
     setTokens([]);
     setRefTokens([]);
@@ -565,6 +589,15 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
     setText('');
     setReplyTo(null);
     input.current?.focus();
+  };
+  const insertFormat = (kind: 'bold' | 'list' | 'code') => {
+    const el = input.current; if (!el) return;
+    const start = el.selectionStart, end = el.selectionEnd, selectedText = text.slice(start, end);
+    const prefix = kind === 'bold' ? '**' : kind === 'code' ? `${start && text[start - 1] !== '\n' ? '\n' : ''}\x60\x60\x60text\n` : `${start && text[start - 1] !== '\n' ? '\n' : ''}- `;
+    const suffix = kind === 'bold' ? '**' : kind === 'code' ? '\n\x60\x60\x60\n' : '';
+    const content = kind === 'list' ? selectedText.replace(/\n/g, '\n- ') : selectedText;
+    setText(text.slice(0, start) + prefix + content + suffix + text.slice(end));
+    requestAnimationFrame(() => { if (!input.current) return; input.current.focus(); input.current.setSelectionRange(start + prefix.length, start + prefix.length + content.length); });
   };
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (emoji.onKeyDown(e)) return;
@@ -600,7 +633,7 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
     // Flecha arriba con el campo vacío: editar mi último mensaje (como en Slack).
     if (e.key === 'ArrowUp' && !text) {
       const mine = [...(local?.messages ?? [])].reverse().find((m) => m.authorId === d.me.id && m.kind === 'text' && !m.deletedAt && !m.viewOnce);
-      if (mine) { e.preventDefault(); setEditing({ id: mine.id, text: mine.body }); }
+      if (mine) { e.preventDefault(); setEditing({ id: mine.id, text: mine.displayBody ?? mine.body }); }
     }
   };
   const saveEdit = async () => {
@@ -701,7 +734,7 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
       ...(!embedded && canDerive && myWsRole !== 'guest' ? [{ label: t('menu.derive'), icon: '💬', hint: t('menu.hintThread'), onSelect: () => setDeriving(m) }] : []),
       ...(!embedded ? [{ label: t('side.ask'), icon: '🔒', hint: t('menu.hintSide'), onSelect: () => setSideFor(m) }] : []),
       { divider: true },
-      { label: t('menu.copyText'), icon: '⧉', onSelect: async () => { await copyText(m.body); toast(t('toast.copied')); } },
+      { label: locale().startsWith('en') ? 'Copy full message' : 'Copiar mensaje completo', icon: '⧉', onSelect: async () => { const ok = await copyText((m.displayBody ?? m.body) + (m.attachments?.length ? '\n' + m.attachments.map((a) => `📎 ${a.name}`).join('\n') : '')); toast(ok ? t('toast.copied') : (locale().startsWith('en') ? 'Could not copy' : 'No se pudo copiar')); } },
       { label: t('menu.copyLink'), icon: '⛓', onSelect: async () => { await copyText(messageLink(m)); toast(t('toast.linkCopied')); } },
       { divider: true },
       ...(conv.canPost ? [{ label: isPinned ? t('menu.unpin') : t('menu.pin'), icon: '📌', onSelect: () => client.setMessagePinned(m, !isPinned).then(() => toast(isPinned ? t('toast.unpinned') : t('toast.pinned'))).catch((e) => toast(errorText(e))) }] : []),
@@ -718,7 +751,7 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
       ...(!isSelfChat(d, conv) && m.kind === 'text' && m.body ? [{ label: t('self.saveHere'), icon: '✎', onSelect: () => void saveToSelf(m, personById(d, m.authorId)?.name ?? null) }] : []),
       ...(mine ? [
         { divider: true },
-        { label: t('menu.edit'), icon: '✎', onSelect: () => setEditing({ id: m.id, text: m.body }) },
+        { label: t('menu.edit'), icon: '✎', onSelect: () => setEditing({ id: m.id, text: m.displayBody ?? m.body }) },
         { label: t('menu.delete'), icon: '🗑', danger: true, onSelect: () => { if (confirm(t('menu.deleteConfirm'))) void client.deleteMessage(m.id).catch((e) => toast(errorText(e))); } },
       ] : []),
     ];
@@ -726,15 +759,16 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
 
   // ---------- gg de este chat ----------
   const ggSource = convSource(id);
-  const quoteOf = (m: MessageDTO): Quote => ({ id: m.id, author: m.authorId === d.me.id ? t('common.youShort') : personById(d, m.authorId)?.name ?? '', text: m.body.slice(0, 1000) });
+  const quoteOf = (m: MessageDTO): Quote => ({ id: m.id, author: m.authorId === d.me.id ? t('common.youShort') : personById(d, m.authorId)?.name ?? '', text: (m.displayBody ?? m.body).slice(0, 1000) });
+  const closeGg = () => { if (document.activeElement instanceof HTMLElement) document.activeElement.blur(); setGgOpen(false); setSelected(new Set()); setGgQuotes([]); setGgRequest(null); setSuggestFor(null); };
   const openGg = () => { setGgOpen(true); setGgUsed(true); };
   const askGg = (m: MessageDTO) => { setGgQuotes((q) => (q.some((x) => x.id === m.id) ? q : [...q, quoteOf(m)])); openGg(); };
   const toggleSel = (m: MessageDTO) => setSelected((x) => { const n = new Set(x); if (n.has(m.id)) n.delete(m.id); else n.add(m.id); return n; });
   const ggHost: GgHost = {
     // Elegir no es enviar: el texto cae en la caja como «Borrador de gg».
     useDraft: (x) => { setText(x); setGgDraft(true); requestAnimationFrame(() => input.current?.focus()); },
-    task: (p) => setNewIssue({ title: p.title, assigneeName: p.assigneeName, due: p.due, origin: p.messageId ? byId.get(p.messageId) : undefined }),
-    reminder: (p) => openDialog((close) => <ReminderDialog conv={conv} message={p.messageId ? byId.get(p.messageId) : undefined} defaultNote={p.title} defaultDate={p.due} onClose={close} />),
+    task: (p) => showDialogUntilClosed((close) => <NewIssueDialog conversationId={id} originMessageId={p.messageId ?? undefined} defaultTitle={p.title} defaultAssigneeName={p.assigneeName} defaultDue={p.due} onClose={close} />),
+    reminder: (p) => showDialogUntilClosed((close) => <ReminderDialog conv={conv} message={p.messageId ? byId.get(p.messageId) : undefined} defaultNote={p.title} defaultDate={p.due} onClose={close} />),
     messagePerson: (name, draft) => {
       const fold = (x: string) => x.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase().trim();
       const who = d.people.find((p) => p.id !== d.me.id && p.kind === 'human' && (fold(p.name) === fold(name) || fold(p.name).split(' ')[0] === fold(name).split(' ')[0]));
@@ -751,54 +785,68 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
         // Archivos del sistema soltados en cualquier parte del chat: mismo flujo que «+» (drafts.add).
         // Solo con «Files» en dataTransfer.types: los arrastres internos (chats a paneles, temas) no activan la capa.
         onDragOver={(e) => {
-          if (!conv.canPost || !claimFileDrag(e)) return;
+          if (!conv.canPost || longSending || !claimFileDrag(e)) return;
           if (!dropping) setDropping(true);
           if (dropTimer.current) clearTimeout(dropTimer.current);
           dropTimer.current = setTimeout(endDrop, 700);
         }}
         onDragLeave={(e) => { if (e.relatedTarget && !e.currentTarget.contains(e.relatedTarget as Node)) endDrop(); }}
         onDrop={(e) => {
-          if (!conv.canPost || !isFileDrag(e.dataTransfer)) return;
+          if (!conv.canPost || longSending || !isFileDrag(e.dataTransfer)) return;
           e.preventDefault(); e.stopPropagation(); endDrop();
           const files = [...e.dataTransfer.files];
           if (files.length) { drafts.add(files); input.current?.focus(); }
         }}>
         {dropping && <div className="drop-hint" aria-hidden><span>⤓ {t('att.drop', { name: isSide ? t('side.title') : title })}</span></div>}
-        <header className="conv-head" onContextMenu={contextHandler(() => conversationMenu(conv, { onNewMeeting: () => newEvent({ conversationId: id }) }))}>
+        <header className="conv-head chat-header-compact" onContextMenu={contextHandler(() => conversationMenu(conv, { onNewMeeting: () => newEvent({ conversationId: id }) }))}>
           {!embedded && <button className="icon-btn only-mobile" aria-label={t('common.back')} onClick={() => (history.length > 1 ? history.back() : navigate('/conversaciones'))}>‹</button>}
-          {conv.kind !== 'direct' && conv.avatarUrl && <ConvAvatar c={conv} size={30} />}
+          {conv.kind === 'direct' ? <Avatar person={personById(d, directOtherId(d, conv))} size={28} /> : conv.avatarUrl ? <ConvAvatar c={conv} size={30} /> : null}
           <div className="grow conv-head-title" style={{ minWidth: 0 }}>
             <h2 className="ellipsis">{conv.kind === 'internal' ? '◌ ' : conv.level === 'directivo' ? '◆ ' : ''}{isSide ? `💬 ${t('side.title')}` : title}{muted && <> <button className="head-mute" title={`${muteLine ?? t('side.muted')} · ${t('menu.unmute')}`} aria-label={t('menu.unmute')} onClick={(e) => openMuteMenu(e.currentTarget)}>🔕</button></>}</h2>
             {isSide
               ? <div className="small muted ellipsis side-head-people"><StackedAvatars c={conv} size={18} /> 🔒 {t('side.privateN', { n: conv.memberIds.length })}</div>
-              : <div className="small muted ellipsis">{conversationSubtitle(d, conv)}{conv.kind !== 'direct' ? ` · ${tn(conv.memberIds.length, 'n.participant', 'n.participants')}` : ''}</div>}
+              : <div className="small muted ellipsis">{conversationSubtitle(d, conv)}{conv.kind !== 'direct' ? ` · ${tn(conv.memberIds.length, 'n.participant', 'n.participants')}` : ''}<span className="chat-header-context"> · {activeFilter ? topicById.get(activeFilter)?.name : t(generalOnly ? 'topic.general' : 'topic.all')}{messageFeed === 'activity' ? ` · ${locale().startsWith('en') ? 'Task activity' : 'Actividad de tareas'}` : ''}</span></div>}
           </div>
-          {!embedded && !ggDm && <GgButton source={ggSource} on={ggShown} onClick={() => (ggShown ? setGgOpen(false) : openGg())} />}
-          <div className="row only-desktop head-orgs">{orgsHere.map((o) => o && <OrgMark key={o.id} org={o} size={22} />)}</div>
-          {embedded && pinned.size > 0 && <button className="btn ghost small" onClick={() => setShowPins(true)} title={t('pins.title')}>📌 {pinned.size}</button>}
-          {embedded && conv.canManage && conv.kind !== 'direct' && <button className="btn ghost small" onClick={() => openDialog((close) => <AddMembersDialog conversationId={id} onClose={close} />)} title={t('bar.addPeople')}>＋ {t('bar.people')}</button>}
-          {!embedded && <PersonalChatControls conv={conv} />}
-          {ws && !embedded && <button className="btn ghost small only-desktop head-space" onClick={() => navigate(`/w/${ws.id}`)}>{t('chat.space')}</button>}
-          {!isSide && <CallButtons conv={conv} />}
-          {!embedded && <span className="zoom-pill only-desktop" role="group" aria-label={t('zoom.label')}>
-            <button className="icon-btn" aria-label={t('zoom.out')} title={t('zoom.out')} disabled={zoom <= ZOOM_MIN} onClick={() => setConvZoom(id, zoom - 0.1)}>A−</button>
-            {zoom !== 1 && <button className="zoom-val" title={t('zoom.reset')} onClick={() => setConvZoom(id, 1)}>{Math.round(zoom * 100)}%</button>}
-            <button className="icon-btn" aria-label={t('zoom.in')} title={t('zoom.in')} disabled={zoom >= ZOOM_MAX} onClick={() => setConvZoom(id, zoom + 0.1)}>A+</button>
-          </span>}
-          {/* ⊞ Abrir otro chat al lado (hasta 4, split.ts): lo mismo que arrastrar un chat de la lista. */}
-          {!embedded && splitAvailable() && (!pane || pane.count < MAX_PANES) && <button className="icon-btn only-desktop head-split" aria-label={t('split.add')} title={t('split.add')} onClick={() => openDialog((close) => <SplitPicker activeId={id} onClose={close} />)}>⊞</button>}
-          <button className={`icon-btn only-desktop head-search ${searching ? 'is-on' : ''}`} aria-label={t('csearch.open')} title={t('csearch.open')} aria-pressed={searching} onClick={() => setSearching((v) => !v)}>🔎</button>
-          <button className="icon-btn" aria-label={t('menu.open')} onClick={(e) => { const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); openMenuAt(r.left, r.bottom + 4, [{ label: t('csearch.open'), icon: '🔎', onSelect: () => setSearching(true) }, ...(!embedded ? [{ label: `${t('zoom.in')} · ${Math.round(zoom * 100)}%`, icon: 'A+', onSelect: () => setConvZoom(id, zoom + 0.1) }, { label: t('zoom.out'), icon: 'A−', onSelect: () => setConvZoom(id, zoom - 0.1) }, ...(zoom !== 1 ? [{ label: t('zoom.reset'), icon: '↺', onSelect: () => setConvZoom(id, 1) }] : [])] : []), { divider: true }, ...conversationMenu(conv, { onNewMeeting: () => newEvent({ conversationId: id }) })]); }}>⋯</button>
-          {embedded ? <>
-            <button className="icon-btn" aria-label={t('side.openFull')} title={t('side.openFull')} onClick={() => navigate(`/c/${id}`)}>⤢</button>
-            <button className="icon-btn" aria-label={t('side.close')} title={t('side.close')} onClick={embedded.onClose}>×</button>
-          </> : pane ? <>
-            {pane.onTint && <button className="icon-btn head-keep" aria-label={t('tint.title')} title={t('tint.title')} onClick={(e) => pane.onTint!(e.currentTarget)}>🎨</button>}
-            {pane.onPin && <button className={`icon-btn head-keep ${pane.pinned ? 'is-on' : ''}`} aria-pressed={!!pane.pinned} aria-label={t(pane.pinned ? 'grid.unpin' : 'grid.pin')} title={t(pane.pinned ? 'grid.unpin' : 'grid.pin')} onClick={pane.onPin}>📌</button>}
-            {pane.count > 1 && <button className="icon-btn head-keep" aria-label={t('split.only')} title={t('split.only')} onClick={pane.onOnly}>⤢</button>}
-            <button className="icon-btn head-keep" aria-label={t('split.close')} title={t('split.close')} onClick={pane.onClose}>×</button>
-          </> : <button className="icon-btn" aria-label={t('chat.details')} onClick={() => setPanel(!panelPref)}>ⓘ</button>}
+          <div className="chat-header-primary">
+            {!embedded && !ggDm && <GgButton source={ggSource} on={ggShown} onClick={() => (ggShown ? closeGg() : openGg())} />}
+            {!isSide && <span className="chat-header-primary-call"><CallButtons conv={conv} /></span>}
+            {embedded ? <>
+              <button className="icon-btn chat-header-primary-control" aria-label={t('side.openFull')} title={t('side.openFull')} onClick={() => navigate(`/c/${id}`)}>⤢</button>
+              <button className="icon-btn chat-header-primary-control" aria-label={t('side.close')} title={t('side.close')} onClick={embedded.onClose}>×</button>
+            </> : pane ? <>
+              <PaneSizeControl size={pane.size} />
+              {pane.onPin && <button className={`icon-btn chat-header-primary-control pane-pin-control ${pane.pinned ? 'is-on' : ''}`} aria-label={t(pane.pinned ? 'grid.unpin' : 'grid.pin')} title={t(pane.pinned ? 'grid.unpin' : 'grid.pin')} aria-pressed={!!pane.pinned} onClick={pane.onPin}><span aria-hidden>📌</span>{pane.pinned && <span className="pane-pin-label">{locale().startsWith('en') ? 'Pinned' : 'Fijado'}</span>}</button>}
+              {pane.count > 1 && <button className="icon-btn chat-header-primary-control" aria-label={t('split.only')} title={t('split.only')} onClick={pane.onOnly}>⤢</button>}
+              <button className="icon-btn chat-header-primary-control" aria-label={t('split.close')} title={t('split.close')} onClick={pane.onClose}>×</button>
+            </> : null}
+            <ChatHeaderPopover>
+            <div className="chat-header-identity">{orgsHere.map((o) => o && <span key={o.id} className="row"><OrgMark org={o} size={22} /><span>{o.name}</span></span>)}</div>
+            <div className="chat-header-actions">
+              {embedded && pinned.size > 0 && <button className="btn ghost small" data-close-header onClick={() => setShowPins(true)}>📌 {t('pins.title')} · {pinned.size}</button>}
+              {embedded && conv.canManage && conv.kind !== 'direct' && <button className="btn ghost small" data-close-header onClick={() => openDialog((close) => <AddMembersDialog conversationId={id} onClose={close} />)}>＋ {t('bar.people')}</button>}
+              {!embedded && <button className="btn ghost small" data-close-header onClick={() => openDialog((close) => <PersonalChatDialog conv={conv} onClose={close} />)}>🎨 {locale().startsWith('en') ? 'Customize chat' : 'Personalizar chat'}</button>}
+              {ws && !embedded && <button className="btn ghost small" data-close-header onClick={() => navigate(`/w/${ws.id}`)}>{t('chat.space')}</button>}
+              {!isSide && d.features?.calls === true && conv.canPost && <button className="btn ghost small head-call-video" data-close-header aria-label={t('call.video')} onClick={() => void startCall(id, 'video').catch((e) => toast(errorText(e)))}>🎥 {t('call.video')}</button>}
+              {!embedded && <>
+                <button className="btn ghost small" aria-label={t('zoom.out')} disabled={zoom <= ZOOM_MIN} onClick={() => setConvZoom(id, zoom - .1)}>A− {t('zoom.out')}</button>
+                <button className="btn ghost small" aria-label={t('zoom.in')} disabled={zoom >= ZOOM_MAX} onClick={() => setConvZoom(id, zoom + .1)}>A+ {t('zoom.in')}</button>
+                <button className="btn ghost small" aria-label={t('zoom.reset')} onClick={() => setConvZoom(id, 1)}>↺ {t('zoom.reset')} · {Math.round(zoom * 100)}%</button>
+              </>}
+              {!embedded && splitAvailable() && (!pane || pane.count < MAX_PANES) && <button className="btn ghost small" data-close-header onClick={() => openDialog((close) => <SplitPicker activeId={id} onClose={close} />)}>⊞ {t('split.add')}</button>}
+              <button className={`btn ghost small ${searching ? 'is-on' : ''}`} data-close-header aria-label={t('csearch.open')} aria-pressed={searching} onClick={() => setSearching((value) => !value)}>🔎 {t('csearch.open')}</button>
+              <button className="btn ghost small" data-close-header onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); openMenuAt(r.left, r.bottom + 4, conversationMenu(conv, { onNewMeeting: () => newEvent({ conversationId: id }) })); }}>⋯ {t('menu.open')}</button>
+              {!embedded && pane ? <>
+                {pane.onTint && <button className="btn ghost small" data-close-header aria-label={t('tint.title')} onClick={(e) => pane.onTint!(e.currentTarget)}>🎨 {t('tint.title')}</button>}
+              </> : !embedded && <button className="btn ghost small" onClick={() => setPanel(!panelPref)}>ⓘ {t('chat.details')}</button>}
+            </div>
+            {!embedded && <>
+              <div className="chat-feed-tools"><label><input type="checkbox" checked={messageFeed === 'activity'} onChange={(e) => setMessageFeed(e.target.checked ? 'activity' : 'messages')} /> {locale().startsWith('en') ? 'Show task activity' : 'Mostrar actividad de tareas'}</label><button className="link-btn" onClick={() => navigate(`/archivos?conversationId=${id}`)}>▣ {t('nav.files')}</button></div>
+              <ChatBar conv={conv} pinnedCount={pinned.size} canOpenIssues={canOpenIssues} onPins={() => setShowPins(true)} onLinks={() => setShowLinks(true)} onOpenIssue={setOpenIssue} onNewIssue={() => setNewIssue({})} onOpenThread={setSideId} />
+            </>}
+            </ChatHeaderPopover>
+          </div>
         </header>
+        {!embedded && <div className="chat-header-topics"><TopicDock conv={conv} list={topics} filter={showAll && activeTopicIds.size ? TOPIC_ALL : activeFilter} onFilter={(x) => { setTopicFilter(x); atBottom.current = true; requestAnimationFrame(() => { const el = scroller.current; if (el) el.scrollTop = el.scrollHeight; }); }} counts={topicCounts} unread={topicUnread} /></div>}
         {searching && <ChatSearchBar conv={conv} scroller={scroller} onJump={jumpTo} onClose={() => { setSearching(false); input.current?.focus(); }} />}
         {!isSide && <CallBanner conversationId={id} />}
         {isSide && (embedded?.anchor || anchorExcerpt) && (
@@ -816,13 +864,7 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
             </div>
           </div>
         )}
-        {!embedded && <div className="row" style={{ padding: '4px 12px', gap: 8 }}><div className="seg grow"><button className={messageFeed === 'messages' ? 'on' : ''} onClick={() => setMessageFeed('messages')}>{locale().startsWith('en') ? 'Messages' : 'Mensajes'}</button><button className={messageFeed === 'activity' ? 'on' : ''} onClick={() => setMessageFeed('activity')}>{locale().startsWith('en') ? 'All activity' : 'Toda la actividad'}</button></div><button className="btn small" onClick={() => navigate(`/archivos?conversationId=${id}`)}>▣ {t('nav.files')}</button></div>}
         <LineageBar conv={conv} />
-        {!embedded && (
-          <ChatBar conv={conv} pinnedCount={pinned.size} canOpenIssues={canOpenIssues} onPins={() => setShowPins(true)} onLinks={() => setShowLinks(true)}
-            onOpenIssue={setOpenIssue} onNewIssue={() => setNewIssue({})} onOpenThread={setSideId} />
-        )}
-        {!embedded && <TopicDock conv={conv} list={topics} filter={showAll && activeTopicIds.size ? TOPIC_ALL : activeFilter} onFilter={(x) => { setTopicFilter(x); atBottom.current = true; requestAnimationFrame(() => { const el = scroller.current; if (el) el.scrollTop = el.scrollHeight; }); }} counts={topicCounts} unread={topicUnread} />}
         {!embedded && <DerivedPendingStrip conv={conv} />}
 
         {placementFailed && <div className="error" role="alert">{t('chat.unreadLoadFailed')} <button className="link-btn" disabled={local?.loading} onClick={() => void retryUnreadHistory()}>{t('chat.retryUnread')}</button></div>}
@@ -877,7 +919,7 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
                   })()}
                   {m.replyTo && (
                     <button className="msg-quote" onClick={() => quoted && jumpTo(quoted.seq)}>
-                      {quoted ? <><b>{personById(d, quoted.authorId)?.name}</b> {quoted.deletedAt ? t('chat.deleted') : excerpt(cardQuote(quoted) ?? quoted.body, 120)}</> : t('reply.quoteMissing')}
+                      {quoted ? <><b>{personById(d, quoted.authorId)?.name}</b> {quoted.deletedAt ? t('chat.deleted') : excerpt(cardQuote(quoted) ?? quoted.displayBody ?? quoted.body, 120)}</> : t('reply.quoteMissing')}
                     </button>
                   )}
                   {m.forwarded && <ForwardedTag d={d} m={m} />}
@@ -889,7 +931,7 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
                       <div className="row small"><span className="muted grow">{t('edit.hint')}</span><button className="btn ghost small" onClick={() => setEditing(null)}>{t('common.cancel')}</button><button className="btn primary small" onClick={saveEdit}>{t('edit.save')}</button></div>
                     </div>
                   ) : m.viewOnce && !m.deletedAt ? <ViewOnceBubble m={m} /> : (
-                    (m.body || m.deletedAt || !m.attachments?.length) && <div className={`msg-body ${!m.deletedAt && isJumbo(m.body) ? 'is-jumbo' : ''}`}>{m.deletedAt ? <i className="muted">{t('chat.deleted')}</i> : m.kind === 'text' ? <MessageText d={d} body={m.body} mentions={m.mentions} refs={m.refs} /> : m.body}{m.editedAt && !m.deletedAt && <span className="msg-edited"> {t('msg.edited')}</span>}</div>
+                    ((m.displayBody ?? m.body) || m.deletedAt || !m.attachments?.length) && <div className={`msg-body ${!m.deletedAt && isJumbo(m.body) ? 'is-jumbo' : ''}`}>{m.deletedAt ? <i className="muted">{t('chat.deleted')}</i> : m.kind === 'text' ? <MessageText d={d} body={m.displayBody ?? m.body} mentions={m.mentions} refs={m.refs} /> : m.body}{m.editedAt && !m.deletedAt && <span className="msg-edited"> {t('msg.edited')}</span>}</div>
                   )}
                   {!m.deletedAt && !m.viewOnce && !!m.attachments?.length && <AttachmentsView list={m.attachments} onCreateIssue={canOpenIssues ? (title) => setNewIssue({ origin: m, title }) : undefined} />}
                   {!m.deletedAt && !isEditing && !m.viewOnce && <MessageLinks m={m} mode={conv.linkPreviews ?? 'large'} onIssue={canOpenIssues ? (title) => setNewIssue({ origin: m, title }) : undefined} />}
@@ -936,16 +978,16 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
           <QuickReplies onSend={(q) => { atBottom.current = true; void client.send(id, q); }} onAsk={() => setAdding(true)} />
         )}
         <div className="typing">{typers.length ? t(typers.length > 1 ? 'chat.typingMany' : 'chat.typingOne', { names: typers.join(', ') }) : ''}</div>
-        <div className="composer">
+        <fieldset className="composer" disabled={longSending}>
           {privateReply && (
             <div className="reply-bar is-private">
-              <span className="grow ellipsis"><b>✉ {t('preply.bar', { name: personById(d, privateReply.authorId)?.name ?? '' })}</b> · {excerpt(cardQuote(privateReply) ?? privateReply.body, 100)}</span>
+              <span className="grow ellipsis"><b>✉ {t('preply.bar', { name: personById(d, privateReply.authorId)?.name ?? '' })}</b> · {excerpt(cardQuote(privateReply) ?? privateReply.displayBody ?? privateReply.body, 100)}</span>
               <button className="icon-btn" aria-label={t('preply.cancel')} onClick={() => setPrivateReply(null)}>×</button>
             </div>
           )}
           {replyTo && (
             <div className="reply-bar">
-              <span className="grow ellipsis"><b>{t('reply.to', { name: personById(d, replyTo.authorId)?.name ?? '' })}</b> · {excerpt(cardQuote(replyTo) ?? replyTo.body, 100)}</span>
+              <span className="grow ellipsis"><b>{t('reply.to', { name: personById(d, replyTo.authorId)?.name ?? '' })}</b> · {excerpt(cardQuote(replyTo) ?? replyTo.displayBody ?? replyTo.body, 100)}</span>
               <button className="icon-btn" aria-label={t('reply.cancel')} onClick={() => setReplyTo(null)}>×</button>
             </div>
           )}
@@ -963,6 +1005,7 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
                 {lastText && lastText.authorId !== d.me.id && <ReplyForMe source={ggSource} host={ggHost} />}
               </div>
             )}
+            {text.length > LONG_TEXT_LIMIT && <div className="small muted" role="status">{locale().startsWith('en') ? 'Long text will be sent as a UTF-8 file, preserving the complete content.' : 'El texto largo se enviará como archivo UTF-8 conservando todo el contenido.'}</div>}
             <DraftTray drafts={drafts.drafts} onRemove={drafts.remove} onRetry={drafts.retry} />
             <div className="composer-box">
               <button className="bring-btn" title={t('bar.plus')} aria-label={t('bar.plus')} onClick={(e) => {
@@ -970,6 +1013,7 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
                 openMenuAt(r.left, r.top - 8, [
                   { label: t('att.fromPhotos'), icon: '🖼', onSelect: () => pickFiles('media', drafts.add) },
                   { label: t('att.fromFiles'), icon: '📎', onSelect: () => pickFiles('any', drafts.add) },
+                  { label: t('imp.action'), icon: '⤓', onSelect: () => openDialog((close) => <BringDialog conversationId={id} onClose={close} />) },
                   { divider: true },
                   { label: t('meet.nowTitle'), icon: '📹', onSelect: () => openDialog((close) => <MeetingDialog conversationId={id} onClose={close} />) },
                   { label: t('meet.laterTitle'), icon: '🔗', onSelect: () => openDialog((close) => <MeetingDialog conversationId={id} scheduled onClose={close} />) },
@@ -979,8 +1023,9 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
                   ...(conv.sideIssueId ? [{ label: t('task.addHere'), icon: '☑', onSelect: () => openDialog((close) => <TasksDialog parentId={conv.sideIssueId!} conversationId={id} onClose={close} />) }] : []),
                 ]);
               }}>＋</button>
-              <button className="bring-btn" title={t('imp.action')} aria-label={t('imp.action')} onClick={() => openDialog((close) => <BringDialog conversationId={id} onClose={close} />)}>⤓</button>
+              <button className="bring-btn composer-import" title={t('imp.action')} aria-label={t('imp.action')} onClick={() => openDialog((close) => <BringDialog conversationId={id} onClose={close} />)}>⤓</button>
               <button className="bring-btn composer-emoji" title={t('react.insert')} aria-label={t('react.insert')} onClick={(e) => { const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); openEmojiPicker(r.left, r.top - 8, insertEmoji); }}>☺</button>
+              <button className="bring-btn composer-format" title={locale().startsWith('en') ? 'Text format' : 'Formato de texto'} aria-label={locale().startsWith('en') ? 'Text format' : 'Formato de texto'} onClick={(e) => { const r=e.currentTarget.getBoundingClientRect(); openMenuAt(r.left,r.top-8,[{ label: locale().startsWith('en') ? 'Bold' : 'Negrita', icon:'B', onSelect:()=>insertFormat('bold') }, { label: locale().startsWith('en') ? 'Bulleted list' : 'Lista con viñetas', icon:'•', onSelect:()=>insertFormat('list') }, { label: locale().startsWith('en') ? 'Code block' : 'Bloque de código', icon:'</>', onSelect:()=>insertFormat('code') }]); }}>Aa</button>
               <GifButton conversationId={id} onSend={sendMedia} disabled={!!privateReply || !conv.canPost} />
               <div className="mention-wrap">
               {picker.view}
@@ -1002,13 +1047,13 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
                 ? <VoiceRecorder conversationId={id} viewOnce={viewOnce} onSent={() => { atBottom.current = true; setReplyTo(null); setViewOnce(false); }} />
                 : <>
                   {canSchedule && <button className="bring-btn sched-btn" title={t('sched.menuTitle')} aria-label={t('sched.menuTitle')} onClick={(e) => openScheduleMenu(e.currentTarget, schedule)}>🕒</button>}
-                  <button className="send" onClick={send} disabled={(!text.trim() && !drafts.ready.length) || drafts.busy} aria-label={t('chat.send')}
+                  <button className="send" onClick={send} disabled={(!text.trim() && !drafts.ready.length) || drafts.busy || longSending} aria-label={t('chat.send')}
                     {...(canSchedule ? menuProps(() => scheduleMenu(schedule, t('sched.menuTitle'))) : {})}>➤</button>
                 </>}
             </div>
             </>
           ) : <div className="hint" style={{ textAlign: 'center', padding: 8 }}>{t('chat.readOnly')}</div>}
-        </div>
+        </fieldset>
       </section>
 
       {sideConv && (
@@ -1018,7 +1063,7 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
       )}
       {ggShown && (
         <GgSidePanel source={ggSource} chatName={title} quoted={ggQuotes} onClearQuote={(qid) => setGgQuotes((q) => (qid ? q.filter((x) => x.id !== qid) : []))}
-          host={ggHost} onClose={() => setGgOpen(false)} request={ggRequest} onJump={(mid) => { const x = byId.get(mid); if (x) jumpTo(x.seq); }} />
+          host={ggHost} onClose={closeGg} request={ggRequest} onJump={(mid) => { const x = byId.get(mid); if (x) jumpTo(x.seq); }} />
       )}
       {panel && !sideConv && !ggShown && (
         <aside className="panel">

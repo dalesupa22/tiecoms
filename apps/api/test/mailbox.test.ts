@@ -275,7 +275,7 @@ describe('correo en el chat (API + proveedor falso)', () => {
   });
 
   it('WhatsApp como correo: tarjeta con hilo, tarea y sin responder desde chaggu', async () => {
-    const acc = (await pool.query("INSERT INTO wa_accounts (user_id, label, kind, status) VALUES ($1,'Business','business','connected') RETURNING id", [ana.id])).rows[0].id;
+    const acc = (await pool.query("INSERT INTO wa_accounts (user_id, label, kind, status, privacy_synced_at,lease_owner,lease_until) VALUES ($1,'Business','business','connected',now(),'fixture',now()+interval '1 hour') RETURNING id", [ana.id])).rows[0].id;
     const jid = '120363000000000001@g.us';
     await pool.query("INSERT INTO wa_chats (account_id, jid, name, is_group) VALUES ($1,$2,'Soporte Uniandes',true)", [acc, jid]);
     await pool.query("INSERT INTO wa_messages (account_id, chat_jid, id, from_me, author_name, body, sent_at) VALUES ($1,$2,'WAM1',false,'Lorena Tapias','Ya confirmé con James la cuenta correcta.', now())", [acc, jid]);

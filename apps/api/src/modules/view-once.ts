@@ -42,7 +42,7 @@ export async function openViewOnce(userId: string, messageId: string): Promise<V
       const dto = attachmentDTO(r);
       return { ...dto, url: `/api/v1/once?t=${signOnce(r.id, userId)}`, thumbUrl: null, ...(dto.kind === 'voice' ? { transcript: null } : {}) };
     });
-    return { body: m.view_once_body ?? '', attachments };
+    return { body: m.view_once_body ?? '', ...(m.display_body!==null ? {displayBody:m.display_body} : {}), attachments };
   });
 }
 
@@ -69,7 +69,7 @@ export async function fetchOnce(token: string) {
  */
 export async function purgeViewOnce(): Promise<number> {
   const { rows } = await pool.query(
-    `UPDATE messages m SET view_once_body = NULL, view_once_purged_at = now()
+    `UPDATE messages m SET view_once_body = NULL, display_body=NULL, view_once_purged_at = now()
       WHERE m.view_once AND m.view_once_purged_at IS NULL AND (
         m.created_at < now() - make_interval(days => $1)
         OR (NOT EXISTS (

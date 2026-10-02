@@ -87,7 +87,7 @@ export function GifPicker({ conversationId, query: initialQuery = '', tab: initi
     try {
       const r = await client.request<SendGifResult>(`/conversations/${conversationId}/gifs`, { method: 'POST', json: { url: item.url } });
       if (!currentSession()) { onClose(); return; }
-      onSend(r.attachment, r.attribution ?? '');
+      onSend(r.attachment, r.attachment.provenance ? '' : r.attribution ?? '');
       onClose();
     } catch (e) { inFlight.current = false; if (!currentSession()) { onClose(); return; } toast(errorText(e)); setSending(false); }
   };

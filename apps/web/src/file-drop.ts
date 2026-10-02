@@ -98,6 +98,11 @@ export function installFileDropGuard(doc: Document = document) {
   doc.addEventListener('drop', () => setTimeout(end, 0), true);
   const view = doc.defaultView;
   if (!view) return;
+  view.addEventListener('blur', end);
+  view.addEventListener('popstate', end);
+  view.addEventListener('chaggu:navigate', end);
+  doc.addEventListener('visibilitychange', () => { if (doc.hidden) end(); });
+  doc.addEventListener('keydown', (e) => { if (e.key === 'Escape') end(); });
   view.addEventListener('dragover', (e) => {
     if (e.defaultPrevented || !isFileDrag(e.dataTransfer)) return;
     e.preventDefault();

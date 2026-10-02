@@ -1,0 +1,19 @@
+@media (min-width: 861px) {
+  .shell.has-provider.provider-resizable {
+    grid-template-columns: calc(68px * var(--ui-zoom, 1)) var(--provider-sidebar-width, min(calc(var(--side) * var(--ui-zoom, 1)), 38vw)) minmax(0, 1fr);
+  }
+  .shell.provider-resizable > .sidebar-host { position: relative; }
+  .provider-sidebar-resize {
+    position: absolute; top: 0; bottom: 0; right: -5px; width: 10px; z-index: 19;
+    cursor: col-resize; touch-action: none; outline: none;
+  }
+  .provider-sidebar-resize::after {
+    content: ''; position: absolute; top: 0; bottom: 0; left: 4px; width: 2px;
+    background: var(--line); transition: background-color 120ms;
+  }
+  .provider-sidebar-resize:hover::after, .provider-sidebar-resize:focus-visible::after,
+  .provider-sidebar-is-resizing .provider-sidebar-resize::after { background: var(--accent); width: 3px; }
+  .provider-sidebar-resize:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
+  .provider-sidebar-is-resizing, .provider-sidebar-is-resizing * { cursor: col-resize !important; user-select: none !important; }
+}
+@media (max-width: 860px) { .provider-sidebar-resize { display: none; } }

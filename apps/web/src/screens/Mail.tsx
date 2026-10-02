@@ -1,3 +1,4 @@
+import { AttachmentsView } from './Attachments.tsx';
 import { MailLiveReply } from './MailLiveReply.tsx';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { MailConnectionDTO, MailListItemDTO, MailMessageDTO, MailProvider, MessageDTO, SharedMailDTO, SharedMailCommentDTO } from '@tiecoms/contracts';
@@ -11,6 +12,7 @@ import { mailParts, mailSnippet } from '../mail-text.ts';
 import { prepareMeetingProof, takeMeetingProof, clearMeetingProof } from '../meeting-oauth.ts';
 import { setDrag, type DragPayload } from '../grid-actions.ts';
 import { GridSideButton, PinToGrid } from './Tray.tsx';
+import './MailReader.css';
 
 /**
  * Correo en el chat (docs/CORREO.md): la lista es tu Gmail u Outlook en vivo; al llevar un correo a un chat
@@ -221,7 +223,7 @@ export function MailBrowser({ connections, onPick, pickLabel, compact, inPane, o
   const conn = connections.find((c) => c.provider === provider);
   if (!ready.length) return <ConnectCards list={connections} reload={() => location.reload()} />;
   return (
-    <div className={`mail-browser ${compact ? 'is-compact' : ''}`}>
+    <div className={`mail-browser ${compact ? 'is-compact' : ''} ${inPane ? 'is-pane' : ''}`}>
       <div className="mail-bar">
         {ready.length > 1 && (
           <div className="seg" role="tablist">
@@ -328,13 +330,19 @@ function MailPreview({ provider, item, pickLabel, pin, onPick, onClose }: { prov
 
 export function MailMeta({ from, to, cc, date, provider }: { from: SharedMailDTO['from']; to: SharedMailDTO['to']; cc: SharedMailDTO['cc']; date: string | null; provider: MailProvider | 'whatsapp' }) {
   const list = (l: SharedMailDTO['to']) => l.map((a) => (a.name ? `${a.name} <${a.email}>` : a.email)).join(', ');
+  const sender = from ? (from.name ? `${from.name} <${from.email}>` : from.email) : '—';
   return (
-    <dl className="mail-meta">
-      <dt>{t('mail.meta.from')}</dt><dd>{from ? (from.name ? `${from.name} <${from.email}>` : from.email) : '—'}</dd>
-      {!!to.length && <><dt>{t('mail.meta.to')}</dt><dd>{list(to)}</dd></>}
-      {!!cc.length && <><dt>CC</dt><dd>{list(cc)}</dd></>}
-      {date && <><dt>{t('mail.meta.date')}</dt><dd>{new Date(date).toLocaleString(locale(), { dateStyle: 'medium', timeStyle: 'short' })} · <SrcIcon provider={provider} size={12} /> {LABEL[provider]}</dd></>}
-    </dl>
+    <div className="mail-meta-compact">
+      <div className="mail-meta-sender"><span className="muted">{t('mail.meta.from')}</span> <span className="mail-sender-address" title={sender}>{sender}</span></div>
+      <div className="mail-meta-date small muted">{date && <time dateTime={date}>{new Date(date).toLocaleString(locale(), { dateStyle: 'medium', timeStyle: 'short' })}</time>}<span><SrcIcon provider={provider} size={12} /> {LABEL[provider]}</span></div>
+      {(!!to.length || !!cc.length) && <details className="mail-recipients">
+        <summary>{[to.length ? `${t('mail.meta.to')} ${to.length}` : '', cc.length ? `CC ${cc.length}` : ''].filter(Boolean).join(' · ')}</summary>
+        <dl className="mail-meta">
+          {!!to.length && <><dt>{t('mail.meta.to')}</dt><dd>{list(to)}</dd></>}
+          {!!cc.length && <><dt>CC</dt><dd>{list(cc)}</dd></>}
+        </dl>
+      </details>}
+    </div>
   );
 }
 
@@ -507,9 +515,9 @@ export function MailText({ text }: { text: string }) {
 
 /**
  * El correo con su diseño. Iframe con sandbox sin scripts (el API ya quitó scripts y on*): solo deja abrir enlaces
- * en otra pestaña. allow-same-origin es para medir el alto y encoger los correos de 600 px al ancho de la tarjeta.
+ * en otra pestaña. allow-same-origin permite medir el cuerpo; el texto mantiene su tamaño y los diseños anchos pueden desplazarse.
  */
-const HTML_HEAD = `<meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src https: http: data:; style-src 'unsafe-inline' https:; font-src https: data:"><base target="_blank"><meta name="color-scheme" content="light"><style>:root{color-scheme:light}html,body{margin:0;background:#fff;color:#1f1f1f;font:14px/1.45 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;overflow-wrap:anywhere}body{padding:12px}img{max-width:100%;height:auto}a{color:#1a5fd6}</style>`;
+const HTML_HEAD = `<meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src https: http: data:; style-src 'unsafe-inline' https:; font-src https: data:"><base target="_blank"><meta name="color-scheme" content="light"><style>:root{color-scheme:light}html,body{margin:0;background:#fff;color:#1f1f1f;font:14px/1.45 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;overflow-wrap:anywhere;min-width:0}body{padding:12px;box-sizing:border-box}img{max-width:100%;height:auto}table{max-width:100%!important}td,th{overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:#1a5fd6}.mail-image-placeholder{display:inline-block;box-sizing:border-box;max-width:100%;padding:8px 10px;border:1px dashed #bcc4ce;border-radius:6px;color:#596473;background:#f6f7f9;font:13px/1.4 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}.mail-empty-image-wrapper{height:auto!important;min-height:0!important;max-height:none!important}</style>`;
 const htmlCache = new Map<string, string | null>();
 function useMailHtml(id: string, on: boolean) {
   const [html, setHtml] = useState<string | null | undefined>(htmlCache.get(id));
@@ -523,24 +531,85 @@ function useMailHtml(id: string, on: boolean) {
 }
 export function MailHtml({ html, maxHeight }: { html: string; maxHeight?: number }) {
   const ref = useRef<HTMLIFrameElement>(null);
+  const bodyObserver = useRef<ResizeObserver | null>(null);
+  const imageCleanup = useRef<(() => void) | null>(null);
+  const settleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const measureFrame = useRef<number | null>(null);
   const [h, setH] = useState(160);
   const fit = () => {
     const f = ref.current, doc = f?.contentDocument;
     if (!f || !doc?.body) return;
-    // Se mide sin zoom y se encoge lo que no cabe (los boletines vienen a 600 px).
-    const root = doc.documentElement;
-    root.style.zoom = '';
-    const w = f.clientWidth, sw = root.scrollWidth, sh = doc.body.offsetHeight;
-    const z = sw > w + 2 ? w / sw : 1;
-    if (z !== 1) root.style.zoom = String(z);
-    setH(Math.ceil(sh * z) + 2);
+    const height = Math.max(80, Math.ceil(Math.max(doc.body.offsetHeight, doc.body.scrollHeight, doc.body.getBoundingClientRect().height)) + 2);
+    setH((previous) => previous === height ? previous : height);
   };
-  useEffect(() => { const f = ref.current; if (!f) return; const ro = new ResizeObserver(() => fit()); ro.observe(f); return () => ro.disconnect(); }, []);
+  const scheduleFit = () => {
+    if (measureFrame.current !== null) return;
+    measureFrame.current = requestAnimationFrame(() => { measureFrame.current = null; fit(); });
+  };
+  useEffect(() => {
+    const f = ref.current;
+    if (!f) return;
+    let width = -1;
+    const ro = new ResizeObserver(() => { if (f.clientWidth !== width) { width = f.clientWidth; scheduleFit(); } });
+    ro.observe(f);
+    return () => {
+      ro.disconnect(); bodyObserver.current?.disconnect(); imageCleanup.current?.();
+      if (settleTimer.current) clearTimeout(settleTimer.current);
+      if (measureFrame.current !== null) cancelAnimationFrame(measureFrame.current);
+    };
+  }, []);
+  const loaded = () => {
+    const doc = ref.current?.contentDocument;
+    if (!doc?.body) return;
+    bodyObserver.current?.disconnect(); imageCleanup.current?.();
+    if (settleTimer.current) clearTimeout(settleTimer.current);
+    let current = true;
+    const cleanups: (() => void)[] = [];
+    const resize = () => { if (current && ref.current?.contentDocument === doc) scheduleFit(); };
+    const unavailable = (img: HTMLImageElement) => {
+      if (!img.isConnected) return;
+      const placeholder = doc.createElement('span');
+      placeholder.className = 'mail-image-placeholder';
+      placeholder.textContent = img.alt?.trim() || (locale().startsWith('en') ? 'Image unavailable' : 'Imagen no disponible');
+      placeholder.setAttribute('role', 'img');
+      placeholder.setAttribute('aria-label', locale().startsWith('en') ? 'Image unavailable' : 'Imagen no disponible');
+      img.replaceWith(placeholder);
+      // Only collapse wrappers devoted to this missing image. Never alter a
+      // surrounding section that also contains message text or other media.
+      let wrapper = placeholder.parentElement;
+      for (let depth = 0; wrapper && wrapper !== doc.body && depth < 4; depth++, wrapper = wrapper.parentElement) {
+        if (wrapper.childElementCount !== 1 || wrapper.textContent?.trim() !== placeholder.textContent) break;
+        wrapper.classList.add('mail-empty-image-wrapper');
+        wrapper.removeAttribute('height');
+      }
+      resize();
+    };
+    doc.querySelectorAll('img').forEach((img) => {
+      const src = img.getAttribute('src')?.trim();
+      if (!src || /^cid:/i.test(src) || (img.complete && img.naturalWidth === 0)) { unavailable(img); return; }
+      const failed = () => unavailable(img);
+      img.addEventListener('load', resize);
+      img.addEventListener('error', failed);
+      cleanups.push(() => { img.removeEventListener('load', resize); img.removeEventListener('error', failed); });
+    });
+    imageCleanup.current = () => { current = false; cleanups.forEach((cleanup) => cleanup()); };
+    // Email CSS can keep changing geometry forever. Observe only its initial
+    // settling period; later images/fonts and user width changes resize explicitly.
+    let updates = 0;
+    const observer = new ResizeObserver(() => {
+      if (++updates > 24) { observer.disconnect(); return; }
+      resize();
+    });
+    bodyObserver.current = observer;
+    observer.observe(doc.body);
+    settleTimer.current = setTimeout(() => { observer.disconnect(); settleTimer.current = null; }, 2000);
+    void doc.fonts.ready.then(resize);
+    resize();
+  };
   return (
     <iframe ref={ref} className="mail-html" title={t('mail.title')} sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
       referrerPolicy="no-referrer" srcDoc={`<!doctype html><html><head>${HTML_HEAD}</head><body>${html}</body></html>`}
-      style={{ height: maxHeight ? Math.min(h, maxHeight) : h }} scrolling={maxHeight && h > maxHeight ? 'yes' : 'no'}
-      onLoad={() => { fit(); ref.current?.contentDocument?.querySelectorAll('img').forEach((i) => i.addEventListener('load', fit, { once: true })); }} />
+      style={{ height: maxHeight ? Math.min(h, maxHeight) : h }} scrolling="auto" onLoad={loaded} />
   );
 }
 
@@ -574,6 +643,8 @@ export function MailCard({ emailId, banner, onIssue }: { emailId: string; banner
           </div>
         </div>
         <button className="wa-quote link-quote" onClick={() => open('read')}>{email.snippet}</button>
+        {!!email.chagguAttachments?.length && <AttachmentsView list={email.chagguAttachments} />}
+        {email.mediaStatus && email.mediaStatus !== 'ready' && <div className="small muted" role="status">{email.mediaStatus === 'pending' ? (locale().startsWith('en') ? 'Preparing attachment…' : 'Preparando adjunto…') : (locale().startsWith('en') ? 'Original attachment unavailable' : 'Adjunto original no disponible')}</div>}
         <CardComments email={email} canPost={!!conv?.canPost} />
         <div className="mail-card-foot">
           <span className="grow" />

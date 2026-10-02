@@ -305,17 +305,17 @@ async function previewFor(url: string): Promise<LinkPreviewDTO | null> {
 
 /** Job del worker: vistas previas de los primeros 3 enlaces del mensaje; avisa a la conversación y completa la biblioteca. */
 export async function previewMessage(messageId: string) {
-  const { rows } = await pool.query("SELECT id, body, kind, deleted_at FROM messages WHERE id = $1", [messageId]);
+  const { rows } = await pool.query("SELECT id, body, display_body, kind, deleted_at FROM messages WHERE id = $1", [messageId]);
   const m = rows[0];
   if (!m || m.kind !== 'text' || m.deleted_at) return;
-  const urls = extractUrls(m.body, MAX_PREVIEWS);
+  const urls = extractUrls(m.display_body ?? m.body, MAX_PREVIEWS);
   const found: (LinkPreviewDTO | null)[] = [];
   for (const url of urls) found.push(await previewFor(url));
   await tx(async (c) => {
     // El texto pudo cambiar mientras se leía la página: solo se guarda si siguen siendo los mismos enlaces.
     const cur = await c.query('SELECT * FROM messages WHERE id = $1 FOR UPDATE', [messageId]);
     const row = cur.rows[0];
-    if (!row || row.deleted_at || JSON.stringify(extractUrls(row.body, MAX_PREVIEWS)) !== JSON.stringify(urls)) return;
+    if (!row || row.deleted_at || JSON.stringify(extractUrls(row.display_body ?? row.body, MAX_PREVIEWS)) !== JSON.stringify(urls)) return;
     const ids = new Map<number, string>();
     for (const [i, url] of urls.entries()) {
       const u = await c.query('UPDATE message_links SET preview = $3 WHERE message_id = $1 AND url = $2 AND position = $4 RETURNING id', [messageId, url, found[i] ? JSON.stringify(found[i]) : null, i]);

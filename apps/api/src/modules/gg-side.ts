@@ -11,6 +11,10 @@
  *  - La salida del modelo se valida y se normaliza: el cliente siempre recibe el mismo formato aunque el modelo se salga.
  *  - Lo que usa IA exige users.ai_consent_at (403 ai_consent_required).
  */
+import { calendarSlots } from './gg-calendar.ts';
+import { inferredCalendarWindow } from '../calendar-window.ts';
+import { z } from 'zod';
+import { GgCalendarWindow,type GgCalendarSlotsDTO } from '@tiecoms/contracts';
 import { randomUUID } from 'node:crypto';
 import type { GgSideDraft, GgSideMessageDTO, GgSideSuggestion, GgSideThreadDTO } from '@tiecoms/contracts';
 import { GgSideSource } from '@tiecoms/contracts';
@@ -18,6 +22,7 @@ import { conversationAccess } from '../access.ts';
 import { pool } from '../db.ts';
 import { ApiError, badRequest, notFound } from '../errors.ts';
 import { completeJson } from './assistant.ts';
+import { requireWaVisible } from './wa-privacy.ts';
 import { messagesForGg, ownChat } from './whatsapp.ts';
 
 const CONTEXT = 60;
@@ -87,9 +92,11 @@ const toDTO = (r: any): GgSideMessageDTO => ({
 });
 
 async function save(userId: string, key: string, session: number, role: 'user' | 'gg', body: string, quoted: unknown, extra: unknown) {
+  if(key.startsWith('wa:')) await resolve(userId,key);
   const { rows } = await pool.query(
     'INSERT INTO gg_side_messages (user_id, source, session, role, body, quoted, extra) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *',
     [userId, key, session, role, body.slice(0, 8000), quoted ? JSON.stringify(quoted) : null, extra ? JSON.stringify(extra) : null]);
+  if(key.startsWith('wa:')) await resolve(userId,key);
   return toDTO(rows[0]);
 }
 
@@ -171,7 +178,7 @@ async function ask(sys: string, user: string, history: { role: 'user' | 'assista
 async function quotedOf(userId: string, s: Src, ids?: string[]) {
   if (!ids?.length) return [];
   const got = await sourceMessages(userId, s, { ids: [...new Set(ids)].slice(0, 20), limit: 20 });
-  return got.map((m) => ({ id: m.id, author: m.mine ? 'Tú' : m.author ?? 'Alguien', text: m.text.slice(0, 1000) }));
+  return got.map((m) => ({ id: m.id, author: m.mine ? 'Tú' : m.author ?? 'Alguien', text: m.text.slice(0, 1000), at: m.at }));
 }
 const quotedBlock = (q: { author: string; text: string }[]) =>
   q.length ? `\n<<<CITADOS\n${q.map((x) => `${x.author}: ${clean(x.text)}`).join('\n')}\nCITADOS>>>` : '';
@@ -182,12 +189,14 @@ export async function thread(userId: string, source: string): Promise<GgSideThre
   const st = await state(userId, s.key);
   const { rows } = await pool.query(
     'SELECT * FROM gg_side_messages WHERE user_id = $1 AND source = $2 AND session = $3 ORDER BY created_at, id LIMIT 300', [userId, s.key, st.session]);
+  if(s.kind==='wa') await requireWaVisible(pool,s.accountId,s.jid);
   return { session: st.session, messages: rows.map(toDTO), pending: st.pending };
 }
 
 async function computePending(userId: string, s: Src, me: string, msgs: SrcMsg[]) {
   const shape = '{"greeting": string, "pending": [{"text": string, "messageId": string}], "followUps": [string, string, string]}';
   const sys = system('saludar con lo que viste: qué le piden a la persona o qué espera respuesta de ella (pending, máximo 6, con el id del mensaje), y 2 a 4 preguntas que la persona podría hacerte después (followUps).', s, me, shape);
+  if(s.kind==='wa') await requireWaVisible(pool,s.accountId,s.jid);
   const { raw } = await ask(sys, dataBlock(msgs, me));
   const j = parseJson(raw) ?? {};
   const valid = new Set(msgs.map((m) => m.id));
@@ -210,6 +219,7 @@ export async function open(userId: string, source: string) {
   const { name: me } = await requireConsent(userId);
   const msgs = await sourceMessages(userId, s);
   const p = await computePending(userId, s, me, msgs);
+  if(s.kind==='wa') await requireWaVisible(pool,s.accountId,s.jid);
   await storePending(userId, s.key, p.pending.length, p.lastSeq);
   const st = await state(userId, s.key);
   return { message: await save(userId, s.key, st.session, 'gg', p.greeting, null, { pending: p.pending, followUps: p.followUps }) };
@@ -227,6 +237,7 @@ export async function refreshPending(userId: string, source: string) {
   if (!fresh || recent) return { source: s.key, pending: st.pending, recalculated: false };
   const { name: me } = await requireConsent(userId);
   const p = await computePending(userId, s, me, msgs);
+  if(s.kind==='wa') await requireWaVisible(pool,s.accountId,s.jid);
   await storePending(userId, s.key, p.pending.length, p.lastSeq);
   return { source: s.key, pending: p.pending.length, recalculated: true };
 }
@@ -240,7 +251,7 @@ async function threadHistory(userId: string, key: string, session: number) {
 }
 
 /** Pregunta libre sobre el chat (con citados opcionales). gg recuerda el hilo de esta sesión. */
-export async function askSide(userId: string, input: { source: string; text: string; quotedMessageIds?: string[] }) {
+export async function askSide(userId: string, input: { source: string; text: string; quotedMessageIds?: string[];calendar?:z.infer<typeof GgCalendarWindow> }) {
   const s = await resolve(userId, input.source);
   const { name: me } = await requireConsent(userId);
   const st = await state(userId, s.key);
@@ -248,13 +259,16 @@ export async function askSide(userId: string, input: { source: string; text: str
   const history = await threadHistory(userId, s.key, st.session);
   const userMsg = await save(userId, s.key, st.session, 'user', input.text, quoted.length ? quoted : null, null);
   const msgs = await sourceMessages(userId, s);
+  const ownRelativeDate=/(?:pr[oó]xima semana|semana que viene|next week|ma[ñn]ana|tomorrow)/i.test(input.text);
+  const calendar=await calendarForGesture(userId,input.source,input.quotedMessageIds ?? [],input.calendar,[input.text,...quoted.map(q=>q.text)].join('\n'),ownRelativeDate || !quoted.length ? Date.now() : Date.parse(quoted[quoted.length-1]!.at));
   const shape = '{"answer": string, "followUps": [string, string, string], "drafts": [{"style": "short"|"warm"|"action", "text": string}] }  (drafts solo si te piden redactar una respuesta; si no, [])';
-  const sys = `${system('responder la pregunta de la persona sobre este chat. Al final propone 2 a 4 siguientes preguntas (followUps).', s, me, shape)}\n\n${dataBlock(msgs, me)}`;
+  const sys = `${system('responder la pregunta de la persona sobre este chat. Al final propone 2 a 4 siguientes preguntas (followUps).', s, me, shape)}\n\n${dataBlock(msgs, me)}\nCALENDARIO VERIFICADO POR EL SERVIDOR: ${JSON.stringify(calendar)}. Solo si ready hay horarios comprobados; si no, pide conectar o completar rango/duración/zona. Nunca digas que revisaste la agenda sin checkedAt.`;
+  if(s.kind==='wa') await requireWaVisible(pool,s.accountId,s.jid);
   const { raw } = await ask(sys, `${me} pregunta: ${input.text.slice(0, 2000)}${quotedBlock(quoted)}`, history);
   const j = parseJson(raw);
   const body = str(j?.answer, 4000) || (j ? 'No tengo una respuesta para eso con lo que hay en este chat.' : clean(raw, 1500) || 'No pude responder; intenta de nuevo.');
   const d = drafts(j?.drafts);
-  const message = await save(userId, s.key, st.session, 'gg', body, null, { followUps: followUps(j?.followUps), ...(d.length ? { drafts: d } : {}) });
+  const message = await save(userId, s.key, st.session, 'gg', body, null, { ...(calendar ? {calendar} : {}),followUps: followUps(j?.followUps), ...(d.length ? { drafts: d } : {}) });
   return { message, question: userMsg };
 }
 
@@ -276,6 +290,7 @@ export async function replyForMe(userId: string, input: { source: string; tone?:
   const shape = '{"drafts": [{"style": "short", "text": string}, {"style": "warm", "text": string}, {"style": "action", "text": string, "action": {"kind": "task"|"reminder", "title": string, "assigneeName": string|null, "due": "YYYY-MM-DD"|null}}]}';
   const sys = `${system('redactar 3 respuestas para que la persona responda al chat, en primera persona: short (corta), warm (cálida) y action (con acción: además propone una tarea o un recordatorio en "action"). Son borradores: la persona los edita y los envía ella.', s, me, shape)}
 ${input.tone ? TONES[input.tone] : ''}\n\n${dataBlock(msgs, me)}${mine.length ? `\n<<<MIS_MENSAJES\n${mine.map((m) => clean(m.text, 300)).join('\n')}\nMIS_MENSAJES>>>` : ''}`;
+  if(s.kind==='wa') await requireWaVisible(pool,s.accountId,s.jid);
   const { raw } = await ask(sys, `Redacta las 3 respuestas${quoted.length ? ' a los mensajes citados' : ' al último mensaje que espera respuesta'}.${quotedBlock(quoted)}`);
   const d = drafts(parseJson(raw)?.drafts);
   if (!d.length) throw new ApiError(502, 'assistant_failed', 'gg no pudo redactar respuestas; intenta de nuevo');
@@ -284,7 +299,7 @@ ${input.tone ? TONES[input.tone] : ''}\n\n${dataBlock(msgs, me)}${mine.length ? 
 }
 
 /** Sugerencias para varios mensajes seleccionados: se juntan sin repetir y se ordenan por lo que más encaja (2 a 6). */
-export async function suggest(userId: string, input: { source: string; messageIds: string[] }) {
+export async function suggest(userId: string, input: { source: string; messageIds: string[];calendar?:z.infer<typeof GgCalendarWindow> }) {
   const s = await resolve(userId, input.source);
   const { name: me } = await requireConsent(userId);
   const st = await state(userId, s.key);
@@ -293,7 +308,9 @@ export async function suggest(userId: string, input: { source: string; messageId
   const msgs = await sourceMessages(userId, s);
   const shape = '{"suggestions": [{"kind": "reply"|"task"|"reminder"|"message_person"|"summary", "title": string, "detail": string|null, "draft": string|null, "params": {"assigneeName": string|null, "due": "YYYY-MM-DD"|null, "personName": string|null}, "forMessageIds": [string]}]}';
   const sys = `${system('proponer de 2 a 6 cosas que la persona puede hacer con los mensajes citados (responder, crear tarea con responsable y fecha si salen del texto, recordatorio, escribirle a alguien, resumir). Sin repetir, de la que más encaja a la que menos. forMessageIds: ids de los mensajes citados a los que aplica.', s, me, shape)}\n\n${dataBlock(msgs, me)}`;
+  if(s.kind==='wa') await requireWaVisible(pool,s.accountId,s.jid);
   const { raw } = await ask(sys, `Mensajes citados:\n<<<CITADOS\n${picked.map((m) => `[${m.id}] ${m.mine ? 'Tú' : m.author ?? 'Alguien'}: ${clean(m.text)}`).join('\n')}\nCITADOS>>>`);
+  const calendar=await calendarForGesture(userId,input.source,input.messageIds,input.calendar,picked.map(m=>m.text).join('\n'),Date.parse(picked[picked.length-1]!.at));
   const valid = new Set(picked.map((m) => m.id));
   let list = suggestions(parseJson(raw)?.suggestions, valid);
   // Mínimo 2: si el modelo no dio, lo de siempre (responder y resumir).
@@ -304,8 +321,8 @@ export async function suggest(userId: string, input: { source: string; messageId
   for (const b of base) if (list.length < 2 && !list.some((x) => x.kind === b.kind)) list.push(b);
   list = list.map((x) => (x.forMessageIds.length ? x : { ...x, forMessageIds: [...valid] }));
   const quoted = picked.map((m) => ({ id: m.id, author: m.mine ? 'Tú' : m.author ?? 'Alguien', text: m.text.slice(0, 1000) }));
-  await save(userId, s.key, st.session, 'gg', `Esto puedo hacer con ${picked.length === 1 ? 'este mensaje' : `estos ${picked.length} mensajes`}:`, quoted, { suggestions: list });
-  return { suggestions: list };
+  await save(userId, s.key, st.session, 'gg', `Esto puedo hacer con ${picked.length === 1 ? 'este mensaje' : `estos ${picked.length} mensajes`}:` + calendarText(calendar), quoted, { suggestions: list,...(calendar ? {calendar} : {}) });
+  return { suggestions: list,...(calendar ? {calendar} : {}) };
 }
 
 /** «Nueva conversación»: sube el número de sesión; el historial anterior queda guardado pero ya no se muestra. */
@@ -322,7 +339,32 @@ export async function pendingCounts(userId: string, sourcesCsv: string) {
   const list = [...new Set(sourcesCsv.split(',').map((x) => x.trim()).filter(Boolean))].slice(0, 200);
   if (!list.length) throw badRequest('Faltan fuentes');
   const keys = list.map((x) => (x.startsWith('c:') ? x.toLowerCase() : x.replace(/^wa:([^:]+):/, (_m, a: string) => `wa:${a.toLowerCase()}:`)));
-  const { rows } = await pool.query('SELECT source, pending_count FROM gg_side_state WHERE user_id = $1 AND source = ANY($2)', [userId, keys]);
+  const { rows } = await pool.query(`SELECT source, pending_count FROM gg_side_state WHERE user_id = $1 AND source = ANY($2)
+    AND (source NOT LIKE 'wa:%' OR EXISTS (SELECT 1 FROM wa_accounts a WHERE a.user_id=$1
+      AND a.id::text=split_part(source,':',2) AND wa_chat_visible(a.id,split_part(source,':',3))))`, [userId, keys]);
   const by = new Map(rows.map((r) => [r.source, Number(r.pending_count)]));
   return Object.fromEntries(list.map((x, i) => [x, by.get(keys[i]!) ?? 0]));
+}
+
+/** Exactly one fresh provider check per explicit gesture; no speculative dates or background checks. */
+async function calendarForGesture(userId:string,source:string,messageIds:string[],window:z.infer<typeof GgCalendarWindow>|undefined,text:string,reference=Date.now()):Promise<GgCalendarSlotsDTO|null> {
+  if(window) return await calendarSlots(userId,{source,messageIds,...window}) as GgCalendarSlotsDTO;
+  if(/(?:agenda|agendar|reuni[oó]n|meeting|calendar|horario|disponibilidad|libres?|fechas?|dates?|schedule|free.?time)/i.test(text)) {
+    const tz=(await pool.query('SELECT sleep_tz FROM users WHERE id=$1',[userId])).rows[0]?.sleep_tz;
+    const inferred=tz ? inferredCalendarWindow(text,tz,reference) : null;
+    if(inferred) return await calendarSlots(userId,{source,messageIds,...inferred}) as GgCalendarSlotsDTO;
+    return {status:'needs_clarification',provider:null,checkedAt:null,timezone:null,slots:[]};
+  }
+  return null;
+}
+
+function calendarText(calendar:GgCalendarSlotsDTO|null) {
+  if(!calendar) return '';
+  if(calendar.status==='needs_connect'||calendar.status==='reconnect') return '\n\nPara comprobar tus horarios, conecta o vuelve a autorizar tu calendario en Ajustes.';
+  if(calendar.status!=='ready') return '\n\nUsa «Ver disponibilidad / agendar» para precisar fechas, duración y zona horaria. No he confirmado horarios todavía.';
+  const format=(iso:string)=>new Date(iso).toLocaleString('es-CO',{timeZone:calendar.timezone ?? 'UTC',weekday:'long',day:'numeric',month:'long',hour:'2-digit',minute:'2-digit'});
+  if(!calendar.slots.length) return `\n\nRevisé tu calendario principal y Chaggu (${calendar.timezone}); no encontré huecos en la jornada de búsqueda.`;
+  const mins=Math.round((Date.parse(calendar.slots[0]!.endsAt)-Date.parse(calendar.slots[0]!.startsAt))/60000);
+  const hours=calendar.startHour===undefined ? '' : `, jornada ${String(calendar.startHour).padStart(2,'0')}:00–${String(calendar.endHour ?? 18).padStart(2,'0')}:00`;
+  return `\n\nHorarios libres comprobados en tu calendario principal y Chaggu (${calendar.timezone}). Propuestas de ${mins} minutos${hours}:\n`+calendar.slots.map(s=>`• ${format(s.startsAt)} – ${new Date(s.endsAt).toLocaleTimeString('es-CO',{timeZone:calendar.timezone ?? 'UTC',hour:'2-digit',minute:'2-digit'})}`).join('\n')+'\nUsa «Ver disponibilidad / agendar» para ajustar la duración, elegir e invitar. Aún no se ha creado una reunión.';
 }

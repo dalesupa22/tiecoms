@@ -65,3 +65,15 @@ export const updatePersonalChat = (id: string, patch: Partial<ChatPersonalPrefer
 
 export const CHAT_FONTS = { system: 'inherit', serif: 'Georgia, "Times New Roman", serif', mono: 'ui-monospace, SFMono-Regular, Consolas, monospace', rounded: '"Avenir Next", "Trebuchet MS", sans-serif' } as const;
 export const chatAppearanceStyle = (pref: ChatPersonalPreferenceDTO = {}) => ({ fontFamily: CHAT_FONTS[pref.font ?? 'system'] });
+
+/** Atomic issue-view preferences: no read before write, unrelated preferences stay untouched. */
+export function updateIssuePreferences(patch: NonNullable<PersonalPreferencesDTO['issues']>) {
+  const userId = client.getState().data?.me.id;
+  const operation = queue.then(async () => {
+    if (!userId || client.getState().data?.me.id !== userId) return;
+    const saved = await client.request<PersonalPreferencesDTO>('/me/personal-preferences', { method: 'PATCH', json: { issues: patch } });
+    if (owner === userId) { value = saved; announce(); }
+  });
+  queue = operation.catch((error) => toast(errorText(error)));
+  return operation;
+}

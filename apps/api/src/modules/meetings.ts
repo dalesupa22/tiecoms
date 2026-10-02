@@ -52,7 +52,7 @@ interface Provider {
   authorize(state: string, verifier: string): string;
   exchange(code: string, verifier: string): Promise<Tokens>;
   refresh(refresh: string): Promise<Tokens>;
-  create(accessToken: string, m: { key: string; title: string; startsAt: string; endsAt: string; timezone: string; instant: boolean }): Promise<Created>;
+  create(accessToken: string, m: { key: string; title: string; startsAt: string; endsAt: string; timezone: string; instant: boolean; description?:string|null; attendeeEmails?:string[] }): Promise<Created>;
   read?(accessToken: string, externalId: string): Promise<Created>;
   revoke?(accessToken: string): Promise<void>;
 }
@@ -121,10 +121,10 @@ const PROVIDERS: Record<MeetingProvider, Provider> = {
       try { return await googleRead(accessToken, externalId); }
       catch (e) { if (!(e instanceof ProviderError && e.status === 404)) throw e; }
       const base = apiBase('MEETINGS_GOOGLE_API', 'https://www.googleapis.com/calendar/v3');
-      const res = await request(`${base}/calendars/primary/events?conferenceDataVersion=1&sendUpdates=none`, {
+      const res = await request(`${base}/calendars/primary/events?conferenceDataVersion=1&sendUpdates=${m.attendeeEmails?.length ? 'all' : 'none'}`, {
         method: 'POST', headers: { authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
         body: JSON.stringify({
-          id: externalId, summary: m.title, start: { dateTime: m.startsAt, timeZone: m.timezone }, end: { dateTime: m.endsAt, timeZone: m.timezone },
+          id: externalId, summary: m.title, ...(m.description ? {description:m.description} : {}), ...(m.attendeeEmails?.length ? {attendees:m.attendeeEmails.map(email=>({email}))} : {}), start: { dateTime: m.startsAt, timeZone: m.timezone }, end: { dateTime: m.endsAt, timeZone: m.timezone },
           conferenceData: { createRequest: { requestId: m.key, conferenceSolutionKey: { type: 'hangoutsMeet' } } },
         }),
       });
@@ -160,7 +160,7 @@ const PROVIDERS: Record<MeetingProvider, Provider> = {
       const res = await request(`${base}/me/events`, {
         method: 'POST', headers: { authorization: `Bearer ${accessToken}`, 'content-type': 'application/json', prefer: `outlook.timezone="${m.timezone}"` },
         body: JSON.stringify({
-          subject: m.title, start: { dateTime: local(m.startsAt), timeZone: m.timezone }, end: { dateTime: local(m.endsAt), timeZone: m.timezone },
+          subject: m.title, ...(m.description ? {body:{contentType:'text',content:m.description}} : {}), ...(m.attendeeEmails?.length ? {attendees:m.attendeeEmails.map(email=>({emailAddress:{address:email},type:'required'}))} : {}), start: { dateTime: local(m.startsAt), timeZone: m.timezone }, end: { dateTime: local(m.endsAt), timeZone: m.timezone },
           isOnlineMeeting: true, onlineMeetingProvider: 'teamsForBusiness', transactionId: m.key.slice(0, 64),
         }),
       });
@@ -360,11 +360,12 @@ const toDTO = (r: any): MeetingDTO => ({
 
 type MeetingInput = {
   provider: MeetingProvider; conversationId?: string | null; idempotencyKey: string; title: string;
-  startsAt?: string | null; durationMin: number; timezone: string; share: boolean;
+  startsAt?: string | null; durationMin: number; timezone: string; share: boolean;description?:string;attendeeEmails?:string[];inviteeIds?:string[];
 };
 const fingerprint = (i: MeetingInput) => sha(JSON.stringify([
   1, i.provider, i.conversationId ?? null, i.title, i.startsAt ? new Date(i.startsAt).toISOString() : null,
   i.durationMin, i.timezone, i.share,
+  ...(i.description || i.attendeeEmails?.length || i.inviteeIds?.length ? [i.description ?? null,i.attendeeEmails ?? [],i.inviteeIds ?? []] : []),
 ]));
 const details = (row: any) => ({ meetingId: row.id });
 const rowById = async (id: string) => (await pool.query('SELECT * FROM meetings WHERE id = $1', [id])).rows[0];
@@ -423,7 +424,7 @@ async function shareCreated(row: any) {
     await conversationAccess(pool, row.user_id, row.conversation_id, 'post');
     if (!row.calendar_event_id) {
       const ev = await createEvent(row.user_id, row.conversation_id, {
-        title: row.title, location: row.join_url, description: `${PROVIDERS[row.provider as MeetingProvider].label}: ${row.join_url}`,
+        title: row.title, location: row.join_url, description: [row.description,`${PROVIDERS[row.provider as MeetingProvider].label}: ${row.join_url}`].filter(Boolean).join("\n\n"), ...(row.invitee_ids ? {inviteeIds:row.invitee_ids} : {}),
         startsAt: new Date(row.starts_at).toISOString(), endsAt: new Date(row.ends_at).toISOString(), timezone: row.timezone,
       }, row.id);
       row.calendar_event_id = ev.id;
@@ -439,7 +440,7 @@ async function shareCreated(row: any) {
   }
 }
 
-async function recover(row: any, readOnly: boolean): Promise<MeetingDTO> {
+async function recover(row: any, readOnly: boolean,expectedGeneration?:string): Promise<MeetingDTO> {
   row = await rowById(row.id);
   if (row.status === 'created') {
     if (!readOnly) await shareCreated(row);
@@ -461,7 +462,7 @@ async function recover(row: any, readOnly: boolean): Promise<MeetingDTO> {
   let dispatched = false;
   try {
     if (priorUncertain && !row.connection_generation) throw connectionChanged();
-    const credentials = await accessToken(row.user_id, row.provider, priorUncertain ? row.connection_generation : undefined);
+    const credentials = await accessToken(row.user_id, row.provider, priorUncertain ? row.connection_generation : expectedGeneration);
     row.connection_generation = credentials.generation;
     row.connection_access_cipher = credentials.accessCipher;
     const at = credentials.access;
@@ -479,7 +480,7 @@ async function recover(row: any, readOnly: boolean): Promise<MeetingDTO> {
       );
       if (!reserved.rowCount) throw connectionChanged();
       dispatched = true;
-      created = await def.create(at, { key: row.id, title: row.title, startsAt: new Date(row.starts_at).toISOString(), endsAt: new Date(row.ends_at).toISOString(), timezone: row.timezone, instant: row.instant });
+      created = await def.create(at, { key: row.id, title: row.title, startsAt: new Date(row.starts_at).toISOString(), endsAt: new Date(row.ends_at).toISOString(), timezone: row.timezone, instant: row.instant,description:row.description,attendeeEmails:row.attendee_emails ?? [] });
     }
     await pool.query("UPDATE meetings SET status = 'created', operation_state = 'complete', join_url = $2, external_id = $3, error = NULL, error_code = NULL, error_status = NULL WHERE id = $1", [row.id, created.joinUrl, created.externalId]);
   } catch (e) {
@@ -493,7 +494,7 @@ async function recover(row: any, readOnly: boolean): Promise<MeetingDTO> {
   return toDTO(await rowById(row.id));
 }
 
-export async function createMeeting(userId: string, input: MeetingInput) {
+export async function createMeeting(userId: string, input: MeetingInput,expectedGeneration?:string) {
   // Recovery belongs to the original operation even if time, access or provider configuration changed.
   // Only a new key can fail preflight without a meetingId; callers must keep ambiguous existing attempts.
   const fp = fingerprint(input);
@@ -510,14 +511,14 @@ export async function createMeeting(userId: string, input: MeetingInput) {
     if (!instant && starts.getTime() < Date.now() - 5 * 60_000) throw badRequest('La hora de la reunión ya pasó');
     const ends = new Date(starts.getTime() + input.durationMin * 60_000);
     const ins = await pool.query(
-      `INSERT INTO meetings (user_id, provider, conversation_id, idempotency_key, title, starts_at, ends_at, timezone, request_fingerprint, share_requested, instant)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT (user_id, idempotency_key) DO NOTHING RETURNING *`,
-      [userId, input.provider, input.conversationId ?? null, input.idempotencyKey, input.title, starts.toISOString(), ends.toISOString(), input.timezone, fp, input.share, instant],
+      `INSERT INTO meetings (user_id, provider, conversation_id, idempotency_key, title, starts_at, ends_at, timezone, request_fingerprint, share_requested, instant,description,attendee_emails,invitee_ids)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) ON CONFLICT (user_id, idempotency_key) DO NOTHING RETURNING *`,
+      [userId, input.provider, input.conversationId ?? null, input.idempotencyKey, input.title, starts.toISOString(), ends.toISOString(), input.timezone, fp, input.share, instant,input.description ?? null,JSON.stringify(input.attendeeEmails ?? []),input.inviteeIds ?? null],
     );
     row = ins.rows[0] ?? (await pool.query('SELECT * FROM meetings WHERE user_id = $1 AND idempotency_key = $2', [userId, input.idempotencyKey])).rows[0];
   }
   if (!row.request_fingerprint?.equals(fp)) throw new ApiError(409, 'idempotency_mismatch', 'Esta llave pertenece a otro intento. Conserva los datos originales para recuperarlo.', details(row));
-  return locked(row, () => recover(row, false));
+  return locked(row, () => recover(row, false,expectedGeneration));
 }
 
 export async function getMeeting(userId: string, id: string) {

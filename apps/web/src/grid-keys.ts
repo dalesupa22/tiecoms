@@ -7,8 +7,8 @@
 export const MAX_PANES_DEFAULT = 4;
 export type MailProviderKey = 'google' | 'microsoft';
 /** Las secciones enteras que también caben en un cuadrito: la lista de tareas, la bandeja de correo y todas las conversaciones de WhatsApp. */
-export type Section = 'tasks' | 'inbox' | 'wachats';
-export const SECTIONS: Section[] = ['tasks', 'inbox', 'wachats'];
+export type Section = 'tasks' | 'inbox' | 'wachats' | 'agenda' | 'trazo' | 'calls';
+export const SECTIONS: Section[] = ['tasks', 'inbox', 'wachats', 'agenda', 'trazo', 'calls'];
 export type PaneRef =
   | { kind: 'chat'; id: string }
   | { kind: 'mail'; provider: MailProviderKey; id: string }
@@ -63,13 +63,22 @@ export function replaceIndex(panes: string[], pinned: ReadonlySet<string>, prefe
 }
 
 /**
- * Coloca `key` en el hueco `index` de la cuadrícula. Si ya estaba, se queda donde estaba. Un hueco libre (o más allá del
+ * Coloca `key` en el hueco `index` de la cuadrícula. Si ya estaba, intercambia su lugar con el destino. Un hueco libre (o más allá del
  * último) agrega al final; uno ocupado reemplaza, salvo que esté fijado. Devuelve los paneles nuevos y el lugar, o null si
  * el hueco es de un panel fijado.
  */
 export function placeInto(panes: string[], key: string, index: number, pinned: ReadonlySet<string>, max: number): { panes: string[]; at: number; replaced: string | null } | null {
+  if (!Number.isInteger(index) || index < 0 || index >= max) return null;
   const ex = panes.indexOf(key);
-  if (ex >= 0) return { panes, at: ex, replaced: null };
+  if (ex >= 0) {
+    if (index >= panes.length) return { panes: [...panes.filter((p) => p !== key), key], at: panes.length - 1, replaced: null };
+    const at = index;
+    if (at === ex) return { panes, at, replaced: null };
+    if (pinned.has(panes[at]!)) return null;
+    const next = [...panes];
+    [next[ex], next[at]] = [next[at]!, key];
+    return { panes: next, at, replaced: null };
+  }
   const next = [...panes];
   if (index < next.length) {
     if (pinned.has(next[index]!)) return null;

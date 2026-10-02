@@ -296,9 +296,15 @@ export interface UserDTO {
   sleep?: SleepDTO;
   /** Solo en bootstrap.me: autorizó usar IA con gg (su chat y @gg). */
   aiConsent?: boolean;
+  availability?: AvailabilityDTO;
 }
 
 /** Modo sueño: todas las noches, de `start` a `end` (HH:MM en `tz`), no suena nada. */
+export const AvailabilityMode = z.enum(['available', 'busy', 'focus', 'dnd', 'rest']);
+export type AvailabilityMode = z.infer<typeof AvailabilityMode>;
+export interface AvailabilityDTO { mode: AvailabilityMode | null; until: string | null; silent: boolean; revision: number }
+export const AvailabilityInput = z.object({ mode: AvailabilityMode.nullable(), until: z.iso.datetime({ offset: true }).nullable().optional() });
+
 export interface SleepDTO { on: boolean; start: string; end: string; tz: string; tzAuto: boolean }
 
 export interface OrganizationDTO {
@@ -346,6 +352,7 @@ export interface PersonDTO {
   area: string | null;
   guest: boolean;
   guestUntil: string | null;
+  availability?: AvailabilityDTO;
   avatarUrl?: string | null;
   /** Horario de descanso de la persona (solo si lo tiene encendido): a quien escribe se le avisa que no le sonará. */
   sleep?: { start: string; end: string; tz: string } | null;
@@ -395,6 +402,7 @@ export interface ConversationDTO {
   lastMessageAt: string | null;
   lastMessagePreview: string | null;
   lastReadSeq: number;
+  readRevision?: number;
   unread: number;
   canPost: boolean;
   canManage: boolean;
@@ -462,7 +470,9 @@ export interface MessagePreviewDTO {
  * Adjunto de un mensaje. url y thumbUrl son rutas del API que exigen Bearer (quien puede leer el mensaje).
  * width/height solo en imágenes cuyo formato el servidor sabe leer; thumbUrl solo si alguien subió la miniatura.
  */
+export interface AttachmentProvenanceDTO { version: 1; provider: 'openverse' | 'memegen' | 'klipy'; title: string; attribution: string; sourceUrl: string | null; author?: string | null; license?: string | null; licenseUrl?: string | null }
 export interface AttachmentDTO {
+  provenance?: AttachmentProvenanceDTO | null;
   id: string;
   name: string;
   contentType: string;
@@ -845,6 +855,8 @@ export interface SharedMailDTO {
   /** Se guardó solo lo nuevo: el historial citado y la firma se ven con GET /mail/shared/:id/original (en vivo). */
   trimmed?: boolean;
   sentAt: string | null; attachments: MailAttachmentInfoDTO[];
+  chagguAttachments?: AttachmentDTO[];
+  mediaStatus?: WaMediaDTO['status'];
   messageId: string | null; comment: string | null; status: SharedMailStatus; repliedAt: string | null; repliedBy: string | null;
   /** Respuesta programada pendiente (solo la ve quien la programó). */
   scheduledReply: { id: string; sendAt: string } | null;
@@ -873,6 +885,7 @@ export const MailTaskInput = z.object({
 /** Reenviar una tarjeta de correo o WhatsApp a otros chats: cada chat recibe su copia con hilo propio. */
 export const ForwardSharedInput = z.object({ conversationIds: z.array(z.uuid()).min(1).max(10), comment: z.string().trim().max(4000).optional() });
 export const ShareWaInput = z.object({
+  clientMessageId: z.string().min(1).max(64).optional(),
   accountId: z.uuid(), jid: z.string().min(3).max(200), messageId: z.string().min(1).max(200),
   conversationId: z.uuid().optional(), conversationIds: z.array(z.uuid()).min(1).max(10).optional(),
   comment: z.string().trim().max(4000).optional(),
@@ -941,6 +954,8 @@ export interface MessageDTO {
   clientMessageId: string | null;
   kind: 'text' | 'system';
   body: string;
+  /** Server-authored comment without verified automatic credits; absent on legacy. Never disclosed before one-view opening. */
+  displayBody?: string | null;
   replyTo: string | null;
   /** Si este mensaje trae de vuelta el resultado de una conversación derivada. */
   mergedFrom: string | null;
@@ -1396,7 +1411,7 @@ export const MAX_REFS_PER_MESSAGE = 20;
 
 export type ViewOnceState = 'unopened' | 'opened' | 'sent';
 /** POST /messages/:id/open (una vez por persona; 410 already_opened la segunda). URLs firmadas de 60 s. */
-export interface ViewOnceOpenDTO { body: string; attachments: AttachmentDTO[] }
+export interface ViewOnceOpenDTO { body: string; displayBody?: string | null; attachments: AttachmentDTO[] }
 
 export const SendMessageInput = z.object({
   clientMessageId: z.string().min(8).max(64),
@@ -1457,7 +1472,7 @@ export type SystemBody17 =
   | { k: 'event.comments'; eventId: string; title: string; count: number; lastById: string; lastByName: string; lastExcerpt: string };
 // ---------- Sonidos (docs/SONIDOS.md) ----------
 /** Sonidos de mensaje: se generan en cada cliente (web con WebAudio; móvil con archivos del mismo nombre). */
-export const MESSAGE_SOUNDS = ['pop', 'gota', 'campana', 'marimba', 'burbuja', 'cristal', 'acorde', 'silbido', 'tambor', 'brisa'] as const;
+export const MESSAGE_SOUNDS = ['pop', 'gota', 'campana', 'marimba', 'burbuja', 'cristal', 'acorde', 'silbido', 'tambor', 'brisa', 'energy', 'spark', 'portal', 'victory'] as const;
 export type MessageSound = (typeof MESSAGE_SOUNDS)[number];
 /** 'none' = sin sonido. */
 export const SoundChoice = z.enum([...MESSAGE_SOUNDS, 'none']);
@@ -1577,6 +1592,7 @@ export const UpdateWaAccountInput = z.object({ label: z.string().trim().min(1).m
 export const WaSendInput = z.object({ text: z.string().trim().min(1).max(4000) });
 export const RelinkWaAccountInput = z.object({ pairPhone: PairPhone });
 export const WaChatsQuery = z.object({
+  cursor: z.string().max(4096).optional(),
   accountId: z.uuid().optional(),
   category: WaCategory.optional(),
   groups: z.enum(['1', '0']).optional(),
@@ -1603,6 +1619,8 @@ export const WaMessagesQuery = z.object({ before: z.iso.datetime().optional(), l
 
 export interface WaAccountDTO {
   id: string;
+  /** False mientras el puente comprueba los chats bloqueados de WhatsApp. */
+  privacyReady?: boolean;
   /** ¿Se puede responder desde chaggu con esta cuenta? Por defecto no. */
   sendEnabled: boolean;
   label: string;
@@ -1646,7 +1664,8 @@ export interface WaChatDTO {
   /** Estado de la cuenta: si no es 'connected', la fila sale atenuada con «WhatsApp desconectado». */
   accountStatus?: WaStatus;
 }
-export interface WaMessageDTO { id: string; fromMe: boolean; author: string | null; kind: string; body: string; sentAt: string; reactions?: { emoji: string; name: string }[] }
+export interface WaMediaDTO { status: 'pending' | 'ready' | 'failed' | 'unavailable' | 'restricted'; attachment?: AttachmentDTO | null; error?: string | null }
+export interface WaMessageDTO { media?: WaMediaDTO; id: string; fromMe: boolean; author: string | null; kind: string; body: string; sentAt: string; reactions?: { emoji: string; name: string }[] }
 
 // ---------- Eventos en tiempo real ----------
 /** Evento durable de una conversación, ordenado por eventSeq. */
@@ -1668,7 +1687,7 @@ export type ConversationEvent =
 /** Aviso a una cuenta: algo cambió en su alcance; el cliente vuelve a pedir /bootstrap. */
 export type AccountEvent =
   | { type: 'scope.changed'; reason: string }
-  | { type: 'read.updated'; conversationId: string; seq: number }
+  | { type: 'read.updated'; conversationId: string; seq: number; readRevision?: number }
   | { type: 'reminder.due'; reminder: ReminderDTO }
   /** Mis recordatorios cambiaron desde otro dispositivo (p. ej. una reacción 👀): volver a pedirlos. */
   | { type: 'reminders.changed' }
@@ -1704,7 +1723,10 @@ export type AccountEvent =
   | { type: 'issue.hidden'; issueId: string; conversationId: string }
   /** Cambió mi modo sueño (desde este u otro dispositivo). */
   | { type: 'me.sleep'; sleep: SleepDTO }
+  | { type: 'person.availability'; userId: string; availability: AvailabilityDTO }
   | { type: 'whatsapp.updated'; accountId: string }
+  /** Revoca de inmediato la vista local; reset invalida toda la cuenta durante su verificación. */
+  | { type: 'wa.privacy'; accountId: string; jids?: string[]; reset?: boolean }
   /** Cambió un chat de WhatsApp de la bandeja (se movió, fijó o sacó, o le entró un mensaje): reemplazar la fila por accountId+jid. */
   | { type: 'wa.inbox'; chat: WaChatDTO }
   | { type: 'drive.updated'; workspaceId: string | null; conversationId?: string | null };
@@ -1763,10 +1785,12 @@ export interface AssistantActionDTO {
 export const GgSideSource = z.string().regex(/^(c:[0-9a-f-]{36}|wa:[0-9a-f-]{36}:[^\s]{3,200})$/i, 'Fuente inválida');
 export const GgSideQuery = z.object({ source: GgSideSource });
 export const GgSideSourceInput = z.object({ source: GgSideSource });
-export const GgSideAskInput = z.object({ source: GgSideSource, text: z.string().trim().min(1).max(2000), quotedMessageIds: z.array(z.string().min(1).max(200)).max(20).optional() });
+export const GgCalendarWindow = z.object({from:z.iso.datetime({offset:true}),to:z.iso.datetime({offset:true}),durationMin:z.number().int().min(15).max(240),timezone:z.string().min(1).max(64),startHour:z.number().int().min(0).max(23).optional(),endHour:z.number().int().min(1).max(24).optional()}).refine(v=>(v.endHour ?? 18)>(v.startHour ?? 9),'Invalid daily hours');
+export interface GgCalendarSlotsDTO {status:'ready'|'needs_connect'|'reconnect'|'error'|'needs_clarification';provider:'google'|'microsoft'|null;checkedAt:string|null;timezone:string|null;slots:{startsAt:string;endsAt:string}[];calendar?:'primary'|null;scope?:'owned-primary-and-chaggu'|null;startHour?:number;endHour?:number}
+export const GgSideAskInput = z.object({ source: GgSideSource, text: z.string().trim().min(1).max(2000), quotedMessageIds: z.array(z.string().min(1).max(200)).max(20).optional(), calendar:GgCalendarWindow.optional() });
 export const GgSideTone = z.enum(['me', 'shorter', 'formal', 'more']);
 export const GgSideReplyInput = z.object({ source: GgSideSource, tone: GgSideTone.optional(), quotedMessageIds: z.array(z.string().min(1).max(200)).max(20).optional() });
-export const GgSideSuggestInput = z.object({ source: GgSideSource, messageIds: z.array(z.string().min(1).max(200)).min(1).max(30) });
+export const GgSideSuggestInput = z.object({ source: GgSideSource, messageIds: z.array(z.string().min(1).max(200)).min(1).max(30),calendar:GgCalendarWindow.optional() });
 export const GgSidePendingQuery = z.object({ sources: z.string().min(1).max(8000) });
 export interface GgSideDraft {
   style: 'short' | 'warm' | 'action';
@@ -1788,7 +1812,7 @@ export interface GgSideMessageDTO {
   role: 'user' | 'gg';
   body: string;
   quoted?: { id: string; author: string; text: string }[] | null;
-  extra?: { followUps?: string[]; drafts?: GgSideDraft[]; suggestions?: GgSideSuggestion[]; pending?: { text: string; messageId?: string }[] } | null;
+  extra?: { calendar?:GgCalendarSlotsDTO; followUps?: string[]; drafts?: GgSideDraft[]; suggestions?: GgSideSuggestion[]; pending?: { text: string; messageId?: string }[] } | null;
   createdAt: string;
 }
 export interface GgSideThreadDTO { session: number; messages: GgSideMessageDTO[]; pending: number }
@@ -1872,7 +1896,9 @@ export const ChatPersonalPreferenceInput = z.object({
   font: z.enum(['system', 'serif', 'mono', 'rounded']).optional(), hideBar: z.boolean().optional(),
 });
 export type ChatPersonalPreferenceDTO = z.infer<typeof ChatPersonalPreferenceInput>;
+export const IssuePersonalPreferencesInput = z.object({ view: z.enum(['list', 'cards', 'board']).optional(), grouping: z.enum(['group', 'assignee']).optional(), filter: z.enum(['mine', 'open', 'completed']).optional() });
 export const PersonalPreferencesInput = z.object({
+  issues: IssuePersonalPreferencesInput.optional(),
   appearance: z.object({ mode: z.enum(['system', 'light', 'dark']), accent: z.string().regex(/^#[0-9a-fA-F]{6}$/).nullable() }).optional(),
   sections: z.array(z.object({ id: z.uuid(), name: z.string().trim().min(1).max(80) })).max(100).default([]),
   conversations: z.record(z.uuid(), ChatPersonalPreferenceInput).default({}),
@@ -1880,3 +1906,6 @@ export const PersonalPreferencesInput = z.object({
 export type PersonalPreferencesDTO = z.infer<typeof PersonalPreferencesInput>;
 // GIFs y memes (docs/GIFS.md).
 export * from './gifs.ts';
+
+/** Atomic partial merge; a legacy full PUT does not erase additive preferences. */
+export const PersonalPreferencesPatchInput = z.object({ appearance: z.object({ mode: z.enum(['system', 'light', 'dark']).optional(), accent: z.string().regex(/^#[0-9a-fA-F]{6}$/).nullable().optional() }).optional(), issues: IssuePersonalPreferencesInput.optional() });

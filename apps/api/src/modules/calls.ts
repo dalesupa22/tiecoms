@@ -400,7 +400,7 @@ async function joinCall(userId: string, callId: string, created: boolean, device
  */
 async function ring(c: Tx, call: CallDTO, callerId: string) {
   const { rows: all } = await c.query(
-    `SELECT m.user_id, (u.dnd_until IS NOT NULL AND u.dnd_until > now()) AS dnd FROM conversation_memberships m JOIN users u ON u.id = m.user_id
+    `SELECT m.user_id, ((u.dnd_until IS NOT NULL AND u.dnd_until > now()) OR tiecoms_sleeping(u.sleep_on,u.sleep_start,u.sleep_end,u.sleep_tz)) AS dnd FROM conversation_memberships m JOIN users u ON u.id = m.user_id
       WHERE m.conversation_id = $1 AND m.removed_at IS NULL AND m.user_id <> $2 AND u.disabled_at IS NULL
         AND (EXISTS (SELECT 1 FROM conversations d WHERE d.id = m.conversation_id AND d.kind = 'direct')
              OR EXISTS (SELECT 1 FROM organization_memberships a JOIN organization_memberships b ON b.org_id = a.org_id WHERE a.user_id = $2 AND b.user_id = m.user_id))`,
@@ -690,11 +690,15 @@ export async function guestJoin(token: string, name: string): Promise<GuestJoinD
 
 /** Crea al invitado en la reunión de Chime y lo anota. `r` trae la llamada y el enlace por el que entra. */
 async function admitGuest(r: { link_id: string; call_id: string; external_id: string; meeting: unknown; conversation_id: string }, name: string): Promise<GuestJoinDTO> {
-  const n = await pool.query('SELECT count(*)::int AS n FROM call_guests WHERE call_id = $1 AND left_at IS NULL', [r.call_id]);
-  if (n.rows[0].n >= MAX_GUESTS) throw new ApiError(409, 'call_full', 'La llamada ya tiene el máximo de invitados');
   const secret = randomToken(24);
-  const clean = name.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 60) || 'Invitado';
-  const ins = await pool.query('INSERT INTO call_guests (call_id, link_id, name, secret_hash) VALUES ($1,$2,$3,$4) RETURNING id', [r.call_id, r.link_id, clean, sha256(secret)]);
+  const clean = name.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0,60) || 'Invitado';
+  const ins = await tx(async (c) => {
+    const active=await c.query('SELECT ended_at,external_id FROM calls WHERE id=$1 FOR UPDATE',[r.call_id]);
+    if (!active.rows[0] || active.rows[0].ended_at || active.rows[0].external_id!==r.external_id) throw new ApiError(409,'call_ended','La llamada ya terminó');
+    const n=await c.query('SELECT count(*)::int AS n FROM call_guests WHERE call_id=$1 AND left_at IS NULL',[r.call_id]);
+    if (n.rows[0].n>=MAX_GUESTS) throw new ApiError(409,'call_full','La llamada ya tiene el máximo de invitados');
+    return c.query('INSERT INTO call_guests (call_id,link_id,name,secret_hash) VALUES ($1,$2,$3,$4) RETURNING id',[r.call_id,r.link_id,clean,sha256(secret)]);
+  });
   const guestId = ins.rows[0].id as string;
   let attendee: Attendee;
   try { attendee = await getProvider().attendee(r.external_id, guestExternalId(guestId)); }

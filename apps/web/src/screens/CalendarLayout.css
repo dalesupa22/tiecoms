@@ -1,0 +1,38 @@
+/* Scoped calendar layout; each collision cluster gets readable columns even inside a narrow pane. */
+.cal-time-scroll { max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; border-radius: 14px; container-type: inline-size; }
+.cal-time-grid.week { overflow: visible; }
+.cal-time-grid .week-body { overflow: visible; }
+.cal-time-grid .week-hours { position: sticky; left: 0; z-index: 3; background: var(--card); }
+.cal-time-grid .week-head > span:first-child,
+.cal-time-grid .week-allday > span:first-child { position: sticky; left: 0; z-index: 3; background: var(--card); }
+.cal-time-grid .week-ev {
+  box-sizing: border-box;
+  margin-left: 2px;
+  padding: 4px 6px;
+  min-width: 0;
+  min-height: 28px;
+  gap: 2px;
+  line-height: 16px;
+  justify-content: flex-start;
+  cursor: pointer;
+}
+.cal-time-grid .week-ev b { flex: none; min-width: 0; font-size: 12px; line-height: 16px; }
+.cal-time-grid .week-ev .cal-ev-detail { flex: none; font-size: 11.5px; line-height: 14px; }
+.cal-time-grid .week-ev.is-compact { flex-direction: row; align-items: center; gap: 6px; }
+.cal-time-grid .week-ev.is-compact b { flex: 1; }
+.cal-time-grid .week-ev:not(.is-compact) { overflow: visible; }
+/* A later meeting can span the entire day. Its label stays readable when the
+   user scrolls to a collision lane farther right, rather than leaving a blank card. */
+.cal-time-grid .week-ev:not(.is-compact) > b,
+.cal-time-grid .week-ev:not(.is-compact) > .cal-ev-detail {
+  position: sticky;
+  left: 62px;
+  width: max-content;
+  max-width: 100%;
+  max-width: min(100%, calc(100cqw - 72px));
+  align-self: flex-start;
+}
+.cal-time-grid .week-allday .month-ev { overflow: visible; }
+.cal-time-grid .week-allday .month-ev > span { display: block; position: sticky; left: 62px; width: max-content; max-width: 100%; max-width: min(100%, calc(100cqw - 72px)); }
+.cal-time-grid .cal-ev-time { flex: none; font-size: 11px; line-height: 16px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.cal-time-grid .week-ev:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 1px; z-index: 4; }

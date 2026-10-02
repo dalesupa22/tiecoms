@@ -1,3 +1,6 @@
+import { CalendarSlotsInput,CalendarConfirmInput,calendarSlots,confirmCalendar } from './modules/gg-calendar.ts';
+import { readWaMedia,retryWaMedia } from './modules/wa-media.ts';
+import { AvailabilityInput, PersonalPreferencesPatchInput } from '@tiecoms/contracts';
 import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
 import cookie from '@fastify/cookie';
 import cors from '@fastify/cors';
@@ -23,7 +26,7 @@ import * as sso from './modules/sso.ts';
 import * as domains from './modules/domains.ts';
 import { deleteAccount } from './modules/account.ts';
 import { bootstrap } from './modules/bootstrap.ts';
-import { listEvents, listMessages, markRead, markTreeRead, sendMessage } from './modules/messages.ts';
+import { listEvents, listMessages, messagesAround, markRead, markTreeRead, sendMessage } from './modules/messages.ts';
 import * as ws from './modules/workspaces.ts';
 import * as groups from './modules/groups.ts';
 import * as invitations from './modules/invitations.ts';
@@ -338,6 +341,7 @@ export async function buildHttp() {
     priv.patch('/api/v1/me', async (req) => profile.updateProfile(req.userId, UpdateProfileInput.parse(req.body)));
     // «No molestar» general: { until: ISO | null } → { dndUntil }.
     priv.put('/api/v1/me/sounds', async (req) => prefs.setSounds(req.userId, SoundsInput.parse(req.body ?? {})));
+    priv.put('/api/v1/me/availability', async (req) => prefs.setAvailability(req.userId, AvailabilityInput.parse(req.body ?? {})));
     priv.put('/api/v1/me/dnd', async (req) => prefs.setDnd(req.userId, DndInput.parse(req.body ?? {}).until));
     // Modo sueño: horario diario sin sonidos { on?, start?, end?, tz?, tzAuto? } → { sleep }.
     priv.put('/api/v1/me/sleep', async (req) => prefs.setSleep(req.userId, SleepInput.parse(req.body ?? {})));
@@ -537,6 +541,12 @@ export async function buildHttp() {
     priv.post<{ Params: { id: string } }>('/api/v1/conversations/:id/read', async (req) => markRead(req.userId, req.params.id, MarkReadInput.parse(req.body).seq));
     priv.post<{ Params: { id: string } }>('/api/v1/conversations/:id/read-tree', async (req) => markTreeRead(req.userId, req.params.id, MarkTreeReadInput.parse(req.body).items));
     priv.post<{ Params: { id: string } }>('/api/v1/conversations/:id/members', async (req) => ws.addMembers(req.userId, req.params.id, AddMembersInput.parse(req.body)));
+    priv.get<{ Params: { id: string } }>('/api/v1/conversations/:id/messages/around', async (req) => {
+      const q=z.object({ messageId:z.uuid().optional(), seq:z.coerce.number().int().positive().optional(), limit:z.coerce.number().int().min(10).max(100).default(50) }).refine((v)=>!!v.messageId || !!v.seq).parse(req.query);
+      return messagesAround(req.userId,z.uuid().parse(req.params.id),q,q.limit);
+    });
+    priv.post('/api/v1/gg/calendar/slots',ggLimit,async(req)=>calendarSlots(req.userId,CalendarSlotsInput.parse(req.body)));
+    priv.post('/api/v1/gg/calendar/confirm',ggLimit,async(req)=>confirmCalendar(req.userId,CalendarConfirmInput.parse(req.body)));
     // Preferencias personales, no leído, mensajes
     priv.put<{ Params: { id: string } }>('/api/v1/conversations/:id/prefs', async (req) => prefs.setConversationPrefs(req.userId, req.params.id, ConversationPrefsInput.parse(req.body)));
     priv.put<{ Params: { id: string } }>('/api/v1/workspaces/:id/prefs', async (req) => prefs.setWorkspacePrefs(req.userId, req.params.id, WorkspacePrefsInput.parse(req.body).pinned));
@@ -695,7 +705,8 @@ export async function buildHttp() {
     priv.put<{ Params: { id: string } }>('/api/v1/notes/:id', async (req) => notes.saveNote(req.userId, NoteInput.parse(req.body), z.uuid().parse(req.params.id)));
     priv.delete<{ Params: { id: string } }>('/api/v1/notes/:id', async (req) => notes.deleteNote(req.userId, z.uuid().parse(req.params.id)));
     priv.get('/api/v1/me/personal-preferences', async (req) => notes.getPersonalPreferences(req.userId));
-    priv.put('/api/v1/me/personal-preferences', async (req) => notes.setPersonalPreferences(req.userId, PersonalPreferencesInput.parse(req.body)));
+    priv.put('/api/v1/me/personal-preferences', async (req) => notes.setPersonalPreferences(req.userId, PersonalPreferencesInput.parse(req.body), false, Object.keys(req.body as object)));
+    priv.patch('/api/v1/me/personal-preferences', async (req) => notes.setPersonalPreferences(req.userId, PersonalPreferencesPatchInput.parse(req.body), true));
 
     priv.get('/api/v1/reminders', async (req) => ({ reminders: await reminders.listReminders(req.userId) }));
     priv.post('/api/v1/reminders', async (req) => reminders.createReminder(req.userId, CreateReminderInput.parse(req.body)));
@@ -762,6 +773,11 @@ export async function buildHttp() {
     priv.get<{ Params: { id: string } }>('/api/v1/drive/files/:id/link', async (req) => drive.downloadLink(req.userId, z.uuid().parse(req.params.id)));
 
     // Conectar WhatsApp (personal y Business): cuentas, chats y organización.
+    priv.get<{Params:{accountId:string;jid:string;messageId:string}}>('/api/v1/whatsapp/media/:accountId/:jid/:messageId',async(req,reply)=>{
+      const f=await readWaMedia(req.userId,z.uuid().parse(req.params.accountId),req.params.jid,req.params.messageId);
+      return reply.header('content-type',f.contentType).header('cache-control','private,no-store').header('x-content-type-options','nosniff').send(f.body);
+    });
+    priv.post<{Params:{accountId:string;jid:string;messageId:string}}>('/api/v1/whatsapp/media/:accountId/:jid/:messageId',async(req)=>retryWaMedia(req.userId,z.uuid().parse(req.params.accountId),req.params.jid,req.params.messageId));
     priv.get('/api/v1/whatsapp/accounts', async (req) => ({ accounts: await wa.listAccounts(req.userId), max: wa.MAX_WA_ACCOUNTS }));
     priv.post('/api/v1/whatsapp/accounts', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (req) => wa.createAccount(req.userId, CreateWaAccountInput.parse(req.body)));
     priv.patch<{ Params: { id: string } }>('/api/v1/whatsapp/accounts/:id', async (req) => wa.updateAccount(req.userId, req.params.id, UpdateWaAccountInput.parse(req.body)));
@@ -770,7 +786,7 @@ export async function buildHttp() {
     priv.delete<{ Params: { id: string } }>('/api/v1/whatsapp/accounts/:id', async (req) => wa.removeAccount(req.userId, req.params.id));
     priv.get('/api/v1/whatsapp/chats', async (req) => {
       const q = WaChatsQuery.parse(req.query);
-      return wa.listChats(req.userId, { accountId: q.accountId, category: q.category, groups: q.groups === undefined ? undefined : q.groups === '1', search: q.q, hidden: q.hidden === '1', limit: q.limit });
+      return wa.listChats(req.userId, { accountId: q.accountId, category: q.category, groups: q.groups === undefined ? undefined : q.groups === '1', search: q.q, hidden: q.hidden === '1', limit: q.limit, cursor: q.cursor });
     });
     priv.post('/api/v1/whatsapp/organize', async (req) => wa.reorganize(req.userId));
     priv.post<{ Params: { accountId: string; jid: string } }>('/api/v1/whatsapp/chats/:accountId/:jid/send', { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (req, reply) => {
@@ -844,7 +860,7 @@ export async function buildHttp() {
     reply.header('cache-control', 'no-store');
     return calls.roomGuestJoin(req.params.code, GuestJoinInput.parse(req.body).name);
   });
-  app.post<{ Params: { id: string } }>('/api/v1/call-guests/:id/heartbeat', { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (req) =>
+  app.post<{ Params: { id: string } }>('/api/v1/call-guests/:id/heartbeat', { config: { rateLimit: { max: 240, timeWindow: '1 minute' } } }, async (req) =>
     calls.guestHeartbeat(z.uuid().parse(req.params.id), GuestSecretInput.parse(req.body).secret));
   app.post<{ Params: { id: string } }>('/api/v1/call-guests/:id/leave', guestLimit, async (req) =>
     calls.guestLeave(z.uuid().parse(req.params.id), GuestSecretInput.parse(req.body).secret));

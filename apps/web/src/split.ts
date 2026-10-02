@@ -10,6 +10,7 @@
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { navigate } from './router.ts';
 import { MAX_PANES_DEFAULT, TASKS_KEY, isChatKey, placeIntoGrid, replaceIndex, splitMain } from './grid-keys.ts';
+import { layoutAfterPlacement } from './grid-span-layout.ts';
 
 export const MAX_PANES = MAX_PANES_DEFAULT;
 /** Desde qué ancho de ventana hay paneles (la app de Mac abre en ~1000 px: con 1100 no aparecían). */
@@ -69,6 +70,63 @@ const listeners = new Set<() => void>();
 const emit = () => listeners.forEach((l) => l());
 const subscribe = (l: () => void) => { listeners.add(l); return () => { listeners.delete(l); }; };
 
+// Expansion changes presentation only. History and reload retain the canonical grid.
+const expandedFromUrl = () => new URLSearchParams(location.search).get('pane');
+let expandedKey = expandedFromUrl();
+window.addEventListener('popstate', () => { expandedKey = expandedFromUrl(); emit(); });
+window.addEventListener('chaggu:navigate', () => { expandedKey = expandedFromUrl(); emit(); });
+export const useExpandedPane = () => useSyncExternalStore(subscribe, () => expandedKey);
+export function collapsePane() {
+  const url = new URL(location.href); url.searchParams.delete('pane');
+  history.replaceState(history.state, '', url); expandedKey = null; emit();
+}
+export type GridLayout = 'classic' | 'tall-center' | 'tall-left' | 'tall-right' | 'custom';
+const LAYOUT_KEY = 'chaggu:grid-layout-v1';
+const savedLayout = read<{ version?: number; kind?: GridLayout; order?: string[]; tall?: string[]; wide?: string[] }>(LAYOUT_KEY, {});
+let layout: GridLayout = savedLayout.version === 1 && ['classic', 'tall-center', 'tall-left', 'tall-right', 'custom'].includes(savedLayout.kind ?? '') ? savedLayout.kind! : 'classic';
+let layoutOrder: string[] = Array.isArray(savedLayout.order) ? savedLayout.order.filter((x): x is string => typeof x === 'string') : [];
+let tallPanes: string[] = Array.isArray(savedLayout.tall) ? savedLayout.tall.filter((x): x is string => typeof x === 'string') : [TASKS_KEY];
+let widePanes: string[] = Array.isArray(savedLayout.wide) ? savedLayout.wide.filter((x): x is string => typeof x === 'string') : [];
+const saveLayout = () => write(LAYOUT_KEY, { version: 1, kind: layout, order: layoutOrder, tall: tallPanes, wide: widePanes });
+export const useGridLayout = () => useSyncExternalStore(subscribe, () => layout);
+export const useLayoutOrder = () => useSyncExternalStore(subscribe, () => layoutOrder);
+export const useTallPanes = () => useSyncExternalStore(subscribe, () => tallPanes);
+export const useWidePanes = () => useSyncExternalStore(subscribe, () => widePanes);
+export function setPaneSize(key: string, rows: 1 | 2, columns: 1 | 2, currentTall: readonly string[], currentWide: readonly string[], currentOrder: readonly string[]) {
+  const tall = new Set(currentTall), wide = new Set(currentWide);
+  if (rows === 2) tall.add(key); else tall.delete(key);
+  if (columns === 2) wide.add(key); else wide.delete(key);
+  tallPanes = [...tall].filter((k) => panes.includes(k));
+  widePanes = [...wide].filter((k) => panes.includes(k));
+  layoutOrder = currentOrder.filter((k) => panes.includes(k));
+  layout = 'custom'; saveLayout(); emit();
+}
+export function setPaneRows(key: string, rows: 1 | 2, currentTall: readonly string[]) {
+  const next = new Set(layout === 'custom' ? tallPanes : currentTall);
+  if (rows === 2) next.add(key); else next.delete(key);
+  tallPanes = [...next].filter((k) => panes.includes(k));
+  layout = 'custom'; saveLayout(); emit();
+}
+export function setGridLayout(next: GridLayout) {
+  layout = next; saveLayout(); emit();
+}
+export function moveLayoutPane(key: string, index: number) {
+  const order = [...layoutOrder.filter((k) => panes.includes(k)), ...panes.filter((k) => !layoutOrder.includes(k))];
+  const at = order.indexOf(key);
+  if (at < 0 || index < 0 || index >= order.length || at === index) return;
+  [order[at], order[index]] = [order[index]!, order[at]!];
+  layoutOrder = order; saveLayout(); emit();
+}
+/** A newly opened/focused pane must not remain in the saved fifth slot of a four-pane preset. */
+function revealLayoutPane(key: string) {
+  if (layout === 'classic' || layout === 'custom') return;
+  const order = [...layoutOrder.filter((k) => panes.includes(k)), ...panes.filter((k) => !layoutOrder.includes(k))];
+  const at = order.indexOf(key);
+  if (at < 4) return;
+  [order[3], order[at]] = [order[at]!, order[3]!];
+  layoutOrder = order; saveLayout();
+}
+
 function set(next: string[]) {
   panes = next.slice(0, MAX_STORED);
   // Lo que ya no está en la cuadrícula deja de estar fijado y de guardar su nombre.
@@ -113,7 +171,7 @@ function routeChatId(): string | null {
 let lastActive: string | null = null;
 export function syncActive(active: string) {
   activeKey = active;
-  if (panes.length === 0 || panes.includes(active)) { lastActive = active; emit(); return; }
+  if (panes.length === 0 || panes.includes(active)) { lastActive = active; revealLayoutPane(active); emit(); return; }
   // Tareas va en su columna y no entra en estas cuentas.
   const { main, tasks } = splitMain(panes);
   const at = lastActive ? main.indexOf(lastActive) : -1;
@@ -124,6 +182,7 @@ export function syncActive(active: string) {
   else { const r = replaceIndex(next, pinned); if (r >= 0) next[r] = active; else { lastActive = active; emit(); return; } }
   lastActive = active;
   set([...new Set(next), ...(tasks ? [TASKS_KEY] : [])]);
+  revealLayoutPane(active); emit();
 }
 
 export type OpenResult = 'opened' | 'focused' | 'blocked';
@@ -148,6 +207,7 @@ export function openBeside(key: string, active: string | null, replace?: string 
   }
   set(next);
   activeKey = key;
+  revealLayoutPane(key);
   if (!active && isChatKey(key)) navigate(`/c/${key}`);
   emit();
   return 'opened';
@@ -158,13 +218,20 @@ export function openBeside(key: string, active: string | null, replace?: string 
  * Devuelve el lugar (0–3) o -1 si ese cuadrito es de un panel fijado o la cuadrícula está llena.
  */
 export function pinAt(key: string, index: number, meta?: PaneMeta): number {
+  const before = [...panes];
   const r = placeIntoGrid(panes, key, index, pinned, MAX_PANES);
   if (!r) return -1;
   if (r.replaced) pinned.delete(r.replaced);
   if (r.panes !== panes) set(r.panes);
+  // Preserve visual layout order while applying the explicit slot move to the keys occupying it.
+  if (layoutOrder.length) {
+    layoutOrder = layoutAfterPlacement(layoutOrder, before, panes, key, index);
+    saveLayout();
+  }
   pinned = new Set(pinned).add(key);
   if (meta) metas = { ...metas, [key]: meta };
   activeKey = key; lastActive = key;
+  revealLayoutPane(key);
   write(PIN_KEY, [...pinned]); write(META_KEY, metas);
   pulse++;
   emit();
@@ -173,6 +240,7 @@ export function pinAt(key: string, index: number, meta?: PaneMeta): number {
 
 /** Cierra un panel; si era el activo, el activo pasa al vecino. Con uno solo y sin nada fijado, vuelve a la vista normal. */
 export function closePane(key: string, active: string | null) {
+  if (expandedKey === key) collapsePane();
   const at = panes.indexOf(key);
   const next = panes.filter((x) => x !== key);
   const keep = next.length > 1 || next.some((k) => !isChatKey(k) || pinned.has(k));
@@ -183,21 +251,50 @@ export function closePane(key: string, active: string | null) {
   }
 }
 
-/** Deja solo esta conversación (⤢). */
+/** Revoke specific panels without collapsing any surviving panel, pin or layout choice. */
+export function removePanes(keys: readonly string[]) {
+  if (!keys.length) return;
+  const removed = new Set(keys);
+  const before = [...panes], previousActive = activeKey;
+  if (expandedKey && removed.has(expandedKey)) collapsePane();
+  layoutOrder = layoutOrder.filter((key) => !removed.has(key));
+  tallPanes = tallPanes.filter((key) => !removed.has(key));
+  widePanes = widePanes.filter((key) => !removed.has(key));
+  saveLayout();
+  panes = panes.filter((key) => !removed.has(key));
+  pinned = new Set([...pinned].filter((key) => !removed.has(key)));
+  metas = Object.fromEntries(Object.entries(metas).filter(([key]) => !removed.has(key)));
+  if (activeKey && removed.has(activeKey)) activeKey = null;
+  write(KEY, panes); write(PIN_KEY, [...pinned]); write(META_KEY, metas); emit();
+  if (lastActive && removed.has(lastActive)) lastActive = null;
+  if (previousActive && removed.has(previousActive)) {
+    const at = before.indexOf(previousActive);
+    const next = panes[Math.min(Math.max(0, at - 1), panes.length - 1)];
+    if (next) focusPane(next);
+  }
+}
+
+/** Include saved references even if their panel is currently absent. */
+export const currentPaneReferences = () => [...new Set([...panes, ...pinned, ...Object.keys(metas), ...layoutOrder, ...tallPanes, ...widePanes, ...(expandedKey ? [expandedKey] : [])])];
+
+/** Expande sin borrar paneles, fijados, metadatos o tamaños. */
 export function onlyPane(key: string) {
-  if (isChatKey(key)) { set([]); navigate(`/c/${key}`, true); return; }
-  set([key]); activeKey = key; emit();
+  if (expandedKey === key) { collapsePane(); return; }
+  const url = new URL(location.href); url.searchParams.set('pane', key);
+  history.pushState(history.state, '', url); expandedKey = key; activeKey = key; emit();
 }
 
 /** Enfocar un panel sin recargar. Un chat cambia el URL solo si ya estás en /c/:id; en la cuadrícula solo se marca. */
 export function focusPane(key: string) {
   lastActive = key; activeKey = key;
+  revealLayoutPane(key);
   if (isChatKey(key) && routeChatId()) navigate(`/c/${key}`, true);
   emit();
 }
 
 /** ¿La conversación está a la vista en algún panel? (para no avisar de lo que ya se está leyendo). */
-export const isOpenInPanes = (id: string) => panes.includes(id);
+export const isOpenInPanes = (id: string) => panes.includes(id) && (!expandedKey || expandedKey === id)
+  && (layout === 'classic' || layout === 'custom' || [...layoutOrder.filter((k) => panes.includes(k)), ...panes.filter((k) => !layoutOrder.includes(k))].slice(0, 4).includes(id));
 
 // ---------- Cuadrícula al lado de WhatsApp y Correo ----------
 export const useGridSide = () => useSyncExternalStore(subscribe, () => gridSide);

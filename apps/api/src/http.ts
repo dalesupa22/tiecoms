@@ -11,7 +11,7 @@ import {
   CreateEventInput, CreateInvitationInput, CreateIssueInput, CreateChildIssueInput, CreatePersonalIssueInput, CreateOrgInvitationInput, CreateReminderInput, CreateScheduledInput, UpdateScheduledInput, CreateWorkspaceInput, ConversationPrefsInput, DeriveInput, EditMessageInput, IssueCommentInput, MarkUnreadInput, ReturnResultInput, RsvpInput, UpdateEventInput, UpdateIssueInput, WorkspacePrefsInput, EventsQuery, LoginInput, MarkReadInput, MarkTreeReadInput, MIN_CLIENT_CONTRACT, PageQuery,
   RefreshInput, SendMessageInput, CreateTopicInput, UpdateTopicInput, SetMessageTopicInput, SignupInput, SsoExchangeInput, AddDomainInput, DeleteAccountInput, type AuthResult,
   UpdateProfileInput, DndInput, MeetingProvider, MeetingConnectInput, MeetingConfirmInput, CreateMeetingInput, SleepInput, CreateChatInput, DriveTreeQuery, CreateDriveDocumentInput, CreateFolderInput, UpdateFolderInput, UpdateFileInput, UploadFileQuery, CreateWaAccountInput, UpdateWaAccountInput, RelinkWaAccountInput, WaChatsQuery, UpdateWaChatInput, WaMessagesQuery, WaSendInput, MailLiveReplyInput,
-  SideConversationInput, PushTokenInput, ReactInput, LinksQuery, SavedLinksQuery, LinkStateInput, ReactionActionsInput,
+  SideConversationInput, PushTokenInput, ReactInput, LinksQuery, SavedLinksQuery, LinkStateInput, ReactionActionsInput, CreateAgentInput,
   SignPdfInput, MAX_SIGNATURE_BYTES, SigningHistoryQuery,
   CreateIntegrationInput, IncomingWebhookInput, IntegrationCommentInput, IntegrationCreateIssueInput, IntegrationUpdateIssueInput, WebhookTaskInput, TaskColumnsInput,
   ChatSearchQuery, GlobalSearchQuery, EventCommentInput, MailProvider, MailListQuery, ShareMailInput, MailReplyInput, MailTaskInput, ShareWaInput, ForwardSharedInput,
@@ -56,6 +56,7 @@ import * as assistant from './modules/assistant.ts';
 import * as gg from './modules/gg.ts';
 import * as ggSide from './modules/gg-side.ts';
 import * as mcp from './modules/mcp.ts';
+import * as agentsDirectory from './modules/agents-directory.ts';
 import * as mcpOAuth from './modules/mcp-oauth.ts';
 import { getOrCreateDirect } from './modules/workspaces.ts';
 import * as signatures from './modules/signatures.ts';
@@ -602,6 +603,11 @@ export async function buildHttp() {
       reactions.react(req.userId, z.uuid().parse(req.params.id), req.params.emoji, true, ReactInput.parse(req.body ?? {})));
     priv.delete<{ Params: { id: string; emoji: string } }>('/api/v1/messages/:id/reactions/:emoji', { config: { rateLimit: { max: 120, timeWindow: '1 minute' } } }, async (req) =>
       reactions.react(req.userId, z.uuid().parse(req.params.id), req.params.emoji, false));
+    // Pantalla «Agentes» (modules/agents-directory.ts).
+    priv.get<{ Params: { id: string } }>('/api/v1/organizations/:id/agents', async (req) => agentsDirectory.listOrgAgents(req.userId, z.uuid().parse(req.params.id)));
+    priv.post<{ Params: { id: string } }>('/api/v1/organizations/:id/agents', async (req) => agentsDirectory.createOrgAgent(req.userId, z.uuid().parse(req.params.id), CreateAgentInput.parse(req.body)));
+    priv.post<{ Params: { id: string; agentId: string } }>('/api/v1/organizations/:id/agents/:agentId/token', async (req) => agentsDirectory.rotateOrgAgentToken(req.userId, z.uuid().parse(req.params.id), z.uuid().parse(req.params.agentId)));
+    priv.delete<{ Params: { id: string; agentId: string } }>('/api/v1/organizations/:id/agents/:agentId', async (req) => agentsDirectory.disableOrgAgent(req.userId, z.uuid().parse(req.params.id), z.uuid().parse(req.params.agentId)));
     priv.put<{ Params: { id: string } }>('/api/v1/organizations/:id/reaction-actions', async (req) =>
       reactions.setReactionActions(req.userId, z.uuid().parse(req.params.id), ReactionActionsInput.parse(req.body).reactionActions));
     // Enlaces: biblioteca del chat, «Ver después» personal y resumen con IA bajo pedido.

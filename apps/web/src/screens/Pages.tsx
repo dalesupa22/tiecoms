@@ -258,7 +258,7 @@ export function PeopleScreen() {
       {people.length === 0 && <div className="empty">{t('people.empty')}</div>}
       {[...byOrg.entries()].map(([k, list]) => (
         <section key={k} style={{ marginBottom: 18 }}>
-          <div className="row" style={{ marginBottom: 8 }}>{k !== 'agents' && k !== 'guest' && <OrgMark org={orgById(d, k)} />}<b>{k === 'agents' ? t('common.agents') : k === 'guest' ? t('common.guests') : orgById(d, k)?.name}</b><span className="small muted">{list.length}</span></div>
+          <div className="row" style={{ marginBottom: 8 }}>{k !== 'agents' && k !== 'guest' && <OrgMark org={orgById(d, k)} />}<b>{k === 'agents' ? t('common.agents') : k === 'guest' ? t('common.guests') : orgById(d, k)?.name}</b><span className="small muted">{list.length}</span>{k === 'agents' && <button className="btn small ghost" style={{ marginLeft: 'auto' }} onClick={() => navigate('/agentes')}>{getLang() === 'en' ? 'See all agents ›' : 'Ver todos los agentes ›'}</button>}</div>
           <div className="list">
             {list.map((p) => (
               <div key={p.id} className="card conv-card" {...menuProps(() => personMenu(p))}>
@@ -321,7 +321,7 @@ export function SettingsScreen() {
   return (
     <div className="page"><div className="page-narrow" style={{ maxWidth: 720 }}>
       <h1>{t('nav.you')}</h1>
-      <div className="row" style={{ flexWrap: 'wrap', marginBottom: 16 }}>{([['/notas', 'nav.notes'], ['/alertas', 'nav.alerts'], ['/comunidad', 'nav.community'], ['/organizar', 'nav.organize'], ['/participantes', 'nav.directory'], ['/archivos', 'nav.files']] as const).map(([to, label]) => <button key={to} className="btn small" onClick={() => navigate(to)}>{t(label)}</button>)}</div>
+      <div className="row" style={{ flexWrap: 'wrap', marginBottom: 16 }}>{([['/notas', 'nav.notes'], ['/alertas', 'nav.alerts'], ['/comunidad', 'nav.community'], ['/organizar', 'nav.organize'], ['/participantes', 'nav.directory'], ['/agentes', 'nav.agents'], ['/archivos', 'nav.files']] as const).map(([to, label]) => <button key={to} className="btn small" onClick={() => navigate(to)}>{t(label)}</button>)}</div>
       <div className="card" style={{ padding: 18, display: 'flex', gap: 14, alignItems: 'center', margin: '14px 0 24px', flexWrap: 'wrap' }}>
         <Avatar person={personById(d, d.me.id)} org={myOrg} size={48} />
         <div className="grow"><b>{d.me.name}</b><div className="small muted">{d.me.email} · {[d.me.title, myOrg?.name].filter(Boolean).join(' · ')}</div></div>

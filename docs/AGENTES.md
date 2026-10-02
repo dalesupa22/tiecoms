@@ -5,6 +5,19 @@ Un agente es una cuenta `users.kind = 'agent'` (sin correo ni contraseña) que p
 (`https://app.chaggu.com/api/mcp`) con su propio token `chgmcp_`: ve y escribe solo lo que su membresía permite.
 chaggu no hospeda ni corre el agente; el agente vive donde ya vive (servidor del CRM, rutina de Claude, Codex…).
 
+## Pantalla «Agentes» (`/agentes`)
+
+Rail › Agentes (🤖), Tú › Agentes o Directorio › «Ver todos los agentes». Por empresa muestra cada agente con su dueño,
+cargo, estado del token (conectado y último uso), los grupos donde está (solo los que quien mira también ve; el resto
+como «+N que no ves») y sus tareas: abiertas, resueltas y las 5 más recientes (se abren en el detalle).
+
+- **Crear** (administración de la empresa): nombre (`@nombre`), qué hace y grupos que uno administra. Quien crea queda de
+  dueño. El token MCP y el comando `claude mcp add …` salen una sola vez.
+- **⟳ Token** (administración o dueño): revoca los tokens del agente y entrega uno nuevo.
+- **Apagar** (administración o dueño): revoca tokens y desactiva la cuenta; mensajes y tareas quedan como historia.
+- API: `GET|POST /api/v1/organizations/:id/agents`, `POST …/agents/:agentId/token`, `DELETE …/agents/:agentId`
+  (`apps/api/src/modules/agents-directory.ts`, prueba `apps/api/test/agents-directory.test.ts`).
+
 ## Alta (por SSH, en `tiecoms-api-1`)
 
     node ops.js create-agent <correo dueño> "<nombre>" <conversationId,...> ["<empresa>"] ["<cargo>"] > agente.json

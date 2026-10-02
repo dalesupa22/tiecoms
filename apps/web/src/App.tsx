@@ -14,6 +14,7 @@ import { ConversationArea, GridScreen } from './screens/Split.tsx';
 import { DragTray } from './screens/Tray.tsx';
 import { useGridSide } from './split.ts';
 import { InviteScreen } from './screens/Invite.tsx';
+import { AgentsScreen } from './screens/Agents.tsx';
 import { InboxScreen, PeopleScreen, SettingsScreen, SpacesScreen, TodayScreen, WorkspaceScreen } from './screens/Pages.tsx';
 import { Shell } from './screens/Shell.tsx';
 import { IssuesScreen } from './screens/Issues.tsx';
@@ -98,6 +99,7 @@ export function App() {
       {route.name === 'inbox' && <InboxScreen />}
       {route.name === 'spaces' && <SpacesScreen />}
       {route.name === 'people' && <PeopleScreen />}
+      {route.name === 'agents' && <AgentsScreen />}
       {route.name === 'issues' && <IssuesScreen />}
       {route.name === 'trazo' && <TrazoScreen />}
       {route.name === 'agenda' && <AgendaScreen />}

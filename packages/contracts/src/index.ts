@@ -731,6 +731,32 @@ export const LinkStateInput = z.object({ saved: z.boolean().optional(), seen: z.
 /** PUT /messages/:id/reactions/:emoji (cuerpo opcional). remindAt: hora del recordatorio de 👀 (el cliente sabe la zona horaria). */
 export const ReactInput = z.object({ remindAt: z.iso.datetime().optional() });
 export const ReactionActionsInput = z.object({ reactionActions: z.boolean() });
+/** Agentes miembro (docs/AGENTES.md): lista de la empresa, alta, token y apagado. */
+export const CreateAgentInput = z.object({
+  name: z.string().trim().min(2).max(40).regex(/^@?[\p{L}\p{N}][\p{L}\p{N} ._-]*$/u, 'Usa letras, números, espacio, punto, guion o guion bajo'),
+  title: z.string().trim().max(80).optional(),
+  conversationIds: z.array(z.uuid()).max(50).optional(),
+});
+export interface AgentTaskDTO { id: string; title: string; status: string; chatId: string; chat: string | null; updatedAt: string }
+export interface AgentDTO {
+  id: string;
+  name: string;
+  title: string | null;
+  area: string | null;
+  avatarUrl: string | null;
+  owner: { id: string; name: string } | null;
+  createdAt: string;
+  lastUsedAt: string | null;
+  /** Tiene al menos un token MCP activo. */
+  connected: boolean;
+  /** Grupos del agente que quien mira también ve; hiddenGroups = los demás. */
+  groups: { id: string; name: string | null }[];
+  hiddenGroups: number;
+  tasks: { open: number; done: number; recent: AgentTaskDTO[] };
+  /** Quien mira puede rotar el token o apagarlo (administración o dueño). */
+  canManage: boolean;
+}
+
 /** Resumen con IA bajo pedido. basis = de qué salió: el texto del artículo o solo la descripción (videos, redes). */
 export interface LinkSummaryDTO { summary: string; basis: 'article' | 'description'; lang: 'es' | 'en' }
 /**

@@ -1,7 +1,7 @@
 import { io, type Socket } from 'socket.io-client';
 import {
   CONTRACT_VERSION, SOCKET_EVENTS,
-  type AccountEvent, type AuthResult, type BootstrapDTO, type ConversationDTO, type ConversationEvent, type DeviceInfo,
+  type AccountEvent, type AgentDTO, type AuthResult, type BootstrapDTO, type ConversationDTO, type ConversationEvent, type DeviceInfo,
   type AttachmentDTO, type MentionDTO, type MentionItemDTO, type CalendarEventDTO, type EventsPage, type ForwardedInfo, type InvitationPreviewDTO, type IssueDTO, type IssueVisibility, type IssueFieldValue, type TaskColumnDTO, type MeetingConnectionDTO, type MeetingDTO, type MeetingProvider, type IssueEventDTO, type MessageDTO, type OrgInvitationCreatedDTO, type OrgInvitationPreviewDTO, type PendingInvitationDTO, type Platform, type ReminderDTO, type Rsvp, type ScheduledMessageDTO, type SleepDTO,
   type CreateGroupRequest, type CreateGroupResultDTO, type InvitationCreatedDTO, type OversightDTO,
   type LinkItemDTO, type LinkPreviewMode, type LinkSummaryDTO, type LinksPageDTO, type ReactionDTO, type TopicColor, type TopicDTO, type UserDTO, normalizeEmoji,
@@ -1566,6 +1566,23 @@ export class TieComsClient {
   /** Reacciones con acción (👀/✅) para la gente de la empresa (solo owner/admin). */
   async setReactionActions(orgId: string, enabled: boolean) {
     await this.request(`/organizations/${orgId}/reaction-actions`, { method: 'PUT', json: { reactionActions: enabled } });
+    await this.loadBootstrap();
+  }
+
+  // ---------- Agentes (docs/AGENTES.md) ----------
+  listOrgAgents(orgId: string) {
+    return this.request<{ agents: AgentDTO[]; canCreate: boolean }>(`/organizations/${orgId}/agents`);
+  }
+  async createOrgAgent(orgId: string, input: { name: string; title?: string; conversationIds?: string[] }) {
+    const r = await this.request<{ agentId: string; name: string; groups: { id: string; ok: boolean; error?: string }[]; token: string; endpoint: string }>(`/organizations/${orgId}/agents`, { method: 'POST', json: input });
+    await this.loadBootstrap();
+    return r;
+  }
+  rotateOrgAgentToken(orgId: string, agentId: string) {
+    return this.request<{ agentId: string; token: string; endpoint: string }>(`/organizations/${orgId}/agents/${agentId}/token`, { method: 'POST', json: {} });
+  }
+  async disableOrgAgent(orgId: string, agentId: string) {
+    await this.request(`/organizations/${orgId}/agents/${agentId}`, { method: 'DELETE' });
     await this.loadBootstrap();
   }
 

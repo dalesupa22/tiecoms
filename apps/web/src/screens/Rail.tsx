@@ -113,6 +113,7 @@ const PAGES_MORE: { name: Route['name']; label: string; icon: string; to: string
   { name: 'notes', label: 'nav.notes', icon: '📝', to: '/notas' },
   { name: 'files', label: 'nav.files', icon: '▣', to: '/archivos' },
   { name: 'people', label: 'nav.directory', icon: '◎', to: '/participantes' },
+  { name: 'agents', label: 'nav.agents', icon: '🤖', to: '/agentes' },
   { name: 'alerts', label: 'nav.alerts', icon: '⏰', to: '/alertas' },
   { name: 'community', label: 'nav.community', icon: '📣', to: '/comunidad' },
   { name: 'organize', label: 'nav.organize', icon: '▤', to: '/organizar' },

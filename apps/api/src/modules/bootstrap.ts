@@ -6,6 +6,7 @@ import { loadUser } from './auth.ts';
 import { orgVerification } from './domains.ts';
 import { summarize } from './attachments.ts';
 import { activeDnd, toSleep } from './prefs.ts';
+import { inboxChats } from './whatsapp.ts';
 
 const ACTIVE_WM = `wm.revoked_at IS NULL AND (wm.expires_at IS NULL OR wm.expires_at > now())`;
 
@@ -162,7 +163,7 @@ export async function bootstrap(userId: string): Promise<BootstrapDTO> {
     ...(r.my_role ? { reactionActions: r.reaction_actions } : {}),
   }));
 
-  return { contract: CONTRACT_VERSION, serverTime: new Date().toISOString(), me, organizations, workspaces, conversations, people: personList, features: { calls: callsEnabled(), mail: mailEnabled() }, assistantId: '0a9a9a9a-0000-4000-8000-000000000066', myActiveCall: await myActiveCall(userId).catch(() => null), missedCalls: await missedCount(userId).catch(() => 0) };
+  return { contract: CONTRACT_VERSION, serverTime: new Date().toISOString(), me, organizations, workspaces, conversations, people: personList, features: { calls: callsEnabled(), mail: mailEnabled() }, assistantId: '0a9a9a9a-0000-4000-8000-000000000066', myActiveCall: await myActiveCall(userId).catch(() => null), missedCalls: await missedCount(userId).catch(() => 0), waInbox: await inboxChats(userId).catch(() => []) };
 }
 
 function legacyAttachmentPreview(list: { contentType: string; name: string }[]) {

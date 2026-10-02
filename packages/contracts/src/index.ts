@@ -1028,6 +1028,8 @@ export interface BootstrapDTO {
   myActiveCall?: CallDTO | null;
   /** Llamadas perdidas desde la última vez que abrí Llamadas (número rojo). POST /calls/seen lo pone en 0. */
   missedCalls?: number;
+  /** Chats de WhatsApp movidos a la bandeja (inboxPlace no null), de cuentas no removidas y sin ocultar. */
+  waInbox?: WaChatDTO[];
 }
 
 // ---------- Espacios y conversaciones ----------
@@ -1589,6 +1591,13 @@ export const UpdateWaChatInput = z.object({
   hidden: z.boolean().optional(),
   /** Conversación de chaggu a la que llegan los mensajes nuevos de este chat (null = desvincular). */
   linkedConversationId: z.uuid().nullable().optional(),
+  /**
+   * WhatsApp en la bandeja (docs/WA-BANDEJA-GG-CHAT.md). 'auto' = grupo → 'groups', 1 a 1 → 'dms'.
+   * null = sacarlo de la bandeja (también lo desfija de ahí).
+   */
+  inboxPlace: z.enum(['groups', 'dms', 'auto']).nullable().optional(),
+  /** true = fijarlo arriba en la bandeja (si no estaba, lo mueve con 'auto'); false = quitar de fijados. */
+  inboxPinned: z.boolean().optional(),
 });
 export const WaMessagesQuery = z.object({ before: z.iso.datetime().optional(), limit: z.coerce.number().int().min(1).max(200).default(60) });
 
@@ -1630,6 +1639,12 @@ export interface WaChatDTO {
   hidden: boolean;
   archivedInWhatsApp: boolean;
   linkedConversationId: string | null;
+  /** En qué lista de la bandeja de chaggu vive (null = solo en la pantalla WhatsApp). */
+  inboxPlace?: 'groups' | 'dms' | null;
+  /** Fijado arriba en la bandeja (hace de pinnedAt). No es `pinned`, que es el fijado dentro de WhatsApp. */
+  inboxPinnedAt?: string | null;
+  /** Estado de la cuenta: si no es 'connected', la fila sale atenuada con «WhatsApp desconectado». */
+  accountStatus?: WaStatus;
 }
 export interface WaMessageDTO { id: string; fromMe: boolean; author: string | null; kind: string; body: string; sentAt: string; reactions?: { emoji: string; name: string }[] }
 
@@ -1690,6 +1705,8 @@ export type AccountEvent =
   /** Cambió mi modo sueño (desde este u otro dispositivo). */
   | { type: 'me.sleep'; sleep: SleepDTO }
   | { type: 'whatsapp.updated'; accountId: string }
+  /** Cambió un chat de WhatsApp de la bandeja (se movió, fijó o sacó, o le entró un mensaje): reemplazar la fila por accountId+jid. */
+  | { type: 'wa.inbox'; chat: WaChatDTO }
   | { type: 'drive.updated'; workspaceId: string | null; conversationId?: string | null };
 
 export interface EventsPage {
@@ -1741,6 +1758,41 @@ export interface AssistantActionDTO {
   link?: string | null;
   error?: string | null;
 }
+// ---------- «gg de este chat» (docs/WA-BANDEJA-GG-CHAT.md) ----------
+/** 'c:<conversationId>' o 'wa:<accountId>:<jid>'. */
+export const GgSideSource = z.string().regex(/^(c:[0-9a-f-]{36}|wa:[0-9a-f-]{36}:[^\s]{3,200})$/i, 'Fuente inválida');
+export const GgSideQuery = z.object({ source: GgSideSource });
+export const GgSideSourceInput = z.object({ source: GgSideSource });
+export const GgSideAskInput = z.object({ source: GgSideSource, text: z.string().trim().min(1).max(2000), quotedMessageIds: z.array(z.string().min(1).max(200)).max(20).optional() });
+export const GgSideTone = z.enum(['me', 'shorter', 'formal', 'more']);
+export const GgSideReplyInput = z.object({ source: GgSideSource, tone: GgSideTone.optional(), quotedMessageIds: z.array(z.string().min(1).max(200)).max(20).optional() });
+export const GgSideSuggestInput = z.object({ source: GgSideSource, messageIds: z.array(z.string().min(1).max(200)).min(1).max(30) });
+export const GgSidePendingQuery = z.object({ sources: z.string().min(1).max(8000) });
+export interface GgSideDraft {
+  style: 'short' | 'warm' | 'action';
+  text: string;
+  action?: { kind: 'task' | 'reminder'; title: string; assigneeName?: string | null; due?: string | null } | null;
+}
+export interface GgSideSuggestion {
+  id: string;
+  kind: 'reply' | 'task' | 'reminder' | 'message_person' | 'summary';
+  title: string;
+  detail?: string | null;
+  draft?: string | null;
+  /** p. ej. { assigneeName, due, personName }. */
+  params?: Record<string, string | null> | null;
+  forMessageIds: string[];
+}
+export interface GgSideMessageDTO {
+  id: string;
+  role: 'user' | 'gg';
+  body: string;
+  quoted?: { id: string; author: string; text: string }[] | null;
+  extra?: { followUps?: string[]; drafts?: GgSideDraft[]; suggestions?: GgSideSuggestion[]; pending?: { text: string; messageId?: string }[] } | null;
+  createdAt: string;
+}
+export interface GgSideThreadDTO { session: number; messages: GgSideMessageDTO[]; pending: number }
+
 export interface AssistantTurnDTO { reply: string; actions: AssistantActionDTO[]; /** 2-3 respuestas rápidas que el usuario probablemente dirá después (chips). */ suggestions?: string[] }
 
 

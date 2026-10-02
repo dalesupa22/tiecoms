@@ -234,6 +234,88 @@ describe('responder desde chaggu (apagado por defecto)', () => {
   });
 });
 
+describe('WhatsApp en la bandeja (Grupos/DMs)', () => {
+  const path = (jid: string) => `/whatsapp/chats/${personal.id}/${encodeURIComponent(jid)}`;
+  const patch = (token: string, jid: string, body: unknown) => call(path(jid), { token, method: 'PATCH', body });
+  const inbox = async (token: string) => ((await call('/bootstrap', { token })).json.waInbox ?? []) as any[];
+  const events = async (jid: string, since: number) => (await pool.query(
+    "SELECT payload FROM outbox WHERE id > $1 AND topic = 'account.event' AND payload->'event'->>'type' = 'wa.inbox' AND payload->'event'->'chat'->>'jid' = $2 ORDER BY id",
+    [since, jid])).rows.map((r) => r.payload);
+  const lastOutbox = async () => Number((await pool.query('SELECT COALESCE(max(id), 0) AS n FROM outbox')).rows[0].n);
+
+  it('nace fuera de la bandeja; «auto» manda el grupo a Grupos y el 1 a 1 a DMs', async () => {
+    expect((await inbox(ana.token)).length).toBe(0);
+    const since = await lastOutbox();
+    const g = await patch(ana.token, '1@g.us', { inboxPlace: 'auto' });
+    expect(g.status).toBe(200);
+    expect(g.json).toMatchObject({ inboxPlace: 'groups', inboxPinnedAt: null, pinned: false });
+    expect(g.json.accountStatus).toBeTruthy();
+    const d = await patch(ana.token, '573111@s.whatsapp.net', { inboxPlace: 'auto' });
+    expect(d.json.inboxPlace).toBe('dms');
+    const list = await inbox(ana.token);
+    expect(list.map((c) => [c.jid, c.inboxPlace]).sort()).toEqual([['1@g.us', 'groups'], ['573111@s.whatsapp.net', 'dms']]);
+    // Aviso a la dueña para actualizar la fila sin recargar.
+    const ev = await events('1@g.us', since);
+    expect(ev).toHaveLength(1);
+    expect(ev[0].userIds).toEqual([ana.id]);
+    expect(ev[0].event.chat.inboxPlace).toBe('groups');
+  });
+
+  it('fijar y quitar: no toca el fijado de WhatsApp; fijar sin mover lo mueve solo', async () => {
+    const p = await patch(ana.token, '1@g.us', { inboxPinned: true });
+    expect(p.json.inboxPinnedAt).toBeTruthy();
+    expect(p.json.pinned).toBe(false);
+    const again = await patch(ana.token, '1@g.us', { inboxPinned: true });
+    expect(again.json.inboxPinnedAt).toBe(p.json.inboxPinnedAt);
+    const u = await patch(ana.token, '1@g.us', { inboxPinned: false });
+    expect(u.json).toMatchObject({ inboxPinnedAt: null, inboxPlace: 'groups' });
+    const solo = await patch(ana.token, '2@g.us', { inboxPinned: true });
+    expect(solo.json).toMatchObject({ inboxPlace: 'groups' });
+    expect(solo.json.inboxPinnedAt).toBeTruthy();
+  });
+
+  it('cambiar de sección y sacar de la bandeja (también lo desfija)', async () => {
+    const m = await patch(ana.token, '2@g.us', { inboxPlace: 'dms' });
+    expect(m.json.inboxPlace).toBe('dms');
+    expect(m.json.inboxPinnedAt).toBeTruthy();
+    const out = await patch(ana.token, '2@g.us', { inboxPlace: null });
+    expect(out.json).toMatchObject({ inboxPlace: null, inboxPinnedAt: null });
+    expect((await inbox(ana.token)).some((c) => c.jid === '2@g.us')).toBe(false);
+    // Sigue en la pantalla WhatsApp.
+    expect((await call('/whatsapp/chats', { token: ana.token })).json.chats.some((c: any) => c.jid === '2@g.us')).toBe(true);
+    expect((await patch(ana.token, '2@g.us', { inboxPlace: 'otra' })).status).toBe(400);
+  });
+
+  it('no sale en el bootstrap de otra persona y ella no lo puede mover', async () => {
+    expect((await inbox(beto.token)).length).toBe(0);
+    expect((await patch(beto.token, '1@g.us', { inboxPinned: true })).status).toBe(404);
+  });
+
+  it('un chat oculto no sale en la bandeja', async () => {
+    await patch(ana.token, '573111@s.whatsapp.net', { hidden: true });
+    expect((await inbox(ana.token)).some((c) => c.jid === '573111@s.whatsapp.net')).toBe(false);
+    await patch(ana.token, '573111@s.whatsapp.net', { hidden: false });
+    expect((await inbox(ana.token)).some((c) => c.jid === '573111@s.whatsapp.net')).toBe(true);
+  });
+
+  it('un mensaje nuevo en un chat de la bandeja emite wa.inbox con la fila al día; fuera de la bandeja no', async () => {
+    const since = await lastOutbox();
+    const s = session(personal);
+    const at = new Date(Date.now() + 60_000);
+    await storeMessages(s, [
+      { chat: '1@g.us', id: `in-${run}`, fromMe: false, authorJid: '5731@s.whatsapp.net', authorName: 'Laura', kind: 'text', body: 'Nuevo en la bandeja', sentAt: at },
+      { chat: '2@g.us', id: `out-${run}`, fromMe: false, authorJid: '5732@s.whatsapp.net', authorName: 'Pedro', kind: 'text', body: 'fuera', sentAt: at },
+    ], true);
+    const ev = await events('1@g.us', since);
+    expect(ev).toHaveLength(1);
+    expect(ev[0].event.chat).toMatchObject({ unread: 1, lastPreview: 'Laura: Nuevo en la bandeja', inboxPlace: 'groups' });
+    expect(await events('2@g.us', since)).toHaveLength(0);
+    const row = (await inbox(ana.token)).find((c) => c.jid === '1@g.us');
+    expect(row.unread).toBe(1);
+    expect(row.lastMessageAt).toBe(at.toISOString());
+  });
+});
+
 describe('desconectar', () => {
   it('marca la cuenta para que el puente cierre la sesión y la borre', async () => {
     expect((await call(`/whatsapp/accounts/${business.id}`, { token: ana.token, method: 'DELETE' })).status).toBe(200);

@@ -12,6 +12,7 @@ import { enqueueOutbox, pool, tx } from '../db.ts';
 import { sendMessage } from './messages.ts';
 import { externalReaction } from './reactions.ts';
 import { suggestCategory } from './wa-organize.ts';
+import { emitInbox, inboxChats } from './whatsapp.ts';
 
 // ---------- Cifrado de credenciales ----------
 const KEY = createHash('sha256').update(`tiecoms-wa-store:${process.env.WA_STORE_KEY ?? config.jwtSecret}`).digest();
@@ -320,6 +321,11 @@ export async function storeMessages(s: Session, rows: MsgRow[], live: boolean) {
       // Grupo nuevo: se pide su nombre y tamaño.
       if (c.isGroup && s.sock) void s.sock.groupMetadata(c.jid).then((g) => upsertChats(s, [groupRow(g)])).catch(() => {});
     }
+  }
+  // Chats que la persona movió a su bandeja: la fila se actualiza al instante (evento wa.inbox), sin recargar el bootstrap.
+  if (latest.size) {
+    const inInbox = await inboxChats(s.userId, { accountId: s.id, jids: [...latest.keys()] }).catch(() => []);
+    for (const chat of inInbox) await emitInbox(s.userId, chat).catch(() => {});
   }
   return inserted;
 }

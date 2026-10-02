@@ -331,14 +331,14 @@ function done(ctx: Ctx, kind: AssistantActionKind, target: string, text: string,
 }
 
 // ---------- DeepSeek ----------
-async function chat(messages: any[], tools = TOOLS) {
+async function chat(messages: any[], tools: any[] | null = TOOLS, extra: Record<string, unknown> = {}) {
   const key = process.env.DEEPSEEK_API_KEY;
   if (!key) throw new ApiError(503, 'assistant_unavailable', 'El asistente no está disponible');
   const url = (process.env.DEEPSEEK_URL || 'https://api.deepseek.com').replace(/\/$/, '');
   const res = await fetch(`${url}/chat/completions`, {
     method: 'POST',
     headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ model: process.env.DEEPSEEK_MODEL || 'deepseek-chat', temperature: 0.3, tools, messages }),
+    body: JSON.stringify({ model: process.env.DEEPSEEK_MODEL || 'deepseek-chat', temperature: 0.3, ...(tools ? { tools } : {}), ...extra, messages }),
     signal: AbortSignal.timeout(60_000),
   });
   const j: any = await res.json().catch(() => ({}));
@@ -347,6 +347,12 @@ async function chat(messages: any[], tools = TOOLS) {
     throw new ApiError(502, 'assistant_failed', 'El asistente no respondió; intenta de nuevo');
   }
   return j?.choices?.[0]?.message ?? {};
+}
+
+/** Sin herramientas y con salida JSON (lo usa «gg de este chat», gg-side.ts). Devuelve el texto tal cual: quien llama lo valida. */
+export async function completeJson(messages: { role: 'system' | 'user' | 'assistant'; content: string }[]): Promise<string> {
+  const msg = await chat(messages, null, { response_format: { type: 'json_object' } });
+  return String(msg.content ?? '');
 }
 
 export async function turn(userId: string, raw: unknown): Promise<AssistantTurnDTO> {

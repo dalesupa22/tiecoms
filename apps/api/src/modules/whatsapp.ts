@@ -6,7 +6,7 @@
 import QRCode from 'qrcode';
 import type { WaAccountDTO, WaChatDTO, WaMessageDTO } from '@tiecoms/contracts';
 import { conversationAccess } from '../access.ts';
-import { pool, tx } from '../db.ts';
+import { enqueueOutbox, pool, tx } from '../db.ts';
 import { badRequest, conflict, forbidden, notFound } from '../errors.ts';
 import { suggestCategory, type WaCategory } from './wa-organize.ts';
 
@@ -142,12 +142,15 @@ function toChatDTO(r: any): WaChatDTO {
     hidden: r.hidden,
     archivedInWhatsApp: r.wa_archived,
     linkedConversationId: r.linked_conversation_id,
+    inboxPlace: r.inbox_place ?? null,
+    inboxPinnedAt: r.inbox_pinned_at ? new Date(r.inbox_pinned_at).toISOString() : null,
+    ...(r.account_status ? { accountStatus: r.account_status } : {}),
   };
 }
 
 export async function listChats(userId: string, q: { accountId?: string; category?: WaCategory; groups?: boolean; search?: string; hidden?: boolean; limit: number }) {
   const { rows } = await pool.query(
-    `SELECT c.*, COALESCE(c.name, ct.name) AS name, ct.pn, a.label AS account_label, a.kind AS account_kind
+    `SELECT c.*, COALESCE(c.name, ct.name) AS name, ct.pn, a.label AS account_label, a.kind AS account_kind, a.status AS account_status
        FROM wa_chats c JOIN wa_accounts a ON a.id = c.account_id
        LEFT JOIN LATERAL ${whoSql('c.account_id', 'c.jid')} ct ON true
       WHERE a.user_id = $1 AND a.removed_at IS NULL
@@ -173,9 +176,9 @@ export async function listChats(userId: string, q: { accountId?: string; categor
   return { chats: rows.map(toChatDTO), categories: Object.fromEntries(counts.map((r) => [r.category, { total: r.n, unread: r.unread }])) };
 }
 
-async function ownChat(userId: string, accountId: string, jid: string) {
+export async function ownChat(userId: string, accountId: string, jid: string) {
   const { rows } = await pool.query(
-    `SELECT c.*, COALESCE(c.name, ct.name) AS name, ct.pn, a.label AS account_label, a.kind AS account_kind FROM wa_chats c JOIN wa_accounts a ON a.id = c.account_id
+    `SELECT c.*, COALESCE(c.name, ct.name) AS name, ct.pn, a.label AS account_label, a.kind AS account_kind, a.status AS account_status FROM wa_chats c JOIN wa_accounts a ON a.id = c.account_id
        LEFT JOIN LATERAL ${whoSql('c.account_id', 'c.jid')} ct ON true
       WHERE c.account_id = $1 AND c.jid = $2 AND a.user_id = $3 AND a.removed_at IS NULL`,
     [accountId, jid, userId],
@@ -186,6 +189,7 @@ async function ownChat(userId: string, accountId: string, jid: string) {
 
 export async function updateChat(userId: string, accountId: string, jid: string, input: {
   category?: WaCategory | null; pinned?: boolean; hidden?: boolean; linkedConversationId?: string | null;
+  inboxPlace?: 'groups' | 'dms' | 'auto' | null; inboxPinned?: boolean;
 }) {
   const chat = await ownChat(userId, accountId, jid);
   // Vincular exige poder publicar en esa conversación: los mensajes entran a nombre de quien vincula.
@@ -204,7 +208,42 @@ export async function updateChat(userId: string, accountId: string, jid: string,
     [accountId, jid, input.category ?? auto, input.category !== undefined, input.category !== null, input.pinned ?? null, input.hidden ?? null,
       input.linkedConversationId !== undefined, input.linkedConversationId ?? null],
   );
-  return toChatDTO(await ownChat(userId, accountId, jid));
+  // Bandeja (docs/WA-BANDEJA-GG-CHAT.md): 'auto' = grupo → Grupos, 1 a 1 → DMs; fijar sin haberlo movido lo mueve solo.
+  const touchesInbox = input.inboxPlace !== undefined || input.inboxPinned !== undefined;
+  if (touchesInbox) {
+    const auto = chat.is_group ? 'groups' : 'dms';
+    let place: string | null = chat.inbox_place ?? null;
+    let pinnedAt: Date | null = chat.inbox_pinned_at ?? null;
+    if (input.inboxPlace !== undefined) place = input.inboxPlace === 'auto' ? auto : input.inboxPlace;
+    if (input.inboxPinned === true) { pinnedAt = pinnedAt ?? new Date(); place = place ?? auto; }
+    if (input.inboxPinned === false) pinnedAt = null;
+    if (place === null) pinnedAt = null;
+    await pool.query('UPDATE wa_chats SET inbox_place = $3, inbox_pinned_at = $4, updated_at = now() WHERE account_id = $1 AND jid = $2', [accountId, jid, place, pinnedAt]);
+  }
+  const dto = toChatDTO(await ownChat(userId, accountId, jid));
+  // Ocultar un chat que está en la bandeja también lo saca de ahí en los demás dispositivos.
+  if (touchesInbox || (input.hidden !== undefined && dto.inboxPlace)) await emitInbox(userId, dto);
+  return dto;
+}
+
+/** Aviso a la dueña: cambió una fila de WhatsApp de su bandeja (el cliente la reemplaza sin recargar el bootstrap). */
+export async function emitInbox(userId: string, chat: WaChatDTO) {
+  await tx((c) => enqueueOutbox(c, 'account.event', { userIds: [userId], event: { type: 'wa.inbox', chat } }));
+}
+
+/** Para el bootstrap: los chats de WhatsApp movidos a la bandeja, de cuentas vivas y sin ocultar. */
+export async function inboxChats(userId: string, only?: { accountId: string; jids: string[] }) {
+  const { rows } = await pool.query(
+    `SELECT c.*, COALESCE(c.name, ct.name) AS name, ct.pn, a.label AS account_label, a.kind AS account_kind, a.status AS account_status
+       FROM wa_chats c JOIN wa_accounts a ON a.id = c.account_id
+       LEFT JOIN LATERAL ${whoSql('c.account_id', 'c.jid')} ct ON true
+      WHERE a.user_id = $1 AND a.removed_at IS NULL AND c.inbox_place IS NOT NULL AND NOT c.hidden
+        AND ($2::uuid IS NULL OR (c.account_id = $2 AND c.jid = ANY($3)))
+      ORDER BY c.inbox_pinned_at DESC NULLS LAST, c.last_message_at DESC NULLS LAST
+      LIMIT 300`,
+    [userId, only?.accountId ?? null, only?.jids ?? []],
+  );
+  return rows.map(toChatDTO);
 }
 
 /** Vuelve a pasar el organizador sobre todo lo que no se ha clasificado a mano. */
@@ -239,7 +278,9 @@ export async function listChatMessages(userId: string, accountId: string, jid: s
     kind: r.kind, body: r.body, sentAt: new Date(r.sent_at).toISOString(),
     ...(r.reactions ? { reactions: Object.values(r.reactions as Record<string, { emoji: string; name: string }>) } : {}),
   }));
-  await pool.query('UPDATE wa_chats SET unread = 0 WHERE account_id = $1 AND jid = $2 AND unread > 0', [accountId, jid]);
+  const read = await pool.query('UPDATE wa_chats SET unread = 0 WHERE account_id = $1 AND jid = $2 AND unread > 0 RETURNING inbox_place', [accountId, jid]);
+  // Leído en un dispositivo: la fila de la bandeja se apaga en los demás.
+  if (read.rows[0]?.inbox_place) for (const chat of await inboxChats(userId, { accountId, jids: [jid] })) await emitInbox(userId, chat);
   return { messages, hasMore: rows.length === limit };
 }
 
@@ -263,4 +304,22 @@ export async function sendToChat(userId: string, accountId: string, jid: string,
     if (s?.status === 'failed') return { id, status: 'failed', error: s.error ?? 'No se pudo enviar' };
   }
   return { id, status: 'queued' };
+}
+
+/**
+ * Para «gg de este chat» (gg-side.ts): los últimos mensajes de UN chat, o solo los ids pedidos (citados), sin marcar
+ * nada como leído. Quien llama ya comprobó con ownChat que el chat es de la persona.
+ */
+export async function messagesForGg(accountId: string, jid: string, opts: { limit?: number; ids?: string[] }) {
+  const { rows } = await pool.query(
+    `SELECT m.id, m.from_me, m.body, m.kind, m.sent_at, COALESCE(m.author_name, w.name) AS author, w.pn FROM wa_messages m
+       LEFT JOIN LATERAL ${whoSql('m.account_id', 'm.author_jid')} w ON NOT m.from_me
+      WHERE m.account_id = $1 AND m.chat_jid = $2 AND m.body <> '' AND ($3::text[] IS NULL OR m.id = ANY($3))
+      ORDER BY m.sent_at DESC LIMIT $4`,
+    [accountId, jid, opts.ids ?? null, opts.limit ?? 60],
+  );
+  return rows.reverse().map((r) => ({
+    id: String(r.id), mine: !!r.from_me, author: r.from_me ? null : (r.author ?? phoneLabel(r.pn) ?? 'Contacto'),
+    text: String(r.body ?? ''), at: new Date(r.sent_at).toISOString(), seq: new Date(r.sent_at).getTime(),
+  }));
 }

@@ -12,6 +12,7 @@ import {
   SignPdfInput, MAX_SIGNATURE_BYTES, SigningHistoryQuery,
   CreateIntegrationInput, IncomingWebhookInput, IntegrationCommentInput, IntegrationCreateIssueInput, IntegrationUpdateIssueInput,
   ChatSearchQuery, GlobalSearchQuery, EventCommentInput, MailProvider, MailListQuery, ShareMailInput, MailReplyInput, MailTaskInput, ShareWaInput, ForwardSharedInput,
+  GgSideQuery, GgSideSourceInput, GgSideAskInput, GgSideReplyInput, GgSideSuggestInput, GgSidePendingQuery,
   SetAdminInput, UpdateIntegrationInput, StartCallInput, CallDeviceInput, SoundsInput, CallTranscriptionInput, CallTranscriptInput, CallHistoryQuery, CallShareInput, CallInviteInput, GuestJoinInput, GuestSecretInput, CreateRoomInput, BookingCreateInput, BookingRescheduleInput, BookingPageInput, BookingPagePatch, SignupConfirmInput, ReorderTopicsInput,
 } from '@tiecoms/contracts';
 import { config } from './config.ts';
@@ -47,6 +48,7 @@ import * as voice from './modules/voice.ts';
 import * as calls from './modules/calls.ts';
 import * as assistant from './modules/assistant.ts';
 import * as gg from './modules/gg.ts';
+import * as ggSide from './modules/gg-side.ts';
 import * as mcp from './modules/mcp.ts';
 import { getOrCreateDirect } from './modules/workspaces.ts';
 import * as signatures from './modules/signatures.ts';
@@ -472,6 +474,16 @@ export async function buildHttp() {
       return gg.markAction(req.userId, b.messageId, b.actionId, { status: 'failed', error: 'Descartado' });
     });
     priv.post('/api/v1/assistant/consent', async (req) => gg.setConsent(req.userId, z.object({ on: z.boolean() }).parse(req.body).on));
+    // «gg de este chat» (docs/WA-BANDEJA-GG-CHAT.md): privado de cada persona, aislado a UNA fuente (c:… o wa:…).
+    const ggLimit = { config: { rateLimit: { max: 30, timeWindow: '1 minute', keyGenerator: (r: FastifyRequest) => r.userId ?? r.ip } } };
+    priv.get('/api/v1/gg/side', async (req) => ggSide.thread(req.userId, GgSideQuery.parse(req.query).source));
+    priv.get('/api/v1/gg/side/pending', async (req) => ggSide.pendingCounts(req.userId, GgSidePendingQuery.parse(req.query).sources));
+    priv.post('/api/v1/gg/side/pending/refresh', ggLimit, async (req) => ggSide.refreshPending(req.userId, GgSideSourceInput.parse(req.body).source));
+    priv.post('/api/v1/gg/side/open', ggLimit, async (req) => ggSide.open(req.userId, GgSideSourceInput.parse(req.body).source));
+    priv.post('/api/v1/gg/side', ggLimit, async (req) => ggSide.askSide(req.userId, GgSideAskInput.parse(req.body)));
+    priv.post('/api/v1/gg/side/reply-for-me', ggLimit, async (req) => ggSide.replyForMe(req.userId, GgSideReplyInput.parse(req.body)));
+    priv.post('/api/v1/gg/side/suggest', ggLimit, async (req) => ggSide.suggest(req.userId, GgSideSuggestInput.parse(req.body)));
+    priv.post('/api/v1/gg/side/new', async (req) => ggSide.newSession(req.userId, GgSideSourceInput.parse(req.body).source));
     // Tu chat con gg y «Tú» (notas para ti): se crean al abrirlos.
     priv.post('/api/v1/assistant/chat', async (req) => getOrCreateDirect(req.userId, gg.GG_ID));
     priv.post('/api/v1/me/notes', async (req) => getOrCreateDirect(req.userId, req.userId));

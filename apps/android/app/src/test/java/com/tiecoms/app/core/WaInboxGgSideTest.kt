@@ -64,8 +64,8 @@ class WaInboxGgSideTest {
 
     @Test fun `el arbol pone el WhatsApp fijado en Fijados`() {
         val rows = GroupsTree.build(data, emptyList(), "", null, emptySet(), title).map { it.key }
-        assertTrue(rows.indexOf("pc:wa:acc1:pin@g.us") in 1..3)
-        assertTrue("wc:wa:acc1:grp@g.us" in rows)
+        // Bloque «WhatsApp» arriba (fijado primero), luego Fijados de chaggu.
+        assertEquals(listOf("s:WHATSAPP", "wc:wa:acc1:pin@g.us", "wc:wa:acc1:grp@g.us", "s:PINNED", "pc:g2"), rows.take(5))
     }
 
     @Test fun `aplicar cambios y evento`() {
@@ -95,6 +95,7 @@ class WaInboxGgSideTest {
     @Test fun `cuenta desconectada se atenua`() {
         assertTrue(WaInbox.disconnected(wa("a", WaInbox.DMS, status = "logged_out")))
         assertFalse(WaInbox.disconnected(wa("a", WaInbox.DMS, status = "connected")))
+        assertTrue(WaInbox.disconnected(wa("a", WaInbox.DMS, status = "reconnecting")))
         assertFalse(WaInbox.disconnected(wa("a", WaInbox.DMS, status = null)))
     }
 
@@ -125,6 +126,12 @@ class WaInboxGgSideTest {
         assertEquals("p1", GgSide.matchPerson("ana", people)?.id)
         assertEquals("p2", GgSide.matchPerson("Beto", people)?.id)
         assertNull(GgSide.matchPerson(null, people))
+    }
+
+    @Test fun `respuesta de preguntar trae la pregunta guardada`() {
+        val r = TcJson.decodeFromString(GgSideOne.serializer(), """{"message":{"id":"g","role":"gg","body":"ok"},"question":{"id":"q","role":"user","body":"¿y?"}}""")
+        assertEquals("q", r.question?.id)
+        assertNull(TcJson.decodeFromString(GgSideOne.serializer(), """{"message":{"id":"g"}}""").question)
     }
 
     @Test fun `ultimo mensaje de otra persona`() {

@@ -14,7 +14,7 @@ package com.tiecoms.app.core
  * El orden de siempre (compareConversations / sortHome de la web) se mantiene dentro de cada sección.
  */
 object GroupsTree {
-    enum class Kind { PINNED, ORG, RELATIONS, GUEST }
+    enum class Kind { PINNED, ORG, RELATIONS, GUEST, WHATSAPP }
 
     /** Filtros de Grupos: los de Inicio sin Chats ni Laterales (esos viven en DMs). */
     enum class Tab { ALL, UNREAD, ISSUES }
@@ -305,18 +305,18 @@ object GroupsTree {
 
         // 📌 Fijados (grupos), como Inicio.
         if (wsFilter == null && !searching) {
-            // WhatsApp en Grupos: en el Árbol va arriba con los fijados (fijado) o justo después, en el mismo orden.
-            val wa = WaInbox.inPlace(d, WaInbox.GROUPS)
-            val pinned = HomeTree.order(d.conversations.filter { it.pinnedAt != null && isGroup(d, it) && it.parentId == null } + wa.filter { it.pinnedAt != null }, nowMs, tree)
+            // WhatsApp en Grupos: en el Árbol va en su bloque «WhatsApp» arriba (no es de ninguna empresa), con el mismo orden.
+            val wa = HomeTree.order(WaInbox.inPlace(d, WaInbox.GROUPS), nowMs, tree)
+            if (wa.isNotEmpty()) {
+                rows += Section(Kind.WHATSAPP, null, false, 0, key = "s:WHATSAPP")
+                wa.forEach { rows += Group(it, 0, pinnedSection = true, key = "wc:" + it.id) }
+            }
+            val pinned = HomeTree.order(d.conversations.filter { it.pinnedAt != null && isGroup(d, it) && it.parentId == null }, nowMs, tree)
             if (pinned.isNotEmpty()) {
                 rows += Section(Kind.PINNED, null, false, 0, key = "s:PINNED")
                 // Los fijados van fuera de su empresa: llevan la empresa debajo, como en la Lista.
-                pinned.forEach {
-                    rows += if (WaInbox.isWa(it.id)) Group(it, 0, pinnedSection = true, key = "pc:" + it.id)
-                        else Group(it, 0, pinnedSection = true, threadUnread = threadUnread[it.id] ?: 0, company = companyLine(companyName(d, it), title(it)), key = "pc:" + it.id)
-                }
+                pinned.forEach { rows += Group(it, 0, pinnedSection = true, threadUnread = threadUnread[it.id] ?: 0, company = companyLine(companyName(d, it), title(it)), key = "pc:" + it.id) }
             }
-            HomeTree.order(wa.filter { it.pinnedAt == null }, nowMs, tree).forEach { rows += Group(it, 0, pinnedSection = true, key = "wc:" + it.id) }
         }
 
         // Un espacio sin grupos no aparece; una relación pendiente sin grupos sí.
@@ -353,7 +353,7 @@ object GroupsTree {
             }
         }
 
-        if (rows.none { it is Group || it is Section && it.kind != Kind.PINNED }) return listOf(Empty(filtered = searching || wsFilter != null))
+        if (rows.none { it is Group || it is Section && it.kind != Kind.PINNED && it.kind != Kind.WHATSAPP }) return listOf(Empty(filtered = searching || wsFilter != null))
         if (searching && rows.none { it is Group }) return listOf(Empty(filtered = true))
         return rows
     }

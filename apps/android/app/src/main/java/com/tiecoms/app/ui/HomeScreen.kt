@@ -263,7 +263,7 @@ fun GroupsScreen(
                         // Al cambiar el orden (llega un no leído), la fila se desliza a su lugar en vez de saltar.
                         Box(Modifier.animateItem()) { when (row) {
                             is GroupsTree.Section -> SectionRow(row, myOrg,
-                                onToggle = if (row.kind == GroupsTree.Kind.PINNED) null else ({ toggle(sectionKeyOf(row)) }),
+                                onToggle = if (row.kind == GroupsTree.Kind.PINNED || row.kind == GroupsTree.Kind.WHATSAPP) null else ({ toggle(sectionKeyOf(row)) }),
                                 onAdd = when (row.kind) {
                                     GroupsTree.Kind.ORG -> ({ dialog = GroupsDialog.NewGroup(NewGroupPreset(company = false)) })
                                     GroupsTree.Kind.RELATIONS -> ({ dialog = GroupsDialog.NewGroup(NewGroupPreset(company = true)) })
@@ -580,12 +580,14 @@ private fun SectionRow(row: GroupsTree.Section, myOrg: OrganizationDTO?, onToggl
         GroupsTree.Kind.ORG -> stringResource(R.string.grp_your_org, (row.org ?: myOrg)?.name ?: "")
         GroupsTree.Kind.RELATIONS -> stringResource(R.string.grp_relations)
         GroupsTree.Kind.GUEST -> stringResource(R.string.grp_guest_in)
+        GroupsTree.Kind.WHATSAPP -> "WhatsApp"
     }
     val state = stringResource(if (row.collapsed) R.string.expand else R.string.collapse)
     val base = Modifier.fillMaxWidth()
     val click = if (onToggle != null) base.combinedClickable(onClick = onToggle, onLongClick = onLongPress, onClickLabel = state) else base
     Row(click.padding(start = 16.dp, end = 4.dp, top = 12.dp).heightIn(min = 44.dp).testTag("section-" + row.key.removePrefix("s:")), verticalAlignment = Alignment.CenterVertically) {
         if (row.kind == GroupsTree.Kind.ORG) { OrgMark(row.org ?: myOrg, size = 20.dp); Spacer(Modifier.width(8.dp)) }
+        if (row.kind == GroupsTree.Kind.WHATSAPP) { WaIcon(20.dp); Spacer(Modifier.width(8.dp)) }
         SectionHeader(title, Modifier.weight(1f).semantics { heading() })
         if (row.collapsed) UnreadPill(row.unread, Color(com.tiecoms.app.core.Contrast.SOBER_ORANGE), Color.White)
         if (onAdd != null) IconButton(onClick = onAdd, modifier = Modifier.testTag("add-" + row.kind.name)) { Icon(Icons.Filled.Add, stringResource(R.string.grp_new)) }

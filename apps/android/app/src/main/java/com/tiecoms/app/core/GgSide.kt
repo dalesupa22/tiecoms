@@ -32,7 +32,9 @@ import kotlinx.serialization.json.contentOrNull
     val quoted: List<GgQuotedDTO>? = null, val extra: GgExtraDTO? = null, val createdAt: String = "",
 )
 @Serializable data class GgSideThread(val session: Int = 1, val messages: List<GgSideMessageDTO> = emptyList(), val pending: Int = 0)
-@Serializable data class GgSideOne(val message: GgSideMessageDTO = GgSideMessageDTO())
+/** POST /gg/side responde además `question`: la pregunta guardada (reemplaza a la copia local). */
+@Serializable data class GgSideOne(val message: GgSideMessageDTO = GgSideMessageDTO(), val question: GgSideMessageDTO? = null)
+@Serializable data class GgPendingRefresh(val source: String = "", val pending: Int = 0, val recalculated: Boolean = false)
 @Serializable data class GgDraftsPage(val drafts: List<GgDraft> = emptyList())
 @Serializable data class GgSuggestionsPage(val suggestions: List<GgSuggestion> = emptyList())
 

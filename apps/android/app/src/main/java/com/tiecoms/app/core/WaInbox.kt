@@ -32,7 +32,7 @@ object WaInbox {
     fun suggested(c: WaChatDTO) = if (c.isGroup) GROUPS else DMS
 
     /** La cuenta está desconectada (fila atenuada). null = el servidor no lo dice: se asume conectada. */
-    fun disconnected(c: WaChatDTO) = c.accountStatus != null && c.accountStatus != "connected" && c.accountStatus != "reconnecting"
+    fun disconnected(c: WaChatDTO) = c.accountStatus != null && c.accountStatus != "connected"
 
     /** Conversación sintética para ordenar y separar como las de chaggu. */
     fun asConversation(c: WaChatDTO): ConversationDTO = ConversationDTO(

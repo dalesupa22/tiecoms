@@ -143,6 +143,8 @@ class GgSideModel(private val client: TieComsClient, val source: String, private
         try {
             val t = client.ggSide(source)
             messages.clear(); messages.addAll(t.messages); pending = t.pending; available = true
+            // Recalcula el número al entrar (best-effort; puede pedir IA en el servidor, que pone el tope).
+            runCatching { client.ggPendingRefresh(source) }.onSuccess { pending = it.pending }
         } catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) throw e
             // 404/403 de acceso: sin botón para esta fuente. Red caída: se deja visible (null) y se reintenta al abrir.
@@ -192,9 +194,14 @@ class GgSideModel(private val client: TieComsClient, val source: String, private
         val t = text.trim()
         if (t.isEmpty()) return
         val q = quoted.toList().filter { it.id in quotedIds }
-        messages.add(GgSideMessageDTO(id = "local-" + System.nanoTime(), role = "user", body = t, quoted = q.ifEmpty { null }))
+        val local = GgSideMessageDTO(id = "local-" + System.nanoTime(), role = "user", body = t, quoted = q.ifEmpty { null })
+        messages.add(local)
         quoted.clear()
-        run { messages.add(client.ggSideAsk(source, t, quotedIds)) }
+        run {
+            val r = client.ggSideAsk(source, t, quotedIds)
+            r.question?.takeIf { it.id.isNotEmpty() }?.let { saved -> val i = messages.indexOfFirst { it.id == local.id }; if (i >= 0) messages[i] = saved }
+            messages.add(r.message)
+        }
     }
 
     /** «Responder por mí»: 3 borradores; quedan guardados también en el hilo de gg. */

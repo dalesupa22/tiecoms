@@ -1985,11 +1985,15 @@ class TieComsClient(
     suspend fun ggSideOpen(source: String): GgSideMessageDTO = withContext(dispatcher) {
         gg { req("POST", "/gg/side/open", buildJsonObject { put("source", JsonPrimitive(source)) }, GgSideOne.serializer()).message }
     }
-    suspend fun ggSideAsk(source: String, text: String, quoted: List<String>): GgSideMessageDTO = withContext(dispatcher) {
+    /** Al entrar a un chat: recalcula el número del botón gg (el servidor limita a 1 recálculo por fuente cada 10 min). */
+    suspend fun ggPendingRefresh(source: String): GgPendingRefresh = withContext(dispatcher) {
+        gg { req("POST", "/gg/side/pending/refresh", buildJsonObject { put("source", JsonPrimitive(source)) }, GgPendingRefresh.serializer()) }
+    }
+    suspend fun ggSideAsk(source: String, text: String, quoted: List<String>): GgSideOne = withContext(dispatcher) {
         gg { req("POST", "/gg/side", buildJsonObject {
             put("source", JsonPrimitive(source)); put("text", JsonPrimitive(text))
             if (quoted.isNotEmpty()) put("quotedMessageIds", kotlinx.serialization.json.JsonArray(quoted.map { JsonPrimitive(it) }))
-        }, GgSideOne.serializer()).message }
+        }, GgSideOne.serializer()) }
     }
     suspend fun ggReplyForMe(source: String, tone: String?, quoted: List<String>): List<GgDraft> = withContext(dispatcher) {
         gg { req("POST", "/gg/side/reply-for-me", buildJsonObject {

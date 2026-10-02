@@ -23,7 +23,7 @@ export type Route =
   | { name: 'today' } | { name: 'inbox' } | { name: 'people' } | { name: 'settings' } | { name: 'spaces' } | { name: 'issues' } | { name: 'trazo' } | { name: 'agenda' } | { name: 'share' } | { name: 'whatsapp' } | { name: 'files' } | { name: 'groups' } | { name: 'dms' } | { name: 'saved' } | { name: 'scheduled' } | { name: 'signed' } | { name: 'calls' } | { name: 'mail' } | { name: 'grid' } | { name: 'notes' } | { name: 'alerts' } | { name: 'community' } | { name: 'organize' }
   | { name: 'oversight'; id: string } | { name: 'readonly'; id: string }
   | { name: 'conversation'; id: string } | { name: 'workspace'; id: string } | { name: 'waChat'; accountId: string; jid: string }
-  | { name: 'login' } | { name: 'signup' } | { name: 'sso' } | { name: 'invite'; token: string } | { name: 'guestCall'; token: string } | { name: 'room'; code: string } | { name: 'booking'; slug: string } | { name: 'bookingManage'; token: string } | { name: 'bookingHome' } | { name: 'confirmSignup'; token: string };
+  | { name: 'login' } | { name: 'mcpAuthorize' } | { name: 'signup' } | { name: 'sso' } | { name: 'invite'; token: string } | { name: 'guestCall'; token: string } | { name: 'room'; code: string } | { name: 'booking'; slug: string } | { name: 'bookingManage'; token: string } | { name: 'bookingHome' } | { name: 'confirmSignup'; token: string };
 
 /** cita.chaggu.com (o book.): la ruta es directa, /<nombre> abre la página de citas y /r/<clave> administra una cita. */
 const vanityHost = typeof location !== 'undefined' && /^(calendar|cita|book)\./.test(location.hostname);
@@ -44,6 +44,7 @@ export function parse(path: string): Route {
   if (a === 'llamada' && b) return { name: 'guestCall', token: decodeURIComponent(b) };
   if (a === 'confirmar' && b) return { name: 'confirmSignup', token: decodeURIComponent(b) };
   if (a === 'auth' && b === 'sso') return { name: 'sso' };
+  if (a === 'autorizar-ia') return { name: 'mcpAuthorize' };
   if (a === 'login') return { name: 'login' };
   if (a === 'signup') return { name: 'signup' };
   if (a === 'conversaciones') return { name: 'inbox' };

@@ -443,6 +443,8 @@ function AiConnector() {
       <div className="card" style={{ padding: 16, marginBottom: 24 }}>
         <div className="small muted" style={{ marginBottom: 10 }}>{t('mcp.lead')}</div>
         <div className="small" style={{ marginBottom: 10 }}>URL: <code>{endpoint}</code></div>
+        <div className="small muted" style={{ marginBottom: 4 }}>Claude Code / Codex:</div>
+        <div className="row" style={{ gap: 8, marginBottom: 12 }}><code className="grow small" style={{ wordBreak: 'break-all' }}>{`claude mcp add --transport http chaggu ${endpoint}`}</code><button className="btn small" onClick={() => copy(`claude mcp add --transport http chaggu ${endpoint}`)}>{t('mcp.copy')}</button></div>
         <form className="row" style={{ gap: 8, flexWrap: 'wrap' }} onSubmit={(e) => {
           e.preventDefault(); setBusy(true);
           client.createMcpToken(name.trim() || 'Mi IA').then((r) => { setFresh(r.token); setName(''); return load(); }).catch(() => {}).finally(() => setBusy(false));

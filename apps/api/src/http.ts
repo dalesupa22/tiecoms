@@ -50,6 +50,7 @@ import * as assistant from './modules/assistant.ts';
 import * as gg from './modules/gg.ts';
 import * as ggSide from './modules/gg-side.ts';
 import * as mcp from './modules/mcp.ts';
+import * as mcpOAuth from './modules/mcp-oauth.ts';
 import { getOrCreateDirect } from './modules/workspaces.ts';
 import * as signatures from './modules/signatures.ts';
 import * as mentions from './modules/mentions.ts';
@@ -249,7 +250,7 @@ export async function buildHttp() {
   app.post('/api/mcp', mcpLimit, async (req, reply) => {
     let userId: string;
     try { userId = await mcp.authenticate(req.headers.authorization); } catch (err) {
-      reply.header('www-authenticate', 'Bearer realm="chaggu", error="invalid_token"');
+      reply.header('www-authenticate', `Bearer realm="chaggu", error="invalid_token", resource_metadata="${mcpOAuth.resourceMetadataUrl()}"`);
       throw err;
     }
     const out = await mcp.handleRpc(userId, req.body);
@@ -258,6 +259,32 @@ export async function buildHttp() {
   });
   app.get('/api/mcp', async (_req, reply) => reply.status(405).header('allow', 'POST').send({ error: { code: 'method_not_allowed', message: 'Usa POST (MCP Streamable HTTP)' } }));
   app.delete('/api/mcp', async (_req, reply) => reply.status(405).header('allow', 'POST').send());
+
+  // OAuth del conector: descubrimiento, registro dinámico, token y revocación (modules/mcp-oauth.ts).
+  // Son públicos y los llaman las IAs desde sus servidores o desde la máquina de la persona.
+  const wellKnown = (body: () => object) => async (_req: FastifyRequest, reply: FastifyReply) =>
+    reply.header('cache-control', 'public, max-age=3600').header('access-control-allow-origin', '*').send(body());
+  for (const p of ['/.well-known/oauth-protected-resource', '/.well-known/oauth-protected-resource/api/mcp']) app.get(p, wellKnown(mcpOAuth.protectedResource));
+  for (const p of ['/.well-known/oauth-authorization-server', '/.well-known/oauth-authorization-server/api/mcp', '/.well-known/openid-configuration'])
+    app.get(p, wellKnown(mcpOAuth.authorizationServer));
+  app.register(async (oauth) => {
+    oauth.addContentTypeParser('application/x-www-form-urlencoded', { parseAs: 'string', bodyLimit: 16 * 1024 }, (_req, body, done) =>
+      done(null, Object.fromEntries(new URLSearchParams(String(body)))));
+    const oauthLimit = { config: { rateLimit: { max: 30, timeWindow: '1 minute', keyGenerator: (r: FastifyRequest) => `mcp-oauth:${r.ip}` } } };
+    const send = async (reply: FastifyReply, run: () => Promise<object>, ok = 200) => {
+      reply.header('cache-control', 'no-store').header('access-control-allow-origin', '*');
+      try { return reply.status(ok).send(await run()); } catch (err) {
+        if (err instanceof mcpOAuth.OAuthError) return reply.status(err.status).send({ error: err.code, error_description: err.message });
+        throw err;
+      }
+    };
+    oauth.post('/api/mcp/oauth/register', oauthLimit, async (req, reply) => send(reply, () => mcpOAuth.register(req.body), 201));
+    oauth.post('/api/mcp/oauth/token', oauthLimit, async (req, reply) => send(reply, () => mcpOAuth.token((req.body ?? {}) as Record<string, unknown>)));
+    oauth.post('/api/mcp/oauth/revoke', oauthLimit, async (req, reply) => send(reply, () => mcpOAuth.revoke((req.body ?? {}) as Record<string, unknown>)));
+    // Preflight de clientes en navegador (p. ej. el inspector de MCP).
+    for (const p of ['/api/mcp/oauth/register', '/api/mcp/oauth/token', '/api/mcp/oauth/revoke']) oauth.options(p, async (_req, reply) =>
+      reply.header('access-control-allow-origin', '*').header('access-control-allow-methods', 'POST').header('access-control-allow-headers', 'content-type').status(204).send());
+  });
 
   // ---------- Rutas autenticadas ----------
   app.register(async (priv) => {
@@ -297,6 +324,11 @@ export async function buildHttp() {
     priv.post('/api/v1/me/mcp-tokens', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (req) =>
       mcp.createToken(req.userId, z.object({ name: z.string().trim().min(1).max(60).default('Mi IA') }).parse(req.body ?? {}).name));
     priv.delete<{ Params: { id: string } }>('/api/v1/me/mcp-tokens/:id', async (req) => mcp.revokeToken(req.userId, z.uuid().parse(req.params.id)));
+    // Pantalla /autorizar-ia: qué IA pide acceso, y aprobar o rechazar con la sesión de la persona.
+    priv.get<{ Querystring: { client_id?: string; redirect_uri?: string } }>('/api/v1/mcp-oauth/client', async (req) =>
+      mcpOAuth.describe(z.string().min(1).max(100).parse(req.query.client_id), z.string().min(1).max(2000).parse(req.query.redirect_uri)));
+    priv.post('/api/v1/mcp-oauth/approve', { config: { rateLimit: { max: 20, timeWindow: '1 minute' } } }, async (req) => mcpOAuth.approve(req.userId, mcpOAuth.ApproveInput.parse(req.body)));
+    priv.post('/api/v1/mcp-oauth/deny', async (req) => mcpOAuth.deny(mcpOAuth.ApproveInput.pick({ clientId: true, redirectUri: true, state: true }).parse(req.body)));
     priv.get('/api/v1/blocks', async (req) => safety.listBlocks(req.userId));
     priv.put<{ Params: { id: string } }>('/api/v1/blocks/:id', async (req) => safety.setBlock(req.userId, z.uuid().parse(req.params.id), true));
     priv.delete<{ Params: { id: string } }>('/api/v1/blocks/:id', async (req) => safety.setBlock(req.userId, z.uuid().parse(req.params.id), false));

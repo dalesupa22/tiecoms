@@ -657,6 +657,11 @@ class TieComsClient(
             }
             is AccountEvent.PrefsUpdated -> scheduleBootstrap()
             is AccountEvent.WhatsAppUpdated -> setState { copy(waRevision = waRevision + 1) }
+            // WhatsApp en la bandeja: la fila se actualiza sin recargar el bootstrap; sin chat, se recarga.
+            is AccountEvent.WaInboxUpdated -> if (e.chat == null) scheduleBootstrap() else setState {
+                val d = data ?: return@setState this
+                copy(data = d.copy(waInbox = WaInbox.apply(d.waInbox, e.chat)), waRevision = waRevision + 1)
+            }
             is AccountEvent.DriveUpdated -> setState { copy(driveRevision = driveRevision + 1) }
             AccountEvent.RemindersChanged -> scope.launch { runCatching { loadRemindersInternal() } }
             is AccountEvent.DndUpdated -> applyDnd(e.dndUntil, localOnly = false)
@@ -1928,6 +1933,85 @@ class TieComsClient(
     suspend fun waMessages(c: WaChatDTO): List<WaMessageDTO> = withContext(dispatcher) {
         req("GET", "/whatsapp/chats/${c.accountId}/${enc(c.jid)}/messages?limit=80", null, WaMessagesPage.serializer()).messages
     }
+    /**
+     * Bandeja (contrato 1-oct-2026): mover a Grupos/DMs ('auto' = sugerida), sacar (place null) o fijar arriba.
+     * Se aplica en el acto y se revierte si falla o si el servidor todavía no conoce los campos (API anterior a la 081).
+     */
+    suspend fun waSetInbox(c: WaChatDTO, place: String? = null, placeSet: Boolean = false, pinned: Boolean? = null): WaChatDTO = withContext(dispatcher) {
+        val before = s.data?.waInbox
+        val want = WaInbox.optimistic(c, place, placeSet, pinned, Instant.ofEpochMilli(now()).toString())
+        setState { val d = data ?: return@setState this; copy(data = d.copy(waInbox = WaInbox.apply(d.waInbox, want))) }
+        val body = buildJsonObject {
+            if (placeSet) put("inboxPlace", place?.let { JsonPrimitive(it) } ?: JsonNull)
+            pinned?.let { put("inboxPinned", JsonPrimitive(it)) }
+        }
+        try {
+            val got = req("PATCH", "/whatsapp/chats/${c.accountId}/${enc(c.jid)}", body, WaChatDTO.serializer())
+            if (WaInbox.serverIgnored(want, got)) throw ApiException(501, "wa_inbox_unsupported", "WhatsApp inbox not available yet")
+            // El DTO del PATCH puede no traer el estado de la cuenta: se conserva el que había.
+            val merged = got.copy(accountStatus = got.accountStatus ?: c.accountStatus, accountLabel = got.accountLabel.ifEmpty { c.accountLabel })
+            setState { val d = data ?: return@setState this; copy(data = d.copy(waInbox = WaInbox.apply(d.waInbox, merged)), waRevision = waRevision + 1) }
+            merged
+        } catch (e: Exception) {
+            if (before != null) setState { val d = data ?: return@setState this; copy(data = d.copy(waInbox = before)) }
+            throw e
+        }
+    }
+    /** No leídos de WhatsApp (suma de categories[*].unread) sin bajar la lista: GET /whatsapp/chats?limit=1. null = sin cuenta. */
+    suspend fun waUnreadTotal(): Int? = withContext(dispatcher) {
+        val p = req("GET", "/whatsapp/chats?limit=1", null, WaChatsPage.serializer())
+        if (p.categories.isEmpty() && p.chats.isEmpty()) null else p.categories.values.sumOf { it.unread }
+    }
+    private var mailUnreadAt = 0L
+    private var mailUnreadValue: Int? = null
+    /** GET /mail/unread con caché de 60 s (como la web). */
+    suspend fun mailUnreadCached(): Int = withContext(dispatcher) {
+        val cached = mailUnreadValue
+        if (cached != null && now() - mailUnreadAt < 60_000) return@withContext cached
+        val v = req("GET", "/mail/unread", null, MailUnreadDTO.serializer()).unread
+        mailUnreadValue = v; mailUnreadAt = now(); v
+    }
+
+    // ---------- gg de este chat (contrato 1-oct-2026, parte B) ----------
+    /** El servidor no conoce /gg/side (404): se oculta el botón gg hasta reiniciar sesión. */
+    @Volatile var ggSideMissing: Boolean = false
+        private set
+    private suspend fun <T> gg(block: suspend () -> T): T = try { block() } catch (e: ApiException) {
+        // Ruta inexistente (API anterior): el manejador 404 genérico dice «Ruta no encontrada».
+        if (e.status == 404 && (e.message?.contains("Ruta no encontrada") == true || e.code == "route_not_found")) ggSideMissing = true
+        throw e
+    }
+    suspend fun ggSide(source: String): GgSideThread = withContext(dispatcher) { gg { req("GET", "/gg/side" + q("source" to source), null, GgSideThread.serializer()) } }
+    suspend fun ggSideOpen(source: String): GgSideMessageDTO = withContext(dispatcher) {
+        gg { req("POST", "/gg/side/open", buildJsonObject { put("source", JsonPrimitive(source)) }, GgSideOne.serializer()).message }
+    }
+    suspend fun ggSideAsk(source: String, text: String, quoted: List<String>): GgSideMessageDTO = withContext(dispatcher) {
+        gg { req("POST", "/gg/side", buildJsonObject {
+            put("source", JsonPrimitive(source)); put("text", JsonPrimitive(text))
+            if (quoted.isNotEmpty()) put("quotedMessageIds", kotlinx.serialization.json.JsonArray(quoted.map { JsonPrimitive(it) }))
+        }, GgSideOne.serializer()).message }
+    }
+    suspend fun ggReplyForMe(source: String, tone: String?, quoted: List<String>): List<GgDraft> = withContext(dispatcher) {
+        gg { req("POST", "/gg/side/reply-for-me", buildJsonObject {
+            put("source", JsonPrimitive(source)); tone?.let { put("tone", JsonPrimitive(it)) }
+            if (quoted.isNotEmpty()) put("quotedMessageIds", kotlinx.serialization.json.JsonArray(quoted.map { JsonPrimitive(it) }))
+        }, GgDraftsPage.serializer()).drafts }
+    }
+    suspend fun ggSuggest(source: String, messageIds: List<String>): List<GgSuggestion> = withContext(dispatcher) {
+        gg { req("POST", "/gg/side/suggest", buildJsonObject {
+            put("source", JsonPrimitive(source)); put("messageIds", kotlinx.serialization.json.JsonArray(messageIds.map { JsonPrimitive(it) }))
+        }, GgSuggestionsPage.serializer()).suggestions }
+    }
+    suspend fun ggSideNew(source: String) = withContext(dispatcher) { gg { req("POST", "/gg/side/new", buildJsonObject { put("source", JsonPrimitive(source)) }, JsonElement.serializer()) }; Unit }
+    /** Número del botón gg por fuente (caché del servidor, sin IA). */
+    suspend fun ggPending(sources: List<String>): Map<String, Int> = withContext(dispatcher) {
+        if (sources.isEmpty()) return@withContext emptyMap()
+        val o = gg { req("GET", "/gg/side/pending" + q("sources" to sources.joinToString(",")), null, JsonElement.serializer()) } as? JsonObject ?: return@withContext emptyMap()
+        o.mapNotNull { (k, v) -> (v as? JsonPrimitive)?.contentOrNull?.toIntOrNull()?.let { k to it } }.toMap()
+    }
+    /** Permiso de IA de la cuenta (POST /assistant/consent): el banner de siempre, antes de usar gg. */
+    suspend fun setAiConsent(on: Boolean) = withContext(dispatcher) { req("POST", "/assistant/consent", buildJsonObject { put("on", JsonPrimitive(on)) }, JsonElement.serializer()); Unit }
+
     suspend fun waOrganize(): WaOrganizeResult = withContext(dispatcher) { req("POST", "/whatsapp/organize", buildJsonObject {}, WaOrganizeResult.serializer()) }
 
     // ---------- Correo en el chat (docs/CORREO.md) ----------

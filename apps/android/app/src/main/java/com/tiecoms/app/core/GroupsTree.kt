@@ -136,15 +136,17 @@ object GroupsTree {
         val q = query.trim().lowercase()
         // Los hilos de un directo o chat grupal cuentan en su fila (pendientes del árbol).
         val tree = ReadTree.all(d, nowMs)
+        // WhatsApp en DMs (contrato 1-oct-2026): mismas reglas de orden; buscan por nombre, vista previa o cuenta.
+        val wa = WaInbox.inPlace(d, WaInbox.DMS).filter { (!unreadOnly || it.unread > 0) && WaInbox.matches(d, it, q) }
         return HomeTree.order(d.conversations.filter { isDm(d, it) }
             .filter { !unreadOnly || HomeTree.pendingOf(it, nowMs, tree) > 0 || HomeTree.mentionsOf(it, tree) > 0 }
-            .filter { c -> q.isEmpty() || matchesText(d, c, q, title) }, nowMs, tree)
+            .filter { c -> q.isEmpty() || matchesText(d, c, q, title) } + wa, nowMs, tree)
     }
 
     /** Contador del filtro «No leídos» de DMs: con pendientes del árbol. */
     fun dmsUnreadCount(d: BootstrapDTO, nowMs: Long = System.currentTimeMillis()): Int {
         val tree = ReadTree.all(d, nowMs)
-        return d.conversations.count { isDm(d, it) && (HomeTree.pendingOf(it, nowMs, tree) > 0 || HomeTree.mentionsOf(it, tree) > 0) }
+        return d.conversations.count { isDm(d, it) && (HomeTree.pendingOf(it, nowMs, tree) > 0 || HomeTree.mentionsOf(it, tree) > 0) } + WaInbox.unreadIn(d, WaInbox.DMS)
     }
 
     /** Origen visible de un sidechat («desde #Grupo»); null si no lo puedo ver. */
@@ -179,7 +181,11 @@ object GroupsTree {
         // Solo las filas de la lista (sin derivadas): una derivada con no leídos cuenta en su grupo.
         val tree = ReadTree.all(d, nowMs)
         val groups = d.conversations.filter { isGroup(d, it) && it.parentId == null }
-        return Tab.entries.associateWith { t -> groups.count { inTab(t, it, issues, nowMs, tree) } }
+        // WhatsApp en Grupos: cuenta en Todo y en Sin leer; nunca en Tareas.
+        val wa = WaInbox.inPlace(d, WaInbox.GROUPS)
+        return Tab.entries.associateWith { t -> groups.count { inTab(t, it, issues, nowMs, tree) } + when (t) {
+            Tab.ALL -> wa.size; Tab.UNREAD -> wa.count { it.unread > 0 }; Tab.ISSUES -> 0
+        } }
     }
 
     /** Fila de un grupo y, si están desplegados, sus asuntos (hasta [MAX_ISSUES] y «+N asuntos»). Igual en Árbol y Lista. */
@@ -239,11 +245,14 @@ object GroupsTree {
         val mine = myOrgIds(d)
         val tree = ReadTree.all(d, nowMs)
         val all = d.conversations.filter { isGroup(d, it) && it.parentId == null && (wsFilter == null || it.workspaceId == wsFilter) }
-        if (all.isEmpty()) return listOf(Empty(filtered = wsFilter != null))
+        // WhatsApp movido a Grupos (contrato 1-oct-2026): filas mezcladas con el mismo orden; no en un espacio filtrado ni en Tareas.
+        val wa = if (wsFilter != null || tab == Tab.ISSUES) emptyList()
+            else WaInbox.inPlace(d, WaInbox.GROUPS).filter { (tab != Tab.UNREAD || it.unread > 0) && WaInbox.matches(d, it, q) }
+        if (all.isEmpty() && wa.isEmpty()) return listOf(Empty(filtered = wsFilter != null))
         val companies = all.associate { it.id to companyName(d, it, mine) }
         // La búsqueda sigue encontrando por empresa; en pantalla, el nombre arriba y la empresa abajo (1.7.1).
         val labels = all.associate { it.id to listLabel(companies[it.id], title(it)) }
-        val shown = all.filter { c -> (q.isEmpty() || labels[c.id]!!.lowercase().contains(q) || matchesText(d, c, q, title)) && inTab(tab, c, issues, nowMs, tree) }
+        val shown = all.filter { c -> (q.isEmpty() || labels[c.id]!!.lowercase().contains(q) || matchesText(d, c, q, title)) && inTab(tab, c, issues, nowMs, tree) } + wa
         if (shown.isEmpty()) return listOf(Empty(filtered = true))
         val rows = mutableListOf<Row>()
         var block: HomeTree.Block? = null
@@ -251,6 +260,7 @@ object GroupsTree {
             val b = HomeTree.blockOf(c, nowMs, tree)
             if (b != block && !searching) rows += Divider(b)
             block = b
+            if (WaInbox.isWa(c.id)) { rows += Group(c, 0, key = "c:" + c.id); continue }
             addGroup(rows, c, 0, null, tree[c.id]?.threads ?: 0, issues, collapsed, showAllIssues, today, company = companyLine(companies[c.id], title(c)))
         }
         return rows
@@ -295,12 +305,18 @@ object GroupsTree {
 
         // 📌 Fijados (grupos), como Inicio.
         if (wsFilter == null && !searching) {
-            val pinned = HomeTree.order(d.conversations.filter { it.pinnedAt != null && isGroup(d, it) && it.parentId == null }, nowMs, tree)
+            // WhatsApp en Grupos: en el Árbol va arriba con los fijados (fijado) o justo después, en el mismo orden.
+            val wa = WaInbox.inPlace(d, WaInbox.GROUPS)
+            val pinned = HomeTree.order(d.conversations.filter { it.pinnedAt != null && isGroup(d, it) && it.parentId == null } + wa.filter { it.pinnedAt != null }, nowMs, tree)
             if (pinned.isNotEmpty()) {
                 rows += Section(Kind.PINNED, null, false, 0, key = "s:PINNED")
                 // Los fijados van fuera de su empresa: llevan la empresa debajo, como en la Lista.
-                pinned.forEach { rows += Group(it, 0, pinnedSection = true, threadUnread = threadUnread[it.id] ?: 0, company = companyLine(companyName(d, it), title(it)), key = "pc:" + it.id) }
+                pinned.forEach {
+                    rows += if (WaInbox.isWa(it.id)) Group(it, 0, pinnedSection = true, key = "pc:" + it.id)
+                        else Group(it, 0, pinnedSection = true, threadUnread = threadUnread[it.id] ?: 0, company = companyLine(companyName(d, it), title(it)), key = "pc:" + it.id)
+                }
             }
+            HomeTree.order(wa.filter { it.pinnedAt == null }, nowMs, tree).forEach { rows += Group(it, 0, pinnedSection = true, key = "wc:" + it.id) }
         }
 
         // Un espacio sin grupos no aparece; una relación pendiente sin grupos sí.

@@ -169,13 +169,21 @@ fun WhatsAppScreen(onBack: () -> Unit, onOpenConversation: (String) -> Unit) {
                     }
                 }
                 if (chats.isEmpty()) item { EmptyNote(stringResource(if (connected.isNotEmpty()) R.string.wa_no_chats else R.string.wa_syncing)) }
-                items(chats, key = { "${it.accountId}|${it.jid}" }) { c -> ChatRow(c, multi = (accounts?.size ?: 0) > 1) { open = c } }
+                items(chats, key = { "${it.accountId}|${it.jid}" }) { c -> ChatRow(c, multi = (accounts?.size ?: 0) > 1, inbox = inboxOf(c)) { open = c } }
             }
             item { Spacer(Modifier.heightIn(min = 24.dp)) }
         }
     }
     if (connectOpen) ConnectDialog(accounts ?: emptyList(), onClose = { connectOpen = false }, onDone = { connectOpen = false; scope.launch { loadAccounts() } })
-    open?.let { c -> ChatSheet(c, revision, onClose = { open = null }, onPatch = { patch(c, it) }, onOpenConversation = onOpenConversation) }
+    open?.let { c -> WaChatSheet(c, revision, onClose = { open = null }, onPatch = { patch(c, it) }, onOpenConversation = onOpenConversation) }
+}
+
+/** Estado de bandeja vigente de un chat: manda `waInbox` del bootstrap (lo que se mueve o fija se ve en el acto). */
+@Composable
+private fun inboxOf(c: WaChatDTO): WaChatDTO {
+    val data = LocalClient.current.state.collectAsStateWithLifecycle().value.data ?: return c
+    val live = data.waInbox.firstOrNull { it.accountId == c.accountId && it.jid == c.jid }
+    return c.copy(inboxPlace = live?.inboxPlace, inboxPinnedAt = live?.inboxPinnedAt)
 }
 
 private fun decodeQr(dataUrl: String?): androidx.compose.ui.graphics.ImageBitmap? {
@@ -295,9 +303,15 @@ private fun ConnectDialog(existing: List<WaAccountDTO>, onClose: () -> Unit, onD
     }
 }
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun ChatRow(c: WaChatDTO, multi: Boolean, onOpen: () -> Unit) {
-    Row(Modifier.fillMaxWidth().clickable(onClick = onOpen).heightIn(min = 60.dp).padding(vertical = 6.dp).testTag("waChat-${c.jid}"), verticalAlignment = Alignment.CenterVertically) {
+private fun ChatRow(c: WaChatDTO, multi: Boolean, inbox: WaChatDTO, onOpen: () -> Unit) {
+    val ctx = LocalContext.current
+    // Pulsación larga (contrato 1-oct-2026): «Mover a mi lista principal» › A Grupos / A DMs, «📌 Fijar arriba» y «Sacar…».
+    var menu by remember { mutableStateOf(false) }
+    Box {
+    Row(Modifier.fillMaxWidth().combinedClickable(onClick = onOpen, onLongClick = { menu = true }, onLongClickLabel = stringResource(R.string.menu_more))
+        .heightIn(min = 60.dp).padding(vertical = 6.dp).testTag("waChat-${c.jid}"), verticalAlignment = Alignment.CenterVertically) {
         Text(if (c.isGroup) "👥" else CAT_ICON[c.category] ?: "◌", style = MaterialTheme.typography.titleLarge)
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
@@ -310,16 +324,22 @@ private fun ChatRow(c: WaChatDTO, multi: Boolean, onOpen: () -> Unit) {
             Text(listOfNotNull(if (multi) c.accountLabel else null, "${CAT_ICON[c.category]} ${catName(c.category)}", if (c.linkedConversationId != null) "⇄ chaggu" else null).joinToString(" · "),
                 style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
+        if (inbox.inboxPlace != null) Text(if (inbox.inboxPinnedAt != null) "📌" else "⤴", style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(end = 6.dp).testTag("waInInbox-${c.jid}"))
         if (c.unread > 0) Box(Modifier.background(MaterialTheme.colorScheme.primary, CircleShape).padding(horizontal = 6.dp, vertical = 2.dp)) {
             Text(c.unread.toString(), color = MaterialTheme.colorScheme.onPrimary, style = MaterialTheme.typography.labelSmall)
         }
     }
+    AnchoredMenu(menu, if (menu) waScreenInboxMenu(ctx, inbox) else emptyList(), { menu = false })
+    }
 }
 
+/** Chat de WhatsApp (pantalla WhatsApp y filas de la bandeja), con gg de este chat (fuente `wa:<cuenta>:<jid>`). */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
-private fun ChatSheet(c: WaChatDTO, revision: Int, onClose: () -> Unit, onPatch: (Map<String, JsonElement>) -> Unit, onOpenConversation: (String) -> Unit) {
+internal fun WaChatSheet(c: WaChatDTO, revision: Int, onClose: () -> Unit, onPatch: (Map<String, JsonElement>) -> Unit, onOpenConversation: (String) -> Unit) {
     val ctx = LocalContext.current
     val client = LocalClient.current
+    val container = LocalContainer.current
     val data = client.state.collectAsStateWithLifecycle().value.data ?: return
     var messages by remember { mutableStateOf<List<WaMessageDTO>?>(null) }
     LaunchedEffect(c.accountId, c.jid, revision) { messages = runCatching { client.waMessages(c) }.getOrDefault(emptyList()) }
@@ -327,9 +347,28 @@ private fun ChatSheet(c: WaChatDTO, revision: Int, onClose: () -> Unit, onPatch:
     var waShare by remember { mutableStateOf<WaMessageDTO?>(null) }
     val targets = data.conversations.filter { it.kind != "direct" && it.canPost }
     val linked = c.linkedConversationId?.let { id -> data.conversations.firstOrNull { it.id == id } }
+    val inbox = inboxOf(c)
+    var inboxMenu by remember { mutableStateOf(false) }
+    // gg de este chat: borradores al portapapeles (desde el teléfono no se envía por WhatsApp); nada se manda solo.
+    val gg = rememberGgSide(com.tiecoms.app.core.GgSide.whatsapp(c.accountId, c.jid), enabled = !client.ggSideMissing)
+    var selecting by remember(c.jid) { mutableStateOf(false) }
+    val selected = remember(c.jid) { androidx.compose.runtime.mutableStateListOf<String>() }
+    var suggestFor by remember { mutableStateOf<List<String>?>(null) }
+    var queue by remember { mutableStateOf(listOf<com.tiecoms.app.core.GgSuggestion>()) }
+    fun copyDraft(t: String) { copyToClipboard(ctx, t); container.toast(ctx.getString(R.string.ggs_draft_copied)) }
     FormSheet(c.name, onClose, tag = "waChatSheet") {
-        Text(listOfNotNull(c.accountLabel, if (c.isGroup && c.participants != null) stringResource(R.string.wa_members, c.participants) else null).joinToString(" · "),
-            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(listOfNotNull(c.accountLabel, if (c.isGroup && c.participants != null) stringResource(R.string.wa_members, c.participants) else null).joinToString(" · "),
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+            if (gg != null && gg.available != false) GgButton(gg.pending, onClick = { gg.show() })
+        }
+        // Bandeja: mover a mi lista principal, fijar arriba, sacar.
+        Box {
+            OutlinedButton(onClick = { inboxMenu = true }, modifier = Modifier.testTag("waInboxMenu")) {
+                Text(if (inbox.inboxPlace == null) "⤴ " + stringResource(R.string.wa_move_to_inbox) else (if (inbox.inboxPinnedAt != null) "📌 " else "⤴ ") + stringResource(if (inbox.inboxPlace == com.tiecoms.app.core.WaInbox.GROUPS) R.string.nav_groups else R.string.nav_dms))
+            }
+            AnchoredMenu(inboxMenu, if (inboxMenu) waScreenInboxMenu(ctx, inbox) else emptyList(), { inboxMenu = false })
+        }
         Dropdown(stringResource(R.string.wa_category), WA_CATEGORIES.map { it to "${CAT_ICON[it]} ${catName(it)}" }, c.category, { onPatch(mapOf("category" to JsonPrimitive(it))) })
         Text(stringResource(if (c.categoryManual) R.string.wa_manual else R.string.wa_suggested), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         c.description?.let { Text(it.take(300), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
@@ -337,10 +376,11 @@ private fun ChatSheet(c: WaChatDTO, revision: Int, onClose: () -> Unit, onPatch:
             messages == null -> CircularProgressIndicator()
             messages!!.isEmpty() -> Text(stringResource(R.string.wa_no_messages), style = MaterialTheme.typography.bodySmall)
             else -> messages!!.takeLast(40).forEach { m ->
+                GgSelectable(selecting, m.id in selected, onToggle = { if (m.id in selected) selected.remove(m.id) else selected.add(m.id) }) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = if (m.fromMe) Arrangement.End else Arrangement.Start) {
-                    // Correo en el chat (docs/CORREO.md): pulsación larga › «Comentar en chaggu…» (solo con el correo prendido).
+                    // Pulsación larga: «Comentar en chaggu…» (con el correo prendido), «✨ Preguntar a gg» y «Seleccionar».
                     Surface(shape = RoundedCornerShape(12.dp), color = if (m.fromMe) Color(0xFFDCF8C6) else MaterialTheme.colorScheme.surfaceContainerHigh,
-                        modifier = if (data.mailEnabled) Modifier.combinedClickable(onClick = {}, onLongClick = { waMenu = m }).testTag("waMsg-${m.id}") else Modifier) {
+                        modifier = if (data.mailEnabled || gg != null) Modifier.combinedClickable(onClick = {}, onLongClick = { waMenu = m }).testTag("waMsg-${m.id}") else Modifier) {
                         Column(Modifier.padding(8.dp)) {
                             if (!m.fromMe && c.isGroup && m.author != null) Text(m.author, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, color = if (m.fromMe) Color(0xFF1F1F1F) else MaterialTheme.colorScheme.onSurface)
                             Text(m.body, color = if (m.fromMe) Color(0xFF1F1F1F) else MaterialTheme.colorScheme.onSurface)
@@ -348,7 +388,15 @@ private fun ChatSheet(c: WaChatDTO, revision: Int, onClose: () -> Unit, onPatch:
                         }
                     }
                 }
+                }
             }
+        }
+        if (gg != null && gg.available != false) {
+            if (selecting) GgSelectionBar(selected.size, onAsk = { suggestFor = selected.toList() }, onCancel = { selecting = false; selected.clear() })
+            // «Responder por mí» rápido: solo si lo último es de la otra persona y al tocar ✨.
+            else if (messages?.lastOrNull()?.fromMe == false) TextButton(onClick = { gg.loadQuick() }, modifier = Modifier.testTag("waGgSpark")) { Text("✨ " + stringResource(R.string.ggs_reply_for_me)) }
+            GgQuickReplies(gg) { t -> copyDraft(t) }
+            GgContinueStrip(gg)
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = { onPatch(mapOf("pinned" to JsonPrimitive(!c.pinned))) }) { Text(stringResource(if (c.pinned) R.string.wa_unpin else R.string.wa_pin)) }
@@ -360,7 +408,40 @@ private fun ChatSheet(c: WaChatDTO, revision: Int, onClose: () -> Unit, onPatch:
         if (linked != null) TextButton(onClick = { onClose(); onOpenConversation(linked.id) }) { Text(stringResource(R.string.wa_linked_hint, titleOf(ctx, linked, data))) }
         else Text(stringResource(R.string.wa_link_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
-    waMenu?.let { m -> ActionSheet(null, listOf(SheetItem(ctx.getString(R.string.web_wa_bring), "⤴", tag = "waCommentIn") { waMenu = null; waShare = m }), onDismiss = { waMenu = null }) }
+    waMenu?.let { m -> ActionSheet(null, listOfNotNull(
+        if (data.mailEnabled) SheetItem(ctx.getString(R.string.web_wa_bring), "⤴", tag = "waCommentIn") { waMenu = null; waShare = m } else null,
+        if (gg != null && gg.available != false) SheetItem(ctx.getString(R.string.ggs_ask_about), "✨", tag = "waAskGg") {
+            waMenu = null; gg.quote(com.tiecoms.app.core.GgQuotedDTO(m.id, if (m.fromMe) ctx.getString(R.string.ggs_you) else m.author ?: c.name, excerpt(m.body, 200))); gg.show()
+        } else null,
+        if (gg != null && gg.available != false) SheetItem(ctx.getString(R.string.ggs_select), "☑", tag = "waSelect") { waMenu = null; selecting = true; if (m.id !in selected) selected.add(m.id) } else null,
+    ), onDismiss = { waMenu = null }) }
+    gg?.let { g ->
+        GgSideSheet(g, onUseDraft = { t -> copyDraft(t) },
+            onAction = { a -> queue = listOf(com.tiecoms.app.core.GgSuggestion(id = "draft-action", kind = a.kind, title = a.title)) }, onJump = {})
+        if (!g.open && suggestFor == null) GgConsentDialog(g)
+        suggestFor?.let { ids ->
+            GgSuggestSheet(g, ids, onRun = { l -> queue = ggRunOrder(l); selecting = false; selected.clear() },
+                onFreeAsk = { t ->
+                    ids.forEach { mid -> messages?.firstOrNull { it.id == mid }?.let { m -> g.quote(com.tiecoms.app.core.GgQuotedDTO(m.id, if (m.fromMe) ctx.getString(R.string.ggs_you) else m.author ?: c.name, excerpt(m.body, 200))) } }
+                    g.ask(t, ids); g.show(); selecting = false; selected.clear()
+                }, onClose = { suggestFor = null })
+        }
+    }
+    // Cola de sugerencias en WhatsApp: respuesta al portapapeles; tarea y recordatorio en sus diálogos (en el chat vinculado o personal).
+    val head = queue.firstOrNull()
+    LaunchedEffect(head) {
+        val s = head ?: return@LaunchedEffect
+        when (s.kind) {
+            "task", "reminder" -> Unit
+            "summary" -> { gg?.let { g -> g.ask(ctx.getString(R.string.ggs_summarize), s.forMessageIds); g.show() }; queue = queue.drop(1) }
+            else -> { copyDraft(s.draft ?: s.title); queue = queue.drop(1) }
+        }
+    }
+    if (head != null) androidx.compose.runtime.key(head.id + "|" + queue.size) {
+        if (head.kind == "reminder" && linked != null) ReminderDialog(linked, null, onClose = { queue = queue.drop(1) }, defaultNote = head.param("title") ?: head.title)
+        else if (head.kind == "task" || head.kind == "reminder") NewIssueDialog(linked?.id, null, head.param("title") ?: head.title, onClose = { queue = queue.drop(1) }, onCreated = {},
+            defaultDue = com.tiecoms.app.core.GgSide.dueDate(head.param("due")))
+    }
     waShare?.let { m -> WaShareSheet(c, m, onClose = { waShare = null }, onDone = { cid -> waShare = null; onClose(); onOpenConversation(cid) }) }
 }
 

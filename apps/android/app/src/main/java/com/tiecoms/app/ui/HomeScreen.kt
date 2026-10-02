@@ -26,6 +26,8 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.FormatListBulleted
+import androidx.compose.material.icons.automirrored.filled.FormatIndentIncrease
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.material.icons.filled.Close
@@ -193,8 +195,10 @@ fun GroupsScreen(
         if (query.isBlank()) QuickSearch.Results()
         else QuickSearch.Results(people = QuickSearch.people(data, query), chats = QuickSearch.chats(data, query, { Names.conversationTitle(it, data, internalFallback, convFallback) }))
     }
-    // Recordatorios vencidos: antes avisaba la campanita del menú; ahora una fila arriba de la lista.
+    // Recordatorios vencidos: chip «🔔 N» al final de los filtros (1.7.7; antes era una fila arriba de la lista).
     val dueReminders = state.reminders.count { r -> parseInstant(r.remindAt)?.let { !it.isAfter(java.time.Instant.now()) } == true }
+    val access = rememberAccessChips()
+    var waOpen by remember { mutableStateOf<com.tiecoms.app.core.WaChatDTO?>(null) }
 
     Scaffold(
         topBar = {
@@ -202,11 +206,19 @@ fun GroupsScreen(
                 // Vista (plegar/desplegar) a la izquierda, aparte de ✏️ y «＋», que son para escribir y crear.
                 // Sin «⋮»: Archivos, Recordatorios, Trazo y WhatsApp viven en «Tú».
                 navigationIcon = {
-                    Box {
-                        IconButton(onClick = { foldMenu = true }, modifier = Modifier.testTag("home.fold")) {
-                            Icon(Icons.AutoMirrored.Filled.FormatListBulleted, stringResource(R.string.grp_fold_menu))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box {
+                            IconButton(onClick = { foldMenu = true }, modifier = Modifier.testTag("home.fold")) {
+                                Icon(Icons.AutoMirrored.Filled.FormatListBulleted, stringResource(R.string.grp_fold_menu))
+                            }
+                            AnchoredMenu(foldMenu, if (foldMenu) foldItems() else emptyList(), { foldMenu = false })
                         }
-                        AnchoredMenu(foldMenu, if (foldMenu) foldItems() else emptyList(), { foldMenu = false })
+                        // 1.7.7 (cabecera compacta): Lista | Árbol pasa a un ícono que alterna, junto a ≡.
+                        val next = if (view == GroupsTree.View.LIST) GroupsTree.View.TREE else GroupsTree.View.LIST
+                        IconButton(onClick = { view = next; container.settings.groupsView = next.id }, modifier = Modifier.testTag("groupsView")) {
+                            Icon(if (view == GroupsTree.View.LIST) Icons.AutoMirrored.Filled.List else Icons.AutoMirrored.Filled.FormatIndentIncrease,
+                                stringResource(if (view == GroupsTree.View.LIST) R.string.view_toggle_tree else R.string.view_toggle_list), Modifier.testTag("view-" + view.id))
+                        }
                     }
                 },
                 title = { Text(stringResource(R.string.nav_groups), fontWeight = FontWeight.SemiBold, modifier = Modifier.semantics { heading() }) },
@@ -220,10 +232,10 @@ fun GroupsScreen(
             ConnectionBanner(state.connection)
             DndBanner()
             SearchField(query) { query = it }
-            GroupsViewSwitch(view) { v -> view = v; container.settings.groupsView = v.id }
             FilterPills(
                 GroupsTree.Tab.entries.map { t -> t.name to when (t) { GroupsTree.Tab.ALL -> R.string.home_tab_all; GroupsTree.Tab.UNREAD -> R.string.home_tab_unread; GroupsTree.Tab.ISSUES -> R.string.home_tab_issues } },
                 tab.name, counts.mapKeys { it.key.name }, mentions = data.conversations.sumOf { it.unreadMentions }, onMentions = onMentions,
+                access = access, reminders = dueReminders, onReminders = onReminders,
             ) { tab = GroupsTree.Tab.valueOf(it); container.settings.homeTab = it }
             if (filterWs != null) {
                 InputChip(
@@ -246,16 +258,6 @@ fun GroupsScreen(
                 LazyColumn(Modifier.fillMaxSize().testTag("conversationList"), contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = AssistantListInset)) {
                     // Correo (docs/CORREO.md; en la web va en Hoy): «Comenta tus correos con el equipo · Conectar», solo sin cuenta conectada.
                     item(key = "mailNudge") { val mailNav = LocalMailNav.current; MailConnectNudge(onOpen = { mailNav.openList(null) }) }
-                    if (dueReminders > 0) item(key = "dueReminders") {
-                        Row(Modifier.fillMaxWidth().clickable(onClick = onReminders).heightIn(min = 48.dp).padding(horizontal = 16.dp, vertical = 8.dp).testTag("home.dueReminders"),
-                            verticalAlignment = Alignment.CenterVertically) {
-                            Text("🔔", style = MaterialTheme.typography.titleMedium)
-                            Spacer(Modifier.width(10.dp))
-                            Text("${stringResource(R.string.rem_title)} ($dueReminders)", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f))
-                            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                    }
                     // Con personas o chats encontrados, el «nada coincide» del árbol sobra.
                     items(rows.filter { !(it is GroupsTree.Empty && it.filtered && query.isNotBlank() && !quickResults.isEmpty) }, key = { it.key }) { row ->
                         // Al cambiar el orden (llega un no leído), la fila se desliza a su lugar en vez de saltar.
@@ -270,7 +272,14 @@ fun GroupsScreen(
                                 onLongPress = if (row.kind == GroupsTree.Kind.ORG || row.kind == GroupsTree.Kind.RELATIONS) ({ dialog = GroupsDialog.Header(row) }) else null)
                             is GroupsTree.Company -> CompanyRow(row, onToggle = { toggle(GroupsTree.companyKey(row.kind, row.id)) }, onLongPress = { dialog = GroupsDialog.Header(row) })
                             is GroupsTree.Divider -> BlockHeader(row.block)
-                            is GroupsTree.Group -> {
+                            is GroupsTree.Group -> if (com.tiecoms.app.core.WaInbox.isWa(row.c.id)) {
+                                // WhatsApp en Grupos (contrato 1-oct-2026): su fila, su menú y deslizar para fijar.
+                                val wa = waChatOf(data, row.c)
+                                if (wa != null) SwipePin(wa.inboxPinnedAt != null, { waInboxAct(ctx, wa, pinned = wa.inboxPinnedAt == null) }, "swipe-${row.key}") {
+                                    WaInboxRow(wa, indent = 16.dp, iconSize = 32.dp, menuOpen = menuKey == row.key, menuItems = { waInboxRowMenu(ctx, wa) { waOpen = wa } },
+                                        onDismissMenu = { menuKey = null }, onLongPress = { menuKey = row.key }) { waOpen = wa }
+                                }
+                            } else SwipePin(row.c.pinnedAt != null, { container.scope.launch { runCatching { client.setConversationPrefs(row.c.id, pinned = row.c.pinnedAt == null) }.onFailure { container.toast(errorText(ctx, it)) } } }, "swipe-${row.key}") {
                                 val ws = data.workspaces.firstOrNull { it.id == row.c.workspaceId }
                                 val guest = ws?.myRole == "guest"
                                 ConversationRow(row.c, data, internalFallback, convFallback,
@@ -350,6 +359,7 @@ fun GroupsScreen(
         )
     }
     HomeMenus(data, meetingFor, remindFor, leaveFor, { meetingFor = it }, { remindFor = it }, { leaveFor = it })
+    waOpen?.let { w -> WaChatHost(w, onClose = { waOpen = null }, onOpenConversation = { c -> waOpen = null; onOpen(c) }) }
 }
 
 private fun sectionKeyOf(row: GroupsTree.Section) = GroupsTree.sectionKey(row.kind, if (row.kind == GroupsTree.Kind.ORG) row.key.removePrefix("s:ORG:") else null)
@@ -431,6 +441,9 @@ fun DmsScreen(onOpen: (String) -> Unit, onNewMessage: () -> Unit, onDetails: (St
         else QuickSearch.Results(people = QuickSearch.people(data, query), groups = QuickSearch.groups(data, query, { Names.conversationTitle(it, data, internalFallback, convFallback) }))
     }
     val openPerson = rememberOpenPerson(data, onOpen)
+    val container = LocalContainer.current
+    val access = rememberAccessChips()
+    var waOpen by remember { mutableStateOf<com.tiecoms.app.core.WaChatDTO?>(null) }
     Scaffold(
         topBar = {
             TopAppBar(
@@ -445,10 +458,10 @@ fun DmsScreen(onOpen: (String) -> Unit, onNewMessage: () -> Unit, onDetails: (St
             ConnectionBanner(state.connection)
             DndBanner()
             SearchField(query, placeholder = stringResource(R.string.dm_search)) { query = it }
-            val all = data.conversations.count { GroupsTree.isDm(data, it) }
+            val all = data.conversations.count { GroupsTree.isDm(data, it) } + com.tiecoms.app.core.WaInbox.inPlace(data, com.tiecoms.app.core.WaInbox.DMS).size
             val unread = GroupsTree.dmsUnreadCount(data)
             FilterPills(listOf("ALL" to R.string.home_tab_all, "UNREAD" to R.string.home_tab_unread), if (unreadOnly) "UNREAD" else "ALL",
-                mapOf("ALL" to all, "UNREAD" to unread), mentions = data.conversations.sumOf { it.unreadMentions }, onMentions = onMentions) { unreadOnly = it == "UNREAD" }
+                mapOf("ALL" to all, "UNREAD" to unread), mentions = data.conversations.sumOf { it.unreadMentions }, onMentions = onMentions, access = access) { unreadOnly = it == "UNREAD" }
             PullToRefreshBox(
                 isRefreshing = refreshing,
                 onRefresh = { scope.launch { refreshing = true; try { client.loadBootstrap() } catch (e: Exception) { snackbar.showSnackbar(errorText(ctx, e)) } finally { refreshing = false } } },
@@ -471,7 +484,15 @@ fun DmsScreen(onOpen: (String) -> Unit, onNewMessage: () -> Unit, onDetails: (St
                             item(key = "b:" + block.name) { Box(Modifier.animateItem()) { BlockHeader(block) } }
                         item(key = c.id) {
                         val origin = GroupsTree.sideOrigin(data, c)
-                        Box(Modifier.animateItem()) {
+                        val wa = waChatOf(data, c)
+                        if (wa != null) Box(Modifier.animateItem()) {
+                            // WhatsApp en DMs: su fila, su menú y deslizar para fijar.
+                            SwipePin(wa.inboxPinnedAt != null, { waInboxAct(ctx, wa, pinned = wa.inboxPinnedAt == null) }, "swipe-${c.id}") {
+                                WaInboxRow(wa, indent = 16.dp, iconSize = 44.dp, menuOpen = menuFor == c.id, menuItems = { waInboxRowMenu(ctx, wa) { waOpen = wa } },
+                                    onDismissMenu = { menuFor = null }, onLongPress = { menuFor = c.id }) { waOpen = wa }
+                            }
+                        } else Box(Modifier.animateItem()) {
+                            SwipePin(c.pinnedAt != null, { container.scope.launch { runCatching { client.setConversationPrefs(c.id, pinned = c.pinnedAt == null) }.onFailure { container.toast(errorText(ctx, it)) } } }, "swipe-${c.id}") {
                             ConversationRow(c, data, internalFallback, convFallback, indent = 16.dp, iconSize = 44.dp, showIssuesChip = true,
                                 companyLine = Names.rowCompany(c, data, internalFallback, convFallback),
                                 badge = if (c.isSide) sidechat else null, threadUnread = threadTree[c.id]?.threads ?: 0, threadMentions = threadTree[c.id]?.threadMentions ?: 0,
@@ -479,6 +500,7 @@ fun DmsScreen(onOpen: (String) -> Unit, onNewMessage: () -> Unit, onDetails: (St
                                 menuOpen = menuFor == c.id,
                                 menuItems = { conversationMenu(ctx, c, data, onMeeting = { meetingFor = c.id }, onRemindCustom = { remindFor = c }, onLeave = { leaveFor = c }, onOpen = { onOpen(c.id) }) + listOf(null, SheetItem(ctx.getString(R.string.details_short), "ⓘ", tag = "menuDetails") { onDetails(c.id) }) },
                                 onDismissMenu = { menuFor = null }, onLongPress = { menuFor = c.id }, onIssues = {}, pinMark = c.pinnedAt != null) { onOpen(c.id) }
+                            }
                         }
                         }
                     }
@@ -490,6 +512,7 @@ fun DmsScreen(onOpen: (String) -> Unit, onNewMessage: () -> Unit, onDetails: (St
         }
     }
     HomeMenus(data, meetingFor, remindFor, leaveFor, { meetingFor = it }, { remindFor = it }, { leaveFor = it })
+    waOpen?.let { w -> WaChatHost(w, onClose = { waOpen = null }, onOpenConversation = { cid -> waOpen = null; onOpen(cid) }) }
 }
 
 // ---------- Piezas compartidas ----------
@@ -715,21 +738,6 @@ internal fun BlockHeader(block: com.tiecoms.app.core.HomeTree.Block) {
         modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 2.dp).semantics { heading() }.testTag("block-" + block.name))
 }
 
-/** Selector «Lista | Árbol» arriba de Grupos. */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun GroupsViewSwitch(view: GroupsTree.View, onPick: (GroupsTree.View) -> Unit) {
-    androidx.compose.material3.SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).testTag("groupsView")) {
-        GroupsTree.View.entries.forEachIndexed { i, v ->
-            SegmentedButton(
-                selected = view == v, onClick = { onPick(v) },
-                shape = androidx.compose.material3.SegmentedButtonDefaults.itemShape(i, GroupsTree.View.entries.size),
-                icon = {}, modifier = Modifier.heightIn(min = 40.dp).testTag("view-" + v.id),
-            ) { Text(stringResource(if (v == GroupsTree.View.LIST) R.string.view_list else R.string.view_tree), style = MaterialTheme.typography.labelLarge) }
-        }
-    }
-}
-
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 internal fun ConversationRow(
@@ -908,12 +916,20 @@ fun ConnectionBanner(status: ConnectionStatus) {
 
 /** Pestañas grandes tipo «pill» bajo el buscador, con contador, y la pastilla «@ Menciones» que abre la bandeja. */
 @Composable
-private fun FilterPills(options: List<Pair<String, Int>>, selected: String, counts: Map<String, Int>, mentions: Int = 0, onMentions: () -> Unit = {}, onPick: (String) -> Unit) {
+private fun FilterPills(
+    options: List<Pair<String, Int>>, selected: String, counts: Map<String, Int>, mentions: Int = 0, onMentions: () -> Unit = {},
+    /** 1.7.7: accesos con logo (WhatsApp, Gmail/Outlook) al INICIO de la fila, solo lo conectado. */
+    access: List<AccessItem> = emptyList(),
+    /** 1.7.7: «🔔 N» recordatorios vencidos al final (no sale si es 0). */
+    reminders: Int = 0, onReminders: () -> Unit = {},
+    onPick: (String) -> Unit,
+) {
     androidx.compose.foundation.lazy.LazyRow(
         horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
         modifier = Modifier.padding(vertical = 6.dp).testTag("homeTabs"),
     ) {
+        items(access, key = { "acc-" + it.tag }) { a -> AccessChip(a.tag, a.cd, a.count, a.onClick, a.onLongClick, a.logo) }
         items(options, key = { it.first }) { (t, labelRes) ->
             val on = t == selected
             val n = counts[t] ?: 0
@@ -946,5 +962,42 @@ private fun FilterPills(options: List<Pair<String, Int>>, selected: String, coun
                 }
             }
         }
+        if (reminders > 0) item(key = "reminders") {
+            val cd = stringResource(R.string.reminders_chip_cd, reminders)
+            androidx.compose.material3.Surface(onClick = onReminders, shape = CircleShape, color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                modifier = Modifier.heightIn(min = 44.dp).semantics { contentDescription = cd }.testTag("home.dueReminders")) {
+                Text("🔔 $reminders", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp))
+            }
+        }
     }
+}
+
+/** Un acceso con logo de la fila de chips. */
+internal class AccessItem(val tag: String, val cd: String, val count: Int, val onClick: () -> Unit, val onLongClick: (() -> Unit)?, val logo: @Composable () -> Unit)
+
+/**
+ * Accesos con logo (contrato 1-oct-2026): [WhatsApp N] abre la lista de WhatsApp en 1 toque; [Gmail|Outlook N] la
+ * bandeja de correo (la última usada; pulsación larga elige la cuenta). Solo salen los conectados.
+ */
+@Composable
+private fun rememberAccessChips(): List<AccessItem> {
+    val ctx = LocalContext.current
+    val nav = LocalMailNav.current
+    val settings = LocalContainer.current.settings
+    val counts = rememberAccessCounts()
+    var pick by remember { mutableStateOf(false) }
+    val out = mutableListOf<AccessItem>()
+    counts.wa?.let { n -> out += AccessItem("access-wa", stringResource(R.string.access_whatsapp_cd, n), n, onClick = nav.openWhatsApp, onLongClick = null) { WaIcon(20.dp) } }
+    if (counts.mail != null && counts.providers.isNotEmpty()) {
+        val prov = counts.providers.firstOrNull { it == settings.mailProvider } ?: counts.providers.first()
+        val n = counts.mail
+        out += AccessItem("access-mail", stringResource(R.string.access_mail_cd, com.tiecoms.app.core.Mail.label(prov), n), n,
+            onClick = { settings.mailProvider = prov; nav.openList(null) },
+            onLongClick = if (counts.providers.size > 1) ({ pick = true }) else null) { ProviderIcon(prov, 20.dp) }
+    }
+    if (pick) ActionSheet(ctx.getString(R.string.access_pick_account), counts.providers.map { p ->
+        SheetItem(com.tiecoms.app.core.Mail.label(p), "✉", tag = "accessPick-$p") { settings.mailProvider = p; nav.openList(null) }
+    }) { pick = false }
+    return out
 }

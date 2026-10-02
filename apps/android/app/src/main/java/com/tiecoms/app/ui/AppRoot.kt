@@ -461,7 +461,7 @@ private fun MainNav() {
                 openWhatsApp = { nav.navigate("whatsapp") { launchSingleTop = true } },
             )
         }
-        CompositionLocalProvider(LocalMailNav provides mailNav) {
+        CompositionLocalProvider(LocalMailNav provides mailNav, LocalOpenGeneralGg provides { gg.openPanel(false) }) {
         NavHost(nav, startDestination = "home?ws={ws}", modifier = Modifier.fillMaxSize()) {
             composable("home?ws={ws}", arguments = listOf(navArgument("ws") { type = NavType.StringType; nullable = true; defaultValue = null })) {
                 GroupsScreen(

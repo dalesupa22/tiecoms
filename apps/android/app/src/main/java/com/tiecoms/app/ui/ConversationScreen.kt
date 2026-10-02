@@ -303,6 +303,15 @@ fun ConversationScreen(
     var topicNewFor by remember { mutableStateOf<MessageDTO?>(null) }
     val snackbar = LocalSnackbar.current
     val mailNav = LocalMailNav.current
+    // gg de este chat (contrato 1-oct-2026, parte B): no en el chat con gg ni en un panel embebido.
+    val ggWithAssistant = data.assistantId != null && meta.kind == "direct" && data.assistantId in meta.memberIds
+    val gg = rememberGgSide(com.tiecoms.app.core.GgSide.conversation(id), enabled = !embedded && !ggWithAssistant && !client.ggSideMissing)
+    /** «Seleccionar» (pulsación larga): varios mensajes para «✨ Pedir a gg (N)». */
+    var selecting by remember(id) { mutableStateOf(false) }
+    val selectedIds = remember(id) { androidx.compose.runtime.mutableStateListOf<String>() }
+    var suggestFor by remember { mutableStateOf<List<String>?>(null) }
+    /** Sugerencias marcadas que se van abriendo una a una (cada una en su diálogo, nada se ejecuta solo). */
+    var ggQueue by remember { mutableStateOf(listOf<com.tiecoms.app.core.GgSuggestion>()) }
 
     val listState = rememberLazyListState()
     val atBottom by remember { derivedStateOf { listState.firstVisibleItemIndex <= 1 } }
@@ -650,6 +659,13 @@ fun ConversationScreen(
             if (!mine && meta.kind != "direct" && m.kind == "text" && author?.kind == "human")
                 add(SheetItem(ctx.getString(R.string.menu_reply_private), "✉", tag = "menuReplyPrivate",
                     subtitle = ctx.getString(R.string.menu_reply_private_sub, author.name.substringBefore(' '))) { onPrivateReply(m) })
+            // gg (contrato 1-oct-2026): se AGREGA «✨ Preguntar a gg» y «Seleccionar»; no se quita nada del menú.
+            if (gg != null && gg.available != false && m.kind == "text" && m.deletedAt == null) {
+                add(SheetItem(ctx.getString(R.string.ggs_ask_about), "✨", tag = "menuAskGg") {
+                    gg.quote(com.tiecoms.app.core.GgQuotedDTO(m.id, author?.name ?: "", excerpt(quoteText(ctx, m), 200))); gg.show()
+                })
+                add(SheetItem(ctx.getString(R.string.ggs_select), "☑", tag = "menuSelect") { selecting = true; if (m.id !in selectedIds) selectedIds.add(m.id) })
+            }
             // Bloque 2: responder aparte sin llenar el chat. Hilo con los del chat o sidechat privado; no se juntan con el DM.
             add(null)
             // También en directos y chats grupales (solo «Todos los del chat»); un hilo fuera de un espacio no se deriva otra vez.
@@ -760,6 +776,8 @@ fun ConversationScreen(
                     }
                 },
                 actions = {
+                    // gg de este chat: entre el nombre y la píldora de llamadas/buscar/⋯ (el nombre se corta con «…»).
+                    if (gg != null && gg.available != false) GgButton(gg.pending, onClick = { gg.show() })
                     // 🔎 Buscar en el chat (tanda 1.7).
                     IconButton(onClick = { searchOpen = !searchOpen; if (!searchOpen) searchQ = "" }, modifier = Modifier.testTag("chatSearch")) {
                         Icon(Icons.Filled.Search, stringResource(R.string.cs_open))
@@ -841,7 +859,7 @@ fun ConversationScreen(
                                             copyLink = { copyToClipboard(ctx, messageLink(id, cm.seq)); container.toast(ctx.getString(R.string.toast_link_copied)) },
                                         )
                                     })
-                                else MessageBubble(
+                                else GgSelectable(selecting, item.m.id in selectedIds, onToggle = { if (item.m.id in selectedIds) selectedIds.remove(item.m.id) else selectedIds.add(item.m.id) }) { MessageBubble(
                                     item, data, quoted = item.m.replyTo?.let { byId[it] }, pinnedHere = item.m.id in pinned, highlighted = highlight == item.m.seq,
                                     issue = openHere.firstOrNull { it.originMessageId == item.m.id },
                                     showAvatars = meta.kind != "direct",
@@ -866,7 +884,7 @@ fun ConversationScreen(
                                     topic = if (!showTopics || item.m.deletedAt != null) null else item.m.topicId?.let { topicById[it] },
                                     highlightQuery = searchHighlight,
                                     topicBy = com.tiecoms.app.core.Topics.setBy(item.m)?.let { by -> if (by == me) stringResource(R.string.common_you_short) else Names.person(data, by)?.name?.substringBefore(' ') ?: "" },
-                                )
+                                ) }
                                 is ChatItem.Pending -> PendingBubble(item.p, onRetry = { client.retry(item.p.clientMessageId) }, onDiscard = { client.discard(item.p.clientMessageId) })
                                 ChatItem.LateJoin -> Notice(stringResource(R.string.late_join))
                                 ChatItem.Older -> Notice(stringResource(R.string.loading_older))
@@ -876,6 +894,8 @@ fun ConversationScreen(
                     } }
                 }
                 ConfettiOverlay(confetti)
+                if (selecting) GgSelectionBar(selectedIds.size, onAsk = { suggestFor = selectedIds.toList() }, onCancel = { selecting = false; selectedIds.clear() },
+                    Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp))
                 if (conv?.loaded == true && items.isNotEmpty()) {
                     // Píldora «↑ N nuevos»: la línea de no leídos quedó arriba; tocar salta a ella.
                     if (dividerAbove && entry.second > 0) {
@@ -931,6 +951,8 @@ fun ConversationScreen(
                 meta.sideIssueId?.let { SideIssueStrip(id, it, onOpen = onOpenIssue) }
                 // Mensajes programados de este chat (solo los veo yo): «🕒 N programados · el próximo sale … · Ver».
                 ScheduledStrip(id)
+                GgContinueStrip(gg)
+                GgQuickReplies(gg) { t -> GgDrafts.put(id, t) }
                 Composer(
                 id, title, data, replyTo, editing,
                 onCancelReply = { replyTo = null }, onCancelEdit = { editing = null },
@@ -956,6 +978,8 @@ fun ConversationScreen(
                 onWhatsApp = if (data.mailEnabled && canWork) mailNav.openWhatsApp else null,
                 autoFocus = embedded, focusSignal = replyFocus,
                 canSchedule = privateHere == null, onScheduled = { replyTo = null },
+                // ✨ en la caja: las 3 burbujitas de respuesta, solo si lo último es de otra persona y al tocar (no gasta IA solo).
+                onGgSpark = if (gg != null && gg.available != false && com.tiecoms.app.core.GgSide.lastIsFromOther(conv?.messages.orEmpty().filter { it.authorId !in state.blockedUserIds }, me)) ({ gg.loadQuick() }) else null,
             ) } else ReadOnlyNotice()
         }
     }
@@ -998,6 +1022,49 @@ fun ConversationScreen(
     }
     personCard?.let { pid -> PersonCardSheet(pid, onClose = { personCard = null }, onDirect = { uid -> act { val cid = client.createChat(listOf(uid), null).id; kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { onOpenConversation(cid, null) } } }) }
     sideStart?.let { m -> SideStartSheet(meta, m, onClose = { sideStart = null; sidePreselect = emptyList() }, onStarted = { sid -> sideOpen = sid }, preselect = sidePreselect) }
+
+    // ---------- gg de este chat: hoja, sugerencias de varios mensajes y su cola de diálogos ----------
+    gg?.let { g ->
+        GgSideSheet(g, onUseDraft = { t -> GgDrafts.put(id, t) },
+            onAction = { a -> ggQueue = listOf(com.tiecoms.app.core.GgSuggestion(id = "draft-action", kind = a.kind, title = a.title,
+                params = kotlinx.serialization.json.JsonObject(listOfNotNull(a.assigneeName?.let { "assigneeName" to kotlinx.serialization.json.JsonPrimitive(it) },
+                    a.due?.let { "due" to kotlinx.serialization.json.JsonPrimitive(it) }).toMap()))) },
+            onJump = { mid -> scope.launch { client.ensureMessageId(id, mid)?.let { jumpTo(it) } } })
+        if (!g.open && suggestFor == null) GgConsentDialog(g)
+        suggestFor?.let { ids ->
+            GgSuggestSheet(g, ids, onRun = { l -> ggQueue = ggRunOrder(l); selecting = false; selectedIds.clear() },
+                onFreeAsk = { t ->
+                    ids.forEach { mid -> byId[mid]?.let { m -> g.quote(com.tiecoms.app.core.GgQuotedDTO(m.id, Names.person(data, m.authorId)?.name ?: "", excerpt(quoteText(ctx, m), 200))) } }
+                    g.ask(t, ids); g.show(); selecting = false; selectedIds.clear()
+                },
+                onClose = { suggestFor = null })
+        }
+    }
+    val ggHead = ggQueue.firstOrNull()
+    fun ggNext() { ggQueue = ggQueue.drop(1) }
+    LaunchedEffect(ggHead) {
+        val s = ggHead ?: return@LaunchedEffect
+        when (s.kind) {
+            "task", "reminder" -> Unit
+            "summary" -> { gg?.let { g -> g.ask(ctx.getString(R.string.ggs_summarize), s.forMessageIds); g.show() }; ggNext() }
+            "message_person" -> {
+                ggNext()
+                val p = com.tiecoms.app.core.GgSide.matchPerson(s.param("personName") ?: s.param("name") ?: s.param("assigneeName"), data.people)
+                    ?: s.param("personId")?.let { pid -> Names.person(data, pid) }
+                if (p != null) runCatching { openDirect(client, data, p.id) }.onSuccess { cid -> GgDrafts.put(cid, s.draft ?: s.title); onOpenConversation(cid, null) }
+                    .onFailure { container.toast(errorText(ctx, it)) }
+            }
+            else -> { GgDrafts.put(id, s.draft ?: s.title); ggNext() }
+        }
+    }
+    if (ggHead != null) androidx.compose.runtime.key(ggHead.id + "|" + ggQueue.size) {
+        when (ggHead.kind) {
+            "task" -> NewIssueDialog(id, ggHead.forMessageIds.firstOrNull(), ggHead.param("title") ?: ggHead.title, onClose = { ggNext() }, onCreated = {},
+                defaultOwnerId = com.tiecoms.app.core.GgSide.matchPerson(ggHead.param("assigneeName"), data.people.filter { it.id in meta.memberIds })?.id,
+                defaultDue = com.tiecoms.app.core.GgSide.dueDate(ggHead.param("due")))
+            "reminder" -> ReminderDialog(meta, ggHead.forMessageIds.firstOrNull()?.let { byId[it] }, onClose = { ggNext() }, defaultNote = ggHead.param("title") ?: ggHead.title)
+        }
+    }
 
     topicNewFor?.let { m -> TopicSheet(id, topics, edit = null, onClose = { topicNewFor = null }, onSaved = { t -> tagWithNewTopic(ctx, container, snackbar, m, t) }) }
     forwardCard?.let { e -> ForwardCardSheet(e, onClose = { forwardCard = null }, onDone = { cid -> forwardCard = null; onOpenConversation(cid, null) }) }
@@ -1118,6 +1185,8 @@ private fun Composer(
     focusSignal: Int = 0,
     /** Mensajes programados (1.6.4 / 23): 🕒 junto a enviar y pulsación larga en ➤. false en respuestas privadas. */
     canSchedule: Boolean = false, onScheduled: () -> Unit = {},
+    /** ✨ gg: pide las 3 burbujitas de respuesta (solo al tocar). null = no se muestra. */
+    onGgSpark: (() -> Unit)? = null,
 ) {
     val client = LocalClient.current
     val ctx = LocalContext.current
@@ -1232,6 +1301,15 @@ private fun Composer(
     LaunchedEffect(id, autoFocus) { if (autoFocus) { delay(300); runCatching { focus.requestFocus() } } }
     val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
     LaunchedEffect(focusSignal) { if (focusSignal > 0) { withFrameNanos { }; runCatching { focus.requestFocus() }; keyboard?.show() } }
+    // Borrador de gg (contrato 1-oct-2026): cae en la caja para editarlo; NUNCA se envía solo.
+    val ggPending by GgDrafts.pending.collectAsStateWithLifecycle()
+    var ggLabel by remember(id) { mutableStateOf(false) }
+    LaunchedEffect(ggPending[id]) {
+        val d = GgDrafts.take(id) ?: return@LaunchedEffect
+        text = d; ments = emptyList(); sel = androidx.compose.ui.text.TextRange(d.length); ggLabel = true
+        withFrameNanos { }; runCatching { focus.requestFocus() }
+    }
+    LaunchedEffect(text.isBlank()) { if (text.isBlank()) ggLabel = false }
     fun sendNow() {
         val body = text
         val bodyMents = ments
@@ -1312,6 +1390,8 @@ private fun Composer(
                     else { val (t, m, c) = com.tiecoms.app.core.Refs.insert(text, ments, rq.first, cursor, name, cid); text = t; ments = m; sel = androidx.compose.ui.text.TextRange(c) }
                 }
             }
+            if (ggLabel && editing == null && text.isNotBlank()) Text("✨ " + stringResource(R.string.ggs_draft_label), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp).testTag("ggDraftLabel"))
             if (viewOnce && editing == null) Text("① " + stringResource(R.string.vo_next), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp).testTag("viewOnceOn"))
             if (editing == null && files.isNotEmpty()) PendingFiles(files, uploading, onRemove = { f -> if (uploading == null) { files = files - f; java.io.File(f.path).delete() } })
@@ -1327,6 +1407,12 @@ private fun Composer(
                 }
                 if (editing == null) IconButton(onClick = onBring, modifier = Modifier.size(48.dp).semantics { contentDescription = bringLabel }.testTag("bring")) {
                     Text("⤓", style = MaterialTheme.typography.titleLarge)
+                }
+                if (editing == null && onGgSpark != null && text.isBlank() && !rec.recording) {
+                    val sparkCd = stringResource(R.string.ggs_quick_cd)
+                    IconButton(onClick = onGgSpark, modifier = Modifier.size(48.dp).semantics { contentDescription = sparkCd }.testTag("ggSpark")) {
+                        Text("✨", style = MaterialTheme.typography.titleMedium)
+                    }
                 }
                 if (rec.recording) RecordingBar(rec, locked, gesture, onDelete = { recorder.cancel(); locked = false; container.toast(ctx.getString(R.string.voice_cancelled)) }, onSend = { sendVoice() }, modifier = Modifier.weight(1f))
                 else RichPasteScope(enabled = editing == null && uploading == null, onImages = { uris, done -> add(uris, done) }) { OutlinedTextField(

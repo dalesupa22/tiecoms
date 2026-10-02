@@ -96,6 +96,10 @@ class AppSettings(context: Context) {
     var homeTab: String
         get() = prefs.getString("homeTab", "ALL") ?: "ALL"
         set(v) { prefs.edit().putString("homeTab", v).apply() }
+    /** Bandeja de correo usada por última vez (1.7.7, acceso con logo): google | microsoft; "" = la primera. */
+    var mailProvider: String
+        get() = prefs.getString("mailProvider", "") ?: ""
+        set(v) { prefs.edit().putString("mailProvider", v).apply() }
     /** Vista de Grupos (1.6.4): «list» (Lista, por defecto) o «tree» (Árbol). */
     var groupsView: String
         get() = prefs.getString("groupsView", "list")?.takeIf { it == "list" || it == "tree" } ?: "list"

@@ -348,6 +348,8 @@ data class BootstrapDTO(
     val myActiveCall: CallDTO? = null,
     /** Llamadas perdidas sin ver (migración 042): el número rojo de «Llamadas»; se pone en 0 con POST /calls/seen. */
     val missedCalls: Int = 0,
+    /** WhatsApp en la bandeja (migración 081, docs/CONTRATO-GG-CHAT-WA-INBOX.md): chats movidos a Grupos o DMs. Ausente = servidor anterior. */
+    val waInbox: List<WaChatDTO> = emptyList(),
 ) {
     val callsEnabled: Boolean get() = features.calls
     /** Correo en el chat prendido (`MAIL_ENABLED` en el servidor). */
@@ -715,6 +717,12 @@ data class WaChatDTO(
     val hidden: Boolean = false,
     val archivedInWhatsApp: Boolean = false,
     val linkedConversationId: String? = null,
+    /** En mi lista principal (migración 081): 'groups' | 'dms'; null = solo en la pantalla WhatsApp. */
+    val inboxPlace: String? = null,
+    /** Fijado arriba en mi lista principal (hace de pinnedAt). */
+    val inboxPinnedAt: String? = null,
+    /** Estado de la cuenta (connected, logged_out…): desconectada = fila atenuada «WhatsApp desconectado». null = no se sabe. */
+    val accountStatus: String? = null,
 )
 @Serializable data class WaCount(val total: Int = 0, val unread: Int = 0)
 @Serializable data class WaChatsPage(val chats: List<WaChatDTO> = emptyList(), val categories: Map<String, WaCount> = emptyMap())

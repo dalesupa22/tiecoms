@@ -97,14 +97,14 @@ fun remindMenu(ctx: Context, conv: ConversationDTO, message: MessageDTO?, onCust
     )
 
 @Composable
-fun ReminderDialog(conv: ConversationDTO, message: MessageDTO?, onClose: () -> Unit) {
+fun ReminderDialog(conv: ConversationDTO, message: MessageDTO?, onClose: () -> Unit, defaultNote: String? = null) {
     val ctx = LocalContext.current
     val client = LocalClient.current
     val data = client.state.collectAsStateWithLifecycle().value.data ?: return
     val def = remember { Instant.now().plusSeconds(3600).atZone(ZoneId.systemDefault()) }
     var date by rememberSaveable { mutableStateOf(def.toLocalDate().toString()) }
     var time by rememberSaveable { mutableStateOf(def.toLocalTime().withSecond(0).withNano(0).toString()) }
-    var note by rememberSaveable { mutableStateOf(message?.body?.take(120) ?: "") }
+    var note by rememberSaveable { mutableStateOf(defaultNote?.take(300) ?: message?.body?.take(120) ?: "") }
     FormSheet(stringResource(R.string.rem_custom), onClose, tag = "reminderDialog") {
         Text(stringResource(R.string.rem_about, titleOf(ctx, conv, data)), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -357,7 +357,9 @@ fun <T> Dropdown(label: String, options: List<Pair<T, String>>, selected: T, onS
 
 @Composable
 /** Asunto nuevo. [conversationId] null desde «＋ Crear»: se elige el grupo o chat (el más reciente primero). */
-fun NewIssueDialog(conversationId: String?, originMessageId: String?, defaultTitle: String, onClose: () -> Unit, onCreated: (String) -> Unit) {
+fun NewIssueDialog(conversationId: String?, originMessageId: String?, defaultTitle: String, onClose: () -> Unit, onCreated: (String) -> Unit,
+                   /** Prellenado por gg (contrato 1-oct-2026): responsable y fecha que salen del texto; la persona confirma. */
+                   defaultOwnerId: String? = null, defaultDue: String? = null) {
     val ctx = LocalContext.current
     val client = LocalClient.current
     val scope = rememberCoroutineScope()
@@ -370,8 +372,8 @@ fun NewIssueDialog(conversationId: String?, originMessageId: String?, defaultTit
     val personal = conv == com.tiecoms.app.core.IssueTasks.PERSONAL
     val members = if (personal) emptyList() else humansOf(data, conv)
     var title by rememberSaveable { mutableStateOf(defaultTitle) }
-    var owner by rememberSaveable { mutableStateOf(data.me.id) }
-    var due by rememberSaveable { mutableStateOf<String?>(null) }
+    var owner by rememberSaveable { mutableStateOf(defaultOwnerId?.takeIf { o -> members.any { it.id == o } } ?: data.me.id) }
+    var due by rememberSaveable { mutableStateOf(defaultDue) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     val you = stringResource(R.string.you); val guest = stringResource(R.string.common_guest)

@@ -563,8 +563,11 @@ fun MailListScreen(conversationId: String?, onBack: () -> Unit, onShared: (Strin
 private fun MailBrowser(ready: List<MailConnectionDTO>, conversationId: String?, onShared: (String, String?) -> Unit) {
     val ctx = LocalContext.current
     val client = LocalClient.current
-    var provider by rememberSaveable { mutableStateOf(ready.first().provider) }
+    // 1.7.7: abre en la última bandeja usada (la elige el acceso con logo de Grupos/DMs) y la recuerda.
+    val settings = LocalContainer.current.settings
+    var provider by rememberSaveable { mutableStateOf(ready.firstOrNull { it.provider == settings.mailProvider }?.provider ?: ready.first().provider) }
     if (ready.none { it.provider == provider }) provider = ready.first().provider
+    LaunchedEffect(provider) { settings.mailProvider = provider }
     var f by remember { mutableStateOf(Mail.Filters()) }
     var cat by remember(provider) { mutableStateOf<String?>(null) }
     var qText by rememberSaveable { mutableStateOf("") }

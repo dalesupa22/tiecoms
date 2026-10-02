@@ -38,6 +38,9 @@ class VoicePlayer(private val ctx: Context, private val okHttp: OkHttpClient, pr
     private var player: ExoPlayer? = null
     private var token: String? = null
     private var queue: List<Item> = emptyList()
+    private var waSource: String? = null
+    var privacyCheck: (String) -> Boolean = { true }
+    var privacyDenied: (String) -> Unit = {}
     private var ticker: Job? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
@@ -50,6 +53,10 @@ class VoicePlayer(private val ctx: Context, private val okHttp: OkHttpClient, pr
             p.addListener(object : Player.Listener {
                 override fun onIsPlayingChanged(isPlaying: Boolean) { _state.value = _state.value.copy(playing = isPlaying) }
                 override fun onPlaybackStateChanged(s: Int) { if (s == Player.STATE_ENDED) next() }
+                override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                    val denied = generateSequence<Throwable>(error) { it.cause }.filterIsInstance<androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException>().any { it.responseCode in listOf(403, 404) }
+                    if (denied) waSource?.let { source -> stopOnMain(); privacyDenied(source) }
+                }
             })
             player = p
         }
@@ -64,6 +71,9 @@ class VoicePlayer(private val ctx: Context, private val okHttp: OkHttpClient, pr
     fun play(item: Item, following: List<Item>, bearer: String, startFraction: Float? = null): Unit = onMain { playOnMain(item, following, bearer, startFraction) }
 
     private fun playOnMain(item: Item, following: List<Item>, bearer: String, startFraction: Float?) {
+        val source = com.tiecoms.app.core.WaPrivacy.source(item.url)
+        if (source != null && !privacyCheck(source)) { stopOnMain(); return }
+        waSource = source
         val p = ensure(bearer)
         if (_state.value.currentId == item.id) { if (startFraction != null) seek(startFraction) else if (p.isPlaying) p.pause() else p.play(); return }
         queue = following
@@ -116,6 +126,11 @@ class VoicePlayer(private val ctx: Context, private val okHttp: OkHttpClient, pr
         settings.listenedVoice = _listened.value
     }
 
+    fun stopWhatsApp(account: String, jids: List<String>, reset: Boolean): Unit = onMain {
+        fun affected(source: String?) = source?.let(com.tiecoms.app.core.WaInbox::parse)?.let { it.first == account && (reset || it.second in jids) } == true
+        queue = queue.filterNot { affected(com.tiecoms.app.core.WaPrivacy.source(it.url)) }
+        if (affected(waSource)) stopOnMain()
+    }
     fun stop(): Unit = onMain { stopOnMain() }
-    private fun stopOnMain() { player?.stop(); queue = emptyList(); _state.value = _state.value.copy(currentId = null, playing = false, positionMs = 0) }
+    private fun stopOnMain() { waSource = null; player?.stop(); player?.clearMediaItems(); queue = emptyList(); _state.value = _state.value.copy(currentId = null, playing = false, positionMs = 0) }
 }

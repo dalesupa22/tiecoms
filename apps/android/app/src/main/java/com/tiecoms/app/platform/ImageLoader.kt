@@ -25,7 +25,7 @@ import java.util.concurrent.ConcurrentHashMap
  * caché en memoria (LRU por bytes), caché HTTP en disco de OkHttp (respeta las cabeceras del API),
  * una sola descarga por URL a la vez y reducción al decodificar. Sin dependencias nuevas.
  */
-class ImageLoader(context: Context, base: OkHttpClient) {
+class ImageLoader(context: Context, base: OkHttpClient, private val privacyCheck: (String) -> String = { "" }, private val privacyDenied: (String) -> Unit = {}) {
     /** Byte-array requests only; no private images are retained by Coil after leaving a viewer. */
     val animations = coil.ImageLoader.Builder(context)
         .components {
@@ -61,12 +61,18 @@ class ImageLoader(context: Context, base: OkHttpClient) {
 
     /** Bounded authenticated bytes; once-only signed URLs bypass every disk/memory cache. */
     suspend fun loadBytes(url: String, bearer: String?, private: Boolean = false): ByteArray? {
-        val transport = if (private) uncachedHttp else http
+        val source = com.tiecoms.app.core.WaPrivacy.source(url)
+        val token = source?.let { runCatching { privacyCheck(it) }.getOrNull() ?: return null }
+        val transport = if (private || source != null) uncachedHttp else http
         return try {
             transport.newCall(Request.Builder().url(url).apply {
                 if (bearer != null) header("authorization", "Bearer $bearer")
                 if (private) header("cache-control", "no-store")
             }.build()).await().use { response ->
+                if (source != null) {
+                    if (runCatching { privacyCheck(source) }.getOrNull() != token) return@use null
+                    if (response.code in listOf(403, 404)) privacyDenied(source)
+                }
                 if (!response.isSuccessful) return@use null
                 val body = response.body ?: return@use null
                 val max = com.tiecoms.app.core.Attachments.MAX_BYTES
@@ -80,7 +86,7 @@ class ImageLoader(context: Context, base: OkHttpClient) {
                         if (out.size().toLong() + read > max) return@use null
                         out.write(buffer, 0, read)
                     }
-                    out.toByteArray()
+                    if (source != null && runCatching { privacyCheck(source) }.getOrNull() != token) null else out.toByteArray()
                 }
             }
         } catch (e: kotlinx.coroutines.CancellationException) { throw e }
@@ -89,7 +95,7 @@ class ImageLoader(context: Context, base: OkHttpClient) {
 
     /** [bearer]: para imágenes protegidas (adjuntos y sus miniaturas). */
     suspend fun load(url: String, px: Int, bearer: String? = null): ImageBitmap? {
-        if (bearer != null) return loadBytes(url, bearer, private = true)?.let { decode(it, px) }
+        if (bearer != null || com.tiecoms.app.core.WaPrivacy.source(url) != null) return loadBytes(url, bearer, private = true)?.let { decode(it, px) }
         val k = key(url, px)
         memory.get(k)?.let { return it }
         failedAt[k]?.let { if (System.currentTimeMillis() - it < 60_000) return null }

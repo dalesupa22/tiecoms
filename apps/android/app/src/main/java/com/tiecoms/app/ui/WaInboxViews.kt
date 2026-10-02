@@ -206,6 +206,7 @@ fun rememberAccessCounts(): AccessCounts {
     var wa by remember { mutableStateOf<Int?>(null) }
     var mail by remember { mutableStateOf<Int?>(null) }
     LaunchedEffect(st.waRevision) {
+        wa = null
         runCatching { client.waUnreadTotal() }.onSuccess { wa = it }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
     }
     LaunchedEffect(mailOn) {

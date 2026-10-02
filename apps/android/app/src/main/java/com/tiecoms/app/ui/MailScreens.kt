@@ -943,7 +943,13 @@ fun WaShareSheet(c: WaChatDTO, message: WaMessageDTO, onClose: () -> Unit, onDon
     val ctx = LocalContext.current
     val client = LocalClient.current
     val container = LocalContainer.current
-    val data = client.state.collectAsStateWithLifecycle().value.data ?: return
+    val state = client.state.collectAsStateWithLifecycle().value
+    val source = com.tiecoms.app.core.WaInbox.key(c)
+    val epoch = remember(source) { state.waPrivacy.token(source) }
+    val permitted = state.waPrivacy.allows(source) && epoch == state.waPrivacy.token(source)
+    LaunchedEffect(permitted) { if (!permitted) onClose() }
+    if (!permitted) return
+    val data = state.data ?: return
     var picked by rememberSaveable { mutableStateOf(listOf<String>()) }
     var comment by rememberSaveable { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }

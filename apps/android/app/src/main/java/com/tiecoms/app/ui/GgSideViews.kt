@@ -1,5 +1,7 @@
 package com.tiecoms.app.ui
 
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -135,6 +137,11 @@ class GgSideModel(private val client: TieComsClient, val source: String, private
     var consentFor by mutableStateOf<(suspend () -> Unit)?>(null)
     private var opened = false
 
+    fun purgePrivacy() {
+        messages.clear(); quoted.clear(); quick = null; pending = 0; open = false; opened = false
+        closedWithHistory = false; consentFor = null; available = false
+    }
+
     suspend fun load() {
         if (client.ggSideMissing) { available = false; return }
         try {
@@ -207,7 +214,7 @@ class GgSideModel(private val client: TieComsClient, val source: String, private
             // El servidor lo guarda como mensaje de gg: se vuelve a pedir el hilo; si falla, se muestra igual.
             val t = runCatching { client.ggSide(source) }.getOrNull()
             if (t != null && t.messages.lastOrNull()?.extra?.drafts?.isNotEmpty() == true) { messages.clear(); messages.addAll(t.messages) }
-            else messages.add(GgSideMessageDTO(id = "local-" + System.nanoTime(), role = "gg", body = "", extra = com.tiecoms.app.core.GgExtraDTO(drafts = drafts)))
+            else if (runCatching { client.requireWaSource(source) }.isSuccess) messages.add(GgSideMessageDTO(id = "local-" + System.nanoTime(), role = "gg", body = "", extra = com.tiecoms.app.core.GgExtraDTO(drafts = drafts)))
         }
     }
 
@@ -234,8 +241,13 @@ fun rememberGgSide(source: String, enabled: Boolean): GgSideModel? {
     val client = LocalClient.current
     val scope = rememberCoroutineScope()
     if (!enabled) return null
+    val privacy = client.state.collectAsStateWithLifecycle().value.waPrivacy
     val model = remember(source, client) { GgSideModel(client, source, scope) }
-    LaunchedEffect(model) { model.load() }
+    val epoch = remember(source, client) { privacy.token(source) }
+    val permitted = privacy.allows(source) && privacy.token(source) == epoch
+    LaunchedEffect(model, permitted) { if (permitted) model.load() else model.purgePrivacy() }
+    androidx.compose.runtime.DisposableEffect(model) { onDispose { if (com.tiecoms.app.core.WaInbox.isWa(source)) model.purgePrivacy() } }
+    if (!permitted) return null
     return model
 }
 

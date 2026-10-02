@@ -38,6 +38,7 @@ sealed interface AccountEvent {
     /** Aviso de reunión (SPEC-v4 §E): empieza en [minutes] minutos (10). */
     data class EventSoon(val event: CalendarEventDTO, val minutes: Int) : AccountEvent
     data class PrefsUpdated(val conversationId: String?, val workspaceId: String?) : AccountEvent
+    data class WaPrivacy(val accountId: String, val jids: List<String> = emptyList(), val reset: Boolean = false) : AccountEvent
     data class WhatsAppUpdated(val accountId: String?) : AccountEvent
     /** `wa.inbox` (contrato 1-oct-2026): un chat de WhatsApp de mi bandeja cambió o recibió un mensaje. null = recargar. */
     data class WaInboxUpdated(val chat: WaChatDTO?) : AccountEvent
@@ -123,6 +124,7 @@ fun decodeAccountEvent(el: JsonElement): AccountEvent {
         "event.soon" -> obj(o, "event", CalendarEventDTO.serializer())?.takeIf { it.id.isNotEmpty() }
             ?.let { AccountEvent.EventSoon(it, (o.long("minutes") ?: 10L).toInt()) } ?: AccountEvent.Unknown(type)
         "prefs.updated" -> AccountEvent.PrefsUpdated(o.str("conversationId"), o.str("workspaceId"))
+        "wa.privacy" -> AccountEvent.WaPrivacy(o.str("accountId") ?: "", (o["jids"] as? kotlinx.serialization.json.JsonArray)?.mapNotNull { (it as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull } ?: emptyList(), o["reset"]?.toString() == "true")
         "whatsapp.updated" -> AccountEvent.WhatsAppUpdated(o.str("accountId"))
         "wa.inbox" -> AccountEvent.WaInboxUpdated(obj(o, "chat", WaChatDTO.serializer())?.takeIf { it.accountId.isNotEmpty() && it.jid.isNotEmpty() })
         "drive.updated" -> AccountEvent.DriveUpdated(o.str("workspaceId"))

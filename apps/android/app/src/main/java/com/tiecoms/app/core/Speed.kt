@@ -71,7 +71,7 @@ object Speed {
                 val tail = c.messages.takeLast(MAX_MESSAGES).map { m -> if (m.viewOnce) m.copy(body = "", attachments = emptyList()) else m }
                 CachedConversation(id, tail, c.lastEventSeq, hasMore = c.hasMore || c.messages.size > tail.size)
             }.toList()
-        return SessionSnapshot(VERSION, d.me.id, now, d, convs, state.blockedUserIds.toList())
+        return SessionSnapshot(VERSION, d.me.id, now, d.copy(waInbox = emptyList()), convs, state.blockedUserIds.toList())
     }
 
     fun encode(s: SessionSnapshot): String = TcJson.encodeToString(SessionSnapshot.serializer(), s)
@@ -82,7 +82,7 @@ object Speed {
         val s = runCatching { TcJson.decodeFromString(SessionSnapshot.serializer(), json) }.getOrNull() ?: return null
         if (s.v != VERSION || s.userId != userId || s.data.me.id != userId) return null
         if (now - s.savedAt > MAX_AGE_MS) return null
-        return s
+        return s.copy(data = s.data.copy(waInbox = emptyList()))
     }
 
     /** Conversaciones en memoria a partir de la copia: cargadas, con su cursor para recuperar lo que falta. */

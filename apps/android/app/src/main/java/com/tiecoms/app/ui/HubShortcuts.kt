@@ -100,6 +100,7 @@ fun HubShortcuts(onOpen: (String) -> Unit, modifier: Modifier = Modifier) {
     var waUnread by remember { mutableIntStateOf(0) }
     // Los no leídos de WhatsApp: los mismos contadores por categoría que usa la pantalla de WhatsApp.
     LaunchedEffect(st.waRevision) {
+        waUnread = 0
         runCatching { client.waUnreadCount() }
             .onSuccess { waUnread = it }
             .onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }

@@ -143,10 +143,10 @@ class AppContainer(private val app: Application) {
     val calls by lazy { com.tiecoms.app.platform.CallManager(app, this) }
 
     /** Notas de voz: un solo reproductor para toda la app (reproducción continua). */
-    val voice by lazy { com.tiecoms.app.platform.VoicePlayer(app, okHttp, settings) }
+    val voice by lazy { com.tiecoms.app.platform.VoicePlayer(app, okHttp, settings).apply { privacyCheck = { source -> runCatching { client.value.requireWaSource(source) }.isSuccess }; privacyDenied = { client.value.denyWaSource(it) } } }
 
     /** Imágenes remotas (fotos y miniaturas públicas) con caché en memoria y en disco. */
-    val images by lazy { com.tiecoms.app.platform.ImageLoader(app, okHttp) }
+    val images by lazy { com.tiecoms.app.platform.ImageLoader(app, okHttp, privacyCheck = { source -> val c = client.value; "${c.hashCode()}:${c.sessionGeneration}:${c.requireWaSource(source)}" }, privacyDenied = { source -> client.value.denyWaSource(source) }) }
 
     /** Última versión publicada (GET /app-version). null = aún no se sabe o falló la red: no se avisa nada. */
     val appVersion = MutableStateFlow<com.tiecoms.app.core.AppVersionDTO?>(null)
@@ -490,6 +490,7 @@ class AppContainer(private val app: Application) {
     private fun onSignal(origin: TieComsClient, sig: ClientSignal) {
         if (client.value !== origin) return
         when (sig) {
+            is ClientSignal.WaPrivacyChanged -> voice.stopWhatsApp(sig.accountId, sig.jids, sig.reset)
             is ClientSignal.Sent -> sounds.play(Sound.SEND)
             is ClientSignal.Incoming -> {
                 val m = sig.message
@@ -581,6 +582,7 @@ class AppContainer(private val app: Application) {
             is ClientSignal.CallRinging -> calls.ring(sig.call, sig.callerName.ifBlank { Names.person(client.value.state.value.data, sig.call.startedBy)?.name ?: "" }, sig.conversationTitle)
             // Sin sesión: fuera sugerencias de Direct Share, burbujas y notificaciones de la cuenta anterior.
             is ClientSignal.SignedOut -> {
+                voice.stop()
                 notifier.cancelSession(origin to sig.generation)
                 origin.clearNoticesIfSignedOut {
                     if (client.value === origin) com.tiecoms.app.platform.ConversationShortcuts.clear(app)

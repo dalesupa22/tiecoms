@@ -69,6 +69,7 @@ data class ClientState(
     val events: Map<String, CalendarEventDTO> = emptyMap(),
     /** Sube cuando el puente de WhatsApp trae novedades: la pantalla vuelve a pedir la lista. */
     val waRevision: Int = 0,
+    val waPrivacy: WaPrivacy = WaPrivacy(),
     /** Sube cuando cambia algún árbol de archivos (`drive.updated`): la pantalla Archivos recarga. */
     val driveRevision: Int = 0,
     val blockedUserIds: Set<String> = emptySet(),
@@ -95,6 +96,7 @@ data class ClientState(
 
 /** Avisos puntuales para sonidos y notificaciones. */
 sealed interface ClientSignal {
+    data class WaPrivacyChanged(val accountId: String, val jids: List<String>, val reset: Boolean) : ClientSignal
     /** Mensaje de otra persona recibido EN VIVO (no en la recuperación masiva). */
     data class Incoming(val message: MessageDTO, val generation: Long = 0) : ClientSignal
     /** Mensaje de otra persona recibido EN VIVO que no avisa (chat silenciado o «No molestar»). */
@@ -292,19 +294,56 @@ class TieComsClient(
     fun meta(id: String): ConversationDTO? = s.data?.conversations?.firstOrNull { it.id == id }
     val myId: String? get() = s.data?.me?.id
 
+    private val waFiles = java.util.concurrent.ConcurrentHashMap<String, MutableSet<java.io.File>>()
+    fun requireWaSource(source: String): Long {
+        WaInbox.parse(source)?.first?.let { account -> setState { copy(waPrivacy = waPrivacy.observe(account)) } }
+        val privacy = s.waPrivacy
+        if (!privacy.allows(source)) throw ApiException(404, "not_found", "WhatsApp unavailable")
+        return privacy.token(source)
+    }
+    fun trackWaFile(source: String, file: java.io.File) { waFiles.computeIfAbsent(source) { java.util.concurrent.ConcurrentHashMap.newKeySet() }.add(file) }
+    private fun invalidateKnownWaPrivacy() {
+        (s.waPrivacy.knownAccounts + s.data?.waInbox.orEmpty().map { it.accountId }).forEach { revokeWaPrivacy(it, reset = true) }
+    }
+    private fun denyWaListing(accountId: String? = null) {
+        val accounts = accountId?.let { setOf(it) } ?: (s.waPrivacy.knownAccounts + s.data?.waInbox.orEmpty().map { it.accountId })
+        accounts.filterNot { it in s.waPrivacy.accounts }.forEach { revokeWaPrivacy(it, reset = true) }
+    }
+    fun denyWaSource(source: String) { WaInbox.parse(source)?.let { (a, j) -> revokeWaPrivacy(a, listOf(j)) } }
+    private fun requireWaToken(source: String?, token: Long?) {
+        if (source != null && requireWaSource(source) != token) throw kotlinx.coroutines.CancellationException("WhatsApp privacy changed")
+    }
+    private fun purgeWaResources(accountId: String, jids: List<String>, reset: Boolean) {
+        fun affected(source: String) = WaInbox.parse(source)?.let { it.first == accountId && (reset || it.second in jids) } == true
+        waCountCache = null
+        waFiles.keys.filter(::affected).forEach { source -> waFiles.remove(source)?.forEach { it.delete() } }
+        _signals.tryEmit(ClientSignal.WaPrivacyChanged(accountId, jids, reset))
+    }
+    fun revokeWaPrivacy(accountId: String, jids: List<String> = emptyList(), reset: Boolean = false) {
+        if (accountId.isBlank() || (!reset && jids.isEmpty())) return
+        fun affected(source: String) = WaInbox.parse(source)?.let { it.first == accountId && (reset || it.second in jids) } == true
+        setState { copy(waPrivacy = waPrivacy.revoke(accountId, jids, reset), waRevision = waRevision + 1,
+            data = data?.let { it.copy(waInbox = it.waInbox.filterNot { chat -> affected(WaInbox.key(chat)) }) }) }
+        purgeWaResources(accountId, jids, reset)
+    }
+
     // ---------- HTTP con sesión ----------
     private suspend fun <T> request(method: String, path: String, body: String? = null, serializer: KSerializer<T>, raw: HttpApi.RawBody? = null): T {
+        val source = WaPrivacy.source(path, body)
+        val privacyToken = source?.let(::requireWaSource)
         // Con la copia local a la vista, la sesión se está recuperando (el primer refresh cambia la generación):
         // se espera ese refresh para no descartar lo que la persona hace en el primer segundo.
         if (accessToken == null && refreshing != null) runCatching { refresh() }
         val generation = sessionGeneration
         if (accessToken != null && now() > accessExp - 30_000) refresh()
         requireSession(generation)
+        requireWaToken(source, privacyToken)
         var r = http.exec(method, path, body, accessToken, raw)
         requireSession(generation)
         if (r.code == 401) {
             val outcome = refresh()
             requireSession(generation)
+            requireWaToken(source, privacyToken)
             when (outcome) {
                 RefreshOutcome.OK -> r = http.exec(method, path, body, accessToken, raw)
                 RefreshOutcome.UNAUTHORIZED -> { handleSignedOut(); throw HttpApi.parseError(r) }
@@ -312,6 +351,10 @@ class TieComsClient(
             }
             requireSession(generation)
             if (r.code == 401) { handleSignedOut(); throw HttpApi.parseError(r) }
+        }
+        if (source != null) {
+            if (requireWaSource(source) != privacyToken) throw kotlinx.coroutines.CancellationException("WhatsApp privacy changed")
+            if (r.code in listOf(403, 404) && HttpApi.parseError(r).code != "ai_consent_required") denyWaSource(source)
         }
         if (!r.ok) throw HttpApi.parseError(r)
         return TcJson.decodeFromString(serializer, r.body.ifBlank { "{}" })
@@ -376,6 +419,7 @@ class TieComsClient(
     private fun paintFromCache(): Boolean {
         val userId = storage.get(LAST_USER_KEY) ?: return false
         val snap = Speed.decode(runCatching { snapshots.read(userId) }.getOrNull(), userId, now()) ?: return false
+        synchronized(snapshotLock) { runCatching { snapshots.write(userId, Speed.encode(snap)) } } // Migrate old WA previews even while offline.
         val saved = storage.get("u:$userId:outbox")?.let { runCatching { TcJson.decodeFromString(ListSerializer(PendingMessage.serializer()), it) }.getOrNull() } ?: emptyList()
         setState {
             copy(status = SessionStatus.READY, data = snap.data, conversations = Speed.restore(snap), blockedUserIds = snap.blockedUserIds.toSet(),
@@ -479,6 +523,8 @@ class TieComsClient(
 
     private fun handleSignedOut(): Unit = synchronized(noticeSessionLock) {
         val previousNoticeGeneration = noticeGeneration
+        val waAccounts = s.waPrivacy.knownAccounts + s.data?.waInbox.orEmpty().map { it.accountId } + waFiles.keys.mapNotNull { WaInbox.parse(it)?.first }
+        waAccounts.forEach { revokeWaPrivacy(it, reset = true) }
         endNoticeSession()
         sessionGeneration++; noticeGeneration++; authSessionId = null
         cancelMeetingConnect(); meetingAttempts.clear(); meetingOwner = null; meetingStore.set(null)
@@ -548,6 +594,7 @@ class TieComsClient(
     suspend fun loadBootstrap(): BootstrapDTO = withContext(dispatcher) { loadBootstrapInternal() }
 
     private suspend fun loadBootstrapInternal(): BootstrapDTO {
+        val privacyRevision = s.waPrivacy.revision
         val raw = request("GET", "/bootstrap", null, JsonElement.serializer())
         val data = TcJson.decodeFromJsonElement(BootstrapDTO.serializer(), raw)
         runCatching { Instant.parse(data.serverTime).toEpochMilli() }.getOrNull()?.let { serverOffset = it - now() }
@@ -569,7 +616,10 @@ class TieComsClient(
                         unreadMentions = if (existing.lastReadSeq >= incoming.lastMessageSeq) 0 else existing.unreadMentions)
                 else incoming
             })
-            copy(data = merged, conversations = conversations.filterKeys { it in allowed }, dndUntil = dnd, dndLocalOnly = localOnly)
+            val privacy = if (privacyRevision == waPrivacy.revision) waPrivacy.accept(merged.waInbox) else waPrivacy
+            val rows = if (privacyRevision == privacy.revision) merged.waInbox else this.data?.waInbox.orEmpty()
+            copy(data = merged.copy(waInbox = rows.filter { privacy.allows(WaInbox.key(it)) }), waPrivacy = privacy,
+                conversations = conversations.filterKeys { it in allowed }, dndUntil = dnd, dndLocalOnly = localOnly)
         }
         // 1.7.1: la llamada en la que estoy desde otro dispositivo (con myDevices) entra al estado de llamadas.
         sorted.myActiveCall?.takeIf { !it.ended }?.let { c -> setState { copy(calls = Calls.put(calls, c)) } }
@@ -645,6 +695,8 @@ class TieComsClient(
     private suspend fun resyncInternal() {
         if (s.status != SessionStatus.READY || !live) return
         try {
+            invalidateKnownWaPrivacy()
+            runCatching { waAccounts() }
             loadBootstrapInternal()
             runCatching { loadBlocks() }
             for (c in s.data?.conversations ?: emptyList()) {
@@ -657,6 +709,7 @@ class TieComsClient(
 
     /** Volver a primer plano o recuperar la red. */
     fun wake(forceReconnect: Boolean = false) {
+        invalidateKnownWaPrivacy()
         scope.launch {
             when (s.status) {
                 SessionStatus.READY -> {
@@ -692,11 +745,14 @@ class TieComsClient(
                 if (!dndActive()) _signals.tryEmit(ClientSignal.EventSoon(e.event, e.minutes))
             }
             is AccountEvent.PrefsUpdated -> scheduleBootstrap()
-            is AccountEvent.WhatsAppUpdated -> setState { copy(waRevision = waRevision + 1) }
+            is AccountEvent.WaPrivacy -> revokeWaPrivacy(e.accountId, e.jids, e.reset)
+            is AccountEvent.WhatsAppUpdated -> { setState { copy(waRevision = waRevision + 1) }; scope.launch { runCatching { waAccounts() }; scheduleBootstrap() } }
             // WhatsApp en la bandeja: la fila se actualiza sin recargar el bootstrap; sin chat, se recarga.
-            is AccountEvent.WaInboxUpdated -> if (e.chat == null) scheduleBootstrap() else setState {
-                val d = data ?: return@setState this
-                copy(data = d.copy(waInbox = WaInbox.apply(d.waInbox, e.chat)), waRevision = waRevision + 1)
+            is AccountEvent.WaInboxUpdated -> if (e.chat == null) scheduleBootstrap() else {
+                if (e.chat.hidden) revokeWaPrivacy(e.chat.accountId, listOf(e.chat.jid))
+                setState { val d = data ?: return@setState this
+                    copy(data = d.copy(waInbox = WaInbox.apply(d.waInbox, e.chat).filter { waPrivacy.allows(WaInbox.key(it)) }), waRevision = waRevision + 1)
+                }
             }
             is AccountEvent.DriveUpdated -> setState { copy(driveRevision = driveRevision + 1) }
             AccountEvent.RemindersChanged -> scope.launch { runCatching { loadRemindersInternal() } }
@@ -1776,10 +1832,27 @@ class TieComsClient(
 
     /** Descarga autenticada de un adjunto (o su miniatura) a [dest]; renueva el token si hace falta. */
     suspend fun downloadAttachment(path: String, dest: java.io.File, onProgress: ((Long, Long) -> Unit)? = null) = withContext(dispatcher) {
-        if (accessToken != null && now() > accessExp - 30_000) refresh()
-        var code = http.download(path, accessToken, dest, onProgress)
-        if (code == 401 && refresh() == RefreshOutcome.OK) code = http.download(path, accessToken, dest, onProgress)
-        if (code !in 200..299) throw ApiException(code, if (code == 403) "forbidden" else if (code == 404) "not_found" else "http_$code", "HTTP $code")
+        val generation = sessionGeneration
+        val source = WaPrivacy.source(path); val token = source?.let(::requireWaSource)
+        if (source != null) { dest.delete(); trackWaFile(source, dest); trackWaFile(source, java.io.File(dest.parentFile, dest.name + ".part")) }
+        try {
+            if (accessToken != null && now() > accessExp - 30_000) refresh()
+            requireSession(generation)
+            requireWaToken(source, token)
+            var code = http.download(path, accessToken, dest, onProgress)
+            if (code == 401) {
+                val outcome = refresh()
+                requireSession(generation)
+                requireWaToken(source, token)
+                if (outcome == RefreshOutcome.OK) code = http.download(path, accessToken, dest, onProgress)
+            }
+            requireSession(generation)
+            if (source != null) {
+                if (requireWaSource(source) != token) throw kotlinx.coroutines.CancellationException("WhatsApp privacy changed")
+                if (code in listOf(403, 404)) denyWaSource(source)
+            }
+            if (code !in 200..299) throw ApiException(code, if (code == 403) "forbidden" else if (code == 404) "not_found" else "http_$code", "HTTP $code")
+        } catch (e: Exception) { dest.delete(); throw e }
     }
 
     /** Token vigente para cargar imágenes protegidas (miniaturas de adjuntos). */
@@ -2024,7 +2097,33 @@ class TieComsClient(
     }
 
     // ---------- WhatsApp ----------
-    suspend fun waAccounts(): WaAccountsPage = withContext(dispatcher) { req("GET", "/whatsapp/accounts", null, WaAccountsPage.serializer()) }
+    suspend fun waAccounts(): WaAccountsPage = withContext(dispatcher) {
+        val revision = s.waPrivacy.revision
+        val page = try { req("GET", "/whatsapp/accounts", null, WaAccountsPage.serializer()) }
+        catch (e: ApiException) { if (e.status in listOf(403, 404)) denyWaListing(); throw e }
+        var resetAccounts = emptyList<String>()
+        setState {
+            if (revision != waPrivacy.revision) throw kotlinx.coroutines.CancellationException("WhatsApp privacy changed")
+            var privacy = waPrivacy
+            var changes = 0
+            val resets = mutableListOf<String>()
+            page.accounts.forEach { account ->
+                privacy = privacy.observe(account.id)
+                if (account.privacyReady == false && account.id !in privacy.accounts) {
+                    privacy = privacy.revoke(account.id, emptyList(), true)
+                    resets += account.id; changes++
+                } else if (account.privacyReady == true) {
+                    if (account.id in privacy.accounts) changes++
+                    privacy = privacy.ready(account.id)
+                }
+            }
+            resetAccounts = resets
+            copy(waPrivacy = privacy, waRevision = waRevision + changes,
+                data = data?.let { d -> d.copy(waInbox = d.waInbox.filter { privacy.allows(WaInbox.key(it)) }) })
+        }
+        resetAccounts.forEach { purgeWaResources(it, emptyList(), true) }
+        page
+    }
     suspend fun waCreate(label: String, kind: String, pairPhone: String?): WaAccountDTO = withContext(dispatcher) {
         req("POST", "/whatsapp/accounts", buildJsonObject {
             put("label", JsonPrimitive(label)); put("kind", JsonPrimitive(kind)); put("pairPhone", pairPhone?.let { JsonPrimitive(it) } ?: JsonNull)
@@ -2035,13 +2134,21 @@ class TieComsClient(
     }
     suspend fun waRemove(id: String) = withContext(dispatcher) { req("DELETE", "/whatsapp/accounts/$id", null, JsonElement.serializer()); Unit }
     suspend fun waChats(accountId: String?, category: String?, groups: Boolean?, hidden: Boolean, search: String?, limit: Int? = null, cursor: String? = null): WaChatsPage = withContext(dispatcher) {
-        req("GET", "/whatsapp/chats" + q("accountId" to accountId, "category" to category, "groups" to groups?.let { if (it) "1" else "0" }, "hidden" to if (hidden) "1" else null, "q" to search?.takeIf { it.isNotBlank() }, "limit" to limit?.toString(), "cursor" to cursor), null, WaChatsPage.serializer())
+        val revision = s.waPrivacy.revision
+        val page = try { req("GET", "/whatsapp/chats" + q("accountId" to accountId, "category" to category, "groups" to groups?.let { if (it) "1" else "0" }, "hidden" to if (hidden) "1" else null, "q" to search?.takeIf { it.isNotBlank() }, "limit" to limit?.toString(), "cursor" to cursor), null, WaChatsPage.serializer()) }
+        catch (e: ApiException) { if (e.status in listOf(403, 404)) denyWaListing(accountId); throw e }
+        if (revision != s.waPrivacy.revision) throw kotlinx.coroutines.CancellationException("WhatsApp privacy changed")
+        setState {
+            if (revision != waPrivacy.revision) throw kotlinx.coroutines.CancellationException("WhatsApp privacy changed")
+            copy(waPrivacy = waPrivacy.accept(page.chats))
+        }
+        page.copy(chats = page.chats.filter { s.waPrivacy.allows(WaInbox.key(it)) })
     }
     private var waCountCache: Triple<String, Long, Int>? = null
     private val waCountMutex = kotlinx.coroutines.sync.Mutex()
     suspend fun waUnreadCount(): Int = waCountMutex.withLock {
         val owner = myId ?: return@withLock 0
-        val ownerKey = "$owner:$sessionGeneration"
+        val ownerKey = "$owner:$sessionGeneration:${s.waPrivacy.revision}"
         waCountCache?.takeIf { it.first == ownerKey && now() - it.second < 60_000 }?.let { return@withLock it.third }
         val generation = sessionGeneration
         val p = waChats(null, null, null, false, null, limit = 1)
@@ -2062,8 +2169,10 @@ class TieComsClient(
      */
     suspend fun waSetInbox(c: WaChatDTO, place: String? = null, placeSet: Boolean = false, pinned: Boolean? = null): WaChatDTO = withContext(dispatcher) {
         val before = s.data?.waInbox
+        val revision = s.waPrivacy.revision; val generation = sessionGeneration
+        requireWaSource(WaInbox.key(c))
         val want = WaInbox.optimistic(c, place, placeSet, pinned, Instant.ofEpochMilli(now()).toString())
-        setState { val d = data ?: return@setState this; copy(data = d.copy(waInbox = WaInbox.apply(d.waInbox, want))) }
+        setState { val d = data ?: return@setState this; copy(data = d.copy(waInbox = WaInbox.apply(d.waInbox, want).filter { waPrivacy.allows(WaInbox.key(it)) })) }
         val body = buildJsonObject {
             if (placeSet) put("inboxPlace", place?.let { JsonPrimitive(it) } ?: JsonNull)
             pinned?.let { put("inboxPinned", JsonPrimitive(it)) }
@@ -2073,16 +2182,16 @@ class TieComsClient(
             if (WaInbox.serverIgnored(want, got)) throw ApiException(501, "wa_inbox_unsupported", "WhatsApp inbox not available yet")
             // El DTO del PATCH puede no traer el estado de la cuenta: se conserva el que había.
             val merged = got.copy(accountStatus = got.accountStatus ?: c.accountStatus, accountLabel = got.accountLabel.ifEmpty { c.accountLabel })
-            setState { val d = data ?: return@setState this; copy(data = d.copy(waInbox = WaInbox.apply(d.waInbox, merged)), waRevision = waRevision + 1) }
+            setState { val d = data ?: return@setState this; copy(data = d.copy(waInbox = WaInbox.apply(d.waInbox, merged).filter { waPrivacy.allows(WaInbox.key(it)) }), waRevision = waRevision + 1) }
             merged
         } catch (e: Exception) {
-            if (before != null) setState { val d = data ?: return@setState this; copy(data = d.copy(waInbox = before)) }
+            if (before != null && revision == s.waPrivacy.revision && generation == sessionGeneration) setState { val d = data ?: return@setState this; copy(data = d.copy(waInbox = before.filter { waPrivacy.allows(WaInbox.key(it)) })) }
             throw e
         }
     }
     /** No leídos de WhatsApp (suma de categories[*].unread) sin bajar la lista: GET /whatsapp/chats?limit=1. null = sin cuenta. */
     suspend fun waUnreadTotal(): Int? = withContext(dispatcher) {
-        val p = req("GET", "/whatsapp/chats?limit=1", null, WaChatsPage.serializer())
+        val p = waChats(null, null, null, false, null, limit = 1)
         if (p.categories.isEmpty() && p.chats.isEmpty()) null else p.categories.values.sumOf { it.unread }
     }
     private var mailUnreadAt = 0L
@@ -2140,8 +2249,9 @@ class TieComsClient(
     /** Número del botón gg por fuente (caché del servidor, sin IA). */
     suspend fun ggPending(sources: List<String>): Map<String, Int> = withContext(dispatcher) {
         if (sources.isEmpty()) return@withContext emptyMap()
+        val revision = s.waPrivacy.revision
         val o = gg { req("GET", "/gg/side/pending" + q("sources" to sources.joinToString(",")), null, JsonElement.serializer()) } as? JsonObject ?: return@withContext emptyMap()
-        o.mapNotNull { (k, v) -> (v as? JsonPrimitive)?.contentOrNull?.toIntOrNull()?.let { k to it } }.toMap()
+        o.filterKeys { !WaInbox.isWa(it) || (revision == s.waPrivacy.revision && s.waPrivacy.allows(it)) }.mapNotNull { (k, v) -> (v as? JsonPrimitive)?.contentOrNull?.toIntOrNull()?.let { k to it } }.toMap()
     }
     /** Permiso de IA de la cuenta (POST /assistant/consent): el banner de siempre, antes de usar gg. */
     suspend fun setAiConsent(on: Boolean) = withContext(dispatcher) { req("POST", "/assistant/consent", buildJsonObject { put("on", JsonPrimitive(on)) }, JsonElement.serializer()); Unit }

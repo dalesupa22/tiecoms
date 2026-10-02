@@ -713,6 +713,7 @@ data class OrgDomainDTO(
 
 @Serializable
 data class WaAccountDTO(
+    val privacyReady: Boolean? = null,
     val id: String = "",
     val label: String = "",
     /** personal | business */

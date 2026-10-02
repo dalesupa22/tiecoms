@@ -1,5 +1,8 @@
 package com.tiecoms.app.ui
 
+import androidx.compose.runtime.LaunchedEffect
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+
 import androidx.compose.foundation.combinedClickable
 
 import android.content.ActivityNotFoundException
@@ -185,7 +188,7 @@ suspend fun openAttachment(ctx: Context, client: TieComsClient, a: AttachmentDTO
     val dir = File(ctx.cacheDir, "att/${a.id}").apply { mkdirs() }
     val f = File(dir, com.tiecoms.app.platform.ShareIntake.safeName(a.name, a.contentType, 0))
     try {
-        if (!f.exists() || f.length() == 0L) {
+        if (com.tiecoms.app.core.WaPrivacy.source(a.url) != null || !f.exists() || f.length() == 0L) {
             attachmentToast(ctx, ctx.getString(R.string.att_downloading))
             client.downloadAttachment(a.url, f)
         }
@@ -208,6 +211,12 @@ fun MediaViewer(media: List<AttachmentDTO>, start: Int, onClose: () -> Unit) {
     val ctx = LocalContext.current
     val client = LocalClient.current
     val scope = rememberCoroutineScope()
+    val privacy = client.state.collectAsStateWithLifecycle().value.waPrivacy
+    val sources = remember(media) { media.mapNotNull { com.tiecoms.app.core.WaPrivacy.source(it.url) }.distinct() }
+    val epochs = remember(sources) { sources.associateWith(privacy::token) }
+    val permitted = sources.all { privacy.allows(it) && epochs[it] == privacy.token(it) }
+    LaunchedEffect(permitted) { if (!permitted) onClose() }
+    if (!permitted) return
     val pager = rememberPagerState(initialPage = start.coerceIn(0, (media.size - 1).coerceAtLeast(0))) { media.size }
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Box(Modifier.fillMaxSize().background(Color.Black).testTag("mediaViewer")) {
@@ -267,6 +276,12 @@ private fun VideoPage(a: AttachmentDTO, active: Boolean) {
     val player = remember(a.id, t) {
         val http = OkHttpDataSource.Factory(container.okHttp).setDefaultRequestProperties(mapOf("authorization" to "Bearer $t"))
         ExoPlayer.Builder(ctx).setMediaSourceFactory(DefaultMediaSourceFactory(http)).build().apply {
+            addListener(object : androidx.media3.common.Player.Listener {
+                override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                    val denied = generateSequence<Throwable>(error) { it.cause }.filterIsInstance<androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException>().any { it.responseCode in listOf(403, 404) }
+                    if (denied) com.tiecoms.app.core.WaPrivacy.source(a.url)?.let(client::denyWaSource)
+                }
+            })
             setMediaItem(MediaItem.fromUri(url)); prepare()
         }
     }

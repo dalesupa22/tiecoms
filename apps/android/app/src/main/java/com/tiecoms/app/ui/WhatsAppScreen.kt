@@ -97,11 +97,14 @@ fun WhatsAppScreen(onBack: () -> Unit, onOpenConversation: (String) -> Unit) {
     val client = LocalClient.current
     val container = LocalContainer.current
     val scope = rememberCoroutineScope()
-    val revision = client.state.collectAsStateWithLifecycle().value.waRevision
+    val state = client.state.collectAsStateWithLifecycle().value
+    val revision = state.waRevision
+    val privacy = state.waPrivacy
     var accounts by remember { mutableStateOf<List<WaAccountDTO>?>(null) }
     var max by remember { mutableStateOf(5) }
     var connectOpen by rememberSaveable { mutableStateOf(false) }
     var chats by remember { mutableStateOf<List<WaChatDTO>>(emptyList()) }
+    var chatTokens by remember { mutableStateOf<Map<String, Long>>(emptyMap()) }
     var counts by remember { mutableStateOf<Map<String, WaCount>>(emptyMap()) }
     var next by remember { mutableStateOf<String?>(null) }
     var hasMore by remember { mutableStateOf(false) }
@@ -127,9 +130,15 @@ fun WhatsAppScreen(onBack: () -> Unit, onOpenConversation: (String) -> Unit) {
             if (generation != client.sessionGeneration || scopeKey != listOf(client.myId, accountId, category, onlyGroups.toString(), showHidden.toString(), q, revision.toString())) return
             chats = (if (reset) p.chats else chats + p.chats).distinctBy { it.accountId to it.jid }
                 .sortedWith(compareByDescending<WaChatDTO> { it.pinned }.thenByDescending { it.lastMessageAt ?: "" }.thenBy { it.accountId }.thenBy { it.jid })
+            chatTokens = chatTokens + p.chats.associate { com.tiecoms.app.core.WaInbox.key(it) to client.state.value.waPrivacy.token(com.tiecoms.app.core.WaInbox.key(it)) }
             counts = p.categories; next = p.next; hasMore = p.hasMore == true && p.next != null && p.next != cursor; syncPartial = p.syncPartial == true; error = null
         } catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e; error = errorText(ctx, e) }
         finally { if (generation == client.sessionGeneration && scopeKey == listOf(client.myId, accountId, category, onlyGroups.toString(), showHidden.toString(), q, revision.toString())) chatsLoading = false }
+    }
+    val visibleChats = chats.filter { val key = com.tiecoms.app.core.WaInbox.key(it); privacy.allows(key) && chatTokens[key] == privacy.token(key) }
+    LaunchedEffect(privacy.revision) {
+        chats = visibleChats; counts = emptyMap(); next = null; hasMore = false
+        open?.let { if (!privacy.allows(com.tiecoms.app.core.WaInbox.key(it))) open = null }
     }
     LaunchedEffect(revision) { loadAccounts() }
     LaunchedEffect(revision, accountId, category, onlyGroups, showHidden, q) { if (q.isNotEmpty()) delay(250); loadChats() }
@@ -187,8 +196,8 @@ fun WhatsAppScreen(onBack: () -> Unit, onOpenConversation: (String) -> Unit) {
                     }
                 }
                 if (syncPartial) item { Text(stringResource(R.string.wa_syncing), style = MaterialTheme.typography.labelSmall) }
-                if (chats.isEmpty() && error == null && !chatsLoading) item { EmptyNote(stringResource(if (connected.isNotEmpty()) R.string.wa_no_chats else R.string.wa_syncing)) }
-                items(chats, key = { "${it.accountId}|${it.jid}" }) { c -> ChatRow(c, multi = (accounts?.size ?: 0) > 1, inbox = inboxOf(c)) { open = c } }
+                if (visibleChats.isEmpty() && error == null && !chatsLoading) item { EmptyNote(stringResource(if (connected.isNotEmpty()) R.string.wa_no_chats else R.string.wa_syncing)) }
+                items(visibleChats, key = { "${it.accountId}|${it.jid}" }) { c -> ChatRow(c, multi = (accounts?.size ?: 0) > 1, inbox = inboxOf(c)) { open = c } }
                 if (hasMore) item { TextButton(onClick = { scope.launch { loadChats(reset = false) } }, enabled = !chatsLoading, modifier = Modifier.testTag("waLoadMore")) { Text(stringResource(R.string.wa_load_more)) } }
             }
             item { Spacer(Modifier.heightIn(min = 24.dp)) }
@@ -360,10 +369,16 @@ internal fun WaChatSheet(c: WaChatDTO, revision: Int, onClose: () -> Unit, onPat
     val ctx = LocalContext.current
     val client = LocalClient.current
     val container = LocalContainer.current
-    val data = client.state.collectAsStateWithLifecycle().value.data ?: return
+    val state = client.state.collectAsStateWithLifecycle().value
+    val source = com.tiecoms.app.core.WaInbox.key(c)
+    val openedToken = remember(source) { state.waPrivacy.token(source) }
+    val permitted = state.waPrivacy.allows(source) && openedToken == state.waPrivacy.token(source)
+    LaunchedEffect(permitted) { if (!permitted) onClose() }
+    if (!permitted) return
+    val data = state.data ?: return
     var messages by remember { mutableStateOf<List<WaMessageDTO>?>(null) }
     var mediaError by remember(c.accountId, c.jid) { mutableStateOf<String?>(null) }
-    LaunchedEffect(c.accountId, c.jid, revision) { try { messages = client.waMessages(c); mediaError = null } catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e; mediaError = errorText(ctx, e) } }
+    LaunchedEffect(c.accountId, c.jid, revision) { messages = null; try { messages = client.waMessages(c); mediaError = null } catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e; mediaError = errorText(ctx, e) } }
     var waMenu by remember { mutableStateOf<WaMessageDTO?>(null) }
     var waShare by remember { mutableStateOf<WaMessageDTO?>(null) }
     val targets = data.conversations.filter { it.kind != "direct" && it.canPost }
@@ -377,7 +392,7 @@ internal fun WaChatSheet(c: WaChatDTO, revision: Int, onClose: () -> Unit, onPat
     LaunchedEffect(gg?.open) { if (gg?.open == false) { selecting = false; selected.clear(); gg.quoted.clear() } }
     var suggestFor by remember { mutableStateOf<List<String>?>(null) }
     var queue by remember { mutableStateOf(listOf<com.tiecoms.app.core.GgSuggestion>()) }
-    fun copyDraft(t: String) { copyToClipboard(ctx, t); container.toast(ctx.getString(R.string.ggs_draft_copied)) }
+    fun copyDraft(t: String) { if (runCatching { client.requireWaSource(source) }.getOrNull() != openedToken) return; copyToClipboard(ctx, t); container.toast(ctx.getString(R.string.ggs_draft_copied)) }
     FormSheet(c.name, onClose, tag = "waChatSheet") {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(listOfNotNull(c.accountLabel, if (c.isGroup && c.participants != null) stringResource(R.string.wa_members, c.participants) else null).joinToString(" · "),

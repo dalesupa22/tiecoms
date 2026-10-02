@@ -57,6 +57,7 @@ class HttpApi(val baseUrl: String, private val client: OkHttpClient) {
     }
 
     /** Cliente para subidas (fotos y archivos de hasta 25 MB): más margen que las peticiones normales. */
+    private val privateClient: OkHttpClient by lazy { client.newBuilder().cache(null).build() }
     private val uploadClient: OkHttpClient by lazy {
         client.newBuilder().writeTimeout(java.time.Duration.ofMinutes(3)).readTimeout(java.time.Duration.ofMinutes(3)).build()
     }
@@ -92,7 +93,8 @@ class HttpApi(val baseUrl: String, private val client: OkHttpClient) {
     suspend fun downloadResult(path: String, token: String?, dest: java.io.File, onProgress: ((Long, Long) -> Unit)? = null): HttpResult {
         val b = Request.Builder().url(url(path)).header("x-tiecoms-client", PLATFORM).header("x-tiecoms-contract", CONTRACT_VERSION)
         if (token != null) b.header("authorization", "Bearer $token")
-        uploadClient.newCall(b.get().build()).await().use { res ->
+        if (WaPrivacy.source(path) != null) b.header("cache-control", "no-store")
+        (if (WaPrivacy.source(path) != null) privateClient else uploadClient).newCall(b.get().build()).await().use { res ->
             if (!res.isSuccessful) return HttpResult(res.code, runCatching { res.body?.string()?.take(4000) }.getOrNull() ?: "")
             val body = res.body ?: return HttpResult(res.code, "")
             val total = body.contentLength()
@@ -125,7 +127,9 @@ class HttpApi(val baseUrl: String, private val client: OkHttpClient) {
             else -> null
         }
         b.method(method, body)
-        (if (raw != null) uploadClient else client).newCall(b.build()).await().use { res ->
+        val private = path.contains("/whatsapp/") || path.contains("/gg/side") || path == "/bootstrap"
+        if (private) b.header("cache-control", "no-store")
+        (if (private) privateClient else if (raw != null) uploadClient else client).newCall(b.build()).await().use { res ->
             val text = try { res.body?.string() ?: "" } catch (e: IOException) { throw NetworkException(e) }
             return HttpResult(res.code, text)
         }

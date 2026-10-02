@@ -339,4 +339,27 @@
     <string name="web_wa_bringShort">Bring to a chat</string>
     <!-- wa.bringTitle -->
     <string name="web_wa_bringTitle">Bring a WhatsApp message to a chat</string>
+    <!-- gg redacta un correo; se envía solo tras confirmar (2-oct-2026). -->
+    <string name="ggmail_compose">✉ Draft email</string>
+    <string name="ggmail_title">Email with gg</string>
+    <string name="ggmail_preparing">✨ gg is drafting the email from the chat…</string>
+    <string name="ggmail_note">✨ gg drafted this from the chat. Review and edit it: nothing is sent until you tap “Send” and confirm.</string>
+    <string name="ggmail_missing">⚠ No email visible for %1$s. Type it to include them.</string>
+    <string name="ggmail_from">From: %1$s</string>
+    <string name="ggmail_to">To</string>
+    <string name="ggmail_cc">Cc</string>
+    <string name="ggmail_subject">Subject</string>
+    <string name="ggmail_body">Message</string>
+    <string name="ggmail_send">Send</string>
+    <string name="ggmail_sending">Sending…</string>
+    <string name="ggmail_confirm_title">Send email?</string>
+    <string name="ggmail_confirm_text">Send this email from %1$s to %2$s?</string>
+    <string name="ggmail_confirm_cc">(cc: %1$s)</string>
+    <string name="ggmail_your_mailbox">your mailbox</string>
+    <string name="ggmail_sent">✓ Sent. It is in your Sent folder.</string>
+    <string name="ggmail_needs_connect">Connect Gmail or Outlook to send email from chaggu.</string>
+    <string name="ggmail_retry">Draft again</string>
+    <string name="ggmail_check">Check: %1$s</string>
+    <string name="ggmail_incomplete">Missing recipient, subject or text.</string>
+    <string name="ggmail_failed">gg could not draft the email. Try again.</string>
 </resources>

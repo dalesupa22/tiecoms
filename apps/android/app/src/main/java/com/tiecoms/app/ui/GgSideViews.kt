@@ -297,7 +297,9 @@ fun GgSideSheet(
     var input by remember { mutableStateOf("") }
     var menu by remember { mutableStateOf(false) }
     var calendar by remember { mutableStateOf(false) }
-    if (calendar) GgCalendarSheet(model.source, model.quoted.map { it.id }) { calendar = false }
+    var mail by remember { mutableStateOf(false) }
+    if (calendar) GgCalendarSheet(model.source, model.quoted.map { it.id }, onConsent = { model.consentFor = it }) { calendar = false }
+    if (mail) GgMailSheet(model.source, model.quoted.map { it.id }, onConsent = { model.consentFor = it }) { mail = false }
     val list = rememberLazyListState()
     LaunchedEffect(model.messages.size, model.busy) { if (model.messages.isNotEmpty()) list.animateScrollToItem(model.messages.size) }
     val summarize = stringResource(R.string.ggs_summarize)
@@ -316,6 +318,7 @@ fun GgSideSheet(
                     IconButton(onClick = { menu = true }, modifier = Modifier.testTag("ggSideMenu")) { Icon(Icons.Filled.MoreVert, stringResource(R.string.menu_more)) }
                     AnchoredMenu(menu, listOf(
                         SheetItem(stringResource(R.string.calendar_find_slots), "📅", tag = "ggCalendarFind") { calendar = true },
+                        SheetItem(stringResource(R.string.ggmail_compose).removePrefix("✉ "), "✉", tag = "ggMailCompose") { mail = true },
                         SheetItem(stringResource(R.string.ggs_new), "↺", tag = "ggSideNew") { model.newSession() },
                         SheetItem(stringResource(R.string.ggs_open_general), "↗", tag = "ggSideGeneral") { model.hide(); openGeneral() },
                     ), { menu = false })
@@ -339,6 +342,9 @@ fun GgSideSheet(
             val follow = GgSide.followUps(model.messages)
             LazyRow(contentPadding = PaddingValues(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(vertical = 4.dp).testTag("ggSideChips")) {
                 item { Chip("✨ " + stringResource(R.string.ggs_reply_for_me), "ggChipReply") { model.replyForMe() } }
+                // gg propone, la persona confirma: nada se agenda ni se envía sin «Confirmar».
+                item { Chip(stringResource(R.string.ggm_schedule), "ggMeetingChip") { calendar = true } }
+                item { Chip(stringResource(R.string.ggmail_compose), "ggMailChip") { mail = true } }
                 items(follow) { f -> Chip(f) { model.ask(f) } }
                 if (follow.isEmpty()) {
                     item { Chip(summarize) { model.ask(summarize) } }
@@ -502,7 +508,9 @@ fun GgSuggestSheet(model: GgSideModel, messageIds: List<String>, onRun: (List<Gg
     var failed by remember(messageIds) { mutableStateOf(false) }
     val picked = remember(messageIds) { mutableStateListOf<String>() }
     var calendar by remember { mutableStateOf(false) }
-    if (calendar) GgCalendarSheet(model.source, messageIds) { calendar = false }
+    var mail by remember { mutableStateOf(false) }
+    if (calendar) GgCalendarSheet(model.source, messageIds, onConsent = { model.consentFor = it }) { calendar = false }
+    if (mail) GgMailSheet(model.source, messageIds, onConsent = { model.consentFor = it }) { mail = false }
     var free by remember { mutableStateOf("") }
     LaunchedEffect(messageIds) {
         try { list = model.suggest(messageIds).also { l -> picked.clear(); l.firstOrNull()?.let { picked.add(it.id) } } }
@@ -513,7 +521,10 @@ fun GgSuggestSheet(model: GgSideModel, messageIds: List<String>, onRun: (List<Gg
         }
     }
     FormSheet(stringResource(R.string.ggs_suggest_title), onClose, tag = "ggSuggestSheet") {
-        OutlinedButton(onClick = { calendar = true }, modifier = Modifier.testTag("selectionFindSlots")) { Text(stringResource(R.string.calendar_find_slots)) }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = { calendar = true }, modifier = Modifier.testTag("selectionFindSlots")) { Text(stringResource(R.string.ggm_schedule)) }
+            OutlinedButton(onClick = { mail = true }, modifier = Modifier.testTag("selectionMail")) { Text(stringResource(R.string.ggmail_compose)) }
+        }
         when {
             list == null -> CircularProgressIndicator()
             failed -> Text(stringResource(R.string.ggs_error), color = MaterialTheme.colorScheme.error)

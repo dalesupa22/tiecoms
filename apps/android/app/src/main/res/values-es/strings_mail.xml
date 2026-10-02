@@ -339,4 +339,27 @@
     <string name="web_wa_bringShort">Llevar a un chat</string>
     <!-- wa.bringTitle -->
     <string name="web_wa_bringTitle">Llevar un WhatsApp a un chat</string>
+    <!-- gg redacta un correo; se envía solo tras confirmar (2-oct-2026). -->
+    <string name="ggmail_compose">✉ Redactar correo</string>
+    <string name="ggmail_title">Correo con gg</string>
+    <string name="ggmail_preparing">✨ gg está redactando el correo con lo que se habló…</string>
+    <string name="ggmail_note">✨ gg lo redactó con el chat. Revísalo y edítalo: no se envía hasta que toques «Enviar» y confirmes.</string>
+    <string name="ggmail_missing">⚠ No veo el correo de %1$s. Escríbelo si quieres incluirlos.</string>
+    <string name="ggmail_from">Desde: %1$s</string>
+    <string name="ggmail_to">Para</string>
+    <string name="ggmail_cc">Copia</string>
+    <string name="ggmail_subject">Asunto</string>
+    <string name="ggmail_body">Mensaje</string>
+    <string name="ggmail_send">Enviar</string>
+    <string name="ggmail_sending">Enviando…</string>
+    <string name="ggmail_confirm_title">¿Enviar el correo?</string>
+    <string name="ggmail_confirm_text">¿Enviar este correo desde %1$s a %2$s?</string>
+    <string name="ggmail_confirm_cc">(copia: %1$s)</string>
+    <string name="ggmail_your_mailbox">tu correo</string>
+    <string name="ggmail_sent">✓ Enviado. Queda en tus Enviados.</string>
+    <string name="ggmail_needs_connect">Conecta tu Gmail u Outlook para enviar correos desde chaggu.</string>
+    <string name="ggmail_retry">Redactar de nuevo</string>
+    <string name="ggmail_check">Revisa: %1$s</string>
+    <string name="ggmail_incomplete">Falta destinatario, asunto o texto.</string>
+    <string name="ggmail_failed">gg no pudo redactar el correo. Intenta de nuevo.</string>
 </resources>

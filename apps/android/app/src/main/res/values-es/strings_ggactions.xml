@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- gg propone, la persona confirma (2-oct-2026): borradores de reunión y de correo. -->
+<resources>
+    <string name="ggm_schedule">📅 Agendar</string>
+    <string name="ggm_preparing">✨ gg está preparando la reunión con lo que se habló…</string>
+    <string name="ggm_note">✨ gg lo preparó con el chat. Revisa todo: nada se agenda hasta que confirmes.</string>
+    <string name="ggm_missing">⚠ No encontré en el chat a %1$s. Escribe su correo en invitados si quieres incluirlos.</string>
+    <string name="ggm_links">🔗 Enlaces en la descripción: %1$s</string>
+    <string name="ggm_title">Título de la reunión</string>
+    <string name="ggm_from_chat">Del chat (reciben la invitación en chaggu)</string>
+    <string name="ggm_remove">Quitar a %1$s</string>
+    <string name="ggm_confirm">Confirmar y agendar</string>
+    <string name="ggm_saved">✓ Reunión guardada en tu calendario.</string>
+    <string name="ggm_bad_emails">Revisa los correos de los invitados (máximo 20).</string>
+</resources>

@@ -2224,6 +2224,28 @@ class TieComsClient(
     suspend fun ggCalendarConfirm(source: String, messageIds: List<String>, provider: String, key: String, title: String, slot: GgCalendarSlot, timezone: String, description: String = "", attendeeEmails: List<String> = emptyList(), inviteeIds: List<String> = emptyList()): MeetingDTO = withContext(dispatcher) {
         req("POST", "/gg/calendar/confirm", buildJsonObject { put("source", JsonPrimitive(source)); put("messageIds", kotlinx.serialization.json.JsonArray(messageIds.map { JsonPrimitive(it) })); put("provider", JsonPrimitive(provider)); put("idempotencyKey", JsonPrimitive(key)); put("title", JsonPrimitive(title)); put("startsAt", JsonPrimitive(slot.startsAt)); put("endsAt", JsonPrimitive(slot.endsAt)); put("timezone", JsonPrimitive(timezone)); if (source.startsWith("c:")) put("conversationId", JsonPrimitive(source.removePrefix("c:"))); put("shareToChat", JsonPrimitive(false)); if (description.isNotBlank()) put("description", JsonPrimitive(description)); if (attendeeEmails.isNotEmpty()) put("attendeeEmails", JsonArray(attendeeEmails.distinct().map { JsonPrimitive(it) })); if (inviteeIds.isNotEmpty()) put("inviteeIds", JsonArray(inviteeIds.distinct().map { JsonPrimitive(it) })) }, MeetingDTO.serializer())
     }
+    // ---------- gg propone, la persona confirma (2-oct-2026) ----------
+    private fun ggDraftBody(source: String, messageIds: List<String>, instruction: String?) = buildJsonObject {
+        put("source", JsonPrimitive(source))
+        if (messageIds.isNotEmpty()) put("messageIds", JsonArray(messageIds.distinct().take(30).map { JsonPrimitive(it) }))
+        instruction?.trim()?.takeIf { it.isNotEmpty() }?.let { put("instruction", JsonPrimitive(it.take(500))) }
+    }
+    /** Borrador de reunión con el chat: no agenda nada (eso es [ggCalendarConfirm]). */
+    suspend fun ggMeetingDraft(source: String, messageIds: List<String>, instruction: String? = null): GgMeetingDraft = withContext(dispatcher) {
+        req("POST", "/gg/meeting-draft", ggDraftBody(source, messageIds, instruction), GgMeetingDraft.serializer())
+    }
+    /** Borrador de correo con el chat: no envía nada (eso es [ggMailSend]). */
+    suspend fun ggMailDraft(source: String, messageIds: List<String>, instruction: String? = null): GgMailDraft = withContext(dispatcher) {
+        req("POST", "/gg/mail-draft", ggDraftBody(source, messageIds, instruction), GgMailDraft.serializer())
+    }
+    /** Envía el correo revisado, solo después de que la persona confirma. Misma [idempotencyKey] = un solo envío. */
+    suspend fun ggMailSend(source: String, provider: String, idempotencyKey: String, to: List<String>, cc: List<String>, subject: String, body: String): GgMailSendResult = withContext(dispatcher) {
+        req("POST", "/gg/mail-send", buildJsonObject {
+            put("source", JsonPrimitive(source)); put("provider", JsonPrimitive(provider)); put("idempotencyKey", JsonPrimitive(idempotencyKey))
+            put("to", JsonArray(to.map { JsonPrimitive(it) })); put("cc", JsonArray(cc.map { JsonPrimitive(it) }))
+            put("subject", JsonPrimitive(subject.trim())); put("body", JsonPrimitive(body.trim()))
+        }, GgMailSendResult.serializer())
+    }
     /** Optional explicit refresh; header and opening gg never trigger it automatically. */
     suspend fun ggPendingRefresh(source: String): GgPendingRefresh = withContext(dispatcher) {
         gg { req("POST", "/gg/side/pending/refresh", buildJsonObject { put("source", JsonPrimitive(source)) }, GgPendingRefresh.serializer()) }

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- gg proposes, the person confirms (2-oct-2026): meeting and email drafts. -->
+<resources>
+    <string name="ggm_schedule">📅 Schedule</string>
+    <string name="ggm_preparing">✨ gg is preparing the meeting from the chat…</string>
+    <string name="ggm_note">✨ gg prepared this from the chat. Review everything: nothing is scheduled until you confirm.</string>
+    <string name="ggm_missing">⚠ Not found in the chat: %1$s. Type their email under guests to include them.</string>
+    <string name="ggm_links">🔗 Links in the description: %1$s</string>
+    <string name="ggm_title">Meeting title</string>
+    <string name="ggm_from_chat">From the chat (invited in chaggu)</string>
+    <string name="ggm_remove">Remove %1$s</string>
+    <string name="ggm_confirm">Confirm and schedule</string>
+    <string name="ggm_saved">✓ Meeting saved to your calendar.</string>
+    <string name="ggm_bad_emails">Check guest email addresses (up to 20).</string>
+</resources>

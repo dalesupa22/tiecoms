@@ -244,6 +244,8 @@ const memeItems = [['#444', 'Drake', 2], ['#555', 'Distracted', 3], ['#666', 'Su
   if (path.startsWith('/gifs/search') || path.startsWith('/gifs/trending')) return { provider: 'openverse', items: gifItems, next: null, poweredBy: { label: 'Wikimedia Commons · Openverse', url: 'https://openverse.org' } };
   if (path.startsWith('/memes/templates')) return { provider: 'memegen', items: memeItems, next: null, poweredBy: { label: 'memegen.link · código abierto', url: 'https://memegen.link' } };
   if (/^\/conversations\/[^/]+\/gifs$/.test(path) && init.method === 'POST') return { attachment: att(`gif-${Date.now()}`, 'gato.gif', 'image/gif', 90_000), attribution: 'GIF: «gato» · Ana · CC BY-SA 4.0 · Wikimedia Commons (vía Openverse)' };
+  if (/^\/attachments\/[^/]+\/link$/.test(path) && init.method === 'POST') { const id = path.split('/')[2]; const a = g.flatMap((m) => m.attachments ?? []).find((x) => x.id === id); return { url: `${location.origin}/archivo/demo-${id}-token-0123456789`, name: a?.name ?? 'archivo', expiresAt: new Date(now + 7 * D).toISOString() }; }
+  if (path.startsWith('/file-links/') && init.method === 'DELETE') return { ok: true };
   if (/^\/whatsapp\/accounts\/[^/]+$/.test(path) && init.method === 'PATCH') { const a = (waAccounts as any[]).find((x) => path.endsWith(x.id))!; Object.assign(a, init.json); return a; }
   if (path === '/whatsapp/accounts' && !init.method) return { accounts: waAccounts, max: 5 };
   if (path.startsWith('/whatsapp/chats?')) {

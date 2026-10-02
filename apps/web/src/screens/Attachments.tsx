@@ -10,6 +10,10 @@ import { menuProps, toast } from '../menu.tsx';
 import { VoiceNote } from './Voice.tsx';
 import { formatBytes, formatDuration } from '../video.ts';
 import { ImageViewer } from './ImageViewer.tsx';
+import { setFileDrag } from '../file-links.ts';
+
+/** Un adjunto de chaggu se puede arrastrar a un chat de WhatsApp (se manda un enlace para verlo). Los de WhatsApp no. */
+const fileDragProps = (a: AttachmentDTO) => waPathScope(a.url) ? {} : { draggable: true, onDragStart: (e: React.DragEvent) => { e.stopPropagation(); setFileDrag(e, { attachmentId: a.id, name: a.name }); } };
 
 // ---------- Descarga autenticada con caché en memoria ----------
 type BlobEntry = { path: string; promise: Promise<string>; url?: string; bytes: number; refs: number; used: number };
@@ -149,7 +153,7 @@ function Tile({ a, more, onOpen }: { a: AttachmentDTO; more?: number; onOpen: ()
   const { url, failed } = useBlobUrl(seen ? (a.contentType.split(';')[0]?.toLowerCase() === 'image/gif' ? a.url : isImage(a) ? a.thumbUrl ?? a.url : a.thumbUrl) : null);
   const ratio = a.width && a.height ? a.width / a.height : 4 / 3;
   return (
-    <button ref={tile} type="button" className="att-tile" onClick={onOpen} {...menuProps(() => imageMenu(a))} aria-label={a.name} style={{ aspectRatio: String(Math.min(2, Math.max(0.6, ratio))) }}>
+    <button ref={tile} type="button" className="att-tile" onClick={onOpen} {...menuProps(() => imageMenu(a))} {...fileDragProps(a)} aria-label={a.name} style={{ aspectRatio: String(Math.min(2, Math.max(0.6, ratio))) }}>
       {url ? <img src={url} alt="" draggable={false} /> : <span className="att-tile-ph">{failed ? '⚠' : isVideo(a) ? '🎬' : ''}</span>}
       {isVideo(a) && <span className="att-play">▶</span>}
       {more ? <span className="att-more">{t('att.more', { n: more })}</span> : null}
@@ -196,7 +200,7 @@ export function AttachmentsView({ list, onCreateIssue }: { list: AttachmentDTO[]
       {list.filter((a) => !!a.provenance).map((a) => <details className="media-credits" key={`credits-${a.id}`}><summary>{getLang() === 'en' ? 'Credits' : 'Créditos'}</summary><span>{a.provenance!.title} · {a.provenance!.author} · {a.provenance!.license}</span>{a.provenance!.sourceUrl && <a href={a.provenance!.sourceUrl!} target="_blank" rel="noopener noreferrer">{getLang() === 'en' ? 'Source' : 'Fuente'}</a>}{a.provenance!.licenseUrl && <a href={a.provenance!.licenseUrl!} target="_blank" rel="noopener noreferrer">{getLang() === 'en' ? 'License' : 'Licencia'}</a>}</details>)}
       {videos.map((a) => <VideoCard key={a.id} a={a} />)}
       {files.map((a) => isPdf(a) ? (
-        <div key={a.id} className="att-file-btn is-pdf">
+        <div key={a.id} className="att-file-btn is-pdf" {...fileDragProps(a)}>
           <button type="button" className="grow" style={{ border: 0, background: 'transparent', padding: 0, textAlign: 'left', minWidth: 0 }} title={t('att.preview')} onClick={() => setPdf({ a, sign: false })}>
             <FileChip a={a} />
           </button>
@@ -204,7 +208,7 @@ export function AttachmentsView({ list, onCreateIssue }: { list: AttachmentDTO[]
           <button type="button" className="icon-btn" aria-label={t('att.download')} onClick={() => void downloadAttachment(a)}>⤓</button>
         </div>
       ) : (
-        <button key={a.id} type="button" className="att-file-btn" title={t('att.download')} onClick={() => void downloadAttachment(a)}>
+        <button key={a.id} type="button" className="att-file-btn" title={t('att.download')} onClick={() => void downloadAttachment(a)} {...fileDragProps(a)}>
           <FileChip a={a} />
           <span className="att-dl" aria-hidden>⤓</span>
         </button>

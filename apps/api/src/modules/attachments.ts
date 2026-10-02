@@ -25,7 +25,7 @@ export const STREAM_OVER_BYTES = 8 * 1024 * 1024;
 const PENDING_HOURS = 24;
 
 /** Tipos que se sirven con su propio Content-Type (y en línea); todo lo demás va como descarga octet-stream. */
-const INLINE_TYPES = new Set([
+export const INLINE_TYPES = new Set([
   'image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/heic', 'image/heif',
   'video/mp4', 'video/quicktime', 'video/webm', 'audio/mpeg', 'audio/mp4', 'audio/aac', 'audio/ogg', 'audio/wav', 'application/pdf',
 ]);

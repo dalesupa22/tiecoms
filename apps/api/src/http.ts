@@ -45,6 +45,7 @@ import * as drive from './modules/drive.ts';
 import * as safety from './modules/safety.ts';
 import * as push from './modules/push.ts';
 import * as attachments from './modules/attachments.ts';
+import * as fileLinks from './modules/file-links.ts';
 import { registerGifMediaRoute, registerGifRoutes } from './modules/gifs.ts';
 import * as storageUsage from './modules/storage-usage.ts';
 import * as voice from './modules/voice.ts';
@@ -417,6 +418,12 @@ export async function buildHttp() {
     });
     priv.delete<{ Params: { id: string } }>('/api/v1/me/signatures/:id', async (req) => signatures.deleteSignature(req.userId, z.uuid().parse(req.params.id)));
     priv.get('/api/v1/me/signings', async (req) => signatures.listSignings(req.userId, SigningHistoryQuery.parse(req.query)));
+    // Enlace para ver el archivo sin cuenta (7 días): para llevarlo a WhatsApp, que desde chaggu solo acepta texto.
+    priv.post<{ Params: { id: string } }>('/api/v1/attachments/:id/link', { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (req, reply) => {
+      reply.header('cache-control', 'no-store');
+      return fileLinks.createLink(req.userId, z.uuid().parse(req.params.id));
+    });
+    priv.delete<{ Params: { token: string } }>('/api/v1/file-links/:token', async (req) => fileLinks.revokeLink(req.userId, req.params.token));
     priv.get<{ Params: { id: string } }>('/api/v1/attachments/:id/sign-info', async (req) => signatures.signInfo(req.userId, z.uuid().parse(req.params.id)));
     priv.post<{ Params: { id: string } }>('/api/v1/attachments/:id/sign', { bodyLimit: 256 * 1024, config: { rateLimit: { max: 20, timeWindow: '1 minute' } } }, async (req, reply) => {
       const input = SignPdfInput.parse(req.body);
@@ -818,6 +825,11 @@ export async function buildHttp() {
 
   // Invitados por enlace a una llamada (sin cuenta): ver, entrar con su nombre, latir y salir.
   const guestLimit = { config: { rateLimit: { max: 20, timeWindow: '1 minute' } } };
+  app.get<{ Params: { token: string } }>('/api/v1/file-links/:token', guestLimit, async (req, reply) => { reply.header('cache-control', 'no-store'); return fileLinks.preview(req.params.token); });
+  app.get<{ Params: { token: string }; Querystring: { download?: string } }>('/api/v1/file-links/:token/file', guestLimit, async (req, reply) => {
+    reply.header('cache-control', 'no-store').header('referrer-policy', 'no-referrer');
+    return reply.redirect(await fileLinks.fileUrl(req.params.token, req.query.download === '1'), 302);
+  });
   app.get<{ Params: { token: string } }>('/api/v1/call-links/:token', guestLimit, async (req, reply) => { reply.header('cache-control', 'no-store'); return calls.previewLink(req.params.token); });
   app.post<{ Params: { token: string } }>('/api/v1/call-links/:token/join', { config: { rateLimit: { max: 6, timeWindow: '1 minute' } } }, async (req, reply) => {
     reply.header('cache-control', 'no-store');

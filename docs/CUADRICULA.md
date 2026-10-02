@@ -54,3 +54,14 @@ En **Tamaño** de cada panel, además de filas/columnas: *Alto completo a la izq
 ## Abrir el tema del mensaje (2-oct-2026)
 
 Burbuja, notificación o mención con `?m=` sobre un chat que **ya estaba abierto** no saltaba (el router solo avisa cuando cambia la ruta, no el `?m=`) y el chat se quedaba en el tema de antes, p. ej. General. Ahora `Conversation.tsx` escucha `chaggu:navigate`/`popstate`. En la app de escritorio el clic en la notificación del sistema no llega a la página: si la ventana vuelve al frente en los 90 s siguientes a un aviso, se abre ese mensaje en su tema (`notices.ts`).
+
+## Llevar un archivo de chaggu a WhatsApp (2-oct-2026)
+
+Desde chaggu, WhatsApp solo acepta texto. Al arrastrar un adjunto de un chat de chaggu (PDF, imagen, documento) y soltarlo en un chat de WhatsApp (panel de la cuadrícula o el lateral), se crea un **enlace para verlo sin cuenta** (`/archivo/<token>`, vence a los 7 días) y cae en la caja de responder: «📎 nombre — Ver en chaggu: enlace». Nunca se envía solo. Antes de enviar: **Quitar enlace** (lo desactiva). Después: **Desactivar enlace** en el aviso (el mensaje queda en WhatsApp, pero ya no abre). Si la cuenta está en solo lectura, el texto se copia para pegarlo.
+
+- API: `modules/file-links.ts`, migración `088_file_links.sql` (hash del token, `expires_at`, `revoked_at`). `POST /attachments/:id/link` (quien puede ver el adjunto; nunca uno de una sola vista), `DELETE /file-links/:token` (quien lo creó), públicos `GET /file-links/:token` y `GET /file-links/:token/file` (302 a una URL firmada de 5 min; solo PDF/imágenes/… se ven en el navegador, lo demás se descarga). Deja de servir si se borra el mensaje o el adjunto.
+- Web: `file-links.ts`, arrastre en `Attachments.tsx`, soltar en `WaChatView`/`WaReply` (`Panes.tsx`), página `screens/FileLink.tsx`.
+
+## Eliminar para todos lo que se trajo arrastrando (2-oct-2026)
+
+Un correo o un mensaje de WhatsApp llevado a un chat es un mensaje de sistema (`mail.shared` / `wa.shared`). Quien lo trajo ahora lo puede **Eliminar para todos** desde el menú de la tarjeta: se borra la tarjeta con sus comentarios y respuestas (`shared_emails`) y el mensaje queda como texto eliminado, así que todas las apps (web, escritorio, iOS, Android) lo muestran como «Mensaje eliminado» sin cambios. Falta el botón en el menú de iOS y Android (el API ya lo permite).

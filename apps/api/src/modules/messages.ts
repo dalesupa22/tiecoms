@@ -307,12 +307,20 @@ export async function markTreeRead(userId: string, rootId: string, items: { conv
 }
 
 // ---------- Editar, eliminar, no leído, fijar ----------
-async function ownMessage(c: Tx, userId: string, messageId: string) {
+/** Lo que se trajo arrastrando a un chat (un correo o un mensaje de WhatsApp): entra como mensaje de sistema de quien lo trajo. */
+const SHARED_KINDS = new Set(['mail.shared', 'wa.shared']);
+export function sharedKind(m: { kind: string; body: string }): string | null {
+  if (m.kind !== 'system') return null;
+  try { const k = JSON.parse(m.body)?.k; return typeof k === 'string' && SHARED_KINDS.has(k) ? k : null; } catch { return null; }
+}
+
+/** `shared`: también lo que la persona trajo arrastrando (solo para borrarlo; no se edita). */
+async function ownMessage(c: Tx, userId: string, messageId: string, shared = false) {
   const { rows } = await c.query('SELECT * FROM messages WHERE id = $1', [messageId]);
   const m = rows[0];
   if (!m) throw notFound('Mensaje');
   const access = await conversationAccess(c, userId, m.conversation_id, 'post', true);
-  if (m.author_id !== userId || m.kind !== 'text') throw forbidden('Solo puedes cambiar tus propios mensajes');
+  if (m.author_id !== userId || !(m.kind === 'text' || (shared && sharedKind(m)))) throw forbidden('Solo puedes cambiar tus propios mensajes');
   if (m.deleted_at) throw conflict('El mensaje ya fue eliminado');
   return Object.assign(m, { access });
 }
@@ -348,9 +356,12 @@ export async function editMessage(userId: string, messageId: string, body: strin
 
 export async function deleteMessage(userId: string, messageId: string) {
   return tx(async (c) => {
-    const m = await ownMessage(c, userId, messageId);
-    // Borrado lógico: se conserva el orden y queda la marca; el contenido deja de servirse.
-    const { rows } = await c.query("UPDATE messages SET body = '', attachments = NULL, mentions = NULL, refs = NULL, view_once_body = NULL, link_preview = NULL, link_previews = NULL, reactions = NULL, external_reactions = NULL, deleted_at = now() WHERE id = $1 RETURNING *", [messageId]);
+    const m = await ownMessage(c, userId, messageId, true);
+    // Lo traído arrastrando (correo o WhatsApp): la tarjeta, su hilo de comentarios y sus respuestas dejan de existir para todos.
+    if (sharedKind(m)) await c.query('DELETE FROM shared_emails WHERE message_id = $1', [messageId]);
+    // Borrado lógico: se conserva el orden y queda la marca; el contenido deja de servirse. Queda como texto
+    // borrado para que todas las apps (web, escritorio, iOS, Android) lo pinten como «Mensaje eliminado».
+    const { rows } = await c.query("UPDATE messages SET kind = 'text', body = '', attachments = NULL, mentions = NULL, refs = NULL, view_once_body = NULL, link_preview = NULL, link_previews = NULL, reactions = NULL, external_reactions = NULL, deleted_at = now() WHERE id = $1 RETURNING *", [messageId]);
     await c.query('DELETE FROM message_mentions WHERE message_id = $1', [messageId]);
     await c.query('DELETE FROM message_reactions WHERE message_id = $1', [messageId]);
     await dropLinks(c, messageId);

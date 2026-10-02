@@ -710,6 +710,8 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
       ...(emailId ? [{ label: t('card.forward'), icon: '↪', onSelect: forward }] : []),
       { divider: true },
       { label: t('menu.copyLink'), icon: '⛓', onSelect: async () => { await copyText(messageLink(m)); toast(t('toast.linkCopied')); } },
+      // Lo que trajiste arrastrando (correo o WhatsApp) se puede quitar para todos, por si te equivocaste de chat.
+      ...(mine ? [{ divider: true }, { label: t('card.deleteAll'), icon: '🗑', danger: true, onSelect: () => { if (confirm(t('card.deleteConfirm'))) void client.deleteMessage(m.id).catch((e) => toast(errorText(e))); } }] : []),
     ];
     return { reply: conv.canPost ? reply : () => {}, replyPrivately: priv, forward, menu: menuProps(() => items) as Record<string, unknown> };
   };

@@ -31,6 +31,8 @@ import { TrazoScreen } from './Lineage.tsx';
 import { CallsScreen } from './Call.tsx';
 import { captureWaPrivacy, openWaDialog, openWaMenuAt, showWaDialogUntilClosed, useWaPrivacy, waMenuProps, waPrivacySyncing, waPrivacyUnavailable } from '../wa-privacy-ui.tsx';
 import { waPrivacyAffected } from '../wa-privacy.ts';
+import './FileLinks.css';
+import { createFileLink, fileLinkDate, fileLinkText, isFileDrag, readFileDrag, revokeFileLink, type FileLink } from '../file-links.ts';
 
 export function SectionPane({ kind, frame }: { kind: 'agenda' | 'trazo' | 'calls'; frame: PaneFrame }) {
   const label = kind === 'agenda' ? t('nav.agenda') : kind === 'trazo' ? t('nav.trazo') : t('nav.calls');
@@ -193,13 +195,28 @@ function useWaAccount(accountId: string) {
 }
 
 /** Responder el chat. Solo si la cuenta tiene «Responder desde chaggu»; si no, lo ofrece (con el aviso de lo que implica). */
-function WaReply({ accountId, jid, onSent, draft }: { accountId: string; jid: string; onSent: () => void; draft?: { text: string; key: number } | null }) {
+function WaReply({ accountId, jid, onSent, draft, fileDraft }: { accountId: string; jid: string; onSent: () => void; draft?: { text: string; key: number } | null; fileDraft?: { link: FileLink; key: number } | null }) {
   const { acc, reload } = useWaAccount(accountId);
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const visible = useWaPrivacy(() => { setText(''); setBusy(false); }, { accountId, jid });
   // Borrador de gg: cae en la caja para editarlo; nunca se envía solo.
   useEffect(() => { if (draft) setText(draft.text); }, [draft?.key]);
+  // Un archivo de chaggu soltado aquí: su enlace cae en la caja (nunca se envía solo) y se puede quitar antes de enviar.
+  const [links, setLinks] = useState<FileLink[]>([]);
+  useEffect(() => {
+    if (!fileDraft) return;
+    const line = fileLinkText(fileDraft.link);
+    if (acc && (!acc.sendEnabled || acc.status !== 'connected')) { void copyText(line).then(() => toast(t('flink.copied'))); return; }
+    setText((x) => (x.trim() ? `${x.trimEnd()}\n` : '') + line);
+    setLinks((l) => [...l, fileDraft.link]);
+    toast(t('flink.ready'));
+  }, [fileDraft?.key]);
+  const dropLink = (l: FileLink) => {
+    setText((x) => x.replace(fileLinkText(l), '').replace(/\n{2,}/g, '\n').trim());
+    setLinks((list) => list.filter((y) => y.url !== l.url));
+    void revokeFileLink(l.url).catch(() => {});
+  };
   if (!acc || !visible || acc.privacyReady === false) return null;
   if (!acc.sendEnabled) {
     return (
@@ -219,15 +236,26 @@ function WaReply({ accountId, jid, onSent, draft }: { accountId: string; jid: st
       const r = await client.sendWhatsApp(accountId, jid, body);
       if (!valid()) return;
       if (r.status === 'failed') toast(`${t('grid.waFailed')}: ${r.error ?? ''}`);
-      else { setText(''); toast(t(r.status === 'sent' ? 'grid.waSent' : 'grid.waQueued')); onSent(); }
+      else {
+        // Enviado con enlaces: por si fue al chat equivocado, se pueden desactivar (en WhatsApp el mensaje queda, pero ya no abre).
+        const sentLinks = links.filter((l) => body.includes(l.url));
+        setText(''); setLinks([]);
+        toast(t(r.status === 'sent' ? 'grid.waSent' : 'grid.waQueued'), sentLinks.length ? { label: t('flink.revoke'), run: () => void Promise.all(sentLinks.map((l) => revokeFileLink(l.url))).then(() => toast(t('flink.revoked'))).catch((e) => toast(errorText(e))) } : undefined, sentLinks.length ? 10_000 : undefined);
+        onSent();
+      }
     } catch (e) { if (valid()) toast(errorText(e)); } finally { if (valid()) setBusy(false); }
   };
   const key = (e: KeyboardEvent<HTMLTextAreaElement>) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void send(); } };
   return (
+    <>
+    {links.length > 0 && <div className="flink-chips">{links.map((l) => (
+      <div key={l.url} className="flink-chip small"><span aria-hidden>🔗</span><span className="grow">{t('flink.note', { name: l.name, date: fileLinkDate(l.expiresAt) })}</span><button className="link-btn" onClick={() => dropLink(l)}>{t('flink.undo')}</button></div>
+    ))}</div>}
     <div className="reply-bar">
       <textarea className="input" rows={1} maxLength={4000} placeholder={t('grid.waReplyPh')} value={text} onChange={(e) => setText(e.target.value)} onKeyDown={key} />
       <button className="btn small primary" disabled={!text.trim() || busy} onClick={() => void send()}>{busy ? t('grid.replySending') : t('grid.replySend')}</button>
     </div>
+    </>
   );
 }
 
@@ -259,10 +287,25 @@ function WaChatView({ accountId, jid, name, isGroup, gg, active = true }: { acco
   useEffect(() => () => { if (sentRefresh.current) clearTimeout(sentRefresh.current); }, [active, accountId, jid]);
   useEffect(() => { if (stickToBottom.current) box.current?.scrollTo({ top: box.current.scrollHeight }); }, [messages]);
   const last = messages?.[messages.length - 1] ?? null;
+  // Soltar aquí un archivo de chaggu (Attachments.tsx): se crea un enlace para verlo y cae en la caja de responder.
+  const [fileDraft, setFileDraft] = useState<{ link: FileLink; key: number } | null>(null);
+  const [fileOver, setFileOver] = useState(false);
+  const fileDrop = {
+    onDragOver: (e: React.DragEvent) => { if (!isFileDrag(e.dataTransfer.types)) return; e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'copy'; if (!fileOver) setFileOver(true); },
+    onDragLeave: (e: React.DragEvent) => { if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node | null)) setFileOver(false); },
+    onDrop: (e: React.DragEvent) => {
+      if (!isFileDrag(e.dataTransfer.types)) return;
+      e.preventDefault(); e.stopPropagation(); setFileOver(false);
+      const f = readFileDrag(e.dataTransfer);
+      const valid = captureWaPrivacy(accountId, jid);
+      if (!f || !valid()) return;
+      void createFileLink(f.attachmentId).then((link) => { if (valid()) setFileDraft({ link, key: Date.now() }); }).catch((err) => toast(errorText(err)));
+    },
+  };
   if (!visible) return null;
   return (
     <>
-      <div className="wa-msgs pane-wa" ref={box} onScroll={(e) => { const el = e.currentTarget; stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; }}>
+      <div className={`wa-msgs pane-wa ${fileOver ? 'is-file-over' : ''}`} ref={box} {...fileDrop} onScroll={(e) => { const el = e.currentTarget; stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; }}>
         {messages === null && <div className="hint">{t('common.loading')}</div>}
         {messages?.length === 0 && <div className="hint">{t('wa.noMessages')}</div>}
         {messages?.map((m) => {
@@ -295,7 +338,8 @@ function WaChatView({ accountId, jid, name, isGroup, gg, active = true }: { acco
       </div>
       {gg && <SelectionBar n={gg.selected.size} onAsk={gg.onSelectAsk} onClear={gg.onClear} />}
       {gg && last && !last.fromMe && <div className="row gg-compose-row"><span className="grow" /><ReplyForMe source={gg.source} host={gg.host} /></div>}
-      <WaReply accountId={accountId} jid={jid} onSent={() => { if (sentRefresh.current) clearTimeout(sentRefresh.current); sentRefresh.current = setTimeout(load, 1500); }} draft={gg?.draft} />
+      {fileOver && <div className="flink-drop small" aria-hidden>🔗 {t('flink.dropHint')}</div>}
+      <div className="flink-wrap" {...fileDrop}><WaReply accountId={accountId} jid={jid} onSent={() => { if (sentRefresh.current) clearTimeout(sentRefresh.current); sentRefresh.current = setTimeout(load, 1500); }} draft={gg?.draft} fileDraft={fileDraft} /></div>
       <div className="pane-foot small muted">{t('grid.waFoot')}</div>
     </>
   );

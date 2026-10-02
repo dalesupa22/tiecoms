@@ -36,6 +36,7 @@ import { CallDock, CallsScreen, IncomingCallHost, OtherDeviceCallBar } from './s
 const SignedScreen = lazy(() => import('./screens/Signed.tsx'));
 /** /llamada/:token: invitados por enlace, sin cuenta. Se carga aparte. */
 const GuestCallScreen = lazy(() => import('./screens/GuestCall.tsx'));
+const FileLinkScreen = lazy(() => import('./screens/FileLink.tsx'));
 /** Citas por enlace (cita.chaggu.com): públicas, sin cuenta. Se cargan aparte. */
 const BookingScreen = lazy(() => import('./screens/Booking.tsx'));
 
@@ -61,7 +62,7 @@ export function App() {
   const gridSide = useGridSide();
 
   useEffect(() => {
-    if (status === 'anonymous' && !['login', 'signup', 'invite', 'sso', 'guestCall', 'room', 'booking', 'bookingManage', 'bookingHome', 'confirmSignup'].includes(route.name)) navigate(`/login${path !== '/' ? `?next=${encodeURIComponent(path)}` : ''}`, true);
+    if (status === 'anonymous' && !['login', 'signup', 'invite', 'sso', 'guestCall', 'fileLink', 'room', 'booking', 'bookingManage', 'bookingHome', 'confirmSignup'].includes(route.name)) navigate(`/login${path !== '/' ? `?next=${encodeURIComponent(path)}` : ''}`, true);
     // Con sesión desde antes, el enlace de una invitación a la empresa (/signup?org=…) se acepta en /invite/… (también
     // entra a sus grupos). Si la sesión acaba de nacer aquí mismo (se registró con el enlace), ya entró: sigue normal.
     const org = route.name === 'signup' ? new URLSearchParams(location.search).get('org') : null;
@@ -73,6 +74,7 @@ export function App() {
 
   if (status === 'ready') markOnce('chaggu:ready');
   // Invitado por enlace: no necesita sesión, ni esperar a que cargue la de chaggu.
+  if (route.name === 'fileLink') return <Suspense fallback={null}><FileLinkScreen key={lang} token={route.token} /></Suspense>;
   if (route.name === 'guestCall') return <Suspense fallback={null}><GuestCallScreen key={lang} token={route.token} /><ToastHost /></Suspense>;
   if (route.name === 'room') return <Suspense fallback={null}><GuestCallScreen key={lang} room={route.code} /><ToastHost /></Suspense>;
   if (route.name === 'booking' || route.name === 'bookingManage' || route.name === 'bookingHome') return <Suspense fallback={null}><BookingScreen key={lang} route={route} /><ToastHost /></Suspense>;

@@ -453,7 +453,7 @@ struct WaChatSheet: View {
                                     .accessibilityIdentifier("wa.bring")
                             }
                             if store.ggSide.available == true && !m.body.isEmpty {
-                                Button { ggQuotes = [quote(m)]; ggOpen = true } label: { Label("✨ " + L("ggs.ask"), systemImage: "sparkles") }
+                                Button { ggQuotes = [quote(m)]; ggOpen = true } label: { Label(L("ggs.ask"), systemImage: "sparkles") }
                                     .accessibilityIdentifier("menu.askGg")
                                 Button { selecting = true; selected = [m.id] } label: { Label(L("ggs.select"), systemImage: "checkmark.circle") }
                                     .accessibilityIdentifier("menu.select")

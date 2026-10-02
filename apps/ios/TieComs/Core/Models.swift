@@ -67,6 +67,8 @@ struct UserDTO: Codable, Equatable, Sendable {
     /// Sonido predeterminado de los chats y tono de llamada (docs/SONIDOS.md); nil = los de fábrica (pop, clasico).
     var messageSound: String?
     var ringtone: String?
+    /// Permiso de IA guardado (users.ai_consent_at; gg en el chat lo exige). Ausente = servidor anterior.
+    var aiConsent: Bool?
 
     init(from decoder: Decoder) throws {
         let c = try container(decoder)
@@ -82,6 +84,7 @@ struct UserDTO: Codable, Equatable, Sendable {
         primaryOrgId = c.o("primaryOrgId")
         avatarUrl = c.o("avatarUrl")
         dndUntil = c.o("dndUntil")
+        aiConsent = c.o("aiConsent")
     }
 }
 

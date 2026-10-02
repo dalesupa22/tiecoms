@@ -173,6 +173,23 @@ extension ApiRequestError {
 }
 
 extension AppStore {
+    /// ¿Ya dio el permiso de IA? (bootstrap `me.aiConsent` o el «Permitir» de esta sesión).
+    var ggConsented: Bool { ggSide.consented || data?.me.aiConsent == true }
+
+    /// «Permitir»: guarda el permiso de IA (POST /assistant/consent, el mismo de gg) y reintenta.
+    func ggSideGrantConsent() async throws {
+        _ = try await api.requestData("/assistant/consent", method: "POST", json: ["on": true])
+        ggSide.consented = true
+        patchMe { $0.aiConsent = true }
+    }
+
+    /// Al entrar a un chat con mensajes nuevos de otra persona: el API recalcula (tope 1 cada 10 min por fuente).
+    func ggSideRefreshPending(_ source: String) async {
+        guard ggSide.available == true, ggConsented else { return }
+        struct R: Decodable { var pending: Int; init(from decoder: Decoder) throws { pending = (try container(decoder)).int("pending") } }
+        if let r: R = try? await api.request("/gg/side/pending/refresh", method: "POST", json: ["source": source]) { ggSide.pending[source] = max(0, r.pending) }
+    }
+
     private func ggBody(_ base: [String: Any]) -> [String: Any] {
         var b = base
         if ggSide.consented { b["aiConsent"] = true }
@@ -237,10 +254,12 @@ extension AppStore {
         let mine = GgSideMessageDTO(role: "user", body: text, quoted: quotes.isEmpty ? nil : quotes)
         appendGg(source, mine)
         do {
-            struct R: Decodable { var message: GgSideMessageDTO }
+            struct R: Decodable { var message: GgSideMessageDTO; var question: GgSideMessageDTO? }
             var body: [String: Any] = ["source": source, "text": text]
             if !quotes.isEmpty { body["quotedMessageIds"] = quotes.map(\.id) }
             let r: R = try await ggGuard { try await api.request("/gg/side", method: "POST", json: ggBody(body)) }
+            // La pregunta guardada (con los citados validados) reemplaza a la local.
+            if let q = r.question, let i = ggSide.threads[source]?.messages.firstIndex(where: { $0.id == mine.id }) { ggSide.threads[source]?.messages[i] = q }
             appendGg(source, r.message)
         } catch {
             ggSide.threads[source]?.messages.removeAll { $0.id == mine.id }

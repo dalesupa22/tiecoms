@@ -238,7 +238,11 @@ struct ConversationView: View {
         .sheet(item: $sheet) { s in sheetView(s) }
         .modifier(GgChatSheets(gg: $gg, source: ggSource, conversationId: conversationId, chatTitle: store.data.flatMap { d in store.meta(conversationId).map { Naming.title(d, $0) } } ?? "",
                                messages: store.conversations[conversationId]?.messages ?? [], onDraft: putGgDraft))
-        .task(id: conversationId) { await store.ggSidePending([ggSource]) }
+        .task(id: conversationId) {
+            await store.ggSidePending([ggSource])
+            // Mensajes nuevos de otra persona: el API recalcula el número (con tope por fuente).
+            if let d = store.data, lastIsFromOther(d) { await store.ggSideRefreshPending(ggSource) }
+        }
         .onChange(of: draft) { _, v in if v.isEmpty && gg.draftActive { gg.draftActive = false } }
         .sheet(item: Binding(get: { askSide }, set: { askSide = $0 })) { m in
             NewSideSheet(conversationId: conversationId, message: m, preselect: sideForPerson.map { [$0] } ?? []) { id in sidePanel = id; sideForPerson = nil }
@@ -1280,7 +1284,7 @@ struct ConversationView: View {
         let myWsRole = d.workspaces.first { $0.id == c.workspaceId }?.myRole
         // gg (contrato 1-oct): se agrega «✨ Preguntar a gg» y «Seleccionar»; no se quita nada del menú de siempre.
         if store.ggSide.available == true && m.kind == "text" {
-            Button { gg.quotes = [ggQuote(d, m)]; gg.open = true } label: { Label("✨ " + L("ggs.ask"), systemImage: "sparkles") }
+            Button { gg.quotes = [ggQuote(d, m)]; gg.open = true } label: { Label(L("ggs.ask"), systemImage: "sparkles") }
                 .accessibilityIdentifier("menu.askGg")
             Button { gg.selecting = true; gg.selected = [m.id]; composerFocused = false } label: { Label(L("ggs.select"), systemImage: "checkmark.circle") }
                 .accessibilityIdentifier("menu.select")

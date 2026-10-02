@@ -194,6 +194,8 @@ struct GgSideSheet: View {
                         .padding(.horizontal, 14)
                     }
                     .scrollDismissesKeyboard(.interactively)
+                    // Al volver otro día, el historial abre en lo último.
+                    .onChange(of: loading) { _, v in if !v { DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { proxy.scrollTo("bottom", anchor: .bottom) } } }
                     .onChange(of: messages.count) { _, _ in withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
                     .onChange(of: busy) { _, _ in withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
                 }
@@ -235,8 +237,8 @@ struct GgSideSheet: View {
         .alert(L("ai.consentTitle"), isPresented: $askConsent) {
             Button(L("common.cancel"), role: .cancel) { retry = nil }
             Button(L("ai.consentAllow")) {
-                store.ggSide.consented = true
-                if let r = retry { run(r) }
+                let r = retry
+                run { try await store.ggSideGrantConsent(); try await r?() }
             }
             .accessibilityIdentifier("gg.consent.allow")
         } message: { Text(L("ai.consentBody")) }
@@ -339,11 +341,20 @@ struct GgSideSheet: View {
                     chip(L("ggs.whatsLeft"), id: "gg.chip.left") { ask(L("ggs.whatsLeft")) }
                     chip(L("ggs.agreed"), id: "gg.chip.agreed") { ask(L("ggs.agreed")) }
                 }
-                ForEach(follow.prefix(4), id: \.self) { f in chip(f, id: "gg.follow") { ask(f) } }
+                // Sin repetir los de arranque; «Responder por mí» como sugerencia pide los 3 borradores.
+                let starters = Set([L("ggs.replyForMe"), L("ggs.summarize"), L("ggs.whatsLeft"), L("ggs.agreed"), "Responder por mí", "Reply for me"].map(Self.fold))
+                ForEach(follow.prefix(4).filter { !(greeting || follow.isEmpty) || !starters.contains(Self.fold($0)) }, id: \.self) { f in
+                    chip(f, id: "gg.follow") { Self.isReplyForMe(f) ? replyForMe(tone: nil) : ask(f) }
+                }
             }
             .padding(.top, 2)
         }
     }
+
+    static func fold(_ s: String) -> String {
+        s.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil).trimmingCharacters(in: CharacterSet.alphanumerics.inverted.union(.whitespaces))
+    }
+    static func isReplyForMe(_ s: String) -> Bool { ["responder por mi", "reply for me"].contains(fold(s)) }
 
     private func chip(_ title: String, id: String, _ action: @escaping () -> Void) -> some View {
         Button(action: action) {
@@ -544,7 +555,7 @@ struct GgSuggestSheet: View {
             .task { await load() }
             .alert(L("ai.consentTitle"), isPresented: $askConsent) {
                 Button(L("common.cancel"), role: .cancel) { dismiss() }
-                Button(L("ai.consentAllow")) { store.ggSide.consented = true; Task { await load() } }
+                Button(L("ai.consentAllow")) { Task { try? await store.ggSideGrantConsent(); await load() } }
             } message: { Text(L("ai.consentBody")) }
         }
         .presentationDetents([.medium, .large])

@@ -117,19 +117,16 @@ struct HomeView: View {
                         if searching { QuickSearchSections(d: d, query: query, showGroups: false) }
                     } else {
                         if !tree.hasGroups && !searching && tab == .all && store.workspaceFilter == nil { emptyState }
-                        let waPinned = wa.filter { $0.inboxPinnedAt != nil }
-                        if !tree.pinned.isEmpty || !waPinned.isEmpty {
+                        // En el Árbol, los de WhatsApp van juntos en su bloque arriba (no son de ninguna empresa), con el mismo orden.
+                        if !wa.isEmpty {
+                            Section {
+                                ForEach(wa) { w in waRow(w) }
+                            } header: { HomeHeader(title: "WhatsApp", identifier: "grp.section.whatsapp") }
+                        }
+                        if !tree.pinned.isEmpty {
                             Section {
                                 ForEach(tree.pinned) { c in convLink(d, c, indent: 0, showWs: true) }
-                                ForEach(waPinned) { w in waRow(w) }
                             } header: { HomeHeader(title: "📌 " + L("side.pinned")) }
-                        }
-                        // En el Árbol, los de WhatsApp sin fijar van juntos en su sección (no tienen empresa).
-                        let waRest = wa.filter { $0.inboxPinnedAt == nil }
-                        if !waRest.isEmpty {
-                            Section {
-                                ForEach(waRest) { w in waRow(w) }
-                            } header: { HomeHeader(title: "WhatsApp", identifier: "grp.section.whatsapp") }
                         }
                         ForEach(tree.sections) { s in section(d, s, tree: tree, open: open, searching: searching) }
                         // Al buscar: también personas (tocar = escribirle) y chats; los grupos ya salen arriba.

@@ -80,6 +80,7 @@ import com.tiecoms.app.platform.ShareIntake
 import com.tiecoms.app.platform.ShareWorker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.UUID
 
@@ -110,19 +111,27 @@ fun ShareSheet(incoming: ShareIntake.Incoming?, onClose: () -> Unit, onOpenApp: 
     val work by remember(workId) {
         workId?.let { WorkManager.getInstance(ctx).getWorkInfoByIdFlow(UUID.fromString(it)) } ?: flowOf(null)
     }.collectAsState(null)
-    val sending = work != null && work?.state?.isFinished == false
+    // «Enviar en un grupo» (1.7.13): mientras se crea el chat grupal, y si el envío fue a ese grupo (para el aviso).
+    var creatingGroup by remember { mutableStateOf(false) }
+    var sentToGroup by rememberSaveable { mutableStateOf(false) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val sending = creatingGroup || (work != null && work?.state?.isFinished == false)
 
     LaunchedEffect(work?.state) {
         val w = work ?: return@LaunchedEffect
         when (w.state) {
             WorkInfo.State.SUCCEEDED -> {
                 val n = selected.size
-                Toast.makeText(ctx, if (n == 1) ctx.getString(R.string.share_sent_one) else ctx.getString(R.string.share_sent, n), Toast.LENGTH_SHORT).show()
+                Toast.makeText(ctx, when {
+                    sentToGroup -> ctx.getString(R.string.share_sent_group)
+                    n == 1 -> ctx.getString(R.string.share_sent_one)
+                    else -> ctx.getString(R.string.share_sent, n)
+                }, Toast.LENGTH_SHORT).show()
                 onClose()
             }
             WorkInfo.State.FAILED, WorkInfo.State.CANCELLED -> {
                 notice = w.outputData.getString(ShareWorker.KEY_ERROR) ?: ctx.getString(R.string.share_failed)
-                workId = null
+                workId = null; sentToGroup = false
             }
             else -> Unit
         }
@@ -168,25 +177,61 @@ fun ShareSheet(incoming: ShareIntake.Incoming?, onClose: () -> Unit, onOpenApp: 
                     }
                 }
                 notice?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp).testTag("shareNotice")) }
+                // Abajo, como Instagram (1.7.13): el mensaje y un botón grande de enviar a todo lo ancho. Con 2+ directos
+                // con personas, «Enviar por separado» (un mensaje a cada uno) o «Enviar en un grupo» (un chat grupal con
+                // ellas, el mismo POST /chats de «Nuevo chat»: sin nombre, retoma el que ya exista con esa misma gente).
+                val groupPeople = remember(selected, data) { com.tiecoms.app.core.ShareGroup.people(selected, data) }
+                val canSend = selected.isNotEmpty() && !sending && (p.files.isNotEmpty() || p.text.isNotBlank() || message.isNotBlank())
+                fun body() = listOf(message.trim(), p.text).filter { it.isNotBlank() }.joinToString("\n\n")
+                fun sendSeparately() {
+                    notice = null; sentToGroup = false
+                    workId = ShareWorker.enqueue(ctx.applicationContext, ShareWorker.Job(selected, p.files, body(), incoming?.source ?: "other")).toString()
+                }
+                fun sendInGroup(people: List<String>) {
+                    notice = null; creatingGroup = true
+                    scope.launch {
+                        try {
+                            val cid = client.createChat(people, null).id
+                            sentToGroup = true
+                            workId = ShareWorker.enqueue(ctx.applicationContext, ShareWorker.Job(listOf(cid), p.files, body(), incoming?.source ?: "other")).toString()
+                        } catch (e: Exception) {
+                            if (e is kotlinx.coroutines.CancellationException) throw e
+                            notice = errorText(ctx, e)
+                        } finally { creatingGroup = false }
+                    }
+                }
                 Surface(tonalElevation = 3.dp) {
-                    Row(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 16.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedTextField(message, { message = it.take(4000) }, placeholder = { Text(stringResource(R.string.share_add_message)) },
-                            maxLines = 4, enabled = !sending, shape = RoundedCornerShape(24.dp), modifier = Modifier.weight(1f).testTag("shareMessage"))
-                        Spacer(Modifier.width(8.dp))
-                        val canSend = selected.isNotEmpty() && !sending && (p.files.isNotEmpty() || p.text.isNotBlank() || message.isNotBlank())
-                        Button(onClick = {
-                            notice = null
-                            val body = listOf(message.trim(), p.text).filter { it.isNotBlank() }.joinToString("\n\n")
-                            workId = ShareWorker.enqueue(ctx.applicationContext, ShareWorker.Job(selected, p.files, body, incoming?.source ?: "other")).toString()
-                        }, enabled = canSend, modifier = Modifier.heightIn(min = 52.dp).testTag("shareSend")) {
-                            if (sending) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                            else Text(if (selected.size > 1) stringResource(R.string.share_send_to, selected.size) else stringResource(R.string.share_send))
-                        }
+                            maxLines = 3, enabled = !sending, shape = RoundedCornerShape(24.dp), modifier = Modifier.fillMaxWidth().testTag("shareMessage"))
+                        if (groupPeople != null) {
+                            ShareBigButton(stringResource(R.string.share_send_separately), stringResource(R.string.share_send_separately_sub, selected.size),
+                                enabled = canSend, busy = sending && !creatingGroup && !sentToGroup, primary = true, tag = "shareSend") { sendSeparately() }
+                            ShareBigButton(stringResource(R.string.share_send_group), stringResource(R.string.share_send_group_sub, groupPeople.size),
+                                enabled = canSend, busy = creatingGroup || (sending && sentToGroup), primary = false, tag = "shareSendGroup") { sendInGroup(groupPeople) }
+                        } else ShareBigButton(
+                            if (selected.size > 1) stringResource(R.string.share_send_to, selected.size) else stringResource(R.string.share_send), null,
+                            enabled = canSend, busy = sending, primary = true, tag = "shareSend") { sendSeparately() }
                     }
                 }
             }
         }
     }
+}
+
+/** Botón grande de enviar (alto ≥ 52 dp, a todo lo ancho), con una línea de detalle opcional. */
+@Composable
+private fun ShareBigButton(label: String, sub: String?, enabled: Boolean, busy: Boolean, primary: Boolean, tag: String, onClick: () -> Unit) {
+    val content: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit = {
+        if (busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = androidx.compose.material3.LocalContentColor.current)
+        else Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(label, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, maxLines = 1)
+            if (sub != null) Text(sub, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+    }
+    val mod = Modifier.fillMaxWidth().heightIn(min = 52.dp).testTag(tag)
+    if (primary) Button(onClick = onClick, enabled = enabled, shape = RoundedCornerShape(14.dp), modifier = mod, content = content)
+    else androidx.compose.material3.FilledTonalButton(onClick = onClick, enabled = enabled, shape = RoundedCornerShape(14.dp), modifier = mod, content = content)
 }
 
 @Composable

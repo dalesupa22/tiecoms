@@ -583,7 +583,10 @@ struct ShareExtensionView: View {
                 Spacer()
                 Image(systemName: on ? "checkmark.circle.fill" : "circle").foregroundStyle(on ? orange : .secondary).font(.title3)
             }
+            .contentShape(Rectangle())
         }
+        // Sin el tinte del botón: el nombre en el color del texto, no en naranja.
+        .buttonStyle(.plain)
         .disabled(model.sending)
         .accessibilityAddTraits(on ? .isSelected : [])
         .accessibilityIdentifier("share.target.\(t.id)")

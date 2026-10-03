@@ -461,17 +461,19 @@ final class GroupsUITests: XCTestCase {
         app.tabBars.buttons["Asuntos"].tap()
         let seg = app.segmentedControls["issues.filter"]
         XCTAssertTrue(seg.waitForExistence(timeout: 5))
-        XCTAssertTrue(seg.buttons.element(boundBy: 0).label.hasPrefix("Míos"))
-        XCTAssertTrue(seg.buttons.element(boundBy: 2).label.hasPrefix("Completados"))
+        XCTAssertTrue(seg.buttons.element(boundBy: 0).label.hasPrefix("Mías"))
+        XCTAssertTrue(seg.buttons.element(boundBy: 2).label.hasPrefix("Hechas"))
         seg.buttons.element(boundBy: 1).tap()
-        let groupBy = app.segmentedControls["issues.groupBy"]
+        // 1.7.13: Por fecha (por defecto) · Por grupo · Por responsable van en el menú de orden.
+        let groupBy = app.buttons["issues.groupBy"]
         XCTAssertTrue(groupBy.exists)
-        groupBy.buttons["Por grupo"].tap()
+        func sort(_ name: String) { groupBy.tap(); let b = app.buttons[name]; if b.waitForExistence(timeout: 3) { b.tap() } }
+        sort("Por grupo")
         let row = app.buttons["issue.row.\(overdue)"]
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'issue.row.'")).firstMatch.waitForExistence(timeout: 8))
         sleep(1)
         shot("03-asuntos-por-grupo")
-        groupBy.buttons["Por responsable"].tap()
+        sort("Por responsable")
         // Según el API, un asunto sin responsable queda de quien lo creó o en «Sin responsable».
         let mineSection = app.descendants(matching: .any)["issues.section.\(f.a.id)"]
         let noneSection = app.descendants(matching: .any)["issues.section.__none"]
@@ -483,7 +485,7 @@ final class GroupsUITests: XCTestCase {
         }
         sleep(1)
         shot("04-asuntos-por-responsable")
-        groupBy.buttons["Por grupo"].tap()
+        sort("Por grupo")
 
         // 3. Alta rápida: responsable y fecha aparecen al escribir; Return crea y deja el campo listo.
         let quick = app.textFields["issue.quickField"]
@@ -728,7 +730,8 @@ final class GroupsUITests: XCTestCase {
         let seg = app.segmentedControls["issues.filter"]
         XCTAssertTrue(seg.waitForExistence(timeout: 5))
         seg.buttons.element(boundBy: 1).tap()
-        app.segmentedControls["issues.groupBy"].buttons["Por grupo"].tap()
+        app.buttons["issues.groupBy"].tap()
+        if app.buttons["Por grupo"].waitForExistence(timeout: 3) { app.buttons["Por grupo"].tap() }
         let parentRow = app.buttons["issue.row.\(parent)"]
         for _ in 0..<6 where !(parentRow.exists && parentRow.isHittable) { app.swipeUp() }
         XCTAssertTrue(parentRow.waitForExistence(timeout: 5))

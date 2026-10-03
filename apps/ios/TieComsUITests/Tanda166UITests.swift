@@ -159,7 +159,7 @@ final class Tanda166UITests: XCTestCase {
         let filter = app.segmentedControls["issues.filter"]
         XCTAssertTrue(filter.waitForExistence(timeout: 8))
         XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Lo que quedó pendiente")).firstMatch.exists, "sin el párrafo issue.pageSub")
-        XCTAssertTrue(app.segmentedControls["issues.groupBy"].exists, "Por grupo / Por responsable se conservan")
+        XCTAssertTrue(app.buttons["issues.groupBy"].exists, "Por grupo / Por responsable se conservan (1.7.13: en el menú de orden)")
         // Los filtros quedan pegados al título: arriba de la primera cuarta parte de la pantalla.
         XCTAssertLessThan(filter.frame.minY, app.frame.height * 0.3, "filtros cerca del título: \(filter.frame)")
         shot("2-01-asuntos-compactos")
@@ -171,7 +171,12 @@ final class Tanda166UITests: XCTestCase {
         let f = try fixture()
         let app = login(f)
         tab(app, "Asuntos", f)
-        // La sección «Personal · solo tú» con el asunto del fixture, 🔒 en la fila.
+        // La sección «Personal · solo tú» con el asunto del fixture, 🔒 en la fila (1.7.13: por defecto es por fecha;
+        // se elige «Por grupo» en el menú de orden).
+        if app.buttons["issues.groupBy"].waitForExistence(timeout: 8) {
+            app.buttons["issues.groupBy"].tap()
+            if app.buttons["Por grupo"].waitForExistence(timeout: 3) { app.buttons["Por grupo"].tap() }
+        }
         let section = app.staticTexts["issues.section.__personal"]
         let found = section.waitForExistence(timeout: 15)
         XCTAssertTrue(found, "sección Personal · solo tú")

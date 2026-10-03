@@ -2959,3 +2959,27 @@
 "composer.format" = "Format";
 "composer.italic" = "Italic";
 "composer.bold" = "Bold";
+
+/* Tareas del móvil (1.7.13) */
+"tasks.f.mine" = "Mine";
+"tasks.f.open" = "Open";
+"tasks.f.done" = "Done";
+"tasks.sort" = "Sort";
+"tasks.byDate" = "By date";
+"tasks.due.overdue" = "Overdue";
+"tasks.due.today" = "Today";
+"tasks.due.week" = "This week";
+"tasks.due.later" = "Later";
+"tasks.due.none" = "No date";
+"tasks.done.recent" = "Recently done";
+"tasks.chip.today" = "Due today";
+"tasks.chip.tomorrow" = "Tomorrow";
+"tasks.chip.yesterday" = "Due yesterday";
+"tasks.chip.overdueN" = "{n} days overdue";
+"tasks.quiet" = "No activity {n}d";
+"tasks.personal" = "Personal";
+"tasks.empty.mine" = "Nothing waiting on you";
+"tasks.empty.open" = "No open tasks";
+"tasks.empty.done" = "No finished tasks yet";
+"tasks.empty.hint" = "Type below to add a task.";
+"tasks.empty.doneHint" = "What you finish will show up here.";

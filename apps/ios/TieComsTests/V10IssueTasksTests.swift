@@ -173,6 +173,38 @@ final class V10IssueTasksTests: XCTestCase {
         XCTAssertEqual(byGroup.map(\.id), ["g1", "g2"], "el grupo con más asuntos primero (3 contra 2)")
     }
 
+    /// 1.7.13: la pestaña de Tareas agrupa por fecha (Vencidas · Hoy · Esta semana · Más adelante · Sin fecha).
+    func testDateSectionsAndChips() throws {
+        let cal = Calendar.current
+        // Jueves 1-oct-2026, 15:00 hora local: la semana llega hasta el domingo 4.
+        let now = cal.date(from: DateComponents(year: 2026, month: 10, day: 1, hour: 15))!
+        let recent = "2026-10-01T12:00:00.000Z"
+        let list = [try issue("nodate", statusSince: recent), try issue("later", due: "2026-10-05", statusSince: recent),
+                    try issue("sunday", due: "2026-10-04", statusSince: recent), try issue("today", due: "2026-10-01", statusSince: recent),
+                    try issue("old", due: "2026-09-28", statusSince: recent), try issue("yday", due: "2026-09-30", statusSince: recent),
+                    try issue("tomorrow", due: "2026-10-02", statusSince: recent)]
+        let s = IssueTree.dateSections(list, now: now, calendar: cal)
+        XCTAssertEqual(s.map(\.id), ["due.overdue", "due.today", "due.week", "due.later", "due.none"])
+        XCTAssertEqual(s[0].issues.map(\.id), ["old", "yday"], "la más vieja primero")
+        XCTAssertEqual(s[2].issues.map(\.id), ["tomorrow", "sunday"])
+        XCTAssertTrue(IssueTree.dateSections([try issue("x", statusSince: recent)], now: now, calendar: cal).map(\.id) == ["due.none"], "sin franjas vacías")
+
+        let chip = { (id: String) in IssueSort.dueChip(list.first { $0.id == id }!, now: now, calendar: cal) }
+        XCTAssertEqual(chip("old")?.text, "Venció hace 3 días")
+        XCTAssertEqual(chip("old")?.tone, .overdue)
+        XCTAssertEqual(chip("yday")?.text, "Venció ayer")
+        XCTAssertEqual(chip("today")?.text, "Vence hoy")
+        XCTAssertEqual(chip("tomorrow")?.text, "Mañana")
+        XCTAssertEqual(chip("sunday")?.tone, .normal)
+        XCTAssertNil(chip("nodate"))
+
+        // «Sin movimiento N d»: desde 5 días y nunca si ya está vencida.
+        let quiet = try issue("q", statusSince: "2026-09-25T12:00:00.000Z")
+        XCTAssertEqual(IssueSort.quietLabel(quiet, now: now), "Sin movimiento 6 d")
+        XCTAssertNil(IssueSort.quietLabel(try issue("q3", statusSince: "2026-09-28T12:00:00.000Z"), now: now))
+        XCTAssertNil(IssueSort.quietLabel(try issue("qo", due: "2026-09-20", statusSince: "2026-09-20T12:00:00.000Z"), now: now))
+    }
+
     func testTextsMatchTheWeb() {
         XCTAssertEqual(L("issue.markDone"), "Marcar como hecho")
         XCTAssertEqual(L("issue.qWho"), "¿Quién lo hace?")

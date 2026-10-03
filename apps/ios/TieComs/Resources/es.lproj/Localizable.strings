@@ -2959,3 +2959,27 @@
 "composer.format" = "Formato";
 "composer.italic" = "Cursiva";
 "composer.bold" = "Negrita";
+
+/* Tareas del móvil (1.7.13) */
+"tasks.f.mine" = "Mías";
+"tasks.f.open" = "Abiertas";
+"tasks.f.done" = "Hechas";
+"tasks.sort" = "Ordenar";
+"tasks.byDate" = "Por fecha";
+"tasks.due.overdue" = "Vencidas";
+"tasks.due.today" = "Hoy";
+"tasks.due.week" = "Esta semana";
+"tasks.due.later" = "Más adelante";
+"tasks.due.none" = "Sin fecha";
+"tasks.done.recent" = "Hechas recientemente";
+"tasks.chip.today" = "Vence hoy";
+"tasks.chip.tomorrow" = "Mañana";
+"tasks.chip.yesterday" = "Venció ayer";
+"tasks.chip.overdueN" = "Venció hace {n} días";
+"tasks.quiet" = "Sin movimiento {n} d";
+"tasks.personal" = "Personal";
+"tasks.empty.mine" = "Nada pendiente para ti";
+"tasks.empty.open" = "No hay tareas abiertas";
+"tasks.empty.done" = "Todavía no hay tareas hechas";
+"tasks.empty.hint" = "Escribe abajo para añadir una tarea.";
+"tasks.empty.doneHint" = "Lo que completes aparecerá aquí.";

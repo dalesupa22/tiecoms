@@ -490,7 +490,8 @@ enum IssueTree {
         }
     }
 
-    enum GroupBy: String, CaseIterable { case group, person }
+    /// `date` (1.7.13, por defecto en la pestaña): Vencidas · Hoy · Esta semana · Más adelante · Sin fecha.
+    enum GroupBy: String, CaseIterable { case date, group, person }
     static let groupByKey = "tc.issues.groupBy"
 
     struct Bucket: Identifiable, Equatable { var id: String; var issues: [IssueDTO] }
@@ -559,12 +560,12 @@ enum IssueTree {
 struct IssuesScreen: View {
     @Environment(AppStore.self) private var store
     /// Pestaña «Todo» (1.7.3, variante 2 del mockup): arriba los atajos pequeños a Correo, WhatsApp, Archivos y Trazo;
-    /// debajo, Tareas igual que siempre.
+    /// debajo, Tareas.
     var hub = false
     @State private var filter = IssueTree.Filter.mine
     @State private var preferenceScope: String?
     @State private var restoringPreferences = false
-    @State private var groupByRaw = IssueTree.GroupBy.group.rawValue
+    @State private var groupByRaw = IssueTree.GroupBy.date.rawValue
     @State private var error: String?
 
     var body: some View {
@@ -576,10 +577,13 @@ struct IssuesScreen: View {
                 let scoped = store.issues.values.filter { store.canCacheIssue($0) && ($0.conversationId.map(visible.contains) ?? true || $0.isRestricted) }
                 let list = IssueTree.filter(Array(scoped), filter, me: d.me.id)
                     .sorted(by: filter == .closed ? IssueSort.recentlyClosed : IssueSort.order)
-                let groupBy = IssueTree.GroupBy(rawValue: groupByRaw) ?? .group
-                // Por grupo, las tareas van debajo de su asunto (en la sección del asunto); por responsable, sueltas.
+                let groupBy = IssueTree.GroupBy(rawValue: groupByRaw) ?? .date
+                // Por grupo, las tareas van debajo de su asunto (en la sección del asunto); por fecha y por responsable, sueltas.
                 let shown = groupBy == .group ? IssueTasks.tops(list, store.issues) : list
-                let sections = IssueTree.sections(shown, by: groupBy, me: d.me.id, groupKey: { IssueTasks.groupConversation($0, store.issues) }) { sectionTitle(d, $0, groupBy) }
+                let sections: [IssueTree.Bucket] = switch groupBy {
+                case .date: filter == .closed ? (list.isEmpty ? [] : [IssueTree.Bucket(id: "done.recent", issues: list)]) : IssueTree.dateSections(list)
+                case .group, .person: IssueTree.sections(shown, by: groupBy, me: d.me.id, groupKey: { IssueTasks.groupConversation($0, store.issues) }) { sectionTitle(d, $0, groupBy) }
+                }
                 List {
                     if hub {
                         Section {
@@ -588,21 +592,21 @@ struct IssuesScreen: View {
                                 .listRowBackground(Color.clear)
                         }
                     }
-                    // 1.6.6: sin el párrafo explicativo (issue.pageSub); los filtros quedan pegados al título.
+                    // 1.7.13: un solo control compacto (Mías · Abiertas · Hechas) y, a su lado, el orden en un menú pequeño.
                     Section {
-                        Picker(L("nav.issues"), selection: $filter) {
-                            ForEach([IssueTree.Filter.mine, .open, .closed], id: \.self) { f in
-                                Text("\(label(f)) \(IssueTree.filter(Array(scoped), f, me: d.me.id).count)").tag(f)
+                        HStack(spacing: 8) {
+                            Picker(L("nav.issues"), selection: $filter) {
+                                ForEach([IssueTree.Filter.mine, .open, .closed], id: \.self) { f in
+                                    Text("\(label(f)) \(IssueTree.filter(Array(scoped), f, me: d.me.id).count)").tag(f)
+                                }
                             }
+                            .pickerStyle(.segmented)
+                            .controlSize(.small)
+                            .accessibilityIdentifier("issues.filter")
+                            sortMenu(groupBy)
                         }
-                        .pickerStyle(.segmented)
-                        .accessibilityIdentifier("issues.filter")
-                        Picker(L("issue.groupBy"), selection: $groupByRaw) {
-                            Text(L("issue.byGroup")).tag(IssueTree.GroupBy.group.rawValue)
-                            Text(L("issue.byPerson")).tag(IssueTree.GroupBy.person.rawValue)
-                        }
-                        .pickerStyle(.segmented)
-                        .accessibilityIdentifier("issues.groupBy")
+                        .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+                        .listRowBackground(Color.clear)
                         if let error { Text(error).foregroundStyle(.red).font(.footnote) }
                     } header: {
                         if hub {
@@ -610,14 +614,13 @@ struct IssuesScreen: View {
                                 .accessibilityAddTraits(.isHeader)
                         }
                     }
-                    if filter != .closed {
-                        Section { QuickAddIssue(conversationId: nil) }
+                    if list.isEmpty {
+                        Section { TasksEmptyState(filter: filter).listRowBackground(Color.clear) }
                     }
-                    if list.isEmpty { Text(L("issue.empty")).foregroundStyle(Theme.textSecondary) }
                     ForEach(sections) { s in
                         Section {
                             ForEach(s.issues) { i in
-                                IssueRow(issue: i, showWhere: groupBy == .person, showOwner: groupBy == .group) { store.push(.issue(i.id)) }
+                                TaskListRow(issue: i, showWhere: groupBy != .group, showOwner: groupBy != .person) { store.push(.issue(i.id)) }
                                 if groupBy == .group && i.parentIssueId == nil {
                                     ForEach(IssueTasks.children(store.issues, of: i.id)) { k in
                                         IssueRow(issue: k, showWhere: false, child: true) { store.push(.issue(k.id)) }
@@ -633,7 +636,17 @@ struct IssuesScreen: View {
                 .listSectionSpacing(.compact)
                 .contentMargins(.top, 4, for: .scrollContent)
                 .scrollContentBackground(.hidden)
+                .scrollDismissesKeyboard(.interactively)
                 .refreshable { await load() }
+                // «Añadir tarea» fijo abajo (no ocupa la primera pantalla); en Hechas no hace falta.
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    if filter != .closed {
+                        QuickAddIssue(conversationId: nil)
+                            .padding(.horizontal, 8).padding(.vertical, 2)
+                            .background(.bar)
+                            .overlay(alignment: .top) { Divider() }
+                    }
+                }
             }
         }
         .background(Theme.background.ignoresSafeArea())
@@ -643,7 +656,8 @@ struct IssuesScreen: View {
             restoringPreferences = true
             preferenceScope = store.me.map { ScopedPreference.key(server: store.api.baseURL.absoluteString, account: $0.id, purpose: "issues") }
             if let key = preferenceScope {
-                groupByRaw = UserDefaults.standard.string(forKey: key + ".groupBy") ?? IssueTree.GroupBy.group.rawValue
+                // «.groupBy2» (1.7.13): la preferencia vieja era «Por grupo» por defecto; ahora se arranca por fecha.
+                groupByRaw = UserDefaults.standard.string(forKey: key + ".groupBy2") ?? IssueTree.GroupBy.date.rawValue
                 filter = IssueTree.Filter(rawValue: UserDefaults.standard.string(forKey: key + ".filter") ?? "") ?? .mine
             }
             restoringPreferences = false
@@ -652,21 +666,48 @@ struct IssuesScreen: View {
         .onChange(of: groupByRaw) { _, _ in savePreferences() }
         .onChange(of: filter) { _, _ in savePreferences() }
     }
+
+    /// Ícono de orden: Por fecha (por defecto) · Por grupo · Por responsable.
+    private func sortMenu(_ groupBy: IssueTree.GroupBy) -> some View {
+        Menu {
+            Picker(L("tasks.sort"), selection: $groupByRaw) {
+                Label(L("tasks.byDate"), systemImage: "calendar").tag(IssueTree.GroupBy.date.rawValue)
+                Label(L("issue.byGroup"), systemImage: "bubble.left.and.bubble.right").tag(IssueTree.GroupBy.group.rawValue)
+                Label(L("issue.byPerson"), systemImage: "person.2").tag(IssueTree.GroupBy.person.rawValue)
+            }
+        } label: {
+            Image(systemName: "arrow.up.arrow.down")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(groupBy == .date ? Theme.textSecondary : Theme.accentText)
+                .frame(width: 34, height: 30)
+                .background(Circle().fill(Theme.bubbleOther))
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .accessibilityLabel(L("tasks.sort"))
+        .accessibilityValue(groupBy == .date ? L("tasks.byDate") : groupBy == .group ? L("issue.byGroup") : L("issue.byPerson"))
+        .accessibilityIdentifier("issues.groupBy")
+    }
+
     private func savePreferences() {
         guard !restoringPreferences, let key = preferenceScope else { return }
-        UserDefaults.standard.set(groupByRaw, forKey: key + ".groupBy")
+        UserDefaults.standard.set(groupByRaw, forKey: key + ".groupBy2")
         UserDefaults.standard.set(filter.rawValue, forKey: key + ".filter")
     }
 
     private func label(_ f: IssueTree.Filter) -> String {
         switch f {
-        case .mine: return L("issue.mine")
-        case .open: return L("issue.allOpen")
-        case .closed, .all: return L("issue.closed")
+        case .mine: return L("tasks.f.mine")
+        case .open: return L("tasks.f.open")
+        case .closed, .all: return L("tasks.f.done")
         }
     }
 
     private func sectionTitle(_ d: BootstrapDTO, _ k: String, _ by: IssueTree.GroupBy) -> String {
+        if by == .date {
+            if k == "done.recent" { return L("tasks.done.recent") }
+            return L("tasks.due.\(k.replacingOccurrences(of: "due.", with: ""))")
+        }
         if by == .person {
             if k == IssueTree.noOwner { return L("issue.noOwner") }
             return (Naming.person(d, k)?.name ?? L("common.participant")) + (k == d.me.id ? " \(L("common.you"))" : "")
@@ -679,6 +720,24 @@ struct IssuesScreen: View {
 
     @ViewBuilder
     private func sectionHeader(_ d: BootstrapDTO, _ s: IssueTree.Bucket, _ by: IssueTree.GroupBy) -> some View {
+        if by == .date {
+            // «Vencidas» en rojo; el resto, discreto. El número, pequeño y en gris.
+            let overdue = s.id == IssueTree.bucketId(.overdue)
+            HStack(spacing: 6) {
+                Text(sectionTitle(d, s.id, by)).font(.subheadline.weight(.bold)).foregroundStyle(overdue ? Color.red : Theme.textPrimary)
+                Text("\(s.issues.count)").font(.caption.weight(.semibold)).monospacedDigit().foregroundStyle(overdue ? Color.red.opacity(0.8) : Theme.textSecondary)
+            }
+            .textCase(nil)
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isHeader)
+            .accessibilityIdentifier("issues.section.\(s.id)")
+        } else {
+            groupedHeader(d, s, by)
+        }
+    }
+
+    @ViewBuilder
+    private func groupedHeader(_ d: BootstrapDTO, _ s: IssueTree.Bucket, _ by: IssueTree.GroupBy) -> some View {
         let text = Text("\(s.id == IssueTasks.personalKey ? "🔒 " : "")\(sectionTitle(d, s.id, by)) · \(s.issues.count)")
             .font(.subheadline.weight(.bold)).foregroundStyle(Theme.textPrimary).textCase(nil)
         if by == .group, let conv = d.conversations.first(where: { $0.id == s.id }) {

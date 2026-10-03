@@ -11,6 +11,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { enqueueOutbox, pool, tx } from '../db.ts';
 import { ApiError, badRequest, notFound } from '../errors.ts';
 import { visibleWaChatSql } from './wa-privacy.ts';
+import { WA_WEBHOOK_EVENTS } from './mcp-consts.ts';
 import { phoneLabel, sendToChat, whoSql } from './whatsapp.ts';
 import { seal, sign, post, unseal, validateOutgoingUrl } from './integration-events.ts';
 
@@ -103,7 +104,6 @@ export async function findChat(ctx: McpCtx, ref: string) {
   throw badRequest(`Hay ${hits.length} chats con ese nombre; usa el valor chat: ${hits.slice(0, 8).map((r) => `${r.name} (${r.account_label}) = ${chatRef(r.account_id, r.jid)}`).join('; ')}`);
 }
 
-const KINDS = ['text', 'audio', 'image', 'video', 'document', 'sticker', 'location', 'contact', 'poll', 'event'] as const;
 
 /** 5. Mensajes con dirección, tipo, teléfono y transcripción; incremental con since/before. */
 export async function readChat(ctx: McpCtx, ref: string, q: { limit: number; since?: string; before?: string; kinds?: string[] }) {
@@ -323,7 +323,7 @@ export async function sendDraft(userId: string, id: string, body?: string) {
 
 // ---------- 10. Avisos al instante ----------
 
-export const WEBHOOK_EVENTS = ['whatsapp.message.received', 'whatsapp.message.sent', 'whatsapp.message.transcribed', 'whatsapp.draft.sent', 'whatsapp.draft.discarded'] as const;
+export const WEBHOOK_EVENTS = WA_WEBHOOK_EVENTS;
 
 export async function setWebhook(ctx: McpCtx, a: { url: string; events?: string[]; chats: string[] }) {
   validateOutgoingUrl(a.url);
@@ -477,4 +477,3 @@ export async function transcribeWaVoice(p: { accountId: string; jid: string; id:
   }
 }
 
-export { KINDS };

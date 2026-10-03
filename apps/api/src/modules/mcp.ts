@@ -21,6 +21,7 @@ import * as mailbox from './mailbox.ts';
 import * as issues from './issues.ts';
 import * as cal from './calendar.ts';
 import * as mwa from './mcp-wa.ts';
+import { WA_KINDS, WA_WEBHOOK_EVENTS } from './mcp-consts.ts';
 import type { McpCtx } from './mcp-wa.ts';
 
 const PREFIX = 'chgmcp_';
@@ -383,7 +384,7 @@ const tools: Tool[] = [
       chat: z.string().min(1).max(300),
       since: z.string().datetime({ offset: true }).optional(),
       before: z.string().datetime({ offset: true }).optional(),
-      kinds: z.array(z.enum(mwa.KINDS)).max(10).optional(),
+      kinds: z.array(z.enum(WA_KINDS)).max(10).optional(),
       limit: z.number().int().min(1).max(200).optional(),
     }),
     run: async (_u, a, ctx) => mwa.readChat(ctx, a.chat, { limit: a.limit ?? 50, since: a.since, before: a.before, kinds: a.kinds }),
@@ -439,7 +440,7 @@ const tools: Tool[] = [
   {
     name: 'set_whatsapp_webhook', scope: 'whatsapp:read',
     description: 'Avisos al instante (POST firmado) de mensajes nuevos, enviados, transcritos y borradores, SOLO de los chats listados. Reemplaza el webhook anterior de este token. Devuelve el secreto una sola vez.',
-    schema: z.object({ url: z.string().url().max(2000), chats: z.array(z.string().min(1).max(300)).max(500), events: z.array(z.enum(mwa.WEBHOOK_EVENTS)).optional() }),
+    schema: z.object({ url: z.string().url().max(2000), chats: z.array(z.string().min(1).max(300)).max(500), events: z.array(z.enum(WA_WEBHOOK_EVENTS)).optional() }),
     run: async (_u, a, ctx) => mwa.setWebhook(ctx, a),
   },
   {

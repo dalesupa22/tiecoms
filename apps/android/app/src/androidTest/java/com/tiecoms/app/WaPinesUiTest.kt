@@ -137,17 +137,17 @@ class WaPinesUiTest {
             tap("mailPin-t1"); waitTag("mailPreview"); shot("13-abre-correo")
             ins.uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK); Thread.sleep(800)
 
-            // 8) Nombre largo: el sello gg es pequeñito y el nombre gana espacio (chat de chaggu y de WhatsApp).
+            // 8) Nombre largo (1.7.13): gg ya no está en la cabecera sino abajo, en la píldora; el nombre gana espacio.
             val longGroup = arg("longGroup"); val personal = arg("personal")
             if (longGroup.isNotBlank()) {
                 ins.runOnMainSync { app.container.pendingLink.value = com.tiecoms.app.core.DeepLink.Conversation(longGroup) }
-                waitTag("composer"); waitTag("ggSideButton", 10_000)
-                assertTrue("sello gg pequeño", compose.onNodeWithTag("ggSideButton", useUnmergedTree = true).getBoundsInRoot().let { (it.right - it.left).value } <= 40f)
+                waitTag("composer"); waitTag("ggPillOpen", 10_000)
+                assertTrue("sin gg en la cabecera", compose.onAllNodes(androidx.compose.ui.test.hasTestTag("ggSideButton"), useUnmergedTree = true).fetchSemanticsNodes().isEmpty())
                 shot("14-nombre-largo-chat"); tap("back"); Thread.sleep(800)
             }
             if (personal.isNotBlank()) {
                 ins.runOnMainSync { app.container.pendingLink.value = com.tiecoms.app.core.DeepLink.Conversation(com.tiecoms.app.core.WaInbox.key(personal, "120363009@g.us")) }
-                waitTag("waMessages"); waitTag("ggSideButton", 10_000)
+                waitTag("waMessages"); waitTag("ggPillOpen", 10_000)
                 shot("15-nombre-largo-whatsapp")
             }
         } catch (e: Throwable) { shot("fallo"); throw e } finally { scenario.close() }

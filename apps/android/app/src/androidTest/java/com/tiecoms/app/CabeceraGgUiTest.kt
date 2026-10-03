@@ -69,7 +69,7 @@ class CabeceraGgUiTest {
             chats.forEachIndexed { i, id ->
                 ins.runOnMainSync { app.container.pendingLink.value = DeepLink.Conversation(id) }
                 compose.waitUntilAtLeastOneExists(hasTestTag("composer"), 20_000)
-                compose.waitUntilAtLeastOneExists(hasTestTag("ggSideButton"), 10_000)
+                compose.waitUntilAtLeastOneExists(hasTestTag("ggPillOpen"), 10_000)
                 assertTrue("🔎", exists("chatSearch")); assertTrue("⋯", exists("convMenu")); assertTrue("📞", exists("callStart"))
                 assertFalse("sin ⓘ aparte", compose.onAllNodes(hasTestTag("details")).fetchSemanticsNodes().size > 1)
                 shot("$i")

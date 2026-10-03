@@ -49,12 +49,9 @@ class NightControlsUiTest {
         compose.setContent { MaterialTheme { Surface(Modifier.fillMaxSize()) { Column {
             AvailabilityBadge(AvailabilityDTO("rest", "2099-01-01T00:00:00Z", true, 4))
             AvailabilityBadge(AvailabilityDTO("future-provider-mode", null, true, 5))
-            GgButton(99, {})
         } } } }
         compose.onNodeWithTag("availability-rest").assertExists()
         compose.onNodeWithTag("availability-future-provider-mode").assertDoesNotExist()
-        compose.onNodeWithText("99", substring = true, useUnmergedTree = true).assertDoesNotExist()
-        compose.onNodeWithTag("ggSideButton").assertExists()
         proof("availability-gg")
     }
     @Test fun recordedOriginalCanPreviewWithoutSendingThenNeedsExplicitSend() {

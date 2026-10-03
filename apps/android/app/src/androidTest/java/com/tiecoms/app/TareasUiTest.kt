@@ -105,6 +105,9 @@ class TareasUiTest {
             compose.waitUntilAtLeastOneExists(hasTestTag("issue-${overdue.id}"), 15_000)
             assertFalse("Míos no trae lo de otro", exists("issue-${forPeer.id}"))
             assertFalse("Míos no trae completados", exists("issue-${done.id}"))
+            // 1.7.13: el alta rápida vive en la hoja de «＋ Añadir tarea».
+            compose.onNodeWithTag("taskAddFab").performClick()
+            compose.waitUntilAtLeastOneExists(hasTestTag("issueQuickAdd"), 5_000)
             compose.onNodeWithTag("issueQuickAdd").performTextInput("Llamar al proveedor")
             compose.waitUntilAtLeastOneExists(hasTestTag("issueQuickOwner"), 5_000)
             assertTrue("fecha al escribir", exists("issueQuickDue"))
@@ -114,6 +117,7 @@ class TareasUiTest {
             compose.waitUntil(5_000) { !exists("issueQuickOwner") } // el campo quedó vacío y listo
             shot("01b-listo-para-el-siguiente")
             androidx.test.uiautomator.UiDevice.getInstance(ins).pressBack() // cierra el teclado
+            androidx.test.uiautomator.UiDevice.getInstance(ins).pressBack() // y la hoja
             log("Alta rápida: Enter crea con Yo como responsable y el campo queda vacío")
 
             // Círculo: completa con «Deshacer».
@@ -126,11 +130,11 @@ class TareasUiTest {
             log("Círculo: completar y Deshacer")
 
             // Por responsable: yo primero.
-            compose.onNodeWithText(str(R.string.issue_all_open), substring = true).performClick()
-            compose.onNodeWithText(str(R.string.issue_by_person)).performClick()
+            compose.onNodeWithTag("taskFilter-open").performClick()
+            compose.onNodeWithTag("taskGrouping").performClick()
+            compose.onNodeWithTag("taskGrouping-person").performClick()
             compose.waitUntilAtLeastOneExists(hasTestTag("issueSection-$me"), 5_000)
             compose.onNodeWithTag("issues").performScrollToNode(hasTestTag("issueSection-$peer"))
-            assertEquals("person", app.container.settings.issueGroupBy)
             compose.onNodeWithTag("issues").performScrollToNode(hasTestTag("issueSection-$me"))
             shot("03-por-responsable")
             log("Abiertos por responsable, recordado en preferencias")

@@ -355,7 +355,7 @@ fun IssueDatePicker(value: LocalDate?, onPick: (LocalDate?) -> Unit, onDismiss: 
  * Sin [conversationId] (pestaña Asuntos) también se elige el grupo o chat.
  */
 @Composable
-fun QuickAddIssue(conversationId: String?, modifier: Modifier = Modifier) {
+fun QuickAddIssue(conversationId: String?, modifier: Modifier = Modifier, autoFocus: Boolean = false) {
     val ctx = LocalContext.current
     val client = LocalClient.current
     val scope = rememberCoroutineScope()
@@ -379,6 +379,8 @@ fun QuickAddIssue(conversationId: String?, modifier: Modifier = Modifier) {
     var pickDate by remember { mutableStateOf(false) }
     val focus = remember { FocusRequester() }
     val typing = title.isNotEmpty()
+    // Desde «＋ Añadir tarea» (1.7.13) el campo llega con el teclado arriba.
+    if (autoFocus) LaunchedEffect(Unit) { androidx.compose.runtime.withFrameNanos { }; runCatching { focus.requestFocus() } }
     fun submit() {
         val text = title.trim()
         if (text.length < 2 || busy) return
@@ -500,20 +502,19 @@ fun IssuesScreen(onOpen: (String) -> Unit, conversationFilter: String? = null, o
             }
             return@Scaffold
         }
+        // 1.7.13: un solo filtro (Mías · Abiertas · Hechas) y, por defecto, agrupadas por fecha.
         var filter by rememberSaveable(data.me.id) { mutableStateOf("mine") }
-        var taskStatus by rememberSaveable(data.me.id) { mutableStateOf("active") }
         val taskPrefs = remember(data.me.id) { ctx.getSharedPreferences("task_preferences_" + data.me.id, android.content.Context.MODE_PRIVATE) }
-        var groupBy by rememberSaveable(data.me.id) { mutableStateOf(taskPrefs.getString("grouping", "group") ?: "group") }
+        var groupBy by rememberSaveable(data.me.id) { mutableStateOf(taskPrefs.getString("grouping_1713", "date") ?: "date") }
+        var adding by rememberSaveable { mutableStateOf(false) }
         var error by remember { mutableStateOf<String?>(null) }
-        LaunchedEffect(data.me.id) { runCatching { client.loadIssuePreferences() }.onSuccess { pref ->
-            pref?.grouping?.takeIf { it == "group" || it == "assignee" }?.let { groupBy = if (it == "assignee") "person" else "group"; taskPrefs.edit().putString("grouping", groupBy).apply() }
-        } }
         LaunchedEffect(Unit) { runCatching { client.loadIssues() }.onFailure { error = errorText(ctx, it) } }
         val mine = data.me.id
         // Los restringidos pueden ser de un chat que no leo (me asignaron una tarea): el servidor ya filtró.
         val inView = st.issues.values.filter { it.personal || it.conversationId in visible || it.restricted }
-        val list = inView.filter { IssueTasks.matches(filter, taskStatus, it, mine) }
-            .sortedWith(if (taskStatus == "completed") IssueTasks.byClosedDesc else IssueTasks.byUrgency())
+        val doneView = filter == "closed"
+        val list = inView.filter { IssueTasks.matches(filter, it, mine) }
+            .sortedWith(if (doneView) IssueTasks.byClosedDesc else IssueTasks.byUrgency())
         val byPerson = groupBy == "person"
         val noOwner = stringResource(R.string.issue_no_owner)
         val you = stringResource(R.string.you)
@@ -525,29 +526,44 @@ fun IssuesScreen(onOpen: (String) -> Unit, conversationFilter: String? = null, o
             else if (byPerson) { if (k == IssueTasks.NO_OWNER) noOwner else (Names.person(data, k)?.name ?: participant) + if (k == mine) " $you" else "" }
             else visible[k]?.let { c -> listOfNotNull(data.workspaces.firstOrNull { it.id == c.workspaceId }?.name, titleOf(ctx, c, data)).distinct().joinToString(" · ") } ?: shared
         }
-        // Por grupo, las tareas van debajo de su asunto (en la sección del asunto); por responsable, sueltas con «↳ asunto».
+        // Por fecha y por grupo, las tareas van debajo de su asunto; por responsable, sueltas con «↳ asunto».
         val shown = if (byPerson) list else IssueTasks.tops(list, st.issues)
-        val sections = IssueTasks.sections(shown.map { if (byPerson) it else it.copy(conversationId = IssueTasks.groupConversation(it, st.issues)) }, byPerson, mine, sectionTitle)
+        val dateSections: List<Pair<IssueTasks.DueBucket?, List<IssueDTO>>> = when {
+            groupBy != "date" -> emptyList()
+            doneView -> if (shown.isEmpty()) emptyList() else listOf(null to shown)
+            else -> IssueTasks.byDate(shown)
+        }
+        val sections = if (groupBy == "date") emptyList() else IssueTasks.sections(shown.map { if (byPerson) it else it.copy(conversationId = IssueTasks.groupConversation(it, st.issues)) }, byPerson, mine, sectionTitle)
             .map { (k, items) -> k to items.map { x -> st.issues[x.id] ?: x } }
         fun count(f: String) = inView.count { IssueTasks.matches(f, it, mine) }
-        LazyColumn(Modifier.padding(pad).fillMaxSize().imePadding().padding(horizontal = 16.dp).testTag("issues"), contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = AssistantListInset)) {
+        Box(Modifier.padding(pad).fillMaxSize()) {
+        LazyColumn(Modifier.fillMaxSize().imePadding().padding(horizontal = 16.dp).testTag("issues"), contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = AssistantListInset + 16.dp)) {
             item(key = "head") {
-                // 1.6.6: sin el párrafo explicativo («Lo que quedó pendiente…»): los filtros van pegados al título.
-                Column(Modifier.padding(top = 2.dp).testTag("issuesHead"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(Modifier.padding(top = 2.dp).testTag("issuesHead"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     // Pestaña «Todo» (variante 2): atajos pequeños arriba y Tareas, como siempre, debajo.
-                    if (hub != null) {
-                        HubShortcuts(hub)
-                        Text(stringResource(R.string.nav_issues), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(top = 4.dp).semantics { heading() }.testTag("hubTasksTitle"))
+                    if (hub != null) HubShortcuts(hub)
+                    Row(Modifier.fillMaxWidth().padding(top = if (hub != null) 4.dp else 0.dp), verticalAlignment = Alignment.CenterVertically) {
+                        if (hub != null) Text(stringResource(R.string.nav_issues), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(end = 8.dp).semantics { heading() }.testTag("hubTasksTitle"))
+                        Spacer(Modifier.weight(1f))
+                        TaskGroupingMenu(groupBy) { g ->
+                            groupBy = g; taskPrefs.edit().putString("grouping_1713", g).apply()
+                            // La web guarda «por grupo / por responsable»; «por fecha» es de esta pantalla y no se sube.
+                            if (g != "date") scope.launch { runCatching { client.saveIssueGrouping(if (g == "person") "assignee" else "group") }.onFailure { error = errorText(ctx, it) } }
+                        }
                     }
-                    Segmented(listOf("mine" to "${stringResource(R.string.issue_mine)} ${inView.count { IssueTasks.matches("mine", taskStatus, it, mine) }}", "all" to "${stringResource(R.string.tasks_all)} ${inView.count { IssueTasks.matches("all", taskStatus, it, mine) }}"), filter, { filter = it }, Modifier.testTag("issueFilter"))
-                    Segmented(listOf("active" to stringResource(R.string.tasks_active), "completed" to stringResource(R.string.tasks_completed), "all" to stringResource(R.string.tasks_any)), taskStatus, { taskStatus = it }, Modifier.testTag("issueStatus"))
-                    Segmented(listOf("group" to stringResource(R.string.issue_by_group), "person" to stringResource(R.string.issue_by_person)), groupBy,
-                        { groupBy = it; taskPrefs.edit().putString("grouping", it).apply(); scope.launch { runCatching { client.saveIssueGrouping(if (it == "person") "assignee" else "group") }.onFailure { error = errorText(ctx, it) } } }, Modifier.semantics { contentDescription = ctx.getString(R.string.issue_group_by) }.testTag("issueGroupBy"))
-                    if (taskStatus == "active") QuickAddIssue(null)
+                    TaskFilterBar(listOf(
+                        Triple("mine", stringResource(R.string.tasks_f_mine), count("mine")),
+                        Triple("open", stringResource(R.string.tasks_f_open), count("open")),
+                        Triple("closed", stringResource(R.string.tasks_f_done), count("closed")),
+                    ), filter, { filter = it })
                     ErrorText(error)
-                    if (list.isEmpty()) EmptyNote(stringResource(R.string.issue_empty))
+                    if (list.isEmpty()) TasksEmpty(filter)
                 }
+            }
+            dateSections.forEach { (b, items) ->
+                item(key = "b${b?.name ?: "done"}") { TaskBucketHeader(b, items.size) }
+                items(items, key = { "${b?.name}/${it.id}" }) { x -> Box(Modifier.animateItem()) { TaskWithKids(st.issues[x.id] ?: x, data, onOpen = onOpen) } }
             }
             sections.forEach { (k, items) ->
                 item(key = "s$k") {
@@ -555,16 +571,19 @@ fun IssuesScreen(onOpen: (String) -> Unit, conversationFilter: String? = null, o
                         if (byPerson) { if (k != IssueTasks.NO_OWNER) { PersonAvatar(Names.person(data, k), data, size = 22.dp); Spacer(Modifier.width(8.dp)) } }
                         else if (k == IssueTasks.PERSONAL) { Text("🔒", style = MaterialTheme.typography.labelLarge); Spacer(Modifier.width(8.dp)) }
                         else visible[k]?.let { ConversationIcon(it, data, 22.dp); Spacer(Modifier.width(8.dp)) }
-                        Text("${sectionTitle(k)} · ${items.size}", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text("${sectionTitle(k)} · ${items.size}", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 }
                 items(items, key = { "$k/${it.id}" }) { Box(Modifier.animateItem()) {
-                    if (byPerson) IssueRow(it, data, showWhere = true, showOwner = false, onOpen = onOpen) else IssueWithTasks(it, data, onOpen = onOpen)
+                    if (byPerson) TaskRow(it, data, showOwner = false, onOpen = onOpen) else TaskWithKids(it, data, showGroup = false, onOpen = onOpen)
                 } }
             }
-            item(key = "foot") { Spacer(Modifier.heightIn(min = 24.dp)) }
         }
+        // «＋ Añadir tarea» flotante abajo a la izquierda (la burbuja de gg ocupa la derecha).
+        if (!doneView) AddTaskFab({ adding = true }, Modifier.align(Alignment.BottomStart).padding(start = 16.dp, bottom = 16.dp))
+        }
+        if (adding) AddTaskSheet { adding = false }
     }
 }
 

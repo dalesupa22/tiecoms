@@ -110,6 +110,45 @@ object IssueTasks {
         return buckets.entries.sortedWith(cmp).map { it.key to it.value.toList() }
     }
 
+    // ---------- Pantalla de Tareas por fecha (1.7.13) ----------
+
+    /** Franjas de la vista por fecha, en este orden: Vencidas, Hoy, Esta semana (hasta el domingo), Más adelante y Sin fecha. */
+    enum class DueBucket { OVERDUE, TODAY, WEEK, LATER, NONE }
+
+    private fun due(i: IssueDTO): LocalDate? = i.dueDate?.let { runCatching { LocalDate.parse(it.take(10)) }.getOrNull() }
+
+    fun dueBucket(i: IssueDTO, today: LocalDate = localToday()): DueBucket {
+        val d = due(i) ?: return DueBucket.NONE
+        val sunday = today.plusDays((7 - today.dayOfWeek.value).toLong())
+        return when {
+            d < today -> if (i.closed) DueBucket.LATER else DueBucket.OVERDUE
+            d == today -> DueBucket.TODAY
+            d <= sunday -> DueBucket.WEEK
+            else -> DueBucket.LATER
+        }
+    }
+
+    /** Días de atraso (0 si no está vencida o ya se cerró). */
+    fun overdueDays(i: IssueDTO, today: LocalDate = localToday()): Int {
+        if (i.closed) return 0
+        val d = due(i) ?: return 0
+        return if (d < today) java.time.temporal.ChronoUnit.DAYS.between(d, today).toInt() else 0
+    }
+
+    /** Agrupa por franja (solo las que tienen algo). Dentro: la fecha más cercana primero y luego la urgencia de siempre. */
+    fun byDate(list: List<IssueDTO>, today: LocalDate = localToday(), now: Instant = Instant.now()): List<Pair<DueBucket, List<IssueDTO>>> {
+        val urg = byUrgency(today, now)
+        val cmp = Comparator<IssueDTO> { a, b -> (a.dueDate ?: "9").compareTo(b.dueDate ?: "9").takeIf { it != 0 } ?: urg.compare(a, b) }
+        val groups = list.groupBy { dueBucket(it, today) }
+        return DueBucket.entries.mapNotNull { b -> groups[b]?.sortedWith(cmp)?.let { b to it } }
+    }
+
+    /** Etiqueta sutil «Sin movimiento N d»: solo si está detenida y NO vencida (lo vencido ya se ve en rojo). */
+    fun idleDays(i: IssueDTO, today: LocalDate = localToday(), now: Instant = Instant.now()): Int {
+        val f = flags(i, today, now)
+        return if (f.overdue) 0 else f.stalledDays
+    }
+
     /** Primer nombre (para chips y el árbol de Grupos). */
     fun firstName(name: String?) = name?.trim()?.split(Regex("\\s+"))?.firstOrNull().orEmpty()
 

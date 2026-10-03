@@ -85,8 +85,8 @@ class GgAccionesUiTest {
             compose.onNodeWithTag("login").performScrollTo().performClick()
             compose.waitUntilAtLeastOneExists(hasTestTag("quick.create"), 20_000)
             ins.runOnMainSync { app.container.pendingLink.value = DeepLink.Conversation(chat) }
-            compose.waitUntilAtLeastOneExists(hasTestTag("ggSideButton"), 20_000)
-            compose.onNodeWithTag("ggSideButton").performClick()
+            compose.waitUntilAtLeastOneExists(hasTestTag("ggPillOpen"), 20_000)
+            compose.onNodeWithTag("ggPillOpen").performClick()
             compose.waitUntilAtLeastOneExists(hasTestTag("ggSideChips"), 15_000)
             Thread.sleep(1500) // que termine de abrir el hilo de gg antes de fijar la respuesta falsa
 
@@ -108,7 +108,7 @@ class GgAccionesUiTest {
 
             // 2) Correo: borrador editable, «Enviar» pide confirmar y solo entonces sale.
             llm(fake, JSONObject().put("to", JSONArray(listOf("jorge@cliente.com", "Beto"))).put("subject", "Propuesta y reunión").put("body", "Hola Jorge,\n\nTe comparto la propuesta.\n\nAna"))
-            if (!exists("ggSideChips")) { compose.onNodeWithTag("ggSideButton").performClick(); compose.waitUntilAtLeastOneExists(hasTestTag("ggSideChips"), 15_000) }
+            if (!exists("ggSideChips")) { compose.onNodeWithTag("ggPillOpen").performClick(); compose.waitUntilAtLeastOneExists(hasTestTag("ggSideChips"), 15_000) }
             compose.onNodeWithTag("ggSideChips").performScrollToNode(hasTestTag("ggMailChip"))
             compose.onNodeWithTag("ggMailChip").performClick()
             compose.waitUntilAtLeastOneExists(hasTestTag("ggMailNote"), 20_000)

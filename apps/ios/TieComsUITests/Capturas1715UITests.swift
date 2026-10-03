@@ -206,4 +206,18 @@ final class Capturas1715UITests: XCTestCase {
         sleep(1)
         shot("79-crear-tarea-desde-compartir")
     }
+
+    /// Bug 1.7.14 («cracks»): una foto con texto y enlaces (con vista previa) se quedaba con la ruedita. Se abre el chat
+    /// con una así ya en el historial y, con el chat abierto, llega otra en vivo (la manda un script a los ~25 s).
+    func test4FotoConEnlaceHistorialYEnVivo() throws {
+        let f = try fixture()
+        let app = login(f)
+        openChat(app, f.dmBrunoId)
+        sleep(8)
+        shot("80-foto-con-enlace-historial")
+        sleep(30)
+        shot("81-foto-con-enlace-en-vivo")
+        let medias = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'att.media.'"))
+        XCTAssertGreaterThanOrEqual(medias.count, 1)
+    }
 }

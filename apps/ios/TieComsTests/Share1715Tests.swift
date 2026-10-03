@@ -59,4 +59,19 @@ final class Share1715Tests: XCTestCase {
         XCTAssertEqual(DeepLink.parse(URL(string: "chaggu://handoff/0f8a-12")!), .handoff("0f8a-12"))
         XCTAssertNil(DeepLink.parse(URL(string: "https://chaggu.com/handoff/0f8a")!), "no desde la web")
     }
+
+    /// Bug «cracks»: una descarga trabada ya no deja la ruedita para siempre (tope de tiempo y reintento).
+    func testDownloadTimeoutEndsAStuckLoad() async {
+        let start = Date()
+        do {
+            _ = try await AttachmentCache.withTimeout(0.3) { try await Task.sleep(nanoseconds: 5_000_000_000); return Data() }
+            XCTFail("debía agotar el tiempo")
+        } catch let e as ApiRequestError {
+            XCTAssertEqual(e.code, "timeout")
+        } catch { XCTFail("\(error)") }
+        XCTAssertLessThan(Date().timeIntervalSince(start), 2)
+        let ok = try? await AttachmentCache.withTimeout(2) { Data([1, 2]) }
+        XCTAssertEqual(ok, Data([1, 2]))
+        XCTAssertLessThanOrEqual(AttachmentCache.timeout, AttachmentCache.staleAfter, "no se espera una descarga más vieja que el tope")
+    }
 }

@@ -252,11 +252,20 @@ struct RemoteImage<Content: View>: View {
         .task(id: url) {
             if let hit = RemoteImageCache.shared.object(forKey: url as NSURL) { image = hit; return }
             image = nil
-            guard let (data, resp) = try? await RemoteImageCache.session.data(from: url),
-                  (resp as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) ?? false,
-                  let img = UIImage(data: data) else { return }
-            RemoteImageCache.shared.setObject(img, forKey: url as NSURL)
-            image = img
+            // Un intento con caché y otro sin él (una respuesta mala guardada no debe dejar la tarjeta sin imagen).
+            for policy in [URLRequest.CachePolicy.returnCacheDataElseLoad, .reloadIgnoringLocalCacheData] {
+                if Task.isCancelled { return }
+                var req = URLRequest(url: url, cachePolicy: policy, timeoutInterval: 20)
+                req.setValue("image/*", forHTTPHeaderField: "accept")
+                if let (data, resp) = try? await RemoteImageCache.session.data(for: req),
+                   (resp as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) ?? false,
+                   let img = UIImage(data: data) {
+                    RemoteImageCache.shared.setObject(img, forKey: url as NSURL)
+                    image = img
+                    return
+                }
+                try? await Task.sleep(nanoseconds: 800_000_000)
+            }
         }
     }
 }

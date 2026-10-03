@@ -11,7 +11,12 @@ import UniformTypeIdentifiers
 final class AttachmentCache {
     static let shared = AttachmentCache()
     private let memory: NSCache<NSString, NSData> = { let c = NSCache<NSString, NSData>(); c.totalCostLimit = 32 * 1024 * 1024; c.countLimit = 64; return c }()
-    private var inflight: [String: Task<Data, Error>] = [:]
+    /// Descargas en curso por clave, con su hora de inicio: una que lleva más de `staleAfter` no se espera (1.7.15:
+    /// una descarga trabada dejaba a todas las vistas de esa foto esperándola y la ruedita no se iba nunca).
+    private var inflight: [String: (task: Task<Data, Error>, started: Date)] = [:]
+    static let staleAfter: TimeInterval = 30
+    /// Tope de una descarga de imagen antes de darla por fallida (y reintentar).
+    static let timeout: TimeInterval = 25
     private var waFiles: [String: Set<URL>] = [:]
     func purgeWhatsApp(where affected: (String) -> Bool) {
         for source in Array(waFiles.keys) where affected(source) {
@@ -39,14 +44,34 @@ final class AttachmentCache {
         if let d = memory.object(forKey: k as NSString) { return d as Data }
         let file = dir.appendingPathComponent(k)
         if let d = try? Data(contentsOf: file) { memory.setObject(d as NSData, forKey: k as NSString, cost: d.count); return d }
-        if let t = inflight[k] { return try await t.value }
+        if let t = inflight[k], Date().timeIntervalSince(t.started) < Self.staleAfter { return try await Self.withTimeout(Self.timeout) { try await t.task.value } }
         let t = Task { try await api.download(path) }
-        inflight[k] = t
-        defer { inflight[k] = nil }
-        let d = try await t.value
+        inflight[k] = (t, Date())
+        defer { if inflight[k]?.task == t { inflight[k] = nil } }
+        let d = try await Self.withTimeout(Self.timeout) { try await t.value }
         memory.setObject(d as NSData, forKey: k as NSString, cost: d.count)
         try? d.write(to: file, options: .atomic)
         return d
+    }
+
+    /// Olvida lo guardado de una ruta (p. ej. datos que no se pudieron leer como imagen) para volver a bajarla.
+    func forget(_ path: String, api: APIClient) {
+        let k = key(path, api: api)
+        memory.removeObject(forKey: k as NSString)
+        try? FileManager.default.removeItem(at: dir.appendingPathComponent(k))
+    }
+
+    /// La operación o un error de tiempo agotado, lo que llegue primero.
+    nonisolated static func withTimeout<T: Sendable>(_ seconds: TimeInterval, _ op: @escaping @Sendable () async throws -> T) async throws -> T {
+        try await withThrowingTaskGroup(of: T.self) { group in
+            group.addTask { try await op() }
+            group.addTask {
+                try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+                throw ApiRequestError(status: 0, code: "timeout", message: L("att.loadFailed"))
+            }
+            defer { group.cancelAll() }
+            return try await group.next()!
+        }
     }
 
     /// Archivo local con su nombre (Quick Look y video necesitan una URL de archivo).
@@ -73,6 +98,8 @@ struct AttachmentImage: View {
     @State private var image: UIImage?
     @State private var failed = false
     @State private var animation: GifAnimation?
+    /// Toques en «reintentar» (vuelve a lanzar la carga).
+    @State private var attempt = 0
 
     var body: some View {
         ZStack {
@@ -81,20 +108,44 @@ struct AttachmentImage: View {
             else if let image {
                 Image(uiImage: image).resizable().scaledToFill()
             } else if failed {
-                Image(systemName: "photo").foregroundStyle(Theme.textSecondary)
+                // Nunca una ruedita eterna: si no cargó, se dice y se puede reintentar con un toque.
+                VStack(spacing: 4) {
+                    Image(systemName: "arrow.clockwise.circle").font(.title2)
+                    Text(L("att.retry")).font(.caption2.weight(.semibold))
+                }
+                .foregroundStyle(Theme.textSecondary)
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("att.retry.\(att.id)")
             } else {
                 ProgressView()
             }
         }
         .clipped()
-        .task(id: att.id) {
-            image = nil; animation = nil; failed = false
-            let path = (useThumb && !att.isGif ? att.thumbUrl : nil) ?? att.url
-            if let d = try? await AttachmentCache.shared.data(path, api: store.api), let img = UIImage(data: d) {
-                let decoded = att.isGif ? await Task.detached { GifAnimation.decode(d) }.value : nil
-                guard !Task.isCancelled else { return }; image = decoded?.frames.first ?? img; animation = decoded
-            } else { failed = true }
+        .contentShape(Rectangle())
+        .highPriorityGesture(TapGesture().onEnded { attempt += 1 }, including: failed ? .all : .subviews)
+        .task(id: "\(att.id)#\(attempt)") { await load() }
+    }
+
+    /// Miniatura y, si falla, el original; cada una con un reintento. Datos que no son imagen se olvidan del caché.
+    private func load() async {
+        image = nil; animation = nil; failed = false
+        var paths: [String] = []
+        if useThumb && !att.isGif, let t = att.thumbUrl { paths.append(t) }
+        if !paths.contains(att.url) { paths.append(att.url) }
+        for path in paths {
+            for round in 0..<2 {
+                if Task.isCancelled { return }
+                if let d = try? await AttachmentCache.shared.data(path, api: store.api), let img = UIImage(data: d) {
+                    let decoded = att.isGif ? await Task.detached { GifAnimation.decode(d) }.value : nil
+                    guard !Task.isCancelled else { return }
+                    image = decoded?.frames.first ?? img; animation = decoded
+                    return
+                }
+                AttachmentCache.shared.forget(path, api: store.api)
+                if round == 0 { try? await Task.sleep(nanoseconds: 1_200_000_000) }
+            }
         }
+        if !Task.isCancelled { failed = true }
     }
 }
 

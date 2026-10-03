@@ -271,4 +271,26 @@ final class Capturas1713UITests: XCTestCase {
         sleep(5)
         shot("33-compartir-enviado-al-grupo")
     }
+
+    /// Reaccionar a una tarjeta de tarea (aviso issue.created): barra con «＋» arriba del menú y chips debajo.
+    func test5ReaccionarTarjeta() throws {
+        let f = try fixture()
+        let app = login(f)
+        openChat(app, f.dmBrunoId)
+        let card = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'msg.taskCard.'")).firstMatch
+        XCTAssertTrue(card.waitForExistence(timeout: 15), "tarjeta de tarea")
+        sleep(1)
+        let title = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'taskCard.title.'")).firstMatch
+        (title.exists ? title : card).press(forDuration: 1.2)
+        let thumbs = app.buttons["react.quick.0"]
+        XCTAssertTrue(thumbs.waitForExistence(timeout: 5), "barra de reacciones en la tarjeta")
+        XCTAssertTrue(app.buttons["react.quick.more"].isHittable, "«＋» visible")
+        sleep(1)
+        shot("40-tarjeta-menu-reacciones")
+        thumbs.tap()
+        let chips = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'card.reactions.'")).firstMatch
+        XCTAssertTrue(chips.waitForExistence(timeout: 8), "👍 debajo de la tarjeta")
+        sleep(2)
+        shot("41-tarjeta-con-reaccion")
+    }
 }

@@ -220,3 +220,46 @@ struct EmojiPickerSheet: View {
         dismiss()
     }
 }
+
+
+/// Reacciones en las tarjetas del chat (1.7.13): evento creado, tarea creada, correo y WhatsApp traídos. El API acepta
+/// reacciones en esos avisos de sistema (y solo en esos); los demás siguen dando 400.
+enum CardReactions {
+    static let kinds: Set<String> = ["event.created", "issue.created", "mail.shared", "wa.shared"]
+    static func allowed(_ m: MessageDTO) -> Bool {
+        guard m.isSystem, m.deletedAt == nil, let k = m.systemPayload?["k"] as? String else { return false }
+        return kinds.contains(k)
+    }
+}
+
+/// Lo que una tarjeta necesita para poner la barra de reacciones arriba de su menú de pulsación larga.
+struct CardReactionContext {
+    var mine: Set<String>
+    var actions: Bool
+    var onPick: (String) -> Void
+    var onMore: () -> Void
+}
+
+private struct CardReactionKey: EnvironmentKey { static let defaultValue: CardReactionContext? = nil }
+extension EnvironmentValues {
+    var cardReactions: CardReactionContext? {
+        get { self[CardReactionKey.self] }
+        set { self[CardReactionKey.self] = newValue }
+    }
+}
+
+/// Barra de reacciones de una tarjeta (solo si el chat la pasó por el entorno).
+struct CardReactionBar: View {
+    @Environment(\.cardReactions) private var ctx
+    var body: some View {
+        if let ctx { QuickReactionBar(mineEmojis: ctx.mine, actions: ctx.actions, onPick: ctx.onPick, onMore: ctx.onMore) }
+    }
+}
+
+/// Para tarjetas sin menú propio (evento): mantener presionado abre solo la barra de reacciones.
+struct CardReactionMenu: ViewModifier {
+    @Environment(\.cardReactions) private var ctx
+    func body(content: Content) -> some View {
+        if ctx != nil { content.contextMenu { CardReactionBar() } } else { content }
+    }
+}

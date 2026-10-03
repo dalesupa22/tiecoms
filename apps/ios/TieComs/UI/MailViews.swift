@@ -528,6 +528,7 @@ struct CardActions: ViewModifier {
     func body(content: Content) -> some View {
         content
             .contextMenu {
+                CardReactionBar()
                 if let onReply { Button(action: onReply) { Label(L("menu.reply"), systemImage: "arrowshape.turn.up.left") }.accessibilityIdentifier("card.menu.reply") }
                 if let onPrivateReply {
                     Button(action: onPrivateReply) { Label(L("preply.action"), systemImage: "envelope") }.accessibilityIdentifier("card.menu.privateReply")

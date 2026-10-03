@@ -167,6 +167,7 @@ struct EventChatCard: View {
         .overlay(alignment: .leading) { UnevenRoundedRectangle(topLeadingRadius: 14, bottomLeadingRadius: 14).fill(fg).frame(width: 4) }
         .overlay(RoundedRectangle(cornerRadius: 14).stroke(Theme.textSecondary.opacity(0.15)))
         .opacity(cancelled ? 0.6 : 1)
+        .modifier(CardReactionMenu())
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("msg.eventCard.\(ev.id)")
     }

@@ -173,6 +173,18 @@ final class V7GroupsReactionsTests: XCTestCase {
         for e in Reactions.common { XCTAssertNotNil(Reactions.normalize(e), "selector: \(e)") }
     }
 
+    /// 1.7.13: solo las tarjetas de evento, tarea, correo y WhatsApp aceptan reacciones (como el API, a673e7e).
+    func testCardReactionsOnlyOnTheFourCards() throws {
+        func sys(_ k: String, deleted: Bool = false) throws -> MessageDTO {
+            let body = "{\\\"k\\\":\\\"\(k)\\\",\\\"issueId\\\":\\\"i1\\\"}"
+            return try dec(MessageDTO.self, #"{"id":"s1","conversationId":"c","seq":1,"authorId":"a","kind":"system","body":"\#(body)","createdAt":""\#(deleted ? #","deletedAt":"x""# : "")}"#)
+        }
+        for k in ["event.created", "issue.created", "mail.shared", "wa.shared"] { XCTAssertTrue(CardReactions.allowed(try sys(k)), k) }
+        for k in ["issue.done", "issue.overdue", "event.today", "chat.created", "side.started"] { XCTAssertFalse(CardReactions.allowed(try sys(k)), k) }
+        XCTAssertFalse(CardReactions.allowed(try sys("issue.created", deleted: true)), "borrada")
+        XCTAssertFalse(CardReactions.allowed(try dec(MessageDTO.self, #"{"id":"m","kind":"text","body":"{\"k\":\"issue.created\"}","createdAt":""}"#)), "un texto no es tarjeta")
+    }
+
     func testMenuBarFitsWithMoreButtonVisible() {
         // 1.7.13: con 6 emojis el «＋» solo aparecía tras hacer scroll en la paleta del menú.
         XCTAssertLessThanOrEqual(Reactions.menuQuick.count + 1, 6, "5 emojis + «＋» caben en un iPhone de 375 pt")

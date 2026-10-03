@@ -1213,37 +1213,18 @@ struct ConversationView: View {
                 .padding(.vertical, 8)
                 .accessibilityAddTraits(.isHeader)
         case .system(let m):
-            // Una tarea nueva se ve como tarjeta completa (docs/TEMAS.md), no como la línea «Creó la tarea…».
-            // Tanda 1.7: «Es hoy», completada, vencida y comentarios también van como la tarjeta de su evento o tarea.
-            if let gp = GG.actions(m) {
-                // gg como chat (docs/GG-CHAT.md): lo que gg dejó listo; solo quien lo pidió confirma.
-                GgActionsRow(message: m, payload: gp)
-            } else if let mk = MailChatKind.parse(m.systemPayload) {
-                // Correo y WhatsApp traídos al chat (docs/CORREO.md): mensaje de quien lo trajo + tarjeta, o la línea con «Abrir».
-                MailChatRow(message: m, kind: mk, canPost: c.canPost,
-                            onReply: c.canPost ? { startReply(m) } : nil,
-                            onPrivateReply: m.authorId != d.me.id && c.kind != .direct ? { act { try await store.startPrivateReply(to: m) } } : nil)
-            } else if let k = ChatCards.kind(m), k.isComments {
-                // Comentarios agrupados: una línea que lleva a la tarea o al evento, sin repetir la tarjeta (como la web).
-                switch k {
-                case .issueComments(let id, let info):
-                    CommentsNoticeLine(count: info.count, title: ChatCards.title(m), lastByName: info.lastByName, lastExcerpt: info.lastExcerpt,
-                                       icon: AnyView(Text("☑").font(.footnote))) { store.push(.issue(id)) }
-                case .eventComments(let id, let info):
-                    CommentsNoticeLine(count: info.count, title: ChatCards.title(m), lastByName: info.lastByName, lastExcerpt: info.lastExcerpt,
-                                       icon: AnyView(Text("📅").font(.footnote))) { store.push(.event(id)) }
-                default: EmptyView()
+            // 1.7.13: evento, tarea, correo y WhatsApp aceptan reacciones como un mensaje (barra arriba del menú y chips debajo).
+            let reactable = CardReactions.allowed(m) && !embedded
+            VStack(alignment: .leading, spacing: 3) {
+                systemCard(d, c, m)
+                    .environment(\.cardReactions, reactable && c.canPost ? CardReactionContext(
+                        mine: Set(m.reactions.filter { $0.userIds.contains(d.me.id) }.map(\.emoji)), actions: Reactions.actionsEnabled(d),
+                        onPick: { react(m, $0) }, onMore: { sheet = .react(m) }) : nil)
+                if reactable && !m.reactions.isEmpty {
+                    ReactionChips(d: d, message: m, mine: false, canReact: c.canPost, onToggle: { react(m, $0) }, onMore: { sheet = .react(m) })
+                        .padding(.leading, 4)
+                        .accessibilityIdentifier("card.reactions.\(m.id)")
                 }
-            } else if let k = ChatCards.kind(m), let eventId = k.eventId {
-                EventChatCard(eventId: eventId, creatorId: m.authorId, kind: k, onComment: c.canPost ? { ev in
-                    commentingEvent = ev; commentingIssue = nil; replyTo = nil; editing = nil; composerFocused = true
-                } : nil)
-            } else if let k = ChatCards.kind(m), let issueId = k.issueId {
-                IssueChatCard(issueId: issueId, creatorId: m.authorId, canPost: c.canPost, kind: k) { i in
-                    commentingIssue = i; commentingEvent = nil; replyTo = nil; editing = nil; composerFocused = true
-                }
-            } else {
-                SystemRow(message: m)
             }
         case .message(let m, let showAuthor):
             let mine = m.authorId == d.me.id
@@ -1387,6 +1368,43 @@ struct ConversationView: View {
         }
         if let s = f.sentAt, !s.isEmpty { label += " · " + (s.contains("T") ? L10n.dateTime(ISODate.parse(s) ?? Date()) : s) }
         return label
+    }
+
+    /// La tarjeta o línea de un aviso de sistema. Una tarea nueva se ve como tarjeta completa (docs/TEMAS.md), no como
+    /// la línea «Creó la tarea…».
+    @ViewBuilder
+    private func systemCard(_ d: BootstrapDTO, _ c: ConversationDTO, _ m: MessageDTO) -> some View {
+        // Tanda 1.7: «Es hoy», completada, vencida y comentarios también van como la tarjeta de su evento o tarea.
+        if let gp = GG.actions(m) {
+            // gg como chat (docs/GG-CHAT.md): lo que gg dejó listo; solo quien lo pidió confirma.
+            GgActionsRow(message: m, payload: gp)
+        } else if let mk = MailChatKind.parse(m.systemPayload) {
+            // Correo y WhatsApp traídos al chat (docs/CORREO.md): mensaje de quien lo trajo + tarjeta, o la línea con «Abrir».
+            MailChatRow(message: m, kind: mk, canPost: c.canPost,
+                        onReply: c.canPost ? { startReply(m) } : nil,
+                        onPrivateReply: m.authorId != d.me.id && c.kind != .direct ? { act { try await store.startPrivateReply(to: m) } } : nil)
+        } else if let k = ChatCards.kind(m), k.isComments {
+            // Comentarios agrupados: una línea que lleva a la tarea o al evento, sin repetir la tarjeta (como la web).
+            switch k {
+            case .issueComments(let id, let info):
+                CommentsNoticeLine(count: info.count, title: ChatCards.title(m), lastByName: info.lastByName, lastExcerpt: info.lastExcerpt,
+                                   icon: AnyView(Text("☑").font(.footnote))) { store.push(.issue(id)) }
+            case .eventComments(let id, let info):
+                CommentsNoticeLine(count: info.count, title: ChatCards.title(m), lastByName: info.lastByName, lastExcerpt: info.lastExcerpt,
+                                   icon: AnyView(Text("📅").font(.footnote))) { store.push(.event(id)) }
+            default: EmptyView()
+            }
+        } else if let k = ChatCards.kind(m), let eventId = k.eventId {
+            EventChatCard(eventId: eventId, creatorId: m.authorId, kind: k, onComment: c.canPost ? { ev in
+                commentingEvent = ev; commentingIssue = nil; replyTo = nil; editing = nil; composerFocused = true
+            } : nil)
+        } else if let k = ChatCards.kind(m), let issueId = k.issueId {
+            IssueChatCard(issueId: issueId, creatorId: m.authorId, canPost: c.canPost, kind: k) { i in
+                commentingIssue = i; commentingEvent = nil; replyTo = nil; editing = nil; composerFocused = true
+            }
+        } else {
+            SystemRow(message: m)
+        }
     }
 
     /// Menú de un mensaje (mismas acciones y orden que messageMenu de la web).

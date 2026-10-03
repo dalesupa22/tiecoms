@@ -184,7 +184,7 @@ struct IssueChatCard: View {
         }
         .overlay(RoundedRectangle(cornerRadius: 14).stroke(Theme.textSecondary.opacity(0.15)))
         .opacity(i.status == .done ? 0.85 : 1)
-        .contextMenu { IssueStatusMenu(issue: i) }
+        .contextMenu { CardReactionBar(); IssueStatusMenu(issue: i) }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("msg.taskCard.\(i.id)")
     }

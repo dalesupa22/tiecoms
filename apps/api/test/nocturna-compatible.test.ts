@@ -4,8 +4,8 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-const mock=vi.hoisted(()=>({reply:'fixture reply',respondCalls:0,afterRespond:null as null|(()=>Promise<void>),history:[] as any[],body:Buffer.from('R0lGODlhAwACAPAAAAAAAP///yH/C05FVFNDQVBFMi4wAwEAAAAh+QQACgAAACwAAAAAAwACAAACAoRRACH5BAAKAAAALAAAAAADAAIAAAIChFEAOw==','base64')}));
-vi.mock('../src/modules/assistant.ts',async(importOriginal)=>({...await importOriginal<any>(),respond:async(_u:any,h:any)=>{mock.respondCalls++;mock.history=h;if(mock.afterRespond) await mock.afterRespond();return {reply:mock.reply,actions:[],suggestions:[]};},completeJson:async()=>JSON.stringify({answer:'Propuesta con calendario del servidor',followUps:['Buscar horarios'],suggestions:[]})}));
+const mock=vi.hoisted(()=>({prompt:'',reply:'fixture reply',respondCalls:0,afterRespond:null as null|(()=>Promise<void>),history:[] as any[],body:Buffer.from('R0lGODlhAwACAPAAAAAAAP///yH/C05FVFNDQVBFMi4wAwEAAAAh+QQACgAAACwAAAAAAwACAAACAoRRACH5BAAKAAAALAAAAAADAAIAAAIChFEAOw==','base64')}));
+vi.mock('../src/modules/assistant.ts',async(importOriginal)=>({...await importOriginal<any>(),respond:async(_u:any,h:any)=>{mock.respondCalls++;mock.history=h;if(mock.afterRespond) await mock.afterRespond();return {reply:mock.reply,actions:[],suggestions:[]};},completeJson:async(msgs:any)=>{mock.prompt=JSON.stringify(msgs);return JSON.stringify({answer:'Propuesta con calendario del servidor',followUps:['Buscar horarios'],suggestions:[]});}}));
 vi.mock('baileys',async(importOriginal)=>({...await importOriginal<any>(),downloadMediaMessage:async()=>Readable.from([mock.body])}));
 const run=randomUUID().slice(0,8);
 describe.skipIf(!process.env.DATABASE_URL)('nocturna compatible: API and canonical media',()=>{
@@ -203,6 +203,21 @@ describe.skipIf(!process.env.DATABASE_URL)('nocturna compatible: API and canonic
     const put=async(kind:string,body:string)=>{const c=await db.pool.connect();try{await c.query('BEGIN');const m=await appendMessage(c,{conversationId:cid,authorId:a.id,kind,body} as any);await c.query('COMMIT');return (m as any).id ?? (m as any).message?.id;}finally{c.release();}};
     for(const k of ['event.created','issue.created','mail.shared','wa.shared']){const id=await put('system',JSON.stringify({k,title:'Tarjeta'}));const r=await req('PUT',`/messages/${id}/reactions/${encodeURIComponent('👍')}`,b.token,{});expect(r.status).toBe(200);}
     const notice=await put('system',JSON.stringify({k:'member.joined'}));expect((await req('PUT',`/messages/${notice}/reactions/${encodeURIComponent('👍')}`,b.token,{})).status).toBe(400);
+  });
+
+  it('gg lee el texto de un PDF: en @gg, en el chat con gg sin texto y citado en gg de este chat',async()=>{
+    await db.pool.query('UPDATE users SET ai_consent_at=now() WHERE id=$1',[a.id]);
+    const {PDFDocument,StandardFonts}=await import('pdf-lib');const doc=await PDFDocument.create();const font=await doc.embedFont(StandardFonts.Helvetica);
+    doc.addPage([400,400]).drawText('Contrato Nestle valor 45.000.000 COP vence 30 de octubre',{x:20,y:300,size:10,font});const pdf=Buffer.from(await doc.save());
+    const atts=await import('../src/modules/attachments.ts'),gg=await import('../src/modules/gg.ts');
+    const file=await atts.upload(a.id,cid,{body:pdf,name:'contrato.pdf',type:'application/pdf'});
+    const sent=await req('POST',`/conversations/${cid}/messages`,a.token,{clientMessageId:randomUUID(),body:'@gg resume este contrato',attachmentIds:[file.id]});expect(sent.status).toBe(201);
+    mock.reply='Resumen';await gg.reply(sent.json.message.id);expect(mock.history.some(h=>h.content.includes('45.000.000 COP') && h.content.includes('contrato.pdf'))).toBe(true);
+    const only=await atts.upload(a.id,cid,{body:pdf,name:'solo.pdf',type:'application/pdf'});
+    const bare=await req('POST',`/conversations/${cid}/messages`,a.token,{clientMessageId:randomUUID(),body:'',attachmentIds:[only.id]});expect(bare.status).toBe(201);
+    const side=await req('POST','/gg/side',a.token,{source:'c:'+cid,text:'¿Qué dice este archivo?',quotedMessageIds:[bare.json.message.id]});expect(side.status).toBe(200);
+    expect(mock.prompt).toContain('45.000.000 COP');expect(mock.prompt).toContain('solo.pdf');
+    expect((await req('POST','/gg/side',b.token,{source:'c:'+cid,text:'¿Qué dice?',quotedMessageIds:[bare.json.message.id]})).status).not.toBe(500);
   });
 
 });

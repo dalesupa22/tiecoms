@@ -6,6 +6,7 @@ import { pool, tx, type Tx } from '../db.ts';
 import { ApiError, forbidden, notFound } from '../errors.ts';
 import { appendEvent, appendMessage, toMessageDTO } from './messages.ts';
 import { respond } from './assistant.ts';
+import { pdfBlock, pdfsOf, PDF_TYPES } from './gg-files.ts';
 
 /**
  * gg como chat (docs/GG-CHAT.md).
@@ -29,7 +30,9 @@ const sys = (k: string, p: Record<string, unknown> = {}) => JSON.stringify({ k, 
 
 /** Dentro de la transacción del mensaje: si toca, encola la respuesta de gg (sin llamar al modelo aquí). */
 export async function maybeQueue(c: Tx, m: MessageDTO) {
-  if (m.authorId === GG_ID || m.kind !== 'text' || !m.body.trim() || m.viewOnce) return;
+  // Un PDF solo, sin texto, también se analiza en el chat con gg.
+  const pdfOnly = !m.body.trim() && !!m.attachments?.some((a) => PDF_TYPES.includes(a.contentType));
+  if (m.authorId === GG_ID || m.kind !== 'text' || (!m.body.trim() && !pdfOnly) || m.viewOnce) return;
   const inDm = (await c.query('SELECT 1 FROM conversation_memberships WHERE conversation_id = $1 AND user_id = $2 AND removed_at IS NULL', [m.conversationId, GG_ID])).rowCount;
   if (!inDm && !mentionsGg(m.body)) return;
   await c.query("INSERT INTO jobs (kind, payload, max_attempts) VALUES ('gg.reply', $1, 1)", [JSON.stringify({ messageId: m.id })]);
@@ -96,6 +99,14 @@ export async function reply(messageId: string) {
       contextBytes+=Buffer.byteLength(content,'utf8');
       if(data.body.length!==Number(a.size_bytes) || contextBytes>MAX_GG_CONTEXT_BYTES) throw oversizedContext();
       history.push({role:'user',content});
+    }
+    // PDFs: se lee el texto con lo que quede de espacio; si no cabe completo, gg lo dice (nunca se omite en silencio).
+    const pdfs=await pdfsOf([messageId]);
+    if(pdfs.length && !String(m.body ?? '').trim()) history.push({role:'user',content:'Analiza este archivo: resumen, puntos clave, fechas, montos y qué debo hacer.'});
+    for(const a of pdfs) {
+      const block=await pdfBlock(asker.id,a.id,MAX_GG_CONTEXT_BYTES-contextBytes);
+      contextBytes+=Buffer.byteLength(block,'utf8');
+      history.push({role:'user',content:block});
     }
     const out = await respond(asker.id, history, { tz: asker.sleep_tz ?? 'America/Bogota', lang: 'es', scope: inDm ? null : conv.id, scopeName, askedBy: asker.name });
     const prepared=out.reply.length>8000 ? await upload(asker.id,conv.id,{body:Buffer.from(out.reply,'utf8'),name:'gg-respuesta.txt',type:'text/plain'}) : null;

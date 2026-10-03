@@ -13,6 +13,7 @@
  */
 import { calendarSlots } from './gg-calendar.ts';
 import { inferredCalendarWindow, CALENDAR_INTENT } from '../calendar-window.ts';
+import { pdfBlock, pdfsOf } from './gg-files.ts';
 import { z } from 'zod';
 import { GgCalendarWindow,type GgCalendarSlotsDTO } from '@tiecoms/contracts';
 import { randomUUID } from 'node:crypto';
@@ -64,15 +65,18 @@ export async function sourceMessages(userId: string, s: Src, opts: { limit?: num
   const ids = opts.ids?.filter((x) => /^[0-9a-f-]{36}$/i.test(x));
   if (opts.ids && !ids?.length) return [];
   const { rows } = await pool.query(
-    `SELECT m.id, m.seq, m.author_id, m.body, m.created_at, u.name FROM messages m LEFT JOIN users u ON u.id = m.author_id
-      WHERE m.conversation_id = $1 AND m.deleted_at IS NULL AND m.kind = 'text' AND NOT m.view_once AND m.body <> ''
+    `SELECT m.id, m.seq, m.author_id, m.body, m.created_at, u.name,
+        (SELECT string_agg(a.name, ', ' ORDER BY a.position) FROM attachments a WHERE a.message_id = m.id AND a.deleted_at IS NULL) AS files
+      FROM messages m LEFT JOIN users u ON u.id = m.author_id
+      WHERE m.conversation_id = $1 AND m.deleted_at IS NULL AND m.kind = 'text' AND NOT m.view_once
+        AND (m.body <> '' OR ($3::uuid[] IS NOT NULL AND EXISTS (SELECT 1 FROM attachments a WHERE a.message_id = m.id AND a.deleted_at IS NULL)))
         AND m.seq >= $2 AND ($3::uuid[] IS NULL OR m.id = ANY($3))
       ORDER BY m.seq DESC LIMIT $4`,
     [s.conversationId, s.fromSeq, ids ?? null, opts.limit ?? CONTEXT],
   );
   return rows.reverse().map((r) => ({
     id: r.id, mine: r.author_id === userId, author: r.author_id === userId ? null : (r.name ?? 'Alguien'),
-    text: String(r.body), at: new Date(r.created_at).toISOString(), seq: Number(r.seq),
+    text: [String(r.body), r.files ? `[archivo: ${r.files}]` : ''].filter(Boolean).join(' '), at: new Date(r.created_at).toISOString(), seq: Number(r.seq),
   }));
 }
 
@@ -181,6 +185,13 @@ async function quotedOf(userId: string, s: Src, ids?: string[]) {
   const got = await sourceMessages(userId, s, { ids: [...new Set(ids)].slice(0, 20), limit: 20 });
   return got.map((m) => ({ id: m.id, author: m.mine ? 'Tú' : m.author ?? 'Alguien', text: m.text.slice(0, 1000), at: m.at }));
 }
+/** Texto de los PDFs de los mensajes citados (solo chats de chaggu), hasta ~30 KB en total. */
+async function quotedFiles(userId: string, s: Src, ids: string[]) {
+  if (s.kind === 'wa' || !ids.length) return '';
+  let room = 30 * 1024, out = '';
+  for (const a of await pdfsOf(ids)) { const b = await pdfBlock(userId, a.id, room); room -= Buffer.byteLength(b, 'utf8'); out += '\n' + b; if (room < 600) break; }
+  return out;
+}
 const quotedBlock = (q: { author: string; text: string }[]) =>
   q.length ? `\n<<<CITADOS\n${q.map((x) => `${x.author}: ${clean(x.text)}`).join('\n')}\nCITADOS>>>` : '';
 
@@ -266,7 +277,8 @@ export async function askSide(userId: string, input: { source: string; text: str
   const shape = '{"answer": string, "followUps": [string, string, string], "drafts": [{"style": "short"|"warm"|"action", "text": string}] }  (drafts solo si te piden redactar una respuesta; si no, [])';
   const sys = `${system('responder la pregunta de la persona sobre este chat. Al final propone 2 a 4 siguientes preguntas (followUps).', s, me, shape)}\n\n${dataBlock(msgs, me)}\nCALENDARIO VERIFICADO POR EL SERVIDOR: ${JSON.stringify(calendar)}.${busyText(calendar,busy)}\nSi status es ready, YA revisaste su calendario: responde con los horarios libres concretos (día y hora) y, si pregunta por un momento puntual, di si está libre u ocupado según los bloques ocupados. No le pidas fechas ni duración si ya hay horarios. Si no es ready, pide conectar el calendario o precisar el rango. Nunca digas que revisaste la agenda sin checkedAt.`;
   if(s.kind==='wa') await requireWaVisible(pool,s.accountId,s.jid);
-  const { raw } = await ask(sys, `${me} pregunta: ${input.text.slice(0, 2000)}${quotedBlock(quoted)}`, history);
+  const files = await quotedFiles(userId, s, quoted.map((q) => q.id));
+  const { raw } = await ask(sys, `${me} pregunta: ${input.text.slice(0, 2000)}${quotedBlock(quoted)}${files}`, history);
   const j = parseJson(raw);
   const body = str(j?.answer, 4000) || (j ? 'No tengo una respuesta para eso con lo que hay en este chat.' : clean(raw, 1500) || 'No pude responder; intenta de nuevo.');
   const d = drafts(j?.drafts);
@@ -317,7 +329,8 @@ export async function suggest(userId: string, input: { source: string; messageId
   const shape = '{"suggestions": [{"kind": "reply"|"task"|"reminder"|"message_person"|"summary", "title": string, "detail": string|null, "draft": string|null, "params": {"assigneeName": string|null, "due": "YYYY-MM-DD"|null, "personName": string|null}, "forMessageIds": [string]}]}';
   const sys = `${system('proponer de 2 a 6 cosas que la persona puede hacer con los mensajes citados (responder, crear tarea con responsable y fecha si salen del texto, recordatorio, escribirle a alguien, resumir). Sin repetir, de la que más encaja a la que menos. forMessageIds: ids de los mensajes citados a los que aplica.', s, me, shape)}\n\n${dataBlock(msgs, me)}`;
   if(s.kind==='wa') await requireWaVisible(pool,s.accountId,s.jid);
-  const { raw } = await ask(sys, `Mensajes citados:\n<<<CITADOS\n${picked.map((m) => `[${m.id}] ${m.mine ? 'Tú' : m.author ?? 'Alguien'}: ${clean(m.text)}`).join('\n')}\nCITADOS>>>`);
+  const files = await quotedFiles(userId, s, picked.map((m) => m.id));
+  const { raw } = await ask(sys, `Mensajes citados:\n<<<CITADOS\n${picked.map((m) => `[${m.id}] ${m.mine ? 'Tú' : m.author ?? 'Alguien'}: ${clean(m.text)}`).join('\n')}\nCITADOS>>>${files}`);
   const {calendar}=await calendarForGesture(userId,input.source,input.messageIds,input.calendar,picked.map(m=>m.text).join('\n'),Date.parse(picked[picked.length-1]!.at));
   const valid = new Set(picked.map((m) => m.id));
   let list = suggestions(parseJson(raw)?.suggestions, valid);

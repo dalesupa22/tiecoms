@@ -91,7 +91,6 @@ struct GgAskPill: View {
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 12).padding(.top, 4).padding(.bottom, 2)
-        .accessibilityIdentifier("gg.pill")
     }
 }
 

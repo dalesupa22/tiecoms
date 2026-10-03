@@ -6086,5 +6086,41 @@
   "tasks.empty.doneHint": [
     "Lo que completes aparecerá aquí.",
     "What you finish will show up here."
+  ],
+  "task.editFailed": [
+    "No se guardó el cambio: {error}",
+    "The change wasn’t saved: {error}"
+  ],
+  "task.changeOwner": [
+    "Cambiar responsable",
+    "Change owner"
+  ],
+  "task.changeDue": [
+    "Cambiar fecha",
+    "Change due date"
+  ],
+  "task.removeDue": [
+    "Quitar fecha",
+    "Remove due date"
+  ],
+  "task.fields": [
+    "Campos",
+    "Fields"
+  ],
+  "task.fieldYes": [
+    "Sí",
+    "Yes"
+  ],
+  "task.fieldNo": [
+    "No",
+    "No"
+  ],
+  "task.fieldEmpty": [
+    "Sin valor",
+    "No value"
+  ],
+  "task.toTomorrow": [
+    "Para mañana",
+    "To tomorrow"
   ]
 }

@@ -2983,3 +2983,12 @@
 "tasks.empty.done" = "No finished tasks yet";
 "tasks.empty.hint" = "Type below to add a task.";
 "tasks.empty.doneHint" = "What you finish will show up here.";
+"task.editFailed" = "The change wasn’t saved: {error}";
+"task.changeOwner" = "Change owner";
+"task.changeDue" = "Change due date";
+"task.removeDue" = "Remove due date";
+"task.fields" = "Fields";
+"task.fieldYes" = "Yes";
+"task.fieldNo" = "No";
+"task.fieldEmpty" = "No value";
+"task.toTomorrow" = "To tomorrow";

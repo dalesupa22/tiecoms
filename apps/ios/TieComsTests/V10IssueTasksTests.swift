@@ -83,6 +83,40 @@ final class V10IssueTasksTests: XCTestCase {
         XCTAssertNil(s.toastUndo, "un error no ofrece «Deshacer»")
     }
 
+    /// 1.7.13: cambiar responsable y fecha desde la lista o el detalle: optimista y con vuelta atrás si el API falla.
+    func testChangeOwnerAndDueOptimistic() async throws {
+        let s = store()
+        s.issues["i5"] = try issue("i5", owner: "me")
+        MockURLProtocol.routes = ["/api/v1/issues/i5": (200, issueJSON("i5", due: "2026-10-09", owner: "bob"))]
+        IssueActions.setAssignees(s, s.issues["i5"]!, ["bob"])
+        XCTAssertEqual(s.issues["i5"]?.assignedIds, ["bob"], "al instante")
+        try await waitUntil(3, "PATCH responsable") { (MockURLProtocol.requests.last?.body["assigneeIds"] as? [String]) == ["bob"] }
+        IssueActions.setDue(s, s.issues["i5"]!, "2026-10-09")
+        XCTAssertEqual(s.issues["i5"]?.dueDate, "2026-10-09")
+        try await waitUntil(3, "PATCH fecha") { MockURLProtocol.requests.last?.body["dueDate"] as? String == "2026-10-09" }
+        // Sin responsable: assigneeIds vacío y ownerId null.
+        MockURLProtocol.routes = ["/api/v1/issues/i5": (200, issueJSON("i5", due: "2026-10-09"))]
+        IssueActions.setAssignees(s, s.issues["i5"]!, [])
+        XCTAssertTrue(s.issues["i5"]?.assignedIds.isEmpty == true)
+        try await waitUntil(3, "PATCH sin responsable") { MockURLProtocol.requests.last?.body["ownerId"] is NSNull }
+        // El API lo rechaza (p. ej. sin permiso): vuelve a como estaba y avisa.
+        MockURLProtocol.routes = [:]
+        try await waitUntil(3, "respuesta anterior aplicada") { s.issues["i5"]?.ownerId == nil }
+        IssueActions.setDue(s, s.issues["i5"]!, nil)
+        XCTAssertNil(s.issues["i5"]?.dueDate)
+        try await waitUntil(3, "revertido") { s.issues["i5"]?.dueDate == "2026-10-09" && s.toast?.hasPrefix("No se guardó el cambio") == true }
+    }
+
+    func testIssueFieldsDecode() throws {
+        let json = issueJSON("f1").replacingOccurrences(of: #""commentCount":0"#, with: #""commentCount":0,"fields":{"Prioridad":"Alta","Horas":3,"Facturable":true}"#)
+        let i = try dec(IssueDTO.self, json)
+        XCTAssertEqual(i.fields["Prioridad"], .text("Alta"))
+        XCTAssertEqual(i.fields["Horas"], .number(3))
+        XCTAssertEqual(i.fields["Facturable"], .bool(true))
+        XCTAssertEqual(i.fields["Horas"]?.display, "3")
+        XCTAssertTrue(try issue("f2").fields.isEmpty, "servidor anterior: sin campos")
+    }
+
     func testDropHasUndoToPreviousStatus() async throws {
         let s = store()
         s.issues["i4"] = try issue("i4", status: "in_progress")

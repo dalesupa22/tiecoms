@@ -2983,3 +2983,12 @@
 "tasks.empty.done" = "Todavía no hay tareas hechas";
 "tasks.empty.hint" = "Escribe abajo para añadir una tarea.";
 "tasks.empty.doneHint" = "Lo que completes aparecerá aquí.";
+"task.editFailed" = "No se guardó el cambio: {error}";
+"task.changeOwner" = "Cambiar responsable";
+"task.changeDue" = "Cambiar fecha";
+"task.removeDue" = "Quitar fecha";
+"task.fields" = "Campos";
+"task.fieldYes" = "Sí";
+"task.fieldNo" = "No";
+"task.fieldEmpty" = "Sin valor";
+"task.toTomorrow" = "Para mañana";

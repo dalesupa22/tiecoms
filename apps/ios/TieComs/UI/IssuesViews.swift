@@ -71,6 +71,34 @@ enum IssueActions {
         Task { do { try await store.setIssueStatus(id, status) } catch { store.show(L10n.errorText(error)) } }
     }
 
+    /// Responsable(s): optimista con vuelta atrás y aviso si el API lo rechaza. Vacío = «Sin responsable».
+    /// A quién se le puede asignar: la gente del chat (en una restringida, solo quien la ve) y quienes ya la tienen.
+    static func candidates(_ store: AppStore, _ d: BootstrapDTO, _ i: IssueDTO) -> [PersonDTO] {
+        let chat = issueMembers(store, d, i.conversationId)
+        let base: [PersonDTO] = i.visibility == .org ? chat.filter { $0.orgId == i.visibleOrgId }
+            : i.visibility == .private ? chat.filter { i.viewerIds.contains($0.id) } : chat
+        let extra = (i.viewerIds + i.assignedIds).filter { u in !base.contains { $0.id == u } }.compactMap { Naming.person(d, $0) }
+        var seen = Set<String>()
+        return (base + extra).filter { seen.insert($0.id).inserted && $0.kind == "human" }
+            .sorted { a, b in a.id == d.me.id ? true : b.id == d.me.id ? false : a.name.localizedCaseInsensitiveCompare(b.name) == .orderedAscending }
+    }
+
+    static func setAssignees(_ store: AppStore, _ i: IssueDTO, _ ids: [String]) {
+        Haptics.tap()
+        let sorted = ids.sorted()
+        let patch: [String: Any] = sorted.isEmpty ? ["assigneeIds": [String](), "ownerId": NSNull()] : ["assigneeIds": sorted]
+        store.editIssue(i.id, patch) { x in
+            x.assigneeIds = sorted
+            if sorted.isEmpty { x.ownerId = nil } else if !(x.ownerId.map(sorted.contains) ?? false) { x.ownerId = sorted.first }
+        }
+    }
+
+    /// Fecha de vencimiento (yyyy-MM-dd) o nil para quitarla.
+    static func setDue(_ store: AppStore, _ i: IssueDTO, _ iso: String?) {
+        Haptics.tap()
+        store.editIssue(i.id, ["dueDate": iso ?? NSNull()]) { $0.dueDate = iso }
+    }
+
     /// «Descartar asunto» al pie del detalle: discreto y con «Deshacer».
     static func drop(_ store: AppStore, _ i: IssueDTO) {
         let prev = i.status, id = i.id
@@ -183,6 +211,35 @@ struct IssueStatusMenu: View {
                 Button { IssueActions.set(store, issue, .open) } label: { Label(L("issue.markOpen"), systemImage: "circle") }
                     .accessibilityIdentifier("issue.menu.open")
             }
+            // 1.7.13: cambiar responsable y fecha sin abrir la tarea.
+            Divider()
+            if !issue.isPersonal, let d = store.data {
+                Menu {
+                    let current = Set(issue.assignedIds)
+                    ForEach(IssueActions.candidates(store, d, issue)) { p in
+                        Button { IssueActions.setAssignees(store, issue, [p.id]) } label: {
+                            Label(p.id == d.me.id ? "\(p.name) \(L("common.you"))" : p.name, systemImage: current == [p.id] ? "checkmark" : "person")
+                        }
+                    }
+                    if !current.isEmpty {
+                        Divider()
+                        Button(role: .destructive) { IssueActions.setAssignees(store, issue, []) } label: { Label(L("issue.noOwner"), systemImage: "person.slash") }
+                    }
+                } label: { Label(L("task.changeOwner"), systemImage: "person.crop.circle") }
+                .accessibilityIdentifier("issue.menu.owner")
+            }
+            Menu {
+                ForEach(IssueDates.shortcuts(), id: \.key) { sc in
+                    Button { IssueActions.setDue(store, issue, sc.iso) } label: {
+                        Label("\(L(sc.key)) · \(IssueSort.shortDate(sc.iso))", systemImage: issue.dueDate == sc.iso ? "checkmark" : "calendar")
+                    }
+                }
+                if issue.dueDate != nil {
+                    Divider()
+                    Button(role: .destructive) { IssueActions.setDue(store, issue, nil) } label: { Label(L("task.removeDue"), systemImage: "calendar.badge.minus") }
+                }
+            } label: { Label(L("task.changeDue"), systemImage: "calendar") }
+            .accessibilityIdentifier("issue.menu.due")
         }
         if let onOpen {
             Divider()
@@ -774,6 +831,8 @@ struct IssueDetailView: View {
     @State private var draftTitle = ""
     @State private var pickDate = false
     @State private var showHistory = false
+    /// Columnas propias del grupo (migración 097); vacío si no tiene o el servidor es anterior.
+    @State private var columns: [TaskColumnDTO] = []
     @FocusState private var editingTitle: Bool
 
     var body: some View {
@@ -790,6 +849,9 @@ struct IssueDetailView: View {
         .navigationTitle(navTitle)
         .navigationBarTitleDisplayMode(.inline)
         .task(id: store.issues[issueId]?.updatedAt) { await load() }
+        .task(id: store.issues[issueId]?.conversationId) {
+            if let cid = store.issues[issueId]?.conversationId { columns = await store.taskColumns(cid) } else { columns = [] }
+        }
     }
 
     /// El título de la pantalla es el grupo o chat del asunto.
@@ -804,14 +866,15 @@ struct IssueDetailView: View {
         do { events = try await store.issueDetail(issueId).events; error = nil } catch { self.error = L10n.errorText(error) }
     }
 
-    private func update(_ patch: [String: Any]) {
+    /// Optimista (store.editIssue): se ve al instante y vuelve atrás con aviso si el API lo rechaza.
+    private func update(_ patch: [String: Any], apply: @escaping (inout IssueDTO) -> Void) {
         Haptics.tap()
-        Task { do { try await store.updateIssue(issueId, patch); error = nil } catch { self.error = L10n.errorText(error) } }
+        store.editIssue(issueId, patch, apply: apply)
     }
 
     private func commitTitle(_ i: IssueDTO) {
-        let v = draftTitle.replacingOccurrences(of: "\n", with: " ").trimmingCharacters(in: .whitespacesAndNewlines)
-        if v.count >= 2 && v != i.title { update(["title": String(v.prefix(200))]) } else { draftTitle = i.title }
+        let v = String(draftTitle.replacingOccurrences(of: "\n", with: " ").trimmingCharacters(in: .whitespacesAndNewlines).prefix(200))
+        if v.count >= 2 && v != i.title { update(["title": v]) { $0.title = v } } else { draftTitle = i.title }
     }
 
     @ViewBuilder
@@ -822,7 +885,7 @@ struct IssueDetailView: View {
         let extra = i.viewerIds.filter { u in !chatMembers.contains { $0.id == u } }.compactMap { Naming.person(d, $0) }
         let base: [PersonDTO] = i.visibility == .org ? chatMembers.filter { $0.orgId == i.visibleOrgId }
             : i.visibility == .private ? chatMembers.filter { i.viewerIds.contains($0.id) } : chatMembers
-        let members = (base + extra).reduce(into: [PersonDTO]()) { acc, p in if !acc.contains(where: { $0.id == p.id }) { acc.append(p) } }
+        let members = (base + extra + IssueActions.candidates(store, d, i)).reduce(into: [PersonDTO]()) { acc, p in if !acc.contains(where: { $0.id == p.id }) { acc.append(p) } }
         let parent = i.parentIssueId.flatMap { store.issues[$0] }
         let orgIds = chatMembers.compactMap(\.orgId).reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
         let f = IssueSort.flags(i)
@@ -902,7 +965,7 @@ struct IssueDetailView: View {
                         ForEach(members) { p in
                             chip(on: i.assignedIds.contains(p.id), id: "issue.who.\(p.id)", action: {
                                 var ids = Set(i.assignedIds); if ids.contains(p.id) { ids.remove(p.id) } else { ids.insert(p.id) }
-                                update(["assigneeIds": ids.sorted()])
+                                IssueActions.setAssignees(store, i, Array(ids))
                             }) {
                                 HStack(spacing: 6) {
                                     Avatar(name: p.name, org: Naming.org(d, p.orgId), size: 22, photo: p.avatarUrl).accessibilityHidden(true)
@@ -911,7 +974,7 @@ struct IssueDetailView: View {
                             }
                         }
                         if i.ownerId != nil {
-                            chip(on: false, ghost: true, id: "issue.who.none", action: { update(["assigneeIds": [String](), "ownerId": NSNull()]) }) { Text(L("issue.noOwner")) }
+                            chip(on: false, ghost: true, id: "issue.who.none", action: { IssueActions.setAssignees(store, i, []) }) { Text(L("issue.noOwner")) }
                         }
                     }
                 }
@@ -921,16 +984,16 @@ struct IssueDetailView: View {
                 question(L("issue.qWhen"), detail: i.dueDate.map(IssueSort.shortDate)) {
                     ChipFlow(spacing: 8) {
                         ForEach(IssueDates.shortcuts(), id: \.key) { s in
-                            chip(on: i.dueDate == s.iso, id: "issue.when.\(s.key)", action: { update(["dueDate": s.iso]); pickDate = false }) { Text(L(s.key)) }
+                            chip(on: i.dueDate == s.iso, id: "issue.when.\(s.key)", action: { IssueActions.setDue(store, i, s.iso); pickDate = false }) { Text(L(s.key)) }
                         }
                         chip(on: pickDate, id: "issue.when.pick", action: { withAnimation { pickDate.toggle() } }) { Text("📅 " + L("issue.dPick")) }
                         if i.dueDate != nil {
-                            chip(on: false, ghost: true, id: "issue.when.none", action: { update(["dueDate": NSNull()]); pickDate = false }) { Text(L("issue.noDue")) }
+                            chip(on: false, ghost: true, id: "issue.when.none", action: { IssueActions.setDue(store, i, nil); pickDate = false }) { Text(L("issue.noDue")) }
                         }
                     }
                     if pickDate {
                         DatePicker(L("issue.pickDate"), selection: Binding(get: { IssueDates.date(i.dueDate) ?? Date() },
-                                                                           set: { update(["dueDate": IssueDates.iso($0)]); pickDate = false }),
+                                                                           set: { IssueActions.setDue(store, i, IssueDates.iso($0)); pickDate = false }),
                                    displayedComponents: .date)
                             .datePickerStyle(.graphical)
                             .tint(Theme.accentText)
@@ -942,7 +1005,7 @@ struct IssueDetailView: View {
                     question(L("issue.qHow")) {
                         ChipFlow(spacing: 8) {
                             ForEach([IssueStatus.open, .in_progress, .waiting], id: \.self) { st in
-                                chip(on: i.status == st, id: "issue.how.\(st.rawValue)", action: { update(["status": st.rawValue]) }) { Text(L("issue.how.\(st.rawValue)")) }
+                                chip(on: i.status == st, id: "issue.how.\(st.rawValue)", action: { IssueActions.set(store, i, st) }) { Text(L("issue.how.\(st.rawValue)")) }
                             }
                         }
                         if i.status == .waiting && orgIds.count > 1 {
@@ -950,10 +1013,30 @@ struct IssueDetailView: View {
                                 Text(L("issue.waitingOn") + ":").font(.footnote).foregroundStyle(Theme.textSecondary).frame(minHeight: 44)
                                 ForEach(orgIds, id: \.self) { o in
                                     chip(on: i.waitingOnOrgId == o, id: "issue.waitingOn.\(o)",
-                                         action: { update(["waitingOnOrgId": i.waitingOnOrgId == o ? NSNull() : o]) }) { Text(Naming.org(d, o)?.name ?? "") }
+                                         action: { let v = i.waitingOnOrgId == o ? nil : o; update(["waitingOnOrgId": v ?? NSNull()]) { $0.waitingOnOrgId = v } }) { Text(Naming.org(d, o)?.name ?? "") }
                                 }
                             }
                         }
+                    }
+                }
+
+                // Campos propios (columnas del grupo y los que llegaron por integraciones), editables aquí.
+                let extraKeys = i.fields.keys.filter { k in !columns.contains { $0.name == k } }.sorted()
+                if !columns.isEmpty || !extraKeys.isEmpty {
+                    question(L("task.fields")) {
+                        VStack(spacing: 0) {
+                            ForEach(columns) { col in
+                                TaskFieldRow(column: col, value: i.fields[col.name]) { v in setField(col.name, v) }
+                                Divider()
+                            }
+                            ForEach(extraKeys, id: \.self) { k in
+                                let v = i.fields[k]
+                                let type = switch v { case .bool: "checkbox"; case .number: "number"; default: "text" }
+                                TaskFieldRow(column: TaskColumnDTO(name: k, type: type), value: v) { nv in setField(k, nv) }
+                                Divider()
+                            }
+                        }
+                        .accessibilityIdentifier("issue.fields")
                     }
                 }
 
@@ -981,6 +1064,11 @@ struct IssueDetailView: View {
         .scrollDismissesKeyboard(.interactively)
         .onAppear { if !editingTitle { draftTitle = i.title } }
         .onChange(of: i.title) { _, t in if !editingTitle { draftTitle = t } }
+    }
+
+    /// Un campo: valor nuevo o nil para borrarlo (PATCH /issues/:id {fields: {nombre: valor|null}}, se mezcla en el API).
+    private func setField(_ name: String, _ v: IssueFieldValue?) {
+        update(["fields": [name: v?.json ?? NSNull()]]) { x in if let v { x.fields[name] = v } else { x.fields.removeValue(forKey: name) } }
     }
 
     private func doneBanner(_ i: IssueDTO) -> some View {

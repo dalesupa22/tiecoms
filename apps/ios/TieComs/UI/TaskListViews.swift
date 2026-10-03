@@ -123,6 +123,19 @@ struct TaskListRow: View {
             }
             .padding(.vertical, 1)
             .contextMenu { IssueStatusMenu(issue: issue, onOpen: onOpen) }
+            // Deslizar: → completar (o reabrir); ← pasar para mañana.
+            .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                Button { IssueActions.toggleDone(store, issue) } label: {
+                    Label(done ? L("issue.reopen") : L("issue.complete"), systemImage: done ? "arrow.uturn.backward" : "checkmark")
+                }
+                .tint(done ? .gray : Theme.doneGreen)
+            }
+            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                if !done, let tomorrow = IssueDates.shortcuts().first(where: { $0.key == "issue.dTomorrow" })?.iso, issue.dueDate != tomorrow {
+                    Button { IssueActions.setDue(store, issue, tomorrow) } label: { Label(L("task.toTomorrow"), systemImage: "calendar.badge.clock") }
+                        .tint(.orange)
+                }
+            }
         }
     }
 
@@ -185,5 +198,71 @@ struct TasksEmptyState: View {
         .padding(.vertical, 36).padding(.horizontal, 24)
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("issues.empty")
+    }
+}
+
+/// Un campo propio de la tarea en el detalle: texto, número, sí/no o lista. Guarda al terminar de escribir
+/// (Return o al salir del campo); vacío = borrar el campo.
+struct TaskFieldRow: View {
+    let column: TaskColumnDTO
+    let value: IssueFieldValue?
+    var onSave: (IssueFieldValue?) -> Void
+    @State private var draft = ""
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Text(column.name).font(.subheadline).foregroundStyle(Theme.textSecondary).lineLimit(2)
+                .frame(maxWidth: 140, alignment: .leading)
+            Spacer(minLength: 4)
+            editor
+        }
+        .frame(minHeight: 44)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("issue.field.\(column.name)")
+        .onAppear { draft = value?.display ?? "" }
+        .onChange(of: value) { _, v in if !focused { draft = v?.display ?? "" } }
+    }
+
+    @ViewBuilder private var editor: some View {
+        switch column.type {
+        case "checkbox":
+            Toggle(column.name, isOn: Binding(get: { if case .bool(true) = value { return true }; return false },
+                                              set: { onSave(.bool($0)) }))
+                .labelsHidden()
+        case "select":
+            Menu {
+                ForEach(column.options, id: \.self) { o in
+                    Button { onSave(.text(o)) } label: { if value?.display == o { Label(o, systemImage: "checkmark") } else { Text(o) } }
+                }
+                if value != nil { Divider(); Button(role: .destructive) { onSave(nil) } label: { Text(L("task.fieldEmpty")) } }
+            } label: {
+                HStack(spacing: 4) {
+                    Text(value?.display ?? L("task.fieldEmpty")).foregroundStyle(value == nil ? Theme.textSecondary : Theme.textPrimary)
+                    Image(systemName: "chevron.up.chevron.down").font(.caption2).foregroundStyle(Theme.textSecondary)
+                }
+                .font(.subheadline)
+            }
+        default:
+            TextField(L("task.fieldEmpty"), text: $draft)
+                .font(.subheadline)
+                .multilineTextAlignment(.trailing)
+                .keyboardType(column.type == "number" ? .decimalPad : .default)
+                .focused($focused)
+                .submitLabel(.done)
+                .onSubmit(commit)
+                .onChange(of: focused) { _, on in if !on { commit() } }
+        }
+    }
+
+    private func commit() {
+        let t = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let next: IssueFieldValue?
+        if t.isEmpty { next = nil }
+        else if column.type == "number" {
+            guard let n = Double(t.replacingOccurrences(of: ",", with: ".")) else { draft = value?.display ?? ""; return }
+            next = .number(n)
+        } else { next = .text(String(t.prefix(500))) }
+        if next != value { onSave(next) }
     }
 }

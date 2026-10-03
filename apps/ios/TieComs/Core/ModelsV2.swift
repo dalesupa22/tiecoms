@@ -208,6 +208,8 @@ struct IssueDTO: Codable, Equatable, Identifiable, Sendable {
     var viewerIds: [String] = []
     /// Tema de la tarea (docs/TEMAS.md). nil = sin tema o servidor anterior.
     var topicId: String?
+    /// Campos propios de la tarea (migración 097): nombre → texto, número o sí/no. Vacío = sin campos o servidor anterior.
+    var fields: [String: IssueFieldValue] = [:]
 
     init(from decoder: Decoder) throws {
         let c = try container(decoder)
@@ -234,6 +236,7 @@ struct IssueDTO: Codable, Equatable, Identifiable, Sendable {
         visibleOrgId = c.o("visibleOrgId")
         viewerIds = c.v("viewerIds", [])
         topicId = c.o("topicId")
+        fields = (try? c.decodeIfPresent([String: IssueFieldValue].self, forKey: AnyKey("fields"))) ?? [:]
     }
 
     /// Restringida: 'org' (solo mi empresa) o 'private'.
@@ -243,6 +246,42 @@ struct IssueDTO: Codable, Equatable, Identifiable, Sendable {
 }
 
 enum IssueVisibility: String, Codable, CaseIterable, Sendable { case all, org, `private` }
+
+/// Valor de un campo de tarea: texto, número o sí/no (IssueFieldValue del contrato).
+enum IssueFieldValue: Codable, Equatable, Sendable {
+    case text(String), number(Double), bool(Bool)
+    init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        if let b = try? c.decode(Bool.self) { self = .bool(b) }
+        else if let n = try? c.decode(Double.self) { self = .number(n) }
+        else { self = .text(try c.decode(String.self)) }
+    }
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        switch self { case .text(let s): try c.encode(s); case .number(let n): try c.encode(n); case .bool(let b): try c.encode(b) }
+    }
+    var json: Any { switch self { case .text(let s): s; case .number(let n): n; case .bool(let b): b } }
+    var display: String {
+        switch self {
+        case .text(let s): return s
+        case .number(let n): return n.rounded() == n && abs(n) < 1e15 ? String(Int64(n)) : String(n)
+        case .bool(let b): return b ? L("task.fieldYes") : L("task.fieldNo")
+        }
+    }
+}
+
+/// Columna de tareas definida por el grupo (GET /conversations/:id/task-columns).
+struct TaskColumnDTO: Decodable, Equatable, Sendable, Identifiable {
+    var name: String
+    var type: String
+    var options: [String]
+    var id: String { name }
+    init(name: String, type: String, options: [String] = []) { self.name = name; self.type = type; self.options = options }
+    init(from decoder: Decoder) throws {
+        let c = try container(decoder)
+        name = c.v("name", ""); type = c.v("type", "text"); options = c.v("options", [])
+    }
+}
 
 struct IssueEventDTO: Codable, Equatable, Identifiable, Sendable {
     var id: Int

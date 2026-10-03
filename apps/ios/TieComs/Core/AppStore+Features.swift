@@ -267,6 +267,31 @@ extension AppStore {
         }
     }
 
+    /// Cambio optimista de una tarea (responsable, fecha, título, estado, campos): se ve al instante y, si el API lo
+    /// rechaza (p. ej. sin permiso), vuelve a como estaba y avisa con el mensaje del servidor.
+    func editIssue(_ id: String, _ patch: [String: Any], apply: (inout IssueDTO) -> Void) {
+        let stamp = sessionStamp
+        guard let prev = issues[id] else { return }
+        var next = prev
+        apply(&next)
+        withAnimation(.easeInOut(duration: 0.2)) { issues[id] = next; recountIssues(prev.conversationId) }
+        Task {
+            do { try await updateIssue(id, patch) } catch {
+                guard stamp == sessionStamp else { return }
+                // Solo se revierte si nadie más la cambió mientras tanto.
+                if issues[id] == next { withAnimation(.easeInOut(duration: 0.2)) { issues[id] = prev; recountIssues(prev.conversationId) } }
+                show(L("task.editFailed", ["error": L10n.errorText(error)]))
+            }
+        }
+    }
+
+    /// Columnas propias del grupo para las tareas (migración 097). Vacío si el servidor no las tiene.
+    func taskColumns(_ conversationId: String) async -> [TaskColumnDTO] {
+        struct R: Decodable { var columns: [TaskColumnDTO] }
+        let r: R? = try? await api.request("/conversations/\(conversationId)/task-columns")
+        return r?.columns ?? []
+    }
+
     func issueDetail(_ id: String) async throws -> IssueDetail {
         let stamp = sessionStamp
         let r: IssueDetail = try await api.request("/issues/\(id)")

@@ -149,6 +149,24 @@ object IssueTasks {
         return if (f.overdue) 0 else f.stalledDays
     }
 
+    // ---------- Edición desde el teléfono (1.7.13) ----------
+
+    /**
+     * «Cambiar responsable»: el nuevo va primero (el servidor toma ownerId) y los demás asignados se conservan, sin el
+     * responsable anterior. null = «Sin responsable».
+     */
+    fun ownerChange(i: IssueDTO, newOwner: String?): Pair<String?, List<String>> {
+        val rest = i.assigneeIds.filter { it != i.ownerId && it != newOwner }
+        return newOwner to (listOfNotNull(newOwner) + rest).distinct()
+    }
+
+    /** Copia local con un campo propio cambiado (null o JsonNull lo borra), como mezcla el servidor. */
+    fun withField(i: IssueDTO, key: String, value: kotlinx.serialization.json.JsonElement?): IssueDTO {
+        val m = (i.fields ?: kotlinx.serialization.json.JsonObject(emptyMap())).toMutableMap()
+        if (value == null || value is kotlinx.serialization.json.JsonNull) m.remove(key) else m[key] = value
+        return i.copy(fields = kotlinx.serialization.json.JsonObject(m))
+    }
+
     /** Primer nombre (para chips y el árbol de Grupos). */
     fun firstName(name: String?) = name?.trim()?.split(Regex("\\s+"))?.firstOrNull().orEmpty()
 

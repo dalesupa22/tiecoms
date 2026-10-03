@@ -71,4 +71,22 @@ class Android1713Test {
         assertEquals(5, IssueTasks.idleDays(issue("d", "2026-10-10", since = quieta), today, now))
         assertEquals(0, IssueTasks.idleDays(issue("e", "2026-09-30", since = quieta), today, now))
     }
+
+    // ---------- Editar desde el teléfono ----------
+    @Test fun `cambiar responsable deja al nuevo primero y conserva a los demas asignados`() {
+        val i = issue("t").copy(ownerId = "ana", assigneeIds = listOf("ana", "beto", "caro"))
+        assertEquals("caro" to listOf("caro", "beto"), IssueTasks.ownerChange(i, "caro"))
+        assertEquals(null to listOf("beto", "caro"), IssueTasks.ownerChange(i, null))
+        assertEquals("dani" to listOf("dani"), IssueTasks.ownerChange(issue("u"), "dani"))
+    }
+
+    @Test fun `un campo se mezcla y null lo borra, y la tarea decodifica fields y externalMeta`() {
+        val i = TcJson.decodeFromString(IssueDTO.serializer(), """{"id":"t","title":"x","fields":{"Tipo":"Bug","Horas":3,"Urgente":true},"externalMeta":{"Prioridad":"Alta"}}""")
+        assertEquals("Alta", i.externalMeta?.get("Prioridad"))
+        val j = IssueTasks.withField(i, "Tipo", kotlinx.serialization.json.JsonPrimitive("Mejora"))
+        assertEquals("Mejora", (j.fields?.get("Tipo") as kotlinx.serialization.json.JsonPrimitive).content)
+        val k = IssueTasks.withField(j, "Horas", null)
+        assertEquals(setOf("Tipo", "Urgente"), k.fields?.keys)
+        assertNull(TcJson.decodeFromString(IssueDTO.serializer(), """{"id":"t","fields":null}""").fields)
+    }
 }

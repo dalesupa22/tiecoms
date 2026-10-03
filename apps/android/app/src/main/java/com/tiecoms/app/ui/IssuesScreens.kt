@@ -637,6 +637,8 @@ fun IssueDetailScreen(id: String, onBack: () -> Unit, onOpenOrigin: (String, Lon
     var editing by rememberSaveable { mutableStateOf(false) }
     val setStatus = rememberIssueStatusSetter()
     val toggle = rememberIssueToggle()
+    val editor = rememberTaskEditor()
+    var ownerSheet by remember { mutableStateOf(false) }
     suspend fun load() { runCatching { events = client.issueDetail(id).events }.onFailure { error = errorText(ctx, it) } }
     // En vivo: issue.updated trae updatedAt/commentCount nuevos y se recarga el historial.
     LaunchedEffect(id, live?.updatedAt, live?.commentCount) { load() }
@@ -724,6 +726,16 @@ fun IssueDetailScreen(id: String, onBack: () -> Unit, onOpenOrigin: (String, Lon
             }
             if (!personal) item(key = "who") {
                 Question(stringResource(R.string.issue_q_who), tag = "issueQWho") {
+                    // 1.7.13: el responsable se cambia de un toque (con «Sin responsable»); debajo, varios asignados como antes.
+                    val owner = Names.person(data, i.ownerId ?: "")
+                    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { ownerSheet = true }.heightIn(min = 52.dp).padding(horizontal = 4.dp).testTag("issueOwnerChange"),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        if (owner != null) PersonAvatar(owner, data, size = 32.dp) else Box(Modifier.size(32.dp).background(MaterialTheme.colorScheme.surfaceContainerHigh, CircleShape))
+                        Spacer(Modifier.width(12.dp))
+                        Text(owner?.name ?: stringResource(R.string.issue_no_owner), style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f),
+                            color = if (owner == null) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface)
+                        Text(stringResource(R.string.tasks_change_owner), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                    }
                     AssigneesPicker(members, (i.assigneeIds + listOfNotNull(i.ownerId)).distinct()) { picked ->
                         scope.launch { runCatching { client.updateIssue(i.id, kotlinx.serialization.json.buildJsonObject {
                             put("assigneeIds", kotlinx.serialization.json.JsonArray(picked.map { kotlinx.serialization.json.JsonPrimitive(it) }))
@@ -741,10 +753,10 @@ fun IssueDetailScreen(id: String, onBack: () -> Unit, onOpenOrigin: (String, Lon
                                 IssueTasks.Shortcut.FRIDAY -> R.string.issue_d_friday; IssueTasks.Shortcut.NEXT_WEEK -> R.string.issue_d_next_week
                             })
                             val iso = d.toString()
-                            Chip(i.dueDate == iso, label, "due-${k.name}") { if (i.dueDate != iso) update("dueDate", iso) }
+                            Chip(i.dueDate == iso, label, "due-${k.name}") { editor.setDue(i, iso) }
                         }
                         Chip(pickDate, "📅 " + stringResource(R.string.issue_d_pick), "due-pick") { pickDate = true }
-                        if (i.dueDate != null) Chip(false, stringResource(R.string.issue_no_due), "due-none") { update("dueDate", null) }
+                        if (i.dueDate != null) Chip(false, stringResource(R.string.issue_no_due), "due-none") { editor.setDue(i, null) }
                     }
                 }
             }
@@ -764,6 +776,8 @@ fun IssueDetailScreen(id: String, onBack: () -> Unit, onOpenOrigin: (String, Lon
                     }
                 }
             }
+            // Campos propios de la tarea (columnas del grupo y campos libres, migración 097) y datos del ticket.
+            if (!personal) item(key = "fields") { TaskFieldsSection(i, canEdit = true) }
             if (i.parentIssueId == null && !personal) item(key = "tasks") { TasksSection(i.id, null, onOpen = onOpenIssue) }
             if (i.parentIssueId != null && i.createdBy == data.me.id) item(key = "vis") { VisibilityChoice(i) }
             item(key = "newsHead") { Question(stringResource(R.string.issue_q_news) + if (comments.isNotEmpty()) " · ${comments.size}" else "", tag = "issueQNews") {} }
@@ -819,7 +833,8 @@ fun IssueDetailScreen(id: String, onBack: () -> Unit, onOpenOrigin: (String, Lon
             }
             item(key = "end") { Spacer(Modifier.heightIn(min = 32.dp)) }
         }
-        if (pickDate) IssueDatePicker(i.dueDate?.let { runCatching { LocalDate.parse(it) }.getOrNull() }, { d -> update("dueDate", d?.toString()) }, { pickDate = false })
+        if (pickDate) IssueDatePicker(i.dueDate?.let { runCatching { LocalDate.parse(it) }.getOrNull() }, { d -> editor.setDue(i, d?.toString()) }, { pickDate = false })
+        if (ownerSheet) OwnerPickerSheet(i, data) { ownerSheet = false }
     }
 }
 

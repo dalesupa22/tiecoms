@@ -66,6 +66,7 @@ import com.tiecoms.app.core.IssueDTO
 import com.tiecoms.app.core.IssueTasks
 import com.tiecoms.app.core.Names
 import java.time.LocalDate
+import kotlinx.coroutines.launch
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
@@ -176,6 +177,8 @@ fun TaskRow(i: IssueDTO, data: BootstrapDTO, showGroup: Boolean = true, showOwne
     val toggle = rememberIssueToggle()
     val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
     var menu by remember { mutableStateOf(false) }
+    var ownerSheet by remember { mutableStateOf(false) }
+    var dueSheet by remember { mutableStateOf(false) }
     val today = IssueTasks.localToday()
     val done = i.closed
     val owner = Names.person(data, i.ownerId ?: "")
@@ -231,9 +234,15 @@ fun TaskRow(i: IssueDTO, data: BootstrapDTO, showGroup: Boolean = true, showOwne
             }
             trailing?.invoke()
         }
-        AnchoredMenu(menu, if (menu) issueQuickMenu(ctx, i, onOpen = { onOpen(i.id) }, onStatus = { st -> setStatus(i, st) },
+        // Mantener presionado: Completar y estados de siempre, y (1.7.13) «Cambiar responsable» y «Cambiar fecha».
+        AnchoredMenu(menu, if (menu) listOfNotNull<SheetItem>(
+            if (!i.personal && !done) SheetItem(stringResource(R.string.tasks_change_owner), "👤", tag = "menuTaskOwner") { ownerSheet = true } else null,
+            if (!done) SheetItem(stringResource(R.string.tasks_change_due), "📅", tag = "menuTaskDue") { dueSheet = true } else null,
+        ).let { extra -> extra + (if (extra.isNotEmpty()) listOf<SheetItem?>(null) else emptyList()) } + issueQuickMenu(ctx, i, onOpen = { onOpen(i.id) }, onStatus = { st -> setStatus(i, st) },
             onAddTask = { dialogs.openTasks(i.id) }, onSide = { dialogs.openSide(i) }) else emptyList(), { menu = false })
     }
+    if (ownerSheet) OwnerPickerSheet(i, data) { ownerSheet = false }
+    if (dueSheet) DuePickerSheet(i) { dueSheet = false }
 }
 
 /** Un asunto con sus tareas debajo, plegables con la flecha (las tareas no se repiten como filas sueltas). */
@@ -292,6 +301,216 @@ fun AddTaskSheet(onClose: () -> Unit) {
         Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 16.dp).padding(bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(stringResource(R.string.tasks_add), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.semantics { heading() })
             QuickAddIssue(null, autoFocus = true)
+        }
+    }
+}
+
+// ---------- Edición rápida (1.7.13): responsable, fecha y campos, optimista con vuelta atrás ----------
+
+/** Cambios de una tarea con el PATCH de la web: se ven al instante y, si el servidor dice que no, vuelven y se avisa. */
+class TaskEditor(private val run: (suspend () -> Unit) -> Unit, private val client: com.tiecoms.app.core.TieComsClient) {
+    fun setOwner(i: IssueDTO, owner: String?) {
+        val (o, assignees) = IssueTasks.ownerChange(i, owner)
+        run {
+            client.patchIssueOptimistic(i.id, kotlinx.serialization.json.buildJsonObject {
+                put("ownerId", o?.let { kotlinx.serialization.json.JsonPrimitive(it) } ?: kotlinx.serialization.json.JsonNull)
+                put("assigneeIds", kotlinx.serialization.json.JsonArray(assignees.map { kotlinx.serialization.json.JsonPrimitive(it) }))
+            }) { it.copy(ownerId = o, assigneeIds = assignees) }
+        }
+    }
+    fun setDue(i: IssueDTO, iso: String?) {
+        if (i.dueDate == iso) return
+        run {
+            client.patchIssueOptimistic(i.id, kotlinx.serialization.json.buildJsonObject {
+                put("dueDate", iso?.let { kotlinx.serialization.json.JsonPrimitive(it) } ?: kotlinx.serialization.json.JsonNull)
+            }) { it.copy(dueDate = iso) }
+        }
+    }
+    fun setField(i: IssueDTO, key: String, value: kotlinx.serialization.json.JsonElement?) {
+        run {
+            client.patchIssueOptimistic(i.id, kotlinx.serialization.json.buildJsonObject {
+                put("fields", kotlinx.serialization.json.buildJsonObject { put(key, value ?: kotlinx.serialization.json.JsonNull) })
+            }) { IssueTasks.withField(it, key, value) }
+        }
+    }
+}
+
+@Composable
+fun rememberTaskEditor(): TaskEditor {
+    val ctx = LocalContext.current
+    val client = LocalClient.current
+    val container = LocalContainer.current
+    return remember(client) {
+        TaskEditor({ block ->
+            container.scope.launch {
+                try { block() } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    container.toast(errorText(ctx, e))
+                }
+            }
+        }, client)
+    }
+}
+
+/** Personas que pueden ser responsables: las del chat (o quienes ven una tarea restringida), yo primero. */
+@Composable
+fun ownerCandidates(i: IssueDTO, data: BootstrapDTO): List<com.tiecoms.app.core.PersonDTO> =
+    remember(i.id, i.visibility, i.viewerIds, data) {
+        IssueTasks.audience(i, humansOf(data, i.conversationId), data.people).sortedByDescending { it.id == data.me.id }
+    }
+
+/** Hoja «Cambiar responsable»: una persona (o «Sin responsable») y listo. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun OwnerPickerSheet(i: IssueDTO, data: BootstrapDTO, onClose: () -> Unit) {
+    val editor = rememberTaskEditor()
+    val people = ownerCandidates(i, data)
+    val st = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(onDismissRequest = onClose, sheetState = st, modifier = Modifier.testTag("ownerSheet")) {
+        Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = 12.dp)) {
+            Text(stringResource(R.string.tasks_change_owner), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp).semantics { heading() })
+            Text(i.title, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(horizontal = 16.dp))
+            androidx.compose.foundation.lazy.LazyColumn(Modifier.fillMaxWidth().heightIn(max = 480.dp).padding(top = 6.dp)) {
+                items(people.size) { n ->
+                    val p = people[n]
+                    OwnerRow(p.name + if (p.id == data.me.id) " · " + stringResource(R.string.you) else "", i.ownerId == p.id, "owner-${p.id}", { PersonAvatar(p, data, size = 32.dp) }) {
+                        onClose(); if (i.ownerId != p.id) editor.setOwner(i, p.id)
+                    }
+                }
+                item {
+                    OwnerRow(stringResource(R.string.issue_no_owner), i.ownerId == null, "owner-none", {
+                        Box(Modifier.size(32.dp).background(MaterialTheme.colorScheme.surfaceContainerHigh, CircleShape))
+                    }) { onClose(); if (i.ownerId != null) editor.setOwner(i, null) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun OwnerRow(label: String, on: Boolean, tag: String, leading: @Composable () -> Unit, onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).semantics { selected = on }.heightIn(min = 52.dp).padding(horizontal = 16.dp).testTag(tag),
+        verticalAlignment = Alignment.CenterVertically) {
+        leading(); Spacer(Modifier.width(12.dp))
+        Text(label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        if (on) Icon(Icons.Filled.Check, null, tint = MaterialTheme.colorScheme.primary)
+    }
+}
+
+/** Hoja «Cambiar fecha»: hoy, mañana, el viernes, la otra semana, el calendario o «Sin fecha». */
+@OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+fun DuePickerSheet(i: IssueDTO, onClose: () -> Unit) {
+    val editor = rememberTaskEditor()
+    var calendar by remember { mutableStateOf(false) }
+    val st = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(onDismissRequest = onClose, sheetState = st, modifier = Modifier.testTag("dueSheet")) {
+        Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 16.dp).padding(bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(stringResource(R.string.tasks_change_due), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.semantics { heading() })
+            androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                IssueTasks.dateShortcuts().forEach { (k, d) ->
+                    val label = stringResource(when (k) {
+                        IssueTasks.Shortcut.TODAY -> R.string.issue_d_today; IssueTasks.Shortcut.TOMORROW -> R.string.issue_d_tomorrow
+                        IssueTasks.Shortcut.FRIDAY -> R.string.issue_d_friday; IssueTasks.Shortcut.NEXT_WEEK -> R.string.issue_d_next_week
+                    })
+                    androidx.compose.material3.FilterChip(i.dueDate == d.toString(), { onClose(); editor.setDue(i, d.toString()) }, { Text(label) },
+                        modifier = Modifier.heightIn(min = 40.dp).testTag("dueQuick-${k.name}"))
+                }
+                androidx.compose.material3.AssistChip({ calendar = true }, { Text("📅 " + stringResource(R.string.issue_d_pick)) }, modifier = Modifier.heightIn(min = 40.dp).testTag("dueQuick-pick"))
+                if (i.dueDate != null) androidx.compose.material3.AssistChip({ onClose(); editor.setDue(i, null) }, { Text(stringResource(R.string.issue_no_due)) },
+                    modifier = Modifier.heightIn(min = 40.dp).testTag("dueQuick-none"))
+            }
+        }
+    }
+    if (calendar) IssueDatePicker(i.dueDate?.let { runCatching { LocalDate.parse(it.take(10)) }.getOrNull() }, { d -> onClose(); editor.setDue(i, d?.toString()) },
+        { calendar = false }, allowClear = true)
+}
+
+/**
+ * Campos de la tarea en el detalle: las columnas del grupo (texto, lista, número, casilla) y los campos libres que
+ * traiga la tarea; abajo, solo para leer, los datos del sistema externo (cliente, prioridad…).
+ */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+fun TaskFieldsSection(i: IssueDTO, canEdit: Boolean) {
+    val client = LocalClient.current
+    val editor = rememberTaskEditor()
+    val conv = i.conversationId
+    val columns by androidx.compose.runtime.produceState<List<com.tiecoms.app.core.TaskColumnDTO>>(emptyList(), conv) {
+        if (!conv.isNullOrEmpty()) value = runCatching { client.taskColumns(conv).columns }.getOrDefault(emptyList())
+    }
+    val fields = i.fields ?: kotlinx.serialization.json.JsonObject(emptyMap())
+    val free = fields.keys.filter { k -> columns.none { it.name.equals(k, ignoreCase = true) } }
+    val meta = i.externalMeta.orEmpty()
+    if (columns.isEmpty() && free.isEmpty() && meta.isEmpty()) return
+    Column(Modifier.fillMaxWidth().testTag("taskFields"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        if (columns.isNotEmpty() || free.isNotEmpty()) Text(stringResource(R.string.tasks_fields), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(top = 8.dp).semantics { heading() })
+        columns.forEach { col ->
+            val key = fields.keys.firstOrNull { it.equals(col.name, ignoreCase = true) } ?: col.name
+            FieldEditor(col.name, col.type, col.options.orEmpty(), fields[key], canEdit) { v -> editor.setField(i, key, v) }
+        }
+        free.forEach { k -> FieldEditor(k, fieldType(fields[k]), emptyList(), fields[k], canEdit) { v -> editor.setField(i, k, v) } }
+        if (meta.isNotEmpty()) {
+            Text(stringResource(R.string.tasks_external), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 8.dp))
+            meta.forEach { (k, v) ->
+                Row(Modifier.fillMaxWidth()) {
+                    Text(k, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(0.4f))
+                    Text(v, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(0.6f))
+                }
+            }
+        }
+    }
+}
+
+private fun fieldType(v: kotlinx.serialization.json.JsonElement?): String {
+    val p = v as? kotlinx.serialization.json.JsonPrimitive ?: return "text"
+    return when { p.isString -> "text"; p.content == "true" || p.content == "false" -> "checkbox"; else -> "number" }
+}
+
+@Composable
+private fun FieldEditor(name: String, type: String, options: List<String>, value: kotlinx.serialization.json.JsonElement?, enabled: Boolean,
+                        onSave: (kotlinx.serialization.json.JsonElement?) -> Unit) {
+    val prim = value as? kotlinx.serialization.json.JsonPrimitive
+    val text = prim?.content.orEmpty()
+    val tag = "field-" + name.replace(Regex("\\s+"), "_")
+    when (type) {
+        "checkbox" -> Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag(tag), verticalAlignment = Alignment.CenterVertically) {
+            Text(name, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+            androidx.compose.material3.Switch(checked = text == "true", enabled = enabled, onCheckedChange = { onSave(kotlinx.serialization.json.JsonPrimitive(it)) })
+        }
+        "select" -> {
+            var open by remember { mutableStateOf(false) }
+            Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(enabled = enabled) { open = true }.testTag(tag), verticalAlignment = Alignment.CenterVertically) {
+                Text(name, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                Box {
+                    Text(text.ifEmpty { stringResource(R.string.tasks_field_unset) } + "  ▾", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold,
+                        color = if (text.isEmpty()) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface)
+                    DropdownMenu(open, { open = false }) {
+                        options.forEach { o -> DropdownMenuItem(text = { Text(o) }, trailingIcon = { if (o == text) Icon(Icons.Filled.Check, null) }, onClick = { open = false; if (o != text) onSave(kotlinx.serialization.json.JsonPrimitive(o)) }) }
+                        if (text.isNotEmpty()) DropdownMenuItem(text = { Text(stringResource(R.string.tasks_field_unset)) }, onClick = { open = false; onSave(null) })
+                    }
+                }
+            }
+        }
+        else -> {
+            var draft by remember(text) { mutableStateOf(text) }
+            val number = type == "number"
+            androidx.compose.material3.OutlinedTextField(draft, { draft = it.take(2000) }, label = { Text(name) }, enabled = enabled, singleLine = number, maxLines = 4,
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = if (number) androidx.compose.ui.text.input.KeyboardType.Decimal else androidx.compose.ui.text.input.KeyboardType.Text),
+                trailingIcon = if (draft != text) ({
+                    IconButton(onClick = {
+                        val t = draft.trim()
+                        onSave(when {
+                            t.isEmpty() -> null
+                            number -> t.replace(',', '.').toDoubleOrNull()?.let { d -> if (d % 1.0 == 0.0 && kotlin.math.abs(d) < 1e15) kotlinx.serialization.json.JsonPrimitive(d.toLong()) else kotlinx.serialization.json.JsonPrimitive(d) } ?: return@IconButton
+                            else -> kotlinx.serialization.json.JsonPrimitive(t)
+                        })
+                    }, modifier = Modifier.testTag("$tag-save")) { Icon(Icons.Filled.Check, stringResource(R.string.tasks_field_save)) }
+                }) else null,
+                modifier = Modifier.fillMaxWidth().testTag(tag))
         }
     }
 }

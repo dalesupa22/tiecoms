@@ -670,6 +670,10 @@ data class IssueDTO(
     val viewerIds: List<String> = emptyList(),
     /** Tema de la tarea (docs/TEMAS.md); la creada desde un mensaje con tema lo hereda. Ausente = sin tema. */
     val topicId: String? = null,
+    /** Campos propios de la tarea (migración 097): nombre → texto, número o sí/no. null = sin campos o servidor anterior. */
+    val fields: kotlinx.serialization.json.JsonObject? = null,
+    /** Datos del sistema externo (cliente, prioridad, categoría…), solo para mostrar. */
+    val externalMeta: Map<String, String>? = null,
 ) {
     val closed: Boolean get() = status == "done" || status == "cancelled"
     /** Asunto personal: sin conversación (🔒 «Personal · solo tú»). */
@@ -851,3 +855,7 @@ data class ScheduledMessageDTO(
 )
 
 @Serializable data class ScheduledPage(val scheduled: List<ScheduledMessageDTO> = emptyList())
+
+/** Columnas de las tareas de un grupo (GET /conversations/:id/task-columns): text | select | number | checkbox. */
+@Serializable data class TaskColumnDTO(val name: String = "", val type: String = "text", val options: List<String>? = null)
+@Serializable data class TaskColumnsDTO(val columns: List<TaskColumnDTO> = emptyList(), val canEdit: Boolean = false)

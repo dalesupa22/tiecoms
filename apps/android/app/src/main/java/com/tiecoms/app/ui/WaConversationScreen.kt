@@ -174,7 +174,7 @@ fun WaConversationScreen(key: String, onBack: () -> Unit, onOpenConversation: (S
                             onCategory = { k -> patch(mapOf("category" to JsonPrimitive(k))) },
                             extra = listOfNotNull(
                                 // 1.7.13: gg desde ⋯ (vuelve a mostrar la píldora de abajo si la escondí en este chat).
-                                gg?.takeIf { it.available != false }?.let { g -> SheetItem(ctx.getString(R.string.ggs_ask_about), "✨", tag = "waMenuGgOpen") { g.reopenFromMenu(ctx) } },
+                                gg?.takeIf { it.available != false }?.let { g -> SheetItem(ctx.getString(R.string.ggs_ask_about).removePrefix("✨").trim(), "✨", tag = "waMenuGgOpen") { g.reopenFromMenu(ctx) } },
                                 SheetItem(ctx.getString(R.string.wa_chat_settings), "⚙", tag = "waChatSettings") { settingsOpen = true })), { menu = false })
                     }
                 },
@@ -260,7 +260,7 @@ fun WaConversationScreen(key: String, onBack: () -> Unit, onOpenConversation: (S
     }
     waMenu?.let { m -> ActionSheet(null, listOfNotNull(
         if (data.mailEnabled) SheetItem(ctx.getString(R.string.web_wa_bring), "⤴", tag = "waCommentIn") { waMenu = null; waShare = m } else null,
-        if (gg != null && gg.available != false) SheetItem(ctx.getString(R.string.ggs_ask_about), "✨", tag = "waAskGg") {
+        if (gg != null && gg.available != false) SheetItem(ctx.getString(R.string.ggs_ask_about).removePrefix("✨").trim(), "✨", tag = "waAskGg") {
             waMenu = null; gg.quote(com.tiecoms.app.core.GgQuotedDTO(m.id, if (m.fromMe) ctx.getString(R.string.ggs_you) else m.author ?: c.name, excerpt(m.body, 200))); gg.show()
         } else null,
         if (gg != null && gg.available != false) SheetItem(ctx.getString(R.string.ggs_select), "☑", tag = "waSelect") { waMenu = null; selecting = true; if (m.id !in selected) selected.add(m.id) } else null,

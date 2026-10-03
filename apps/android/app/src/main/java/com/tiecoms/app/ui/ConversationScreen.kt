@@ -718,7 +718,7 @@ fun ConversationScreen(
                     subtitle = ctx.getString(R.string.menu_reply_private_sub, author.name.substringBefore(' '))) { onPrivateReply(m) })
             // gg (contrato 1-oct-2026): se AGREGA «✨ Preguntar a gg» y «Seleccionar»; no se quita nada del menú.
             if (gg != null && gg.available != false && m.kind == "text" && m.deletedAt == null) {
-                add(SheetItem(ctx.getString(R.string.ggs_ask_about), "✨", tag = "menuAskGg") {
+                add(SheetItem(ctx.getString(R.string.ggs_ask_about).removePrefix("✨").trim(), "✨", tag = "menuAskGg") {
                     gg.quote(com.tiecoms.app.core.GgQuotedDTO(m.id, author?.name ?: "", excerpt(quoteText(ctx, m), 200))); gg.show()
                 })
                 add(SheetItem(ctx.getString(R.string.ggs_select), "☑", tag = "menuSelect") { selecting = true; if (m.id !in selectedIds) selectedIds.add(m.id) })
@@ -1148,7 +1148,7 @@ fun ConversationScreen(
     }
     if (convMenu) ActionSheet(title, listOfNotNull(
         // 1.7.13: gg también desde ⋯ (y vuelve a mostrar la píldora si la escondí en este chat).
-        gg?.takeIf { it.available != false }?.let { g -> SheetItem(ctx.getString(R.string.ggs_ask_about), "✨", tag = "menuGgOpen") { g.reopenFromMenu(ctx) } },
+        gg?.takeIf { it.available != false }?.let { g -> SheetItem(ctx.getString(R.string.ggs_ask_about).removePrefix("✨").trim(), "✨", tag = "menuGgOpen") { g.reopenFromMenu(ctx) } },
         SheetItem(ctx.getString(R.string.cs_open), "🔎", tag = "menuSearch") { searchOpen = true },
         SheetItem(ctx.getString(R.string.details), "ⓘ", tag = "menuDetails") { onDetails() }) +
         conversationMenu(ctx, meta, data, onMeeting = { meeting = true to null }, onRemindCustom = { reminderCustom = true to null }, onLeave = { confirmLeave = true })) { convMenu = false }

@@ -1171,6 +1171,28 @@ class TieComsClient(
         putIssues(listOf(i)); recountIssues(i.conversationId); i
     }
     /**
+     * 1.7.13: edición optimista de una tarea (responsable, fecha, campos…) con el PATCH /issues/:id de la web. [local]
+     * aplica el cambio en el teléfono al instante; si el servidor lo rechaza (p. ej. permisos), vuelve como estaba y
+     * se lanza el error para mostrarlo.
+     */
+    suspend fun patchIssueOptimistic(id: String, patch: JsonObject, local: (IssueDTO) -> IssueDTO): IssueDTO = withContext(dispatcher) {
+        val generation = sessionGeneration
+        val prev = s.issues[id] ?: throw ApiException(404, "not_found", "Tarea no encontrada")
+        putIssues(listOf(local(prev))); recountIssues(prev.conversationId)
+        try {
+            val i = req("PATCH", "/issues/$id", patch, IssueDTO.serializer())
+            putIssues(listOf(i)); recountIssues(i.conversationId); i
+        } catch (e: Exception) {
+            if (generation == sessionGeneration) { putIssues(listOf(prev)); recountIssues(prev.conversationId) }
+            throw e
+        }
+    }
+    /** Columnas de las tareas de un grupo (las define un admin); 404 = servidor anterior → sin columnas. */
+    suspend fun taskColumns(conversationId: String): TaskColumnsDTO = withContext(dispatcher) {
+        try { req("GET", "/conversations/$conversationId/task-columns", null, TaskColumnsDTO.serializer()) }
+        catch (e: ApiException) { if (e.status == 404) TaskColumnsDTO() else throw e }
+    }
+    /**
      * Cambia el estado de un asunto al instante (pulsación larga en Grupos y Asuntos): el asunto se actualiza
      * en local y el conteo del grupo baja de una vez; si el PATCH falla, vuelve como estaba y se lanza el error.
      */

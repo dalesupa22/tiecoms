@@ -37,4 +37,13 @@
     <string name="tasks_empty_open">Cuando alguien cree una tarea en un chat, aparecerá aquí.</string>
     <string name="tasks_empty_done_title">Aún no hay nada hecho</string>
     <string name="tasks_empty_done">Las tareas que completes quedan guardadas aquí.</string>
+    <string name="tasks_change_owner">Cambiar responsable</string>
+    <string name="tasks_change_due">Cambiar fecha</string>
+    <string name="tasks_fields">Campos</string>
+    <string name="tasks_external">Datos del ticket</string>
+    <string name="tasks_yes">Sí</string>
+    <string name="tasks_no">No</string>
+    <string name="tasks_field_unset">Sin definir</string>
+    <string name="tasks_field_save">Guardar</string>
+    <string name="tasks_owner_hint">Solo pueden ser responsables las personas de este chat.</string>
 </resources>

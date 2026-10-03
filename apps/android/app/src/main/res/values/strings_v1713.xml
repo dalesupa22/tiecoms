@@ -37,4 +37,13 @@
     <string name="tasks_empty_open">When someone creates a task in a chat, it shows up here.</string>
     <string name="tasks_empty_done_title">Nothing completed yet</string>
     <string name="tasks_empty_done">Tasks you complete will be kept here.</string>
+    <string name="tasks_change_owner">Change owner</string>
+    <string name="tasks_change_due">Change date</string>
+    <string name="tasks_fields">Fields</string>
+    <string name="tasks_external">Ticket details</string>
+    <string name="tasks_yes">Yes</string>
+    <string name="tasks_no">No</string>
+    <string name="tasks_field_unset">Not set</string>
+    <string name="tasks_field_save">Save</string>
+    <string name="tasks_owner_hint">Only people in this chat can be owners.</string>
 </resources>

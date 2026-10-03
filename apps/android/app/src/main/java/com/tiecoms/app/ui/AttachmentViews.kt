@@ -299,7 +299,9 @@ fun AttachPicker(open: Boolean, onDismiss: () -> Unit, onPicked: (List<android.n
                  /** 1.6.6: «📹 Reunión ahora» y «📅 Agendar reunión con enlace» (Meet, Teams o Zoom). */
                  onMeetNow: (() -> Unit)? = null, onMeetSchedule: (() -> Unit)? = null,
                  /** Correo en el chat (docs/CORREO.md): «Correo» y «Mensaje de WhatsApp». */
-                 onMail: (() -> Unit)? = null, onWhatsApp: (() -> Unit)? = null) {
+                 onMail: (() -> Unit)? = null, onWhatsApp: (() -> Unit)? = null,
+                 /** 1.7.13: «✨ Responder por mí» de gg (antes una ✨ suelta en la barra de escribir). */
+                 onGgReply: (() -> Unit)? = null) {
     val ctx = LocalContext.current
     // Saveable: si el sistema recrea la actividad mientras la cámara está abierta, la foto no se pierde.
     var cameraUri by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<android.net.Uri?>(null) }
@@ -317,7 +319,9 @@ fun AttachPicker(open: Boolean, onDismiss: () -> Unit, onPicked: (List<android.n
     val cameraGate = rememberCameraGate()
     val docs = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenMultipleDocuments()) { onPicked(it.take(Attachments.MAX_PER_MESSAGE)) }
     // El «＋» del compositor (docs/GRUPOS.md): fotos, cámara y archivos; luego Evento y Asunto, creados a mano.
-    if (open) ActionSheet(stringResource(R.string.bar_plus), listOf<SheetItem?>(
+    if (open) ActionSheet(stringResource(R.string.bar_plus), listOfNotNull<SheetItem>(
+        onGgReply?.let { SheetItem(ctx.getString(R.string.ggs_reply_for_me), "✨", tag = "plusGgReply", onClick = it) },
+    ) + (if (onGgReply != null) listOf(null) else emptyList()) + listOf<SheetItem?>(
         SheetItem(ctx.getString(R.string.att_photos_pick), "🖼", tag = "attPhotos") {
             media.launch(androidx.activity.result.PickVisualMediaRequest(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageAndVideo))
         },

@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 1.7.13: gg abajo del chat, compartir como Instagram y la nueva pantalla de Tareas. -->
+<resources>
+    <string name="ggp_ask">✨ Preguntar a gg</string>
+    <string name="ggp_continue">✨ Continuar con gg</string>
+    <string name="ggp_pending_cd">%1$d te esperan</string>
+    <string name="ggp_hide">Esconder gg en este chat</string>
+    <string name="ggp_hidden">gg quedó escondido en este chat. Vuelve a abrirlo desde ⋯</string>
+
+    <string name="share_send_separately">Enviar por separado</string>
+    <string name="share_send_separately_sub">Un mensaje a cada uno de los %1$d</string>
+    <string name="share_send_group">Enviar en un grupo</string>
+    <string name="share_send_group_sub">Crea un chat grupal con estas %1$d personas</string>
+    <string name="share_selected_n">%1$d seleccionados</string>
+    <string name="share_sent_group">Compartido en un chat grupal</string>
+
+    <string name="tasks_f_mine">Mías</string>
+    <string name="tasks_f_open">Abiertas</string>
+    <string name="tasks_f_done">Hechas</string>
+    <string name="tasks_sort">Agrupar por</string>
+    <string name="tasks_by_date">Por fecha</string>
+    <string name="tasks_b_overdue">Vencidas</string>
+    <string name="tasks_b_today">Hoy</string>
+    <string name="tasks_b_week">Esta semana</string>
+    <string name="tasks_b_later">Más adelante</string>
+    <string name="tasks_b_none">Sin fecha</string>
+    <string name="tasks_b_done">Completadas</string>
+    <string name="tasks_due_today">Vence hoy</string>
+    <string name="tasks_due_tomorrow">Mañana</string>
+    <string name="tasks_was_due_one">Venció ayer</string>
+    <string name="tasks_was_due">Venció hace %1$d días</string>
+    <string name="tasks_idle">Sin movimiento %1$d d</string>
+    <string name="tasks_add">Añadir tarea</string>
+    <string name="tasks_empty_mine_title">Estás al día</string>
+    <string name="tasks_empty_mine">No tienes nada pendiente. Añade una tarea o mira las abiertas del equipo.</string>
+    <string name="tasks_empty_open_title">No hay tareas abiertas</string>
+    <string name="tasks_empty_open">Cuando alguien cree una tarea en un chat, aparecerá aquí.</string>
+    <string name="tasks_empty_done_title">Aún no hay nada hecho</string>
+    <string name="tasks_empty_done">Las tareas que completes quedan guardadas aquí.</string>
+</resources>

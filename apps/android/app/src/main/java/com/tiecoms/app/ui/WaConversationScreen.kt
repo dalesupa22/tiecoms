@@ -166,14 +166,16 @@ fun WaConversationScreen(key: String, onBack: () -> Unit, onOpenConversation: (S
                     }
                 },
                 actions = {
-                    if (gg != null && gg.available != false) GgButton(gg.pending, onClick = { gg.show() })
                     Box {
                         IconButton(onClick = { menu = true }, modifier = Modifier.testTag("waConvMenu")) { Icon(Icons.Filled.MoreVert, stringResource(R.string.menu_more)) }
                         AnchoredMenu(menu, if (!menu) emptyList() else waChatMenu(ctx, c, onOpen = null,
                             onPinWa = { patch(mapOf("pinned" to JsonPrimitive(!c.pinned))) },
                             onHide = { patch(mapOf("hidden" to JsonPrimitive(!c.hidden))) },
                             onCategory = { k -> patch(mapOf("category" to JsonPrimitive(k))) },
-                            extra = listOf(SheetItem(ctx.getString(R.string.wa_chat_settings), "⚙", tag = "waChatSettings") { settingsOpen = true })), { menu = false })
+                            extra = listOfNotNull(
+                                // 1.7.13: gg desde ⋯ (vuelve a mostrar la píldora de abajo si la escondí en este chat).
+                                gg?.takeIf { it.available != false }?.let { g -> SheetItem(ctx.getString(R.string.ggs_ask_about), "✨", tag = "waMenuGgOpen") { g.reopenFromMenu(ctx) } },
+                                SheetItem(ctx.getString(R.string.wa_chat_settings), "⚙", tag = "waChatSettings") { settingsOpen = true })), { menu = false })
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
@@ -210,10 +212,12 @@ fun WaConversationScreen(key: String, onBack: () -> Unit, onOpenConversation: (S
                 }
             }
             if (gg != null && gg.available != false) Column(Modifier.padding(horizontal = 8.dp)) {
+                // gg abajo (1.7.13): la píldora con su ✕ y, a la derecha, «Responder por mí» si lo último es del otro.
                 if (selecting) GgSelectionBar(selected.size, onAsk = { suggestFor = selected.toList() }, onCancel = { selecting = false; selected.clear() })
-                else if (messages?.lastOrNull()?.fromMe == false) TextButton(onClick = { gg.loadQuick() }, modifier = Modifier.testTag("waGgSpark")) { Text("✨ " + stringResource(R.string.ggs_reply_for_me)) }
+                else GgAskPill(gg) {
+                    if (messages?.lastOrNull()?.fromMe == false) TextButton(onClick = { gg.loadQuick() }, modifier = Modifier.testTag("waGgSpark")) { Text(stringResource(R.string.ggs_reply_for_me), maxLines = 1) }
+                }
                 GgQuickReplies(gg) { t -> useDraft(t) }
-                GgContinueStrip(gg)
             }
             HorizontalDivider()
             // Compositor: con «Responder desde chaggu» se escribe aquí; si no, el aviso de solo lectura con «Activar».

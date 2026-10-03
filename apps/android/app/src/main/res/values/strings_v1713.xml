@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 1.7.13: gg below the chat, share like Instagram and the new Tasks screen. -->
+<resources>
+    <string name="ggp_ask">✨ Ask gg</string>
+    <string name="ggp_continue">✨ Continue with gg</string>
+    <string name="ggp_pending_cd">%1$d waiting for you</string>
+    <string name="ggp_hide">Hide gg in this chat</string>
+    <string name="ggp_hidden">gg hidden in this chat. Open it again from ⋯</string>
+
+    <string name="share_send_separately">Send separately</string>
+    <string name="share_send_separately_sub">One message to each of the %1$d</string>
+    <string name="share_send_group">Send in a group</string>
+    <string name="share_send_group_sub">Creates a group chat with these %1$d people</string>
+    <string name="share_selected_n">%1$d selected</string>
+    <string name="share_sent_group">Shared in a group chat</string>
+
+    <string name="tasks_f_mine">Mine</string>
+    <string name="tasks_f_open">Open</string>
+    <string name="tasks_f_done">Done</string>
+    <string name="tasks_sort">Group by</string>
+    <string name="tasks_by_date">By date</string>
+    <string name="tasks_b_overdue">Overdue</string>
+    <string name="tasks_b_today">Today</string>
+    <string name="tasks_b_week">This week</string>
+    <string name="tasks_b_later">Later</string>
+    <string name="tasks_b_none">No date</string>
+    <string name="tasks_b_done">Completed</string>
+    <string name="tasks_due_today">Due today</string>
+    <string name="tasks_due_tomorrow">Tomorrow</string>
+    <string name="tasks_was_due_one">Was due yesterday</string>
+    <string name="tasks_was_due">Was due %1$d days ago</string>
+    <string name="tasks_idle">No movement %1$d d</string>
+    <string name="tasks_add">Add task</string>
+    <string name="tasks_empty_mine_title">You\'re all caught up</string>
+    <string name="tasks_empty_mine">Nothing pending for you. Add a task or check the team\'s open ones.</string>
+    <string name="tasks_empty_open_title">No open tasks</string>
+    <string name="tasks_empty_open">When someone creates a task in a chat, it shows up here.</string>
+    <string name="tasks_empty_done_title">Nothing completed yet</string>
+    <string name="tasks_empty_done">Tasks you complete will be kept here.</string>
+</resources>

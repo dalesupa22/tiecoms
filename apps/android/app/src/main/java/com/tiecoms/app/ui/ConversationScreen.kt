@@ -843,9 +843,8 @@ fun ConversationScreen(
                     }
                 },
                 actions = {
-                    // gg · 📞 · 🔎 · ⋯ (2-oct-2026): 📞 pregunta voz o video y ⓘ salió (tocar el nombre abre los detalles, y
-                    // también está en ⋯), así el nombre tiene sitio y termina en «…» sin cambiar el alto.
-                    if (gg != null && gg.available != false) GgButton(gg.pending, onClick = { gg.show() })
+                    // 📞 · 🔎 · ⋯ (1.7.13): gg salió de la cabecera y vive abajo, en la píldora sobre la caja; ⓘ salió en 1.7.10
+                    // (tocar el nombre abre los detalles, y también está en ⋯), así el nombre gana sitio y termina en «…».
                     // 📞 (docs/LLAMADAS.md): solo con features.calls y si puedo escribir.
                     if (!meta.isSide && !blockedDirect) CallHeaderButtons(meta, data, compact = true)
                     // 🔎 Buscar en el chat (tanda 1.7).
@@ -1022,7 +1021,8 @@ fun ConversationScreen(
                 meta.sideIssueId?.let { SideIssueStrip(id, it, onOpen = onOpenIssue) }
                 // Mensajes programados de este chat (solo los veo yo): «🕒 N programados · el próximo sale … · Ver».
                 ScheduledStrip(id)
-                GgContinueStrip(gg)
+                // gg abajo (1.7.13): «✨ Preguntar a gg» / «✨ Continuar con gg» con su ✕ (se esconde en este chat).
+                GgAskPill(gg)
                 GgQuickReplies(gg) { t -> GgDrafts.put(id, t) }
                 val composerReplyId = replyTo?.id
                 Composer(
@@ -1050,7 +1050,7 @@ fun ConversationScreen(
                 onWhatsApp = if (data.mailEnabled && canWork) mailNav.openWhatsApp else null,
                 autoFocus = embedded, focusSignal = replyFocus,
                 canSchedule = privateHere == null, onScheduled = { replyTo = null },
-                // ✨ en la caja: las 3 burbujitas de respuesta, solo si lo último es de otra persona y al tocar (no gasta IA solo).
+                // «✨ Responder por mí» en el «＋»: las 3 burbujitas, solo si lo último es de otra persona y al tocar (no gasta IA solo).
                 onGgSpark = if (gg != null && gg.available != false && com.tiecoms.app.core.GgSide.lastIsFromOther(conv?.messages.orEmpty().filter { it.authorId !in state.blockedUserIds }, me)) ({ gg.loadQuick() }) else null,
             ) } else ReadOnlyNotice()
         }
@@ -1146,7 +1146,10 @@ fun ConversationScreen(
         val mineSet = live.reactions.filter { data.me.id in it.userIds }.map { it.emoji }.toSet()
         EmojiPickerSheet(mineSet, reactionActions, onPick = { e -> react(live, e, e !in mineSet) }, onClose = { pickerFor = null })
     }
-    if (convMenu) ActionSheet(title, listOf(SheetItem(ctx.getString(R.string.cs_open), "🔎", tag = "menuSearch") { searchOpen = true },
+    if (convMenu) ActionSheet(title, listOfNotNull(
+        // 1.7.13: gg también desde ⋯ (y vuelve a mostrar la píldora si la escondí en este chat).
+        gg?.takeIf { it.available != false }?.let { g -> SheetItem(ctx.getString(R.string.ggs_ask_about), "✨", tag = "menuGgOpen") { g.reopenFromMenu(ctx) } },
+        SheetItem(ctx.getString(R.string.cs_open), "🔎", tag = "menuSearch") { searchOpen = true },
         SheetItem(ctx.getString(R.string.details), "ⓘ", tag = "menuDetails") { onDetails() }) +
         conversationMenu(ctx, meta, data, onMeeting = { meeting = true to null }, onRemindCustom = { reminderCustom = true to null }, onLeave = { confirmLeave = true })) { convMenu = false }
     viewer?.let { (list, i) -> MediaViewer(list, i) { viewer = null } }
@@ -1258,7 +1261,7 @@ private fun Composer(
     focusSignal: Int = 0,
     /** Mensajes programados (1.6.4 / 23): 🕒 junto a enviar y pulsación larga en ➤. false en respuestas privadas. */
     canSchedule: Boolean = false, onScheduled: () -> Unit = {},
-    /** ✨ gg: pide las 3 burbujitas de respuesta (solo al tocar). null = no se muestra. */
+    /** gg «Responder por mí»: pide las 3 burbujitas de respuesta (solo al tocar), desde el «＋». null = no se ofrece. */
     onGgSpark: (() -> Unit)? = null,
 ) {
     val client = LocalClient.current
@@ -1413,7 +1416,9 @@ private fun Composer(
     AttachPicker(picker && uploading == null, onDismiss = { picker = false }, onPicked = { add(it) }, onEvent = onNewEvent, onIssue = onNewIssue,
         onTask = sideIssue?.let { sid -> { picker = false; taskDialogs.openTasks(sid, id) } },
         onMeetNow = onMeeting?.let { f -> { picker = false; f(true) } }, onMeetSchedule = onMeeting?.let { f -> { picker = false; f(false) } },
-        onMail = onMail?.let { f -> { picker = false; f() } }, onWhatsApp = onWhatsApp?.let { f -> { picker = false; f() } })
+        onMail = onMail?.let { f -> { picker = false; f() } }, onWhatsApp = onWhatsApp?.let { f -> { picker = false; f() } },
+        // 1.7.13: la ✨ ya no va suelta en la barra (la entrada a gg abajo es la píldora); «Responder por mí» vive en el «＋».
+        onGgReply = onGgSpark?.let { f -> { picker = false; f() } })
     // Un hilo o sidechat abierto al lado recibe el cursor.
     val focus = remember { androidx.compose.ui.focus.FocusRequester() }
     LaunchedEffect(id, autoFocus) { if (autoFocus) { delay(300); runCatching { focus.requestFocus() } } }
@@ -1585,12 +1590,6 @@ private fun Composer(
                 }
                 if (editing == null) IconButton(onClick = onBring, modifier = Modifier.size(48.dp).semantics { contentDescription = bringLabel }.testTag("bring")) {
                     Text("⤓", style = MaterialTheme.typography.titleLarge)
-                }
-                if (editing == null && onGgSpark != null && text.isBlank() && !rec.recording) {
-                    val sparkCd = stringResource(R.string.ggs_quick_cd)
-                    IconButton(onClick = onGgSpark, modifier = Modifier.size(48.dp).semantics { contentDescription = sparkCd }.testTag("ggSpark")) {
-                        Text("✨", style = MaterialTheme.typography.titleMedium)
-                    }
                 }
                 if (editing == null && com.tiecoms.app.core.CreativeMedia.available(client.meta(id)?.kind)) IconButton(onClick = { focusManager.clearFocus(); keyboard?.hide(); creativePicker = true }, enabled = uploading == null && !rec.recording,
                     modifier = Modifier.size(40.dp).testTag("creativeButton").semantics { contentDescription = ctx.getString(R.string.creative_title) }) {

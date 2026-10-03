@@ -86,7 +86,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 
 /*
- * gg dentro del chat (docs/CONTRATO-GG-CHAT-WA-INBOX.md, parte B). Botón gg en el encabezado, hoja «gg de este chat»,
+ * gg dentro del chat (docs/CONTRATO-GG-CHAT-WA-INBOX.md, parte B). Píldora gg abajo (1.7.13), hoja «gg de este chat»,
  * «Responder por mí» (3 borradores + tonos), citar, «Seguir con gg» y sugerencias de varios mensajes.
  * Nada se envía ni se ejecuta solo: los borradores caen al compositor y las acciones abren los diálogos de siempre.
  */
@@ -102,19 +102,6 @@ object GgDrafts {
     val pending = MutableStateFlow<Map<String, String>>(emptyMap())
     fun put(conversationId: String, text: String) { if (text.isNotBlank()) pending.value = pending.value + (conversationId to text) }
     fun take(conversationId: String): String? = pending.value[conversationId]?.also { pending.value = pending.value - conversationId }
-}
-
-/**
- * Sello gg del encabezado (2-oct-2026): la marca de gg pequeñita (22 dp, con sus estrellitas que titilan), sin fondo
- * ni botón grande, para que el nombre del chat gane espacio. La entrada principal es «Seguir con gg» de abajo.
- */
-@Composable
-fun GgButton(count: Int, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    val cd = stringResource(R.string.ggs_button_cd)
-    Box(modifier.size(36.dp).clip(CircleShape).clickable(onClick = onClick, role = androidx.compose.ui.semantics.Role.Button)
-        .semantics { contentDescription = cd }.testTag("ggSideButton"), contentAlignment = Alignment.Center) {
-        GgMark(22.dp, Modifier.clearAndSetSemantics {})
-    }
 }
 
 /** Estado de «gg de este chat» para una fuente (`c:<id>` o `wa:<cuenta>:<jid>`). */
@@ -437,16 +424,86 @@ private fun DraftCard(d: GgDraft, onUseDraft: (String) -> Unit, onAction: (com.t
     }
 }
 
-/** «Seguir con gg» sobre el compositor, tras cerrar la hoja con historial. */
-@Composable
-fun GgContinueStrip(model: GgSideModel?) {
-    if (model == null || !model.closedWithHistory || model.open) return
-    Row(Modifier.fillMaxWidth().clickable { model.show() }.padding(horizontal = 16.dp, vertical = 6.dp).testTag("ggContinue"), verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(20.dp).background(GgInk, CircleShape), contentAlignment = Alignment.Center) { Text("gg", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold) }
-        Spacer(Modifier.width(8.dp))
-        Text(stringResource(R.string.ggs_continue), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-        IconButton(onClick = { model.closedWithHistory = false }, modifier = Modifier.size(32.dp)) { Icon(Icons.Filled.Close, stringResource(R.string.close), Modifier.size(16.dp)) }
+/**
+ * 1.7.13: chats donde escondí la píldora de gg (con su ✕), por fuente (`c:<id>` o `wa:<cuenta>:<jid>`). Vive en el
+ * teléfono (SharedPreferences): es una preferencia de pantalla, no un dato del servidor. Se vuelve a mostrar desde ⋯.
+ */
+object GgPillPrefs {
+    private const val FILE = "gg_pill"
+    private const val KEY = "hidden"
+    private val state = MutableStateFlow<Set<String>?>(null)
+    private fun prefs(ctx: android.content.Context) = ctx.applicationContext.getSharedPreferences(FILE, android.content.Context.MODE_PRIVATE)
+    fun flow(ctx: android.content.Context): kotlinx.coroutines.flow.StateFlow<Set<String>?> {
+        if (state.value == null) state.value = prefs(ctx).getStringSet(KEY, emptySet())?.toSet() ?: emptySet()
+        return state
     }
+    fun setHidden(ctx: android.content.Context, source: String, hidden: Boolean) {
+        val now = (flow(ctx).value ?: emptySet()).let { if (hidden) it + source else it - source }
+        state.value = now
+        prefs(ctx).edit().putStringSet(KEY, now).apply()
+    }
+}
+
+/** ¿Escondí gg en este chat? (reactivo: el ⋯ lo vuelve a mostrar sin recomponer a mano). */
+@Composable
+fun ggPillHidden(source: String): Boolean {
+    val ctx = LocalContext.current
+    val set by remember { GgPillPrefs.flow(ctx) }.collectAsStateWithLifecycle()
+    return set?.contains(source) == true
+}
+
+/**
+ * 1.7.13: la entrada a gg va ABAJO, encima de la caja de texto, en todos los chats (chaggu y WhatsApp): una píldora
+ * pequeña «✨ Preguntar a gg» (o «✨ Continuar con gg» si ya hay conversación con gg aquí) con el número de
+ * pendientes. La ✕ la esconde en ESTE chat (persistido); cerrar la hoja de gg no la vuelve a forzar. Ocupa su propia
+ * fila (no flota), así no tapa mensajes ni el aviso de «está descansando». La disponibilidad no cambia: se muestra
+ * con la misma regla que tenía el botón de la cabecera (`available != false`).
+ */
+@Composable
+fun GgAskPill(model: GgSideModel?, modifier: Modifier = Modifier, trailing: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit = {}) {
+    if (model == null || model.available == false || model.open) return
+    val ctx = LocalContext.current
+    val hidden = ggPillHidden(model.source)
+    if (hidden) {
+        // Escondida: solo queda lo de al lado (p. ej. «Responder por mí» en WhatsApp), si hay.
+        Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, content = trailing)
+        return
+    }
+    val label = stringResource(if (model.messages.any { it.role == "user" }) R.string.ggp_continue else R.string.ggp_ask)
+    val pending = model.pending
+    val pendingCd = if (pending > 0) stringResource(R.string.ggp_pending_cd, pending) else null
+    Row(modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp, top = 2.dp, bottom = 2.dp).testTag("ggPill"), verticalAlignment = Alignment.CenterVertically) {
+        Surface(
+            onClick = { model.show() }, shape = RoundedCornerShape(50),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh, contentColor = MaterialTheme.colorScheme.onSurface,
+            border = androidx.compose.foundation.BorderStroke(1.dp, GgSpark.copy(alpha = 0.35f)),
+            modifier = Modifier.heightIn(min = 32.dp).semantics { contentDescription = listOfNotNull(label.removePrefix("✨ "), pendingCd).joinToString(", ") }.testTag("ggPillOpen"),
+        ) {
+            Row(Modifier.padding(start = 12.dp, end = if (pending > 0) 6.dp else 12.dp, top = 5.dp, bottom = 5.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(label, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                if (pending > 0) {
+                    Spacer(Modifier.width(6.dp))
+                    Box(Modifier.widthIn(min = 20.dp).background(GgSpark, CircleShape).padding(horizontal = 6.dp, vertical = 1.dp).testTag("ggPillCount"), contentAlignment = Alignment.Center) {
+                        Text(if (pending > 99) "99+" else pending.toString(), color = Color.White, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+        IconButton(onClick = {
+            GgPillPrefs.setHidden(ctx, model.source, true)
+            android.widget.Toast.makeText(ctx, ctx.getString(R.string.ggp_hidden), android.widget.Toast.LENGTH_SHORT).show()
+        }, modifier = Modifier.size(36.dp).testTag("ggPillHide")) {
+            Icon(Icons.Filled.Close, stringResource(R.string.ggp_hide), Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Spacer(Modifier.weight(1f))
+        trailing()
+    }
+}
+
+/** «Preguntar a gg» desde ⋯: vuelve a mostrar la píldora en este chat y abre la hoja. */
+fun GgSideModel.reopenFromMenu(ctx: android.content.Context) {
+    GgPillPrefs.setHidden(ctx, source, false)
+    show()
 }
 
 /** Las 3 burbujitas de respuesta sobre la caja (cargadas al tocar ✨). Tocar una = borrador en la caja. */

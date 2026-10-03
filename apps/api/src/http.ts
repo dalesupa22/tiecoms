@@ -565,7 +565,7 @@ export async function buildHttp() {
       const q=z.object({ messageId:z.uuid().optional(), seq:z.coerce.number().int().positive().optional(), limit:z.coerce.number().int().min(10).max(100).default(50) }).refine((v)=>!!v.messageId || !!v.seq).parse(req.query);
       return messagesAround(req.userId,z.uuid().parse(req.params.id),q,q.limit);
     });
-    priv.post('/api/v1/gg/calendar/slots',ggLimit,async(req)=>calendarSlots(req.userId,CalendarSlotsInput.parse(req.body)));
+    priv.post('/api/v1/gg/calendar/slots',ggLimit,async(req)=>{const {busy:_busy,...slots}=await calendarSlots(req.userId,CalendarSlotsInput.parse(req.body)) as Record<string,unknown>;return slots;});
     priv.post('/api/v1/gg/calendar/confirm',ggLimit,async(req)=>confirmCalendar(req.userId,CalendarConfirmInput.parse(req.body)));
     // gg propone y la persona confirma: borrador de reunión (con quién y enlaces) y de correo; el correo sale solo con «Enviar».
     priv.post('/api/v1/gg/meeting-draft',ggLimit,async(req)=>ggActions.meetingDraft(req.userId,req.body));

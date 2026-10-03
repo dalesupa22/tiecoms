@@ -31,7 +31,8 @@ async function ownAgendaBusy(userId:string,from:string,to:string):Promise<[numbe
   return r.rows.map((e)=>[new Date(e.starts_at).getTime(),new Date(e.ends_at).getTime()]);
 }
 function zone(tz:string){try{new Intl.DateTimeFormat('en',{timeZone:tz});}catch{throw badRequest('Zona horaria inválida');}}
-export async function calendarSlots(userId:string,input:z.input<typeof CalendarSlotsInput>){
+/** Free slots inside the window. With `spread` (windows gg inferred from the chat): Monday–Friday, at most 2 per day and 2 hours apart, up to `maxSlots`. `busy` is for gg's prompt only. */
+export async function calendarSlots(userId:string,input:z.input<typeof CalendarSlotsInput>,opts:{maxSlots?:number;spread?:boolean}={}){
   input=CalendarSlotsInput.parse(input);
   await authorize(userId,input.source,input.messageIds);zone(input.timezone);
   const from=Date.parse(input.from),to=Date.parse(input.to);
@@ -42,10 +43,20 @@ export async function calendarSlots(userId:string,input:z.input<typeof CalendarS
   const startHour=input.startHour ?? 9,endHour=input.endHour ?? 18;
   const clock=new Intl.DateTimeFormat('en-CA',{timeZone:input.timezone,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
   const local=(at:number)=>{const parts=clock.formatToParts(new Date(at)),part=(key:string)=>parts.find(p=>p.type===key)!.value;return {day:part('year')+'-'+part('month')+'-'+part('day'),minute:Number(part('hour'))*60+Number(part('minute'))};};
-  const inWorkday=(at:number)=>{const start=local(at),last=local(at+duration-1);return start.day===last.day && start.minute>=startHour*60 && last.minute<endHour*60;};
+  const weekday=(day:string)=>new Date(day+'T12:00:00Z').getUTCDay();
+  const inWorkday=(at:number)=>{const start=local(at),last=local(at+duration-1),wd=weekday(start.day);return start.day===last.day && (!opts.spread || (wd>=1 && wd<=5)) && start.minute>=startHour*60 && last.minute<endHour*60;};
+  const max=Math.min(Math.max(opts.maxSlots ?? 3,1),8),perDay=new Map<string,number>();
   const slots:{startsAt:string;endsAt:string}[]=[];
-  for(let at=Math.ceil(Math.max(from,Date.now()+5*60_000)/step)*step;at+duration<=to && slots.length<3;at+=step) if(inWorkday(at) && !busy.some(([a,b])=>a<at+duration && b>at)) {slots.push({startsAt:new Date(at).toISOString(),endsAt:new Date(at+duration).toISOString()});at+=duration-step;}
-  return {status:'ready' as const,provider:provider.provider,calendar:'primary' as const,scope:'owned-primary-and-chaggu' as const,checkedAt,timezone:input.timezone,startHour,endHour,slots};
+  for(let at=Math.ceil(Math.max(from,Date.now()+5*60_000)/step)*step;at+duration<=to && slots.length<max;at+=step) {
+    if(!inWorkday(at) || busy.some(([a,b])=>a<at+duration && b>at)) continue;
+    const day=local(at).day,n=perDay.get(day) ?? 0;
+    if(opts.spread && n>=2) continue;
+    perDay.set(day,n+1);slots.push({startsAt:new Date(at).toISOString(),endsAt:new Date(at+duration).toISOString()});
+    // Spread: the second option of a day goes at least 2 hours later (morning / afternoon).
+    at+=(opts.spread ? Math.max(duration,2*3600_000) : duration)-step;
+  }
+  const busyOut=busy.filter(([a,b])=>b>from && a<to).sort((x,y)=>x[0]-y[0]).slice(0,60).map(([a,b])=>({startsAt:new Date(a).toISOString(),endsAt:new Date(b).toISOString()}));
+  return {status:'ready' as const,provider:provider.provider,calendar:'primary' as const,scope:'owned-primary-and-chaggu' as const,checkedAt,timezone:input.timezone,startHour,endHour,slots,busy:busyOut};
 }
 export async function confirmCalendar(userId:string,input:z.infer<typeof CalendarConfirmInput>){
   const sourceConversation=await authorize(userId,input.source,input.messageIds);zone(input.timezone);

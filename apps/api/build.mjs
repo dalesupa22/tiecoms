@@ -15,7 +15,7 @@ if (!(await readFile(baileysSocket.replace(/socket\.js$/, 'chats.js'), 'utf8')).
 
 await rm('dist', { recursive: true, force: true });
 const bundled = await build({
-  entryPoints: { server: 'src/server.ts', worker: 'src/worker.ts', 'wa-bridge': 'src/wa-bridge.ts', migrate: 'src/migrate-cli.ts', moderation: 'src/moderation-cli.ts', deletion: 'src/deletion-cli.ts', ops: 'src/ops-cli.ts' },
+  entryPoints: { server: 'src/server.ts', worker: 'src/worker.ts', 'wa-bridge': 'src/wa-bridge.ts', migrate: 'src/migrate-cli.ts', moderation: 'src/moderation-cli.ts', deletion: 'src/deletion-cli.ts', ops: 'src/ops-cli.ts', pdfjs: 'src/pdfjs-entry.ts' },
   outdir: 'dist',
   bundle: true,
   platform: 'node',

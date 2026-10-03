@@ -1,11 +1,12 @@
 /** Texto de un PDF para gg: página por página, con un tope de caracteres y aviso explícito si se cortó. */
-// pdfjs se carga solo cuando gg lee un PDF (no al arrancar el API).
+// pdfjs se carga solo cuando gg lee un PDF y vive fuera del bundle principal (dist/pdfjs.js).
+// La ruta va en una variable para que esbuild no lo meta dentro de server.js / worker.js.
 async function load() {
-  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  const path = process.env.VITEST ? './pdfjs-entry.ts' : './pdfjs.js';
+  const m = await import(/* @vite-ignore */ path);
   // En Node pdfjs usa un «worker falso» en el mismo hilo; dárselo evita que intente cargar un archivo aparte.
-  // @ts-expect-error: el worker de pdfjs no trae tipos.
-  (globalThis as any).pdfjsWorker ??= await import('pdfjs-dist/legacy/build/pdf.worker.mjs');
-  return pdfjs;
+  (globalThis as any).pdfjsWorker ??= m.worker;
+  return m.pdfjs as typeof import('pdfjs-dist/legacy/build/pdf.mjs');
 }
 
 export interface PdfText { text: string; pages: number; readPages: number; truncated: boolean }

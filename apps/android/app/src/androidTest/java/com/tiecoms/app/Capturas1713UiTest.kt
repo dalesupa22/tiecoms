@@ -12,6 +12,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.test.core.app.ActivityScenario
@@ -127,9 +128,47 @@ class Capturas1713UiTest {
             compose.onNodeWithTag("taskFilter-open").performClick()
             shot("06-tareas-abiertas")
             compose.onNodeWithTag("taskGrouping").performClick()
-            Thread.sleep(400)
+            compose.waitUntilAtLeastOneExists(hasTestTag("taskGrouping-date"), 5_000)
             shot("07-tareas-menu-orden")
-            androidx.test.uiautomator.UiDevice.getInstance(ins).pressBack()
+            compose.onNodeWithTag("taskGrouping-date").performClick()
+            Thread.sleep(400)
+
+            // 4b) Mantener presionado: «Cambiar responsable» → Josué y «Cambiar fecha» → Mañana, contra el API.
+            val task = arg("task"); val josue = arg("josue")
+            if (task.isNotBlank() && josue.isNotBlank()) {
+                val client = app.container.client.value
+                compose.onNodeWithTag("issues").performScrollToNode(hasTestTag("issue-$task"))
+                compose.onNodeWithTag("issue-$task").performTouchInput { longClick() }
+                compose.waitUntilAtLeastOneExists(hasTestTag("menuTaskOwner"), 5_000)
+                shot("07b-tarea-menu-editar")
+                compose.onNodeWithTag("menuTaskOwner").performClick()
+                compose.waitUntilAtLeastOneExists(hasTestTag("owner-$josue"), 5_000)
+                shot("07c-cambiar-responsable")
+                compose.onNodeWithTag("owner-$josue").performClick()
+                compose.waitUntil(10_000) { client.state.value.issues[task]?.ownerId == josue }
+                Thread.sleep(1500)
+                compose.waitUntil(10_000) { runBlocking { client.issueDetail(task).issue }.ownerId == josue } // lo guardó el API
+                compose.onNodeWithTag("issue-$task").performTouchInput { longClick() }
+                compose.waitUntilAtLeastOneExists(hasTestTag("menuTaskDue"), 5_000)
+                compose.onNodeWithTag("menuTaskDue").performClick()
+                compose.waitUntilAtLeastOneExists(hasTestTag("dueQuick-TOMORROW"), 5_000)
+                shot("07d-cambiar-fecha")
+                compose.onNodeWithTag("dueQuick-TOMORROW").performClick()
+                val tomorrow = com.tiecoms.app.core.IssueTasks.localToday().plusDays(1).toString()
+                compose.waitUntil(10_000) { client.state.value.issues[task]?.dueDate == tomorrow }
+                Thread.sleep(1500)
+                compose.waitUntil(10_000) { runBlocking { client.issueDetail(task).issue }.dueDate == tomorrow } // lo guardó el API
+                Thread.sleep(800)
+                shot("07e-tareas-tras-editar")
+                // Detalle: responsable de un toque y campos propios.
+                compose.onNodeWithTag("issue-$task").performClick()
+                compose.waitUntilAtLeastOneExists(hasTestTag("issueOwnerChange"), 10_000)
+                shot("07f-detalle")
+                compose.onNodeWithTag("issueDetail").performScrollToNode(hasTestTag("taskFields"))
+                shot("07g-detalle-campos")
+                compose.onNodeWithTag("back").performClick()
+                compose.waitUntilAtLeastOneExists(hasTestTag("taskFilter"), 10_000)
+            }
             compose.onNodeWithTag("taskFilter-mine").performClick()
             shell("cmd uimode night yes")
             Thread.sleep(2500)

@@ -155,6 +155,7 @@ function toChatDTO(r: any): WaChatDTO {
     inboxPlace: r.inbox_place ?? null,
     inboxPinnedAt: r.inbox_pinned_at ? new Date(r.inbox_pinned_at).toISOString() : null,
     integrationsShared: r.integrations_shared === true,
+    readingList: r.reading_list === true,
     ...(r.account_status ? { accountStatus: r.account_status } : {}),
   };
 }

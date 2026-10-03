@@ -2458,3 +2458,8 @@ body.is-pane-resizing, body.is-pane-resizing * { user-select: none !important; }
 .wa-draft { padding: 10px 0; border-top: 1px solid var(--line); }
 .wa-draft:first-of-type { border-top: 0; }
 .wa-draft textarea { width: 100%; min-height: 60px; margin: 6px 0; }
+
+/* Lista de lectura (screens/Links.tsx › ReadingPanel). */
+.reading-panel { padding: 12px 14px; margin: 12px 0 16px; }
+.reading-digest { padding: 12px; border-radius: 10px; background: var(--soft, rgba(127,127,127,.08)); margin-bottom: 10px; line-height: 1.5; }
+.reading-item a { color: inherit; }

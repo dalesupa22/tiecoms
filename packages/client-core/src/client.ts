@@ -2023,6 +2023,12 @@ export class TieComsClient {
   }
   updateMcpToken(id: string, opts: { scopes?: string[] | null; waAccountIds?: string[] | null; expiresAt?: string | null }) { return this.request(`/me/mcp-tokens/${id}`, { method: 'PATCH', json: opts }); }
   mcpActivity(tokenId?: string) { return this.request<{ activity: { app: string; tool: string; target: string | null; items: number; ok: boolean; error: string | null; at: string }[] }>(`/me/mcp-activity${tokenId ? `?tokenId=${tokenId}` : ''}`); }
+  readingList(state: 'pending' | 'seen' | 'all' = 'pending', source: 'whatsapp' | 'chaggu' | 'all' = 'all') { return this.request<{ items: ReadingItemInfo[]; pendingWhatsApp: number }>(`/reading?state=${state}&source=${source}`); }
+  readingDigest(opts: { ids?: string[]; markRead?: boolean; source?: 'whatsapp' | 'chaggu' | 'all' } = {}) {
+    return this.request<{ digest: string; items: (Pick<ReadingItemInfo, 'id' | 'url' | 'title' | 'from' | 'kind'> & { summary: string | null; basis: string | null; topic: string | null; markedRead: boolean })[]; remaining: number }>('/reading/digest', { method: 'POST', json: opts });
+  }
+  setReadingSeen(ids: string[], seen: boolean) { return this.request('/reading/state', { method: 'PUT', json: { ids, seen } }); }
+  addReading(url: string) { return this.request<{ id: string; url: string }>('/reading', { method: 'POST', json: { url } }); }
   waDrafts() { return this.request<{ drafts: WaDraftInfo[] }>('/whatsapp/drafts'); }
   sendWaDraft(id: string, text?: string) { return this.request<{ status: string; error?: string }>(`/whatsapp/drafts/${id}/send`, { method: 'POST', json: text ? { text } : {} }); }
   discardWaDraft(id: string) { return this.request(`/whatsapp/drafts/${id}`, { method: 'DELETE' }); }
@@ -2044,3 +2050,9 @@ export interface McpTokenInfo {
 }
 /** WhatsApp que dejó una integración para que la persona lo apruebe. */
 export interface WaDraftInfo { id: string; chat: string; to: string | null; account: string; text: string; source: string | null; externalRef: string | null; status: string; createdAt: string }
+
+/** Elemento de la lista de lectura (r: lista de lectura / l: Ver después de chaggu). */
+export interface ReadingItemInfo {
+  id: string; url: string; title: string | null; description: string | null; kind: string; provider: string | null; host: string;
+  source: 'whatsapp' | 'chaggu' | 'manual'; from: string | null; chat: string | null; sharedAt: string; seen: boolean; imageUrl: string | null;
+}

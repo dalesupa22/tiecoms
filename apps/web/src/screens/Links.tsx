@@ -304,6 +304,7 @@ export function SavedLinksScreen() {
     <div className="page"><div className="page-narrow" style={{ maxWidth: 760 }}>
       <h1>🔖 {t('nav.saved')}</h1>
       <p className="muted">{t('link.savedIntro')}</p>
+      <ReadingPanel onChanged={() => { setPage(null); load(); }} />
       <div className="seg" style={{ margin: '12px 0', maxWidth: 360 }}>
         <button className={state === 'pending' ? 'on' : ''} onClick={() => setState('pending')}>{t('link.pending')}{pending ? ` · ${pending}` : ''}</button>
         <button className={state === 'seen' ? 'on' : ''} onClick={() => setState('seen')}>{t('link.seenTab')}</button>
@@ -318,5 +319,64 @@ export function SavedLinksScreen() {
       </div>
       {page?.hasMore && <button className="btn ghost" onClick={() => load(true)}>{t('link.more')}</button>}
     </div></div>
+  );
+}
+
+/**
+ * Lista de lectura (docs/LECTURA.md): enlaces que llegan a los chats de WhatsApp marcados con 📚 (p. ej. el de tu
+ * papá) y «✨ Resúmeme todo», que resume cada uno por su contenido, arma un resumen por temas y los marca leídos.
+ */
+function ReadingPanel({ onChanged }: { onChanged: () => void }) {
+  const [items, setItems] = useState<Awaited<ReturnType<typeof client.readingList>>['items'] | null>(null);
+  const [digest, setDigest] = useState<Awaited<ReturnType<typeof client.readingDigest>> | null>(null);
+  const [busy, setBusy] = useState(false);
+  const load = () => client.readingList('pending', 'whatsapp').then((r) => setItems(r.items)).catch(() => setItems([]));
+  useEffect(() => { void load(); }, []);
+  async function summarize() {
+    setBusy(true);
+    try { const r = await client.readingDigest({}); setDigest(r); await load(); onChanged(); } catch (e) { toast(errorText(e)); } finally { setBusy(false); }
+  }
+  return (
+    <div className="card reading-panel">
+      <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+        <b className="grow">📚 {t('reading.title')}</b>
+        <button className="btn primary small" disabled={busy} onClick={() => void summarize()}>{busy ? t('reading.working') : `✨ ${t('reading.digest')}`}</button>
+        {!!items?.length && <button className="btn ghost small" disabled={busy} onClick={() => void client.setReadingSeen(items.map((x) => x.id), true).then(load)}>{t('reading.markAll')}</button>}
+      </div>
+      <div className="small muted" style={{ margin: '4px 0 8px' }}>{t('reading.hint')}</div>
+      {digest && (
+        <div className="reading-digest">
+          <div style={{ whiteSpace: 'pre-wrap' }}>{digest.digest}</div>
+          {digest.items.some((x) => x.summary) && (
+            <details style={{ marginTop: 8 }}>
+              <summary className="small">{t('reading.each', { n: digest.items.filter((x) => x.summary).length })}</summary>
+              {digest.items.filter((x) => x.summary).map((x) => (
+                <div key={x.id} className="small" style={{ marginTop: 8 }}>
+                  <a href={x.url} target="_blank" rel="noreferrer"><b>{x.title ?? x.url}</b></a>{x.from ? <span className="muted"> · {x.from}</span> : null}
+                  <div>{x.summary}</div>
+                </div>
+              ))}
+            </details>
+          )}
+          <div className="row small muted" style={{ marginTop: 8, gap: 8 }}>
+            <span className="grow">{digest.remaining ? t('reading.remaining', { n: digest.remaining }) : t('reading.allRead')}</span>
+            {digest.remaining > 0 && <button className="btn small" disabled={busy} onClick={() => void summarize()}>{t('reading.more')}</button>}
+            <button className="btn ghost small" onClick={() => setDigest(null)}>{t('common.close')}</button>
+          </div>
+        </div>
+      )}
+      {items?.length === 0 && !digest && <div className="small muted">{t('reading.empty')}</div>}
+      {!!items?.length && (
+        <div className="list" style={{ gap: 6 }}>
+          {items.map((x) => (
+            <div key={x.id} className="row small reading-item" style={{ gap: 8 }}>
+              <span className="grow ellipsis"><a href={x.url} target="_blank" rel="noreferrer" onClick={() => void client.setReadingSeen([x.id], true).then(load)}>{x.title ?? x.url}</a>
+                <span className="muted"> · {x.from ?? x.chat ?? x.host} · {new Date(x.sharedAt).toLocaleDateString(locale(), { day: 'numeric', month: 'short' })}</span></span>
+              <button className="icon-btn" title={t('reading.markOne')} aria-label={t('reading.markOne')} onClick={() => void client.setReadingSeen([x.id], true).then(load)}>✓</button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }

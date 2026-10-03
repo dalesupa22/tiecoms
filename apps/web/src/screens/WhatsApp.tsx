@@ -428,6 +428,7 @@ function ChatPanel({ c, revision, onClose, onPatch, onChanged }: { c: WaChatDTO;
           <button className="btn small" onClick={() => onPatch({ pinned: !c.pinned })}>{c.pinned ? t('wa.unpin') : t('wa.pin')}</button>
           <button className="btn small" onClick={() => onPatch({ hidden: !c.hidden })}>{c.hidden ? t('wa.unhide') : t('wa.hide')}</button>
           <button className="btn small" title={t('wa.shareChatHint')} onClick={() => onPatch({ integrationsShared: !c.integrationsShared })}>{c.integrationsShared ? t('wa.unshareChat') : t('wa.shareChat')}</button>
+          <button className="btn small" title={t('wa.readingHint')} onClick={() => onPatch({ readingList: !c.readingList })}>{c.readingList ? t('wa.readingOff') : t('wa.readingOn')}</button>
           {c.categoryManual && <button className="btn ghost small" onClick={() => onPatch({ category: null })}>{t('wa.resetCategory')}</button>}
         </div>
         <label className="field" style={{ marginTop: 10 }}>

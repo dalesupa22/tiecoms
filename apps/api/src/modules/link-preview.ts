@@ -289,7 +289,7 @@ export async function buildPreview(url: string): Promise<LinkPreviewDTO | null> 
 const hashUrl = (u: string) => createHash('sha256').update(u).digest();
 
 /** Vista previa de una URL, desde la caché de 24 h o leyendo la página. */
-async function previewFor(url: string): Promise<LinkPreviewDTO | null> {
+export async function previewFor(url: string): Promise<LinkPreviewDTO | null> {
   const cached = await pool.query(`SELECT status, data FROM link_previews WHERE url_hash = $1 AND fetched_at > now() - make_interval(hours => $2)`, [hashUrl(url), CACHE_HOURS]);
   if (cached.rows[0]) return cached.rows[0].status === 'ok' ? cached.rows[0].data : null;
   let status: 'ok' | 'empty' | 'failed' = 'empty';

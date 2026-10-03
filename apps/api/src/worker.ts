@@ -28,6 +28,7 @@ import { deliverIntegrationEvent } from './modules/integration-events.ts';
 import { deliverAgentEvent } from './modules/agents.ts';
 import { deliverWebhook as deliverMcpWebhook, queueSharedVoiceNotes, transcribeWaVoice } from './modules/mcp-wa.ts';
 import { pushWaDrafts } from './modules/push.ts';
+import { previewItem as previewReading, scanWaReading } from './modules/reading.ts';
 import { reapCalls, summarizeCall } from './modules/calls.ts';
 
 const WORKER_ID = `${hostname()}:${process.pid}`;
@@ -65,6 +66,9 @@ const handlers: Record<string, Handler> = {
   async 'mcp.webhook'(p) { await deliverMcpWebhook(p.deliveryId); },
   async 'wa.transcribe'(p) { await transcribeWaVoice(p); },
   async 'push.wa_drafts'(p) { await pushWaDrafts(p.userId); },
+  /** Lista de lectura (docs/LECTURA.md): enlaces de los chats de WhatsApp marcados y su vista previa. */
+  async 'reading.scan'() { const n = await scanWaReading(); if (n) console.log(`[worker] enlaces nuevos para leer: ${n}`); },
+  async 'reading.preview'(p) { await previewReading(p.id); },
   async 'wa.transcribe_scan'() { const n = await queueSharedVoiceNotes(); if (n) console.log(`[worker] notas de voz de WhatsApp por transcribir: ${n}`); },
   /** Llamada entrante: push para las apps cerradas. */
   async 'push.call'(p) { await pushCall(p); },
@@ -136,9 +140,9 @@ const handlers: Record<string, Handler> = {
 async function schedule() {
   const minute = Math.floor(Date.now() / 60_000);
   await pool.query(
-    `INSERT INTO jobs (kind, dedupe_key) VALUES ('housekeeping.expire_guests', $1), ('housekeeping.cleanup', $2), ('housekeeping.availability', $3), ('wa.transcribe_scan', $4)
+    `INSERT INTO jobs (kind, dedupe_key) VALUES ('housekeeping.expire_guests', $1), ('housekeeping.cleanup', $2), ('housekeeping.availability', $3), ('wa.transcribe_scan', $4), ('reading.scan', $5)
      ON CONFLICT (dedupe_key) DO NOTHING`,
-    [`expire:${minute}`, `cleanup:${Math.floor(minute / 60)}`, `availability:${minute}`, `wa-transcribe:${minute}`],
+    [`expire:${minute}`, `cleanup:${Math.floor(minute / 60)}`, `availability:${minute}`, `wa-transcribe:${minute}`, `reading-scan:${minute}`],
   );
   // Resumen de enlaces: los lunes desde las 13:00 UTC (8:00 en Colombia), una vez por semana.
   const now = new Date();

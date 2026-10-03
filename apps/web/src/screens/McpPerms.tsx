@@ -4,7 +4,7 @@ import { client } from '../app-client.ts';
 import { t } from '../i18n.ts';
 
 /** Permisos del conector MCP (apps/api/src/modules/mcp.ts › SCOPES), en el orden en que se muestran. */
-export const MCP_SCOPES = ['chats:read', 'chats:write', 'whatsapp:read', 'whatsapp:send', 'whatsapp:draft', 'email', 'tasks:read', 'tasks:write', 'calendar'] as const;
+export const MCP_SCOPES = ['chats:read', 'chats:write', 'whatsapp:read', 'whatsapp:send', 'whatsapp:draft', 'email', 'tasks:read', 'tasks:write', 'calendar', 'reading'] as const;
 
 export interface McpPermsValue { scopes: string[]; wa: 'shared' | string[] }
 

@@ -21,6 +21,7 @@ import * as mailbox from './mailbox.ts';
 import * as issues from './issues.ts';
 import * as cal from './calendar.ts';
 import * as mwa from './mcp-wa.ts';
+import * as reading from './reading.ts';
 import { WA_KINDS, WA_WEBHOOK_EVENTS } from './mcp-consts.ts';
 import type { McpCtx } from './mcp-wa.ts';
 
@@ -31,7 +32,7 @@ const iso = (d: Date | null) => (d ? new Date(d).toISOString() : null);
 // ---------- Tokens personales ----------
 
 /** Permisos que puede tener un token (docs/MCP.md). NULL en la base = todos (tokens anteriores). */
-export const SCOPES = ['chats:read', 'chats:write', 'whatsapp:read', 'whatsapp:send', 'whatsapp:draft', 'email', 'tasks:read', 'tasks:write', 'calendar'] as const;
+export const SCOPES = ['chats:read', 'chats:write', 'whatsapp:read', 'whatsapp:send', 'whatsapp:draft', 'email', 'tasks:read', 'tasks:write', 'calendar', 'reading'] as const;
 export type Scope = typeof SCOPES[number];
 
 export interface TokenOptions { scopes?: string[] | null; expiresAt?: string | null; clientName?: string | null; waAccountIds?: string[] | null }
@@ -455,6 +456,41 @@ const tools: Tool[] = [
     schema: z.object({}),
     run: async (_u, _a, ctx) => mwa.deleteWebhook(ctx),
   },
+  // ---------- Lista de lectura (docs/LECTURA.md) ----------
+  {
+    name: 'list_reading', readOnly: true, scope: 'reading',
+    description: 'Mi lista de lectura: lo que guardé en «Ver después» de chaggu y los enlaces (artículos, videos, tweets) que llegan a los chats de WhatsApp marcados con «📚», p. ej. lo que me manda mi papá. Por defecto, lo pendiente.',
+    schema: z.object({ state: z.enum(['pending', 'seen', 'all']).optional(), source: z.enum(['whatsapp', 'chaggu', 'all']).optional(), limit: z.number().int().min(1).max(100).optional() }),
+    run: async (userId, a) => reading.list(userId, { state: a.state ?? 'pending', source: a.source ?? 'all', limit: a.limit ?? 50 }),
+  },
+  {
+    name: 'summarize_reading', scope: 'reading',
+    description: 'Resume lo pendiente por leer (o los ids dados): cada enlace por su contenido real (artículo completo, subtítulos de YouTube, texto completo de X) y un resumen general por temas. Por defecto los marca como leídos (mark_read=false para no marcarlos). Hasta 15 por llamada; remaining dice cuántos quedan. Muestra el digest a la persona tal cual.',
+    schema: z.object({ ids: z.array(z.string().regex(/^[rl]:[0-9a-f-]{36}$/)).max(15).optional(), limit: z.number().int().min(1).max(15).optional(), mark_read: z.boolean().optional(), source: z.enum(['whatsapp', 'chaggu', 'all']).optional() }),
+    run: async (userId, a) => reading.digest(userId, { ids: a.ids, limit: a.limit, markRead: a.mark_read, source: a.source }),
+  },
+  {
+    name: 'mark_reading', scope: 'reading',
+    description: 'Marca como leídos (read=true) o pendientes (read=false) elementos de la lista de lectura.',
+    schema: z.object({ ids: z.array(z.string().regex(/^[rl]:[0-9a-f-]{36}$/)).min(1).max(200), read: z.boolean() }),
+    run: async (userId, a) => reading.setSeen(userId, a.ids, a.read),
+  },
+  {
+    name: 'add_to_reading', scope: 'reading',
+    description: 'Agrega un enlace a mi lista de lectura.',
+    schema: z.object({ url: z.string().min(8).max(2000) }),
+    run: async (userId, a) => reading.addManual(userId, a.url),
+  },
+  {
+    name: 'set_whatsapp_reading', scope: 'reading',
+    description: 'Enciende o apaga «📚 Enlaces a Ver después» en un chat de WhatsApp (valor chat o nombre): sus enlaces entran solos a la lista de lectura. Al encender trae los de los últimos 30 días.',
+    schema: z.object({ chat: z.string().min(1).max(300), on: z.boolean() }),
+    run: async (userId, a, ctx) => {
+      const c = await mwa.findChat(ctx, a.chat);
+      await reading.setWaReading(userId, c.account_id, c.jid, a.on);
+      return { ok: true, chat: c.name, readingList: a.on, ...(a.on ? { pending: (await reading.list(userId, { state: 'pending', source: 'whatsapp', limit: 100 })).pendingWhatsApp } : {}) };
+    },
+  },
   // ---------- Correo (Gmail u Outlook conectado por la persona) ----------
   {
     name: 'list_emails', readOnly: true, scope: 'email',
@@ -698,6 +734,7 @@ const INSTRUCTIONS = [
   'REGLA DE TICKETS: cuando termines de resolver o arreglar un ticket, caso, error o pedido de un cliente (aunque lo hayas resuelto en código, fuera de chaggu), pregúntale a la persona si quiere responderle al cliente desde aquí.',
   'Para eso usa find_client_channels (y get_task si hay ticket) y ofrécele los canales encontrados: WhatsApp, correo, chat de chaggu o comentario en el ticket. Propón un borrador breve y claro en el idioma del cliente, sin detalles internos ni secretos, y espera su confirmación antes de enviarlo.',
   'Después de responder, ofrece marcar el ticket como done con update_task.',
+  'LECTURA: si la persona pide «resúmeme lo que me mandaron», «qué tengo por leer» o algo parecido (artículos, videos, tweets, p. ej. de su papá), usa summarize_reading y muéstrale el digest; ya quedan marcados como leídos. Si hay remaining, ofrece seguir. Si quiere que un chat de WhatsApp alimente la lista, usa set_whatsapp_reading.',
 ].join(' ');
 
 const PROMPTS = [{

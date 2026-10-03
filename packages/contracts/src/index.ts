@@ -1715,6 +1715,8 @@ export const UpdateWaChatInput = z.object({
   inboxPinned: z.boolean().optional(),
   /** Compartir este chat con integraciones aunque su número no esté compartido (docs/MCP.md). */
   integrationsShared: z.boolean().optional(),
+  /** «📚 Enlaces a Ver después»: los enlaces que llegan a este chat entran a mi lista de lectura (docs/LECTURA.md). */
+  readingList: z.boolean().optional(),
 });
 export const WaMessagesQuery = z.object({ before: z.iso.datetime().optional(), limit: z.coerce.number().int().min(1).max(200).default(60) });
 
@@ -1768,6 +1770,8 @@ export interface WaChatDTO {
   accountStatus?: WaStatus;
   /** Compartido con integraciones aunque su número no lo esté. Ausente = servidor anterior. */
   integrationsShared?: boolean;
+  /** Sus enlaces entran a mi lista de lectura. Ausente = servidor anterior. */
+  readingList?: boolean;
 }
 export interface WaMediaDTO { status: 'pending' | 'ready' | 'failed' | 'unavailable' | 'restricted'; attachment?: AttachmentDTO | null; error?: string | null }
 export interface WaMessageDTO { media?: WaMediaDTO; id: string; fromMe: boolean; author: string | null; kind: string; body: string; sentAt: string; reactions?: { emoji: string; name: string }[] }

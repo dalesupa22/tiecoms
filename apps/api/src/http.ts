@@ -59,6 +59,7 @@ import * as mcp from './modules/mcp.ts';
 import * as agentsDirectory from './modules/agents-directory.ts';
 import * as mcpOAuth from './modules/mcp-oauth.ts';
 import * as mcpWa from './modules/mcp-wa.ts';
+import * as reading from './modules/reading.ts';
 import { getOrCreateDirect } from './modules/workspaces.ts';
 import * as signatures from './modules/signatures.ts';
 import * as mentions from './modules/mentions.ts';
@@ -844,8 +845,23 @@ export async function buildHttp() {
       reply.header('cache-control', 'no-store');
       return wa.sendToChat(req.userId, z.uuid().parse(req.params.accountId), req.params.jid, WaSendInput.parse(req.body).text);
     });
-    priv.patch<{ Params: { accountId: string; jid: string } }>('/api/v1/whatsapp/chats/:accountId/:jid', async (req) =>
-      wa.updateChat(req.userId, z.uuid().parse(req.params.accountId), req.params.jid, UpdateWaChatInput.parse(req.body)));
+    priv.patch<{ Params: { accountId: string; jid: string } }>('/api/v1/whatsapp/chats/:accountId/:jid', async (req) => {
+      const input = UpdateWaChatInput.parse(req.body);
+      const accountId = z.uuid().parse(req.params.accountId);
+      // «📚 Enlaces a Ver después» (docs/LECTURA.md): al encender trae los enlaces de los últimos 30 días.
+      if (input.readingList !== undefined) await reading.setWaReading(req.userId, accountId, req.params.jid, input.readingList);
+      return wa.updateChat(req.userId, accountId, req.params.jid, input);
+    });
+    // Lista de lectura: Ver después de chaggu + enlaces de los chats de WhatsApp marcados; «Resúmeme todo».
+    priv.get<{ Querystring: { state?: string; source?: string } }>('/api/v1/reading', async (req) => reading.list(req.userId, {
+      state: z.enum(['pending', 'seen', 'all']).default('pending').parse(req.query.state), source: z.enum(['whatsapp', 'chaggu', 'all']).default('all').parse(req.query.source), limit: 100 }));
+    priv.post('/api/v1/reading', async (req) => reading.addManual(req.userId, z.object({ url: z.string().min(8).max(2000) }).parse(req.body).url));
+    priv.put('/api/v1/reading/state', async (req) => { const b = z.object({ ids: z.array(z.string().regex(/^[rl]:[0-9a-f-]{36}$/)).min(1).max(200), seen: z.boolean() }).parse(req.body); return reading.setSeen(req.userId, b.ids, b.seen); });
+    priv.post('/api/v1/reading/digest', { config: { rateLimit: { hook: 'preHandler', max: 6, timeWindow: '1 minute', keyGenerator: (req) => req.userId } } }, async (req) => {
+      const b = z.object({ ids: z.array(z.string().regex(/^[rl]:[0-9a-f-]{36}$/)).max(15).optional(), markRead: z.boolean().optional(), source: z.enum(['whatsapp', 'chaggu', 'all']).optional() }).parse(req.body ?? {});
+      const lang = String(req.headers['accept-language'] ?? '').toLowerCase().startsWith('en') ? 'en' : 'es';
+      return reading.digest(req.userId, { ...b, lang });
+    });
     priv.get<{ Params: { accountId: string; jid: string } }>('/api/v1/whatsapp/chats/:accountId/:jid/messages', async (req) => {
       const q = WaMessagesQuery.parse(req.query);
       return wa.listChatMessages(req.userId, z.uuid().parse(req.params.accountId), req.params.jid, q.before, q.limit);

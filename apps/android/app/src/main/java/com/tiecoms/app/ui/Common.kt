@@ -325,7 +325,11 @@ fun RemoteImage(path: String, modifier: Modifier = Modifier, sizeHint: Dp = 96.d
     val images = LocalContainer.current.images
     val url = remember(path, client.baseUrl) { client.mediaUrl(path) } ?: return
     val px = with(LocalDensity.current) { sizeHint.roundToPx() }.coerceIn(32, 1024)
-    val bmp by produceState(images.cached(url, px), url, px) { if (value == null) value = images.load(url, px) }
+    // 1.7.15: un reintento corto si la primera carga falla (la vista previa puede tardar en estar lista en el servidor).
+    val bmp by produceState(images.cached(url, px), url, px) {
+        if (value == null) value = images.load(url, px)
+        if (value == null) { kotlinx.coroutines.delay(2_000); value = images.load(url, px, retry = true) }
+    }
     bmp?.let { Image(it, contentDescription = null, modifier = modifier, contentScale = contentScale) }
 }
 

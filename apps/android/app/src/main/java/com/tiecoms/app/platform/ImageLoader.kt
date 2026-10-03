@@ -102,11 +102,11 @@ class ImageLoader(context: Context, base: OkHttpClient, private val privacyCheck
     }
 
     /** [bearer]: para imágenes protegidas (adjuntos y sus miniaturas). */
-    suspend fun load(url: String, px: Int, bearer: String? = null): ImageBitmap? {
+    suspend fun load(url: String, px: Int, bearer: String? = null, retry: Boolean = false): ImageBitmap? {
         if (bearer != null || com.tiecoms.app.core.WaPrivacy.source(url) != null) return loadBytes(url, bearer, private = true)?.let { decode(it, px) }
         val k = key(url, px)
         memory.get(k)?.let { return it }
-        failedAt[k]?.let { if (System.currentTimeMillis() - it < 60_000) return null }
+        if (!retry) failedAt[k]?.let { if (System.currentTimeMillis() - it < 60_000) return null }
         val fresh = scope.async(start = CoroutineStart.LAZY) {
                 try {
                     val bytes = loadBytes(url, null)

@@ -89,15 +89,36 @@ import java.io.File
 
 /** Imagen protegida de un adjunto (miniatura si hay; si no, la original), con Bearer y caché. */
 @Composable
-fun rememberAttachmentImage(a: AttachmentDTO, full: Boolean, px: Int): ImageBitmap? {
+fun rememberAttachmentImage(a: AttachmentDTO, full: Boolean, px: Int): ImageBitmap? = rememberAttachmentImageState(a, full, px).image
+
+/** 1.7.15: estado de la carga para no dejar un spinner eterno: [failed] tras reintentar; [retry] vuelve a intentar. */
+class AttachmentImageState(val image: ImageBitmap?, val failed: Boolean, val retry: () -> Unit)
+
+/**
+ * Carga con reintentos (3 intentos: al instante, a los 1,5 s y a los 4 s; si había miniatura y no sirvió, el último
+ * va por la original). Si nada funciona queda [AttachmentImageState.failed] y la vista ofrece «Reintentar».
+ */
+@Composable
+fun rememberAttachmentImageState(a: AttachmentDTO, full: Boolean, px: Int): AttachmentImageState {
     val client = LocalClient.current
     val container = LocalContainer.current
     val path = if (full || a.thumbUrl == null) a.url else a.thumbUrl
-    val url = remember(path) { client.mediaUrl(path) }
-    val img by produceState<ImageBitmap?>(null, url, px, client.sessionGeneration) {
-        if (url != null && value == null) value = container.images.load(url, px, client.bearer())
+    var attempt by remember(path) { mutableStateOf(0) }
+    var failed by remember(path) { mutableStateOf(false) }
+    val img by produceState<ImageBitmap?>(null, path, px, client.sessionGeneration, attempt) {
+        failed = false
+        val delays = listOf(0L, 1_500L, 4_000L)
+        for ((n, wait) in delays.withIndex()) {
+            if (wait > 0) kotlinx.coroutines.delay(wait)
+            // Último intento: si la miniatura no carga, la original (la miniatura puede no existir todavía).
+            val p = if (n == delays.lastIndex && !full && a.thumbUrl != null) a.url else path
+            val url = client.mediaUrl(p) ?: break
+            val got = runCatching { container.images.load(url, px, client.bearer()) }.getOrNull()
+            if (got != null) { value = got; return@produceState }
+        }
+        failed = true
     }
-    return img
+    return AttachmentImageState(img, failed && img == null) { attempt++ }
 }
 
 /**
@@ -151,12 +172,14 @@ fun AttachmentsBlock(list: List<AttachmentDTO>, fg: Color, onOpenMedia: (Int) ->
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun MediaTile(a: AttachmentDTO, modifier: Modifier, more: Int?, onLongPress: (() -> Unit)?, onClick: () -> Unit) {
-    val img = if (!a.isGif) rememberAttachmentImage(a, full = false, px = 480) else null
+    val st = if (!a.isGif) rememberAttachmentImageState(a, full = false, px = 480) else null
+    val img = st?.image
     val label = if (a.isVideo) stringResource(R.string.att_video) else stringResource(R.string.att_photo)
     Box(modifier.clip(RoundedCornerShape(12.dp)).background(Color(0x22000000)).combinedClickable(onClick = onClick, onLongClick = onLongPress)
         .semantics { contentDescription = "$label ${a.name}" }.testTag("att-${a.id}"), contentAlignment = Alignment.Center) {
         if (a.isGif) AnimatedMediaImage(a.url, a.name, Modifier.fillMaxSize(), px = 480)
-        else if (img != null) Image(img, null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+        else if (img != null) Image(img, null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize().testTag("attImg-${a.id}"))
+        else if (!a.isVideo && st?.failed == true) ImageRetry(st.retry, Modifier.testTag("attRetry-${a.id}"))
         else if (!a.isVideo) CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
         if (a.isVideo) Icon(Icons.Outlined.PlayCircle, null, tint = Color.White, modifier = Modifier.size(44.dp))
         if (more != null) Box(Modifier.fillMaxSize().background(Color(0x99000000)), contentAlignment = Alignment.Center) {
@@ -245,7 +268,8 @@ fun MediaViewer(media: List<AttachmentDTO>, start: Int, onClose: () -> Unit) {
 @Composable
 private fun ZoomImage(a: AttachmentDTO, active: Boolean = true) {
     val thumb = if (!a.isGif) rememberAttachmentImage(a, full = false, px = 480) else null
-    val full = if (!a.isGif) rememberAttachmentImage(a, full = true, px = 2048) else null
+    val fullSt = if (!a.isGif) rememberAttachmentImageState(a, full = true, px = 2048) else null
+    val full = fullSt?.image
     var zoom by remember { mutableFloatStateOf(1f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
     Box(Modifier.fillMaxSize()
@@ -261,7 +285,17 @@ private fun ZoomImage(a: AttachmentDTO, active: Boolean = true) {
             .graphicsLayer { scaleX = zoom; scaleY = zoom; translationX = offset.x; translationY = offset.y }.testTag("viewerImage"), fit = true, px = 2048, active = active)
         else if (img != null) Image(img, a.name, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize()
             .graphicsLayer { scaleX = zoom; scaleY = zoom; translationX = offset.x; translationY = offset.y }.testTag("viewerImage"))
+        else if (fullSt?.failed == true) ImageRetry(fullSt.retry, tint = Color.White)
         else CircularProgressIndicator(color = Color.White)
+    }
+}
+
+/** «No se pudo cargar · Reintentar»: en vez de un spinner que nunca termina. */
+@Composable
+fun ImageRetry(onRetry: () -> Unit, modifier: Modifier = Modifier, tint: Color = MaterialTheme.colorScheme.onSurfaceVariant) {
+    Column(modifier.clip(RoundedCornerShape(10.dp)).clickable(onClick = onRetry).padding(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Text("↻", color = tint, style = MaterialTheme.typography.titleLarge)
+        Text(stringResource(R.string.img_retry), color = tint, style = MaterialTheme.typography.labelSmall)
     }
 }
 

@@ -138,7 +138,7 @@ fun LinkPreviewCard(p: LinkPreviewDTO, fg: Color, modifier: Modifier = Modifier)
         Row(Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
             p.imageUrl?.takeIf { it.isNotBlank() }?.let { img ->
                 Surface(shape = RoundedCornerShape(8.dp), color = fg.copy(alpha = 0.1f), modifier = Modifier.size(64.dp)) {
-                    RemoteImage(img, Modifier.size(64.dp), sizeHint = 64.dp)
+                    RemoteImage(img, Modifier.size(64.dp).testTag("linkPreviewImage"), sizeHint = 64.dp)
                 }
                 Spacer(Modifier.width(10.dp))
             }

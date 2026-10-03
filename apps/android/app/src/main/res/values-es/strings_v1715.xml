@@ -25,4 +25,5 @@
     <string name="sh_remove">Quitar a %1$s</string>
     <string name="sh_no_results">Ninguna conversación coincide con «%1$s»</string>
     <string name="sh_text">Texto</string>
+    <string name="img_retry">Toca para reintentar</string>
 </resources>

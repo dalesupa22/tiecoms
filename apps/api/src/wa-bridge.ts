@@ -366,7 +366,7 @@ async function processOutbox() {
         await requireWaVisible(pool,r.account_id,r.jid);
         const sent=await s.sock.sendMessage(r.jid,{text:r.body});
         if(sent) { const row=msgRow(s,sent); if(row) { await storeMessages(s,[row],false); await queueWaWebhooks(s.id,[row]).catch(()=>{}); } }
-        await pool.query("UPDATE wa_outbox SET status = 'sent', sent_at = now(), body = '' WHERE id = $1", [r.id]);
+        await pool.query("UPDATE wa_outbox SET status = 'sent', sent_at = now(), body = '', wa_message_id = $2 WHERE id = $1", [r.id, sent?.key?.id ?? null]);
         notifyOwner(s);
       } catch (e: any) {
         console.error(`[wa] ${r.account_id} no pude enviar`, e?.message);

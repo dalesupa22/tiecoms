@@ -249,7 +249,8 @@ export async function send(ctx: McpCtx, a: { chat?: string; phone?: string; acco
     if (!t.account?.send_enabled) throw waError('send_disabled', `El número «${t.account?.label}» está en solo lectura. Activa «Responder desde chaggu» en WhatsApp.`, 403);
     if (t.account.status !== 'connected') throw waError('not_connected', `El número «${t.account.label}» no está conectado ahora mismo`, 409);
     const r = await sendToChat(ctx.userId, t.accountId, t.jid, a.text);
-    const out = { to: t.label, chat: chatRef(t.accountId, t.jid), account: t.account.label, status: r.status, ...(r.error ? { error: r.error } : {}) };
+    // outboxId siempre (sirve si queda 'queued'); messageId = id de WhatsApp (el de read_whatsapp) cuando ya salió.
+    const out = { to: t.label, chat: chatRef(t.accountId, t.jid), account: t.account.label, status: r.status, outboxId: r.id, ...(r.messageId ? { messageId: r.messageId } : {}), ...(r.error ? { error: r.error } : {}) };
     if (a.idempotencyKey) await pool.query('UPDATE mcp_idempotency SET response = $3 WHERE token_id = $1 AND key = $2', [ctx.tokenId, a.idempotencyKey, JSON.stringify(out)]);
     return out;
   } catch (e) {

@@ -325,7 +325,7 @@ export async function listChatMessages(userId: string, accountId: string, jid: s
  * (por defecto es de solo lectura). Se encola en wa_outbox y el puente, que tiene la sesión, lo manda; aquí se espera
  * hasta ~12 s por el resultado: si el puente tarda, queda 'queued' y sale en cuanto pueda.
  */
-export async function sendToChat(userId: string, accountId: string, jid: string, text: string): Promise<{ id: string; status: 'sent' | 'queued' | 'failed'; error?: string }> {
+export async function sendToChat(userId: string, accountId: string, jid: string, text: string): Promise<{ id: string; status: 'sent' | 'queued' | 'failed'; error?: string; messageId?: string }> {
   const a = await ownAccount(pool, userId, accountId);
   if (!a.send_enabled) throw forbidden('Esta cuenta está en solo lectura. Activa «Responder desde chaggu» en WhatsApp para poder escribir.');
   if (a.status !== 'connected') throw conflict('La cuenta de WhatsApp no está conectada ahora mismo');
@@ -336,8 +336,8 @@ export async function sendToChat(userId: string, accountId: string, jid: string,
   await pool.query("SELECT pg_notify('tiecoms_wa', $1)", [accountId]);
   for (let i = 0; i < 24; i++) {
     await new Promise((r) => setTimeout(r, 500));
-    const s = (await pool.query('SELECT status, error FROM wa_outbox WHERE id = $1', [id])).rows[0];
-    if (s?.status === 'sent') return { id, status: 'sent' };
+    const s = (await pool.query('SELECT status, error, wa_message_id FROM wa_outbox WHERE id = $1', [id])).rows[0];
+    if (s?.status === 'sent') return { id, status: 'sent', ...(s.wa_message_id ? { messageId: s.wa_message_id } : {}) };
     if (s?.status === 'failed') return { id, status: 'failed', error: s.error ?? 'No se pudo enviar' };
   }
   return { id, status: 'queued' };

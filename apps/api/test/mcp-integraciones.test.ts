@@ -206,6 +206,22 @@ describe('enviar mejor', () => {
     expect((await tool(t, 'send_whatsapp', { phone: '123456', text: 'x' })).structuredContent.error.code).toBe('invalid_phone');
   }, 40_000);
 
+  it('send_whatsapp devuelve outboxId y, cuando sale, el messageId de WhatsApp', async () => {
+    const t = await mkToken(danny, { name: 'Semillero ids' });
+    const pending = tool(t, 'send_whatsapp', { chat: 'Coopcentral', text: `seguimiento ${run}` });
+    // Hace de puente: toma el envío de la cola y lo marca enviado con el id que daría WhatsApp.
+    let outbox: string | undefined;
+    for (let i = 0; i < 40 && !outbox; i++) {
+      outbox = (await pool.query("SELECT id FROM wa_outbox WHERE account_id = $1 AND body = $2 AND status = 'queued'", [biz.id, `seguimiento ${run}`])).rows[0]?.id;
+      if (!outbox) await new Promise((r) => setTimeout(r, 100));
+    }
+    await pool.query("UPDATE wa_outbox SET status = 'sent', sent_at = now(), body = '', wa_message_id = $2 WHERE id = $1", [outbox, `3EB0${run}`]);
+    const r = (await pending).structuredContent;
+    expect(r.status).toBe('sent');
+    expect(r.outboxId).toBe(outbox);
+    expect(r.messageId).toBe(`3EB0${run}`);
+  });
+
   it('send_disabled con código cuando el número es de solo lectura', async () => {
     await pool.query('UPDATE wa_accounts SET send_enabled = false WHERE id = $1', [biz.id]);
     const t = await mkToken(danny, { name: 'X' });

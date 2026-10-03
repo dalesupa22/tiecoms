@@ -56,6 +56,52 @@ class Capturas1713UiTest {
     }
     private fun shell(cmd: String) { ins.uiAutomation.executeShellCommand(cmd).close() }
 
+    private fun login(): ActivityScenario<MainActivity> {
+        val apiUrl = arg("apiUrl")
+        assertFalse("Nunca contra producción", apiUrl.contains("app.tiecoms.com") || apiUrl.contains("app.chaggu.com"))
+        ins.runOnMainSync { app.container.setDebugApiUrl(apiUrl) }
+        val c0 = app.container.client.value
+        runBlocking {
+            kotlinx.coroutines.withTimeout(20_000) { c0.state.first { it.status != SessionStatus.LOADING } }
+            if (c0.state.value.status != SessionStatus.ANONYMOUS) c0.logout()
+        }
+        val scenario = ActivityScenario.launch(MainActivity::class.java)
+        compose.waitUntil(20_000) { exists("email") && !exists("splash") }
+        compose.onNodeWithTag("email").performTextInput(arg("email"))
+        compose.onNodeWithTag("password").performTextInput(arg("password"))
+        compose.onNodeWithTag("login").performScrollTo().performClick()
+        compose.waitUntilAtLeastOneExists(hasTestTag("quick.create"), 20_000)
+        return scenario
+    }
+
+    /** 54: tarjeta de evento con reacciones (la 🎉 de Laura llega del fixture; el 👍 se pone desde la barra). */
+    @Test fun reaccionesEnTarjeta() {
+        val general = arg("general"); val seq = arg("cardSeq")
+        assumeTrue("Faltan argumentos del fixture", arg("apiUrl").isNotBlank() && general.isNotBlank() && seq.isNotBlank())
+        shell("cmd uimode night no")
+        val scenario = login()
+        try {
+            ins.runOnMainSync { app.container.pendingLink.value = DeepLink.Conversation(general) }
+            compose.waitUntilAtLeastOneExists(hasTestTag("composer"), 20_000)
+            compose.waitUntilAtLeastOneExists(hasTestTag("messages"), 20_000)
+            Thread.sleep(2000)
+            compose.onNodeWithTag("messages", useUnmergedTree = true).performScrollToNode(hasTestTag("cardReactable-$seq"))
+            compose.onNodeWithTag("messages", useUnmergedTree = true).performScrollToNode(hasTestTag("reactions-$seq"))
+            compose.waitUntilAtLeastOneExists(hasTestTag("reactions-$seq"), 10_000)
+            compose.onNodeWithTag("cardReactable-$seq").performTouchInput { longClick() }
+            compose.waitUntilAtLeastOneExists(hasTestTag("quickMore"), 5_000)
+            val more = compose.onNodeWithTag("quickMore", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            assertTrue("«＋» dentro de la pantalla", more.right <= ins.targetContext.resources.displayMetrics.widthPixels && more.left >= 0)
+            shot("11-tarjeta-barra")
+            compose.onNodeWithTag("quick-👍").performClick()
+            val c = app.container.client.value
+            compose.waitUntil(10_000) { c.state.value.conversations[general]?.messages?.firstOrNull { it.seq.toString() == seq }?.reactions?.any { r -> r.emoji == "👍" && c.state.value.data?.me?.id in r.userIds } == true }
+            Thread.sleep(800)
+            compose.onNodeWithTag("messages", useUnmergedTree = true).performScrollToNode(hasTestTag("reactions-$seq"))
+            shot("12-tarjeta-con-reacciones")
+        } finally { scenario.close() }
+    }
+
     @Test fun capturas() {
         val apiUrl = arg("apiUrl"); val email = arg("email"); val password = arg("password")
         val general = arg("general"); val dmB = arg("dmB"); val dmC = arg("dmC")

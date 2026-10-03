@@ -91,6 +91,7 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -697,7 +698,8 @@ fun ConversationScreen(
     // Reacciones: solo quien puede publicar, y nunca en mensajes de sistema o eliminados.
     val reactionActions = reactionActionsFor(data)
     val react = rememberReactor(reactionActions)
-    fun canReact(m: MessageDTO) = meta.canPost && m.kind != "system" && m.deletedAt == null && !blockedDirect
+    // 1.7.13 (54): también las tarjetas de evento, tarea, correo y WhatsApp (el API las acepta desde a673e7e).
+    fun canReact(m: MessageDTO) = meta.canPost && com.tiecoms.app.core.Reactions.reactable(m) && !blockedDirect
 
     fun messageMenu(m: MessageDTO): List<SheetItem?> {
         val mine = m.authorId == me
@@ -918,6 +920,9 @@ fun ConversationScreen(
                                 is ChatItem.Day -> DaySeparator(dayText(ctx, item.date))
                                 is ChatItem.Msg -> if (item.m.kind == "system") SystemRow(item.m, data, state.events, onOpenConversation, onOpenIssue, onOpenEvent, canPost = meta.canPost && !blockedDirect,
                                     animate = item.m.id in liveFx,
+                                    // Reacciones en las tarjetas (1.7.13): mantener presionado abre la barra y los chips van debajo.
+                                    react = if (embedded) null else CardReact(item.m.reactions.filter { me in it.userIds }.map { it.emoji }.toSet(), reactionActions,
+                                        enabled = canReact(item.m), onReact = { e, on -> react(item.m, e, on) }, onMore = { pickerFor = item.m }),
                                     // Tarjetas de correo o WhatsApp: responder aquí, en privado y reenviar, como un mensaje normal.
                                     cardActions = if (embedded) null else { cm, emailId ->
                                         val author = Names.person(data, cm.authorId)
@@ -1711,6 +1716,43 @@ internal fun SystemRow(
     animate: Boolean = false,
     /** Acciones de las tarjetas de correo y WhatsApp (menú y deslizar); null las oculta. */
     cardActions: ((MessageDTO, String?) -> CardActions)? = null,
+    /** Reacciones de las tarjetas de evento, tarea, correo y WhatsApp (1.7.13); null = sin reacciones. */
+    react: CardReact? = null,
+) {
+    val key = if (react != null) com.tiecoms.app.core.Reactions.cardKey(m) else null
+    if (react == null || key == null) { SystemRowContent(m, data, events, onOpenConversation, onOpenIssue, onOpenEvent, canPost, animate, cardActions); return }
+    // Correo y WhatsApp ya tienen su pulsación larga (responder, reenviar…): la barra va encima de ese menú.
+    val mailCard = key == "mail.shared" || key == "wa.shared"
+    var menu by remember(m.id) { mutableStateOf(false) }
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+    val menuLabel = stringResource(R.string.react_more)
+    Column(Modifier.fillMaxWidth()) {
+        Box(if (mailCard || !react.enabled) Modifier else Modifier
+            .pointerInput(m.id) { detectTapGestures(onLongPress = { haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress); menu = true }) }
+            .semantics { customActions = listOf(androidx.compose.ui.semantics.CustomAccessibilityAction(menuLabel) { menu = true; true }) }
+            .testTag("cardReactable-${m.seq}")) {
+            androidx.compose.runtime.CompositionLocalProvider(LocalCardReact provides if (mailCard && react.enabled) react else null) {
+                SystemRowContent(m, data, events, onOpenConversation, onOpenIssue, onOpenEvent, canPost, animate, cardActions)
+            }
+            if (!mailCard) AnchoredMenu(menu, emptyList(), { menu = false }, header = {
+                QuickReactionBar(react.mine, react.actions, onPick = { e -> menu = false; react.onReact(e, e !in react.mine) }, onMore = { menu = false; react.onMore() })
+            })
+        }
+        ReactionChips(m, data, react.enabled, onToggle = react.onReact, modifier = Modifier.padding(start = if (mailCard) 54.dp else 12.dp, bottom = 4.dp))
+    }
+}
+
+/** Reacciones de una tarjeta: las mías, si mi empresa tiene reacciones con acción, y qué hacer al tocar. */
+class CardReact(val mine: Set<String>, val actions: Boolean, val enabled: Boolean, val onReact: (String, Boolean) -> Unit, val onMore: () -> Unit)
+
+/** La barra de reacciones para el menú de las tarjetas de correo y WhatsApp (lo lee BroughtBy). */
+val LocalCardReact = androidx.compose.runtime.staticCompositionLocalOf<CardReact?> { null }
+
+@Composable
+private fun SystemRowContent(
+    m: MessageDTO, data: BootstrapDTO, events: Map<String, com.tiecoms.app.core.CalendarEventDTO>,
+    onOpenConversation: (String, Long?) -> Unit, onOpenIssue: (String) -> Unit, onOpenEvent: (String) -> Unit,
+    canPost: Boolean, animate: Boolean, cardActions: ((MessageDTO, String?) -> CardActions)?,
 ) {
     val ctx = LocalContext.current
     val chat = LocalChatColors.current

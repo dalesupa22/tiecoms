@@ -89,4 +89,14 @@ class Android1713Test {
         assertEquals(setOf("Tipo", "Urgente"), k.fields?.keys)
         assertNull(TcJson.decodeFromString(IssueDTO.serializer(), """{"id":"t","fields":null}""").fields)
     }
+
+    // ---------- Reacciones en tarjetas (54) ----------
+    @Test fun `se reacciona a texto y a las 4 tarjetas, no a otros avisos ni borrados`() {
+        fun sys(k: String) = MessageDTO(id = "m", kind = "system", body = """{"k":"$k","issueId":"i"}""")
+        listOf("event.created", "issue.created", "mail.shared", "wa.shared").forEach { assertEquals(it, Reactions.cardKey(sys(it))); assertEquals(true, Reactions.reactable(sys(it))) }
+        assertEquals(false, Reactions.reactable(sys("member.joined")))
+        assertEquals(false, Reactions.reactable(MessageDTO(id = "m", kind = "system", body = "texto viejo")))
+        assertEquals(true, Reactions.reactable(MessageDTO(id = "m", kind = "text", body = "hola")))
+        assertEquals(false, Reactions.reactable(MessageDTO(id = "m", kind = "text", body = "", deletedAt = "2026-10-03T00:00:00Z")))
+    }
 }

@@ -17,6 +17,20 @@ object Reactions {
     /** Máximo de emojis distintos por mensaje (MAX_REACTIONS_PER_MESSAGE): pasado eso el API responde 409. */
     const val MAX_PER_MESSAGE = 20
 
+    /** Tarjetas del chat que aceptan reacciones (API a673e7e, REACTABLE_CARDS): los demás avisos de sistema no. */
+    val CARD_KEYS = setOf("event.created", "issue.created", "mail.shared", "wa.shared")
+
+    /** La «k» de una tarjeta con reacciones, o null si es texto, otro aviso o no se puede leer. */
+    fun cardKey(m: MessageDTO): String? {
+        if (m.kind != "system" || !m.body.startsWith("{")) return null
+        val o = runCatching { TcJson.parseToJsonElement(m.body) as? kotlinx.serialization.json.JsonObject }.getOrNull() ?: return null
+        val k = (o["k"] as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { it.isString }?.content
+        return k?.takeIf { it in CARD_KEYS }
+    }
+
+    /** Se puede reaccionar: mensajes de texto y las 4 tarjetas (evento, tarea, correo y WhatsApp compartidos). */
+    fun reactable(m: MessageDTO): Boolean = m.deletedAt == null && (m.kind == "text" || cardKey(m) != null)
+
     /** Selector completo: los de uso diario en el trabajo primero; el teclado del sistema trae el resto. */
     val PICKER = listOf(
         "👍", "❤️", "😂", "👀", "✅", "🙏", "👏", "🙌", "🎉", "🔥", "💯", "💪",

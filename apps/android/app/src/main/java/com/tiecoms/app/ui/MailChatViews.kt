@@ -227,7 +227,20 @@ private fun BroughtBy(m: MessageDTO, data: BootstrapDTO, comment: String?, tag: 
             content()
         }
     }
-    if (menu && actions != null) ActionSheet(null, listOfNotNull(
+    val cardReact = LocalCardReact.current
+    val cardItems = if (actions == null) emptyList() else listOfNotNull(
+        actions.reply?.let { SheetItem(ctx.getString(R.string.menu_reply), "↩", tag = "cardReply") { menu = false; it() } },
+        actions.replyPrivately?.let { SheetItem(ctx.getString(R.string.menu_reply_private), "✉", tag = "cardReplyPrivate",
+            subtitle = ctx.getString(R.string.menu_reply_private_sub, author?.name?.substringBefore(' ') ?: "")) { menu = false; it() } },
+        actions.forward?.let { SheetItem(ctx.getString(R.string.card_forward), "↪", tag = "cardForward") { menu = false; it() } },
+        SheetItem(ctx.getString(R.string.menu_copy_link), "⛓", tag = "cardCopyLink") { menu = false; actions.copyLink() },
+    )
+    // 1.7.13: con reacciones, el menú se ancla a la tarjeta con la barra 👍 ❤️ … ＋ encima (como un mensaje normal).
+    if (cardReact != null && actions != null) Box(Modifier.padding(start = 54.dp)) {
+        AnchoredMenu(menu, if (menu) cardItems else emptyList(), { menu = false }, header = {
+            QuickReactionBar(cardReact.mine, cardReact.actions, onPick = { e -> menu = false; cardReact.onReact(e, e !in cardReact.mine) }, onMore = { menu = false; cardReact.onMore() })
+        })
+    } else if (menu && actions != null) ActionSheet(null, listOfNotNull(
         actions.reply?.let { SheetItem(ctx.getString(R.string.menu_reply), "↩", tag = "cardReply") { menu = false; it() } },
         actions.replyPrivately?.let { SheetItem(ctx.getString(R.string.menu_reply_private), "✉", tag = "cardReplyPrivate",
             subtitle = ctx.getString(R.string.menu_reply_private_sub, author?.name?.substringBefore(' ') ?: "")) { menu = false; it() } },

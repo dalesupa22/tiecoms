@@ -1187,6 +1187,19 @@ class TieComsClient(
             throw e
         }
     }
+    /** 1.7.14: sube un archivo a una tarea (POST /issues/:id/attachments); queda suelto hasta [setIssueAttachments]. */
+    suspend fun uploadIssueAttachment(issueId: String, file: java.io.File, name: String, contentType: String, onProgress: ((Long, Long) -> Unit)? = null): AttachmentDTO =
+        withContext(dispatcher) {
+            if (file.length() > Attachments.MAX_BYTES) throw ApiException(413, "too_large", "El archivo pesa más de 25 MB.")
+            val raw = HttpApi.RawBody(ByteArray(0), "application/octet-stream",
+                mapOf("x-file-name" to java.net.URLEncoder.encode(name.ifBlank { "archivo" }, "UTF-8").replace("+", "%20"), "x-file-type" to contentType.ifBlank { "application/octet-stream" }),
+                file = file, onProgress = onProgress)
+            request("POST", "/issues/$issueId/attachments", null, AttachmentDTO.serializer(), raw)
+        }
+    /** Deja en la tarea exactamente estos adjuntos (PATCH attachmentIds, como la web): los que falten se quitan. */
+    suspend fun setIssueAttachments(issueId: String, ids: List<String>): IssueDTO = withContext(dispatcher) {
+        updateIssue(issueId, buildJsonObject { put("attachmentIds", kotlinx.serialization.json.JsonArray(ids.distinct().map { JsonPrimitive(it) })) })
+    }
     /** Columnas de las tareas de un grupo (las define un admin); 404 = servidor anterior → sin columnas. */
     suspend fun taskColumns(conversationId: String): TaskColumnsDTO = withContext(dispatcher) {
         try { req("GET", "/conversations/$conversationId/task-columns", null, TaskColumnsDTO.serializer()) }

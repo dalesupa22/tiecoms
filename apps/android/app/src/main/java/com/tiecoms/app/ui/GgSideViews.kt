@@ -489,9 +489,17 @@ fun GgAskPill(model: GgSideModel?, modifier: Modifier = Modifier, trailing: @Com
                 }
             }
         }
+        val snackbar = LocalSnackbar.current
+        val container = LocalContainer.current
         IconButton(onClick = {
             GgPillPrefs.setHidden(ctx, model.source, true)
-            android.widget.Toast.makeText(ctx, ctx.getString(R.string.ggp_hidden), android.widget.Toast.LENGTH_SHORT).show()
+            // 1.7.14: «gg quedó oculto… · Deshacer», y dice dónde recuperarlo (⋯ › Preguntar a gg).
+            container.scope.launch {
+                snackbar.currentSnackbarData?.dismiss()
+                val r = snackbar.showSnackbar(ctx.getString(R.string.ggp_hidden_undo), actionLabel = ctx.getString(R.string.ggp_undo),
+                    duration = androidx.compose.material3.SnackbarDuration.Long)
+                if (r == androidx.compose.material3.SnackbarResult.ActionPerformed) GgPillPrefs.setHidden(ctx, model.source, false)
+            }
         }, modifier = Modifier.size(36.dp).testTag("ggPillHide")) {
             Icon(Icons.Filled.Close, stringResource(R.string.ggp_hide), Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }

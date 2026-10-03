@@ -674,6 +674,8 @@ data class IssueDTO(
     val fields: kotlinx.serialization.json.JsonObject? = null,
     /** Datos del sistema externo (cliente, prioridad, categoría…), solo para mostrar. */
     val externalMeta: Map<String, String>? = null,
+    /** Imágenes y documentos de la tarea (1.7.14), con el mismo acceso que la tarea. Ausente = ninguno o servidor anterior. */
+    val attachments: List<AttachmentDTO> = emptyList(),
 ) {
     val closed: Boolean get() = status == "done" || status == "cancelled"
     /** Asunto personal: sin conversación (🔒 «Personal · solo tú»). */

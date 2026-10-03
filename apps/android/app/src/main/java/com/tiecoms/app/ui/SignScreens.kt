@@ -347,6 +347,7 @@ fun PdfSheet(a: AttachmentDTO, startSigning: Boolean, onClose: () -> Unit) {
                             style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.testTag("pdfPageOf"))
                     }
                     IconButton(onClick = { scope.launch { openAttachment(ctx, client, a) } }) { Icon(Icons.AutoMirrored.Outlined.OpenInNew, stringResource(R.string.sig_open_with)) }
+                    if (!signing) FileActionsButton(a, MaterialTheme.colorScheme.onSurface) { requestClose() }
                     if (!signing) Button(onClick = { signing = true }, enabled = pages != null && !encrypted, modifier = Modifier.padding(end = 4.dp).heightIn(min = 44.dp).testTag("pdfStartSign")) {
                         Text(stringResource(R.string.att_sign_btn))
                     }

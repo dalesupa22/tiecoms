@@ -267,6 +267,7 @@ fun ConversationScreen(
     var newIssue by remember { mutableStateOf<Pair<Boolean, MessageDTO?>?>(null) }
     var meeting by remember { mutableStateOf<Pair<Boolean, MessageDTO?>?>(null) }
     var forwarding by remember { mutableStateOf<MessageDTO?>(null) }
+    var fileTask by remember { mutableStateOf<com.tiecoms.app.core.AttachmentDTO?>(null) }
     /** Reenviar la tarjeta de un correo o WhatsApp a otros chats (su emailId). */
     var forwardCard by remember { mutableStateOf<String?>(null) }
     var reminderCustom by remember { mutableStateOf<Pair<Boolean, MessageDTO?>?>(null) }
@@ -1157,8 +1158,32 @@ fun ConversationScreen(
         SheetItem(ctx.getString(R.string.cs_open), "🔎", tag = "menuSearch") { searchOpen = true },
         SheetItem(ctx.getString(R.string.details), "ⓘ", tag = "menuDetails") { onDetails() }) +
         conversationMenu(ctx, meta, data, onMeeting = { meeting = true to null }, onRemindCustom = { reminderCustom = true to null }, onLeave = { confirmLeave = true })) { convMenu = false }
-    viewer?.let { (list, i) -> MediaViewer(list, i) { viewer = null } }
-    pdfViewer?.let { (a, sign) -> PdfSheet(a, startSigning = sign && meta.canPost, onClose = { pdfViewer = null; pdfSaved = null }) }
+    // 1.7.14: desde un archivo abierto, «Preguntar a gg» (citando su mensaje), «Crear tarea» con el archivo y reenviar.
+    fun messageOf(a: com.tiecoms.app.core.AttachmentDTO) = conv?.messages?.firstOrNull { m -> m.attachments.any { it.id == a.id } }
+    val fileOrigin = FileOrigin(
+        askGg = gg?.takeIf { it.available != false }?.let { g -> { a ->
+            messageOf(a)?.let { m -> g.quote(com.tiecoms.app.core.GgQuotedDTO(m.id, Names.person(data, m.authorId)?.name ?: "", excerpt(m.body.ifBlank { "📎 " + a.name }, 200))) }
+            g.reopenFromMenu(ctx)
+        } },
+        createTask = if (canWork && myWsRole != "guest" && meta.canPost) ({ a -> fileTask = a }) else null,
+        forward = { a -> messageOf(a)?.takeIf { it.kind == "text" }?.let { forwarding = it } },
+    )
+    androidx.compose.runtime.CompositionLocalProvider(LocalFileOrigin provides fileOrigin) {
+        viewer?.let { (list, i) -> MediaViewer(list, i) { viewer = null } }
+        pdfViewer?.let { (a, sign) -> PdfSheet(a, startSigning = sign && meta.canPost, onClose = { pdfViewer = null; pdfSaved = null }) }
+    }
+    fileTask?.let { a ->
+        NewIssueDialog(id, messageOf(a)?.id, a.name.substringBeforeLast('.').ifBlank { a.name }.take(200), onClose = { fileTask = null }, onCreated = { iid ->
+            fileTask = null
+            container.scope.launch {
+                try {
+                    val local = TaskUploads.localCopy(ctx, client, a)
+                    if (TaskUploads.attach(ctx, client, iid, listOf(local)) { msg -> container.toast(msg) } > 0) container.toast(ctx.getString(R.string.fa_task_created))
+                } catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e; container.toast(errorText(ctx, e)) }
+            }
+            onOpenIssue(iid)
+        })
+    }
     voiceIssue?.let { (t, m) -> NewIssueDialog(id, m.id, t, onClose = { voiceIssue = null }, onCreated = onOpenIssue) }
     // El hilo nuevo se abre al lado, sin salir del chat (como un hilo de Slack).
     deriving?.let { m -> DeriveDialog(meta, m, onClose = { deriving = null }, onCreated = { cid -> sideOpen = cid }) }

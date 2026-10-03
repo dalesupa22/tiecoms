@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 1.7.14: archivos en las tareas, acciones desde un archivo abierto y recuperar gg. -->
+<resources>
+    <string name="tf_title">Archivos</string>
+    <string name="tf_title_n">Archivos · %1$d</string>
+    <string name="tf_attach">Adjuntar</string>
+    <string name="tf_none">Aún no hay archivos. Adjunta fotos, documentos o lo que ayude.</string>
+    <string name="tf_uploading">Subiendo %1$d de %2$d…</string>
+    <string name="tf_uploaded">Adjuntado a la tarea</string>
+    <string name="tf_failed">No se pudo adjuntar «%1$s»: %2$s</string>
+    <string name="tf_remove">Quitar archivo</string>
+    <string name="tf_remove_q">¿Quitar «%1$s» de esta tarea?</string>
+    <string name="tf_remove_ok">Quitar</string>
+    <string name="tf_pending">%1$d archivos se adjuntan al guardar</string>
+    <string name="fa_menu">Acciones del archivo</string>
+    <string name="fa_ask_gg">Preguntar a gg por este archivo</string>
+    <string name="fa_create_task">Crear tarea con este archivo</string>
+    <string name="fa_share">Compartir…</string>
+    <string name="fa_forward">Reenviar a un chat de chaggu</string>
+    <string name="fa_task_created">Tarea creada con el archivo adjunto</string>
+    <string name="ggp_hidden_undo">gg quedó oculto en este chat. Recupéralo en ⋯ › Preguntar a gg</string>
+    <string name="ggp_undo">Deshacer</string>
+</resources>

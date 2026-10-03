@@ -235,6 +235,8 @@ fun MediaViewer(media: List<AttachmentDTO>, start: Int, onClose: () -> Unit) {
                 IconButton(onClick = { media.getOrNull(pager.currentPage)?.let { a -> scope.launch { openAttachment(ctx, client, a) } } }) {
                     Icon(Icons.AutoMirrored.Outlined.OpenInNew, stringResource(R.string.att_open_with), tint = Color.White)
                 }
+                // 1.7.14: Preguntar a gg · Crear tarea · Compartir · Reenviar (lo que permita el chat de origen).
+                FileActionsButton(media.getOrNull(pager.currentPage), Color.White, onClose)
             }
         }
     }

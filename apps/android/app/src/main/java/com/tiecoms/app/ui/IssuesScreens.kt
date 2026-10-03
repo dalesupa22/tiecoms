@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -31,6 +32,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.outlined.Edit
@@ -377,8 +379,12 @@ fun QuickAddIssue(conversationId: String?, modifier: Modifier = Modifier, autoFo
     var error by remember { mutableStateOf<String?>(null) }
     var ownerMenu by remember { mutableStateOf(false) }
     var pickDate by remember { mutableStateOf(false) }
+    // 1.7.14: archivos elegidos antes de guardar; se suben a la tarea apenas se crea.
+    var pendingFiles by remember { mutableStateOf(listOf<com.tiecoms.app.core.Attachments.Shared>()) }
+    var filePicker by remember { mutableStateOf(false) }
+    val container = LocalContainer.current
     val focus = remember { FocusRequester() }
-    val typing = title.isNotEmpty()
+    val typing = title.isNotEmpty() || pendingFiles.isNotEmpty()
     // Desde «＋ Añadir tarea» (1.7.13) el campo llega con el teclado arriba.
     if (autoFocus) LaunchedEffect(Unit) { androidx.compose.runtime.withFrameNanos { }; runCatching { focus.requestFocus() } }
     fun submit() {
@@ -387,9 +393,13 @@ fun QuickAddIssue(conversationId: String?, modifier: Modifier = Modifier, autoFo
         busy = true; error = null
         scope.launch {
             try {
-                if (personal) client.createPersonalIssue(text, due)
+                val created = if (personal) client.createPersonalIssue(text, due)
                 else client.createIssue(conv, text, if (members.any { it.id == owner }) owner else data.me.id, due, null, assigneeIds = (assignees + owner).filter { id -> members.any { it.id == id } }.distinct())
-                title = ""; due = null
+                val files = pendingFiles
+                if (files.isNotEmpty()) container.scope.launch {
+                    if (TaskUploads.attach(ctx, client, created.id, files) { msg -> container.toast(msg) } > 0) container.toast(ctx.getString(R.string.tf_uploaded))
+                }
+                title = ""; due = null; pendingFiles = emptyList()
                 runCatching { focus.requestFocus() }
             } catch (e: Exception) { error = errorText(ctx, e) } finally { busy = false }
         }
@@ -431,14 +441,30 @@ fun QuickAddIssue(conversationId: String?, modifier: Modifier = Modifier, autoFo
                     AssistChip(onClick = { pickDate = true },
                         label = { Text("📅 " + (due?.let { shortDay(it) } ?: stringResource(R.string.issue_due)), maxLines = 1) },
                         modifier = Modifier.heightIn(min = 48.dp).testTag("issueQuickDue"))
+                    AssistChip(onClick = { filePicker = true },
+                        label = { Text("📎 " + if (pendingFiles.isEmpty()) stringResource(R.string.tf_attach) else pendingFiles.size.toString(), maxLines = 1) },
+                        modifier = Modifier.heightIn(min = 48.dp).testTag("issueQuickAttach"))
                     Button(onClick = { submit() }, enabled = !busy && title.trim().length >= 2, modifier = Modifier.heightIn(min = 48.dp).testTag("issueQuickSubmit")) {
                         Text(stringResource(R.string.issue_add))
                     }
                 }
             }
         }
+        if (pendingFiles.isNotEmpty()) FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.testTag("issueQuickFiles")) {
+            pendingFiles.forEach { f ->
+                androidx.compose.material3.InputChip(selected = false, onClick = { pendingFiles = pendingFiles - f }, label = { Text(f.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    trailingIcon = { Icon(Icons.Filled.Close, stringResource(R.string.tf_remove), Modifier.size(16.dp)) },
+                    modifier = Modifier.widthIn(max = 220.dp))
+            }
+        }
         ErrorText(error)
     }
+    AttachPicker(filePicker, onDismiss = { filePicker = false }, onPicked = { uris ->
+        filePicker = false
+        if (uris.isNotEmpty()) scope.launch {
+            pendingFiles = pendingFiles + kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { com.tiecoms.app.platform.ShareIntake.copyToCache(ctx.applicationContext, uris, null) }
+        }
+    })
     if (pickDate) IssueDatePicker(due?.let { runCatching { LocalDate.parse(it) }.getOrNull() }, { due = it?.toString() }, { pickDate = false }, allowClear = true)
 }
 
@@ -778,6 +804,8 @@ fun IssueDetailScreen(id: String, onBack: () -> Unit, onOpenOrigin: (String, Lon
             }
             // Campos propios de la tarea (columnas del grupo y campos libres, migración 097) y datos del ticket.
             if (!personal) item(key = "fields") { TaskFieldsSection(i, canEdit = true) }
+            // 1.7.14: archivos de la tarea (adjuntar fotos, cámara o archivos; tocar abre).
+            item(key = "files") { TaskFilesSection(i, canEdit = true) }
             if (i.parentIssueId == null && !personal) item(key = "tasks") { TasksSection(i.id, null, onOpen = onOpenIssue) }
             if (i.parentIssueId != null && i.createdBy == data.me.id) item(key = "vis") { VisibilityChoice(i) }
             item(key = "newsHead") { Question(stringResource(R.string.issue_q_news) + if (comments.isNotEmpty()) " · ${comments.size}" else "", tag = "issueQNews") {} }

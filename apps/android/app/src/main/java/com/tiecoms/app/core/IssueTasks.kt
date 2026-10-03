@@ -167,6 +167,10 @@ object IssueTasks {
         return i.copy(fields = kotlinx.serialization.json.JsonObject(m))
     }
 
+    /** Ids de adjuntos tras sumar [added] (sin repetir, en orden) o quitar [removed]: lo que se manda en attachmentIds. */
+    fun attachmentIds(i: IssueDTO, added: List<String> = emptyList(), removed: String? = null): List<String> =
+        (i.attachments.map { it.id } + added).distinct().filter { it != removed }
+
     /** Primer nombre (para chips y el árbol de Grupos). */
     fun firstName(name: String?) = name?.trim()?.split(Regex("\\s+"))?.firstOrNull().orEmpty()
 

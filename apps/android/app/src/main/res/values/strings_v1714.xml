@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 1.7.14: files on tasks, actions from an open file and getting gg back. -->
+<resources>
+    <string name="tf_title">Files</string>
+    <string name="tf_title_n">Files · %1$d</string>
+    <string name="tf_attach">Attach</string>
+    <string name="tf_none">No files yet. Attach photos, documents or anything that helps.</string>
+    <string name="tf_uploading">Uploading %1$d of %2$d…</string>
+    <string name="tf_uploaded">Attached to the task</string>
+    <string name="tf_failed">Could not attach «%1$s»: %2$s</string>
+    <string name="tf_remove">Remove file</string>
+    <string name="tf_remove_q">Remove «%1$s» from this task?</string>
+    <string name="tf_remove_ok">Remove</string>
+    <string name="tf_pending">%1$d files will be attached when you save</string>
+    <string name="fa_menu">File actions</string>
+    <string name="fa_ask_gg">Ask gg about this file</string>
+    <string name="fa_create_task">Create task with this file</string>
+    <string name="fa_share">Share…</string>
+    <string name="fa_forward">Forward to a chaggu chat</string>
+    <string name="fa_task_created">Task created with the file attached</string>
+    <string name="ggp_hidden_undo">gg hidden in this chat. Bring it back from ⋯ › Ask gg</string>
+    <string name="ggp_undo">Undo</string>
+</resources>

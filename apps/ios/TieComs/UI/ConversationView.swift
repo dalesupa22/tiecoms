@@ -195,6 +195,8 @@ struct ConversationView: View {
     @State private var positioningFailed = false
     // gg dentro del chat (contrato 1-oct-2026, parte B).
     @State private var gg = GgChatState()
+    /// Cambia al tocar la ✕ de la píldora gg o al volver a mostrarla (GgPillPrefs vive en UserDefaults).
+    @State private var ggPillRev = 0
     /// Ancho de la pantalla del chat, para que el nombre en la cabecera quepa con los botones (headerTitleWidth).
     @State private var screenWidth: CGFloat = 393
 
@@ -535,8 +537,7 @@ struct ConversationView: View {
             // Dentro del panel del sidechat la cabecera es la del panel (no se mezcla con la del chat de origen).
             if !embedded {
             ToolbarItem(placement: .principal) {
-                // El sello gg va pegado al nombre (pequeño, sin botón aparte en la píldora): el nombre gana ese espacio.
-                HStack(spacing: 2) {
+                // 1.7.13: gg ya no va en la cabecera (vive abajo, en la píldora «✨ Preguntar a gg»): el nombre gana ese espacio.
                 NavigationLink(value: Route.details(conversationId)) {
                     VStack(spacing: 1) {
                         HStack(spacing: 4) {
@@ -559,10 +560,6 @@ struct ConversationView: View {
                 .accessibilityLabel([Naming.title(d, c), headerSubtitle(d, c)].filter { !$0.isEmpty }.joined(separator: ", "))
                 .accessibilityHint(L("chat.details"))
                 .accessibilityIdentifier("chat.header")
-                // gg en todos los chats, junto al nombre (como en la web: se ve salvo que el servidor no tenga gg).
-                // Si no cabe todo, el nombre termina en «…» (headerTitleWidth).
-                if store.ggSide.available != false { GgHeaderButton(source: ggSource) { gg.open = true } }
-                }
             }
             ToolbarItem(placement: .topBarTrailing) { CallHeaderButtons(conv: c, compact: true) }
             ToolbarItem(placement: .topBarTrailing) {
@@ -580,6 +577,15 @@ struct ConversationView: View {
                     }
                     if (store.pins[conversationId]?.count ?? 0) > 0 { Button { sheet = .pins } label: { Label(L("pins.title"), systemImage: "pin") } }
                     Button { openSearch() } label: { Label(L("search.inChat"), systemImage: "magnifyingglass") }
+                    // gg también desde ⋯ (sobre todo si se escondió la píldora de abajo con su ✕).
+                    if store.ggSide.available != false {
+                        Button { gg.open = true } label: { Label(L("ggs.askPlain"), systemImage: "sparkles") }
+                            .accessibilityIdentifier("chat.menu.gg")
+                        if ggPillHidden {
+                            Button { GgPillPrefs.setHidden(false, ggSource); ggPillRev += 1 } label: { Label(L("ggs.showPill"), systemImage: "eye") }
+                                .accessibilityIdentifier("chat.menu.ggShowPill")
+                        }
+                    }
                     NavigationLink(value: Route.details(conversationId)) { Label(L("chat.details"), systemImage: "info.circle") }
                 } label: { Image(systemName: "ellipsis.circle") }
                 .accessibilityLabel(L("menu.open"))
@@ -589,15 +595,18 @@ struct ConversationView: View {
         }
     }
 
-    /// Lo que puede medir el nombre en la cabecera: el ancho de la pantalla menos ‹, la píldora (📞, 🎥, 🔍, ⋯) y el sello gg.
+    /// Lo que puede medir el nombre en la cabecera: el ancho de la pantalla menos ‹ y la píldora (📞, 🔍, ⋯).
+    /// Desde 1.7.13 gg no ocupa la cabecera.
     private func headerTitleWidth(_ c: ConversationDTO) -> CGFloat {
         let calls = store.data?.callsEnabled == true && c.canPost ? 1 : 0
         let slots = CGFloat(calls + 2)
-        // Medido en iPhone 17 (iOS 26): cada botón de la píldora ocupa ≈ 52 pt; ‹ ≈ 60 pt. El sello gg, junto al nombre.
-        let gg: CGFloat = store.ggSide.available != false ? GgHeaderButton.slot + 2 : 0
+        // Medido en iPhone 17 (iOS 26): cada botón de la píldora ocupa ≈ 52 pt; ‹ ≈ 60 pt.
         let trailing = slots * 52 + 16, leading: CGFloat = 60
-        return max(72, min(260, screenWidth - leading - trailing - gg - 12))
+        return max(72, min(280, screenWidth - leading - trailing - 12))
     }
+
+    /// ¿Escondió la píldora gg de este chat con su ✕? (ggPillRev la vuelve a leer al cambiar).
+    private var ggPillHidden: Bool { let _ = ggPillRev; return GgPillPrefs.hidden(ggSource) }
 
     /// Línea bajo el título del chat: la empresa en un grupo (sin repetirla si el nombre ya la trae).
     private func headerSubtitle(_ d: BootstrapDTO, _ c: ConversationDTO) -> String {
@@ -1564,8 +1573,11 @@ struct ConversationView: View {
             if gg.draftActive { GgDraftBar { gg.draftActive = false } }
             if let b = gg.bubbles, !b.isEmpty {
                 GgReplyBubbles(drafts: b, onPick: { putGgDraft($0.text); gg.bubbles = nil }, onClose: { gg.bubbles = nil })
-            } else if !embedded && !gg.draftActive && store.ggSide.used.contains(ggSource) {
-                GgContinueBar { gg.open = true }
+            } else if !embedded && !gg.draftActive && editing == nil && !commenting && store.ggSide.available != false && !ggPillHidden {
+                // 1.7.13: la entrada a gg de este chat (salió de la cabecera). Ocupa su propia fila del compositor:
+                // empuja los mensajes hacia arriba en vez de taparlos, y el aviso de descanso va debajo, aparte.
+                GgAskPill(source: ggSource, loading: gg.loadingBubbles, onOpen: { gg.open = true },
+                          onHide: { GgPillPrefs.setHidden(true, ggSource); ggPillRev += 1; store.show(L("ggs.pillHidden")) })
             }
             if showQuickReplies(d, c) {
                 SideQuickReplies(onSend: { store.send(conversationId, body: $0) }, onAskOther: { addingToSide = true })
@@ -1603,22 +1615,15 @@ struct ConversationView: View {
                                  // Correo en el chat (docs/CORREO.md): ＋ › Correo con este chat como destino; WhatsApp va a su pantalla.
                                  onMail: embedded || !store.mailEnabled || Naming.isGuest(d, c) ? nil : { store.push(.mailBox(conversationId: conversationId)) },
                                  onWhatsApp: embedded || !store.mailEnabled || Naming.isGuest(d, c) ? nil : { store.push(.whatsapp) },
-                                 onGifs: { pickingGifs = true }, formatting: composerFormatting) { store.show($0) }
+                                 onGifs: { pickingGifs = true },
+                                 // ✨ 3 respuestas de gg sobre la caja si el último mensaje es de la otra persona (solo al pedirlas).
+                                 onReplyIdeas: trimmed.isEmpty && !gg.loadingBubbles && store.ggSide.available == true && lastIsFromOther(d) ? { loadReplyBubbles() } : nil,
+                                 formatting: composerFormatting) { store.show($0) }
                         .disabled(uploading)
                 }
                 if editing == nil && !commenting && !embedded { ViewOnceToggle(on: $viewOnceNext) }
-                // ✨: si el último mensaje es de la otra persona, 3 respuestas de gg sobre la caja (solo al tocarlo, no solas).
-                if editing == nil && !commenting && trimmed.isEmpty && store.ggSide.available == true && lastIsFromOther(d) {
-                    Button { loadReplyBubbles() } label: {
-                        Group {
-                            if gg.loadingBubbles { ProgressView().controlSize(.small) } else { Image(systemName: "sparkles").font(.system(size: 17, weight: .semibold)) }
-                        }
-                        .foregroundStyle(Theme.accentText).frame(width: 34, height: 40)
-                    }
-                    .disabled(gg.loadingBubbles)
-                    .accessibilityLabel(L("ggs.replyIdeas"))
-                    .accessibilityIdentifier("composer.ggReplies")
-                }
+                // 1.7.13: la ✨ de «Ideas de respuesta» ya no sale sola en la barra (era redundante con la píldora gg);
+                // vive en el menú del «＋».
                 // UITextView: tokens resaltados, cursor real y retroceso que borra el token entero.
                 ComposerTextView(text: $draft, mentions: $draftMentions, cursor: $draftCursor, focused: $composerFocused,
                                  placeholder: composerPlaceholder(d, c), accessibilityLabel: L("chat.composerLabel"),

@@ -41,4 +41,17 @@ final class GGChatTests: XCTestCase {
         XCTAssertEqual(Naming.title(d, byId["d"]!), "Bruno")
         XCTAssertFalse(GG.isSelf(d, byId["d"]!))
     }
+
+    /// 1.7.13: la ✕ de «✨ Preguntar a gg» la esconde solo en ese chat y se puede volver a mostrar.
+    func testGgPillHiddenPerChat() {
+        let d = UserDefaults(suiteName: "gg.pill.test.\(UUID().uuidString)")!
+        XCTAssertFalse(GgPillPrefs.hidden("conv:a", defaults: d))
+        GgPillPrefs.setHidden(true, "conv:a", defaults: d)
+        GgPillPrefs.setHidden(true, "conv:a", defaults: d)
+        XCTAssertTrue(GgPillPrefs.hidden("conv:a", defaults: d))
+        XCTAssertFalse(GgPillPrefs.hidden("wa:1:57300", defaults: d), "otro chat no cambia")
+        XCTAssertEqual(d.stringArray(forKey: GgPillPrefs.key), ["conv:a"], "sin repetidos")
+        GgPillPrefs.setHidden(false, "conv:a", defaults: d)
+        XCTAssertFalse(GgPillPrefs.hidden("conv:a", defaults: d))
+    }
 }

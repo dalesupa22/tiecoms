@@ -941,6 +941,10 @@
 "ggs.agreed" = "¿Qué acordamos?";
 "ggs.ask" = "✨ Preguntar a gg";
 "ggs.askN" = "✨ Pedir a gg ({n})";
+"ggs.askPlain" = "Preguntar a gg";
+"ggs.hidePill" = "Ocultar «Preguntar a gg» en este chat";
+"ggs.pillHidden" = "Listo. gg sigue en ⋯ › Preguntar a gg";
+"ggs.showPill" = "Mostrar «Preguntar a gg» abajo";
 "ggs.askPh" = "Pregúntale a gg sobre este chat…";
 "ggs.button" = "gg de este chat";
 "ggs.buttonN" = "gg de este chat · {n} esperan algo de ti";
@@ -950,7 +954,7 @@
 "ggs.chipSummary" = "Resúmeme";
 "ggs.clearSel" = "Quitar selección";
 "ggs.consentNeeded" = "Para usar gg en este chat, autoriza el uso de IA.";
-"ggs.continue" = "✨ Seguir con gg";
+"ggs.continue" = "✨ Continuar con gg";
 "ggs.copied" = "Copiado: pégalo donde lo vas a enviar";
 "ggs.doN" = "Hacer estas {n}";
 "ggs.doOne" = "Hacer esta";

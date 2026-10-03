@@ -408,11 +408,17 @@ struct AttachButton: View {
     var onMail: (() -> Void)? = nil
     var onWhatsApp: (() -> Void)? = nil
     var onGifs: (() -> Void)? = nil
+    /// «✨ Ideas de respuesta de gg» (antes una ✨ suelta en la barra; 1.7.13).
+    var onReplyIdeas: (() -> Void)? = nil
     var formatting: ComposerFormattingController? = nil
     var onError: (String) -> Void
 
     var body: some View {
         Menu {
+            if let onReplyIdeas {
+                Button(action: onReplyIdeas) { Label(L("ggs.replyIdeas"), systemImage: "sparkles") }.accessibilityIdentifier("composer.ggReplies")
+                Divider()
+            }
             if let formatting { ComposerFormatMenu(controller: formatting); Divider() }
             Button { showPhotos = true } label: { Label(L("att.fromPhotos"), systemImage: "photo.on.rectangle") }
             if UIImagePickerController.isSourceTypeAvailable(.camera) {

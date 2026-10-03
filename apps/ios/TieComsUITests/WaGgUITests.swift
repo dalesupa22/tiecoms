@@ -129,7 +129,7 @@ final class WaGgUITests: XCTestCase {
         XCTAssertTrue(general.waitForExistence(timeout: 10))
         general.tap()
         let ggButton = app.buttons["chat.gg"]
-        XCTAssertTrue(ggButton.waitForExistence(timeout: 15), "botón gg en el encabezado")
+        XCTAssertTrue(ggButton.waitForExistence(timeout: 15), "píldora gg sobre la caja")
         sleep(1)
         shot("10-chat-boton-gg")
         // 7. Pulsación larga en un mensaje: el menú de siempre + «✨ Preguntar a gg» y «Seleccionar».
@@ -202,7 +202,9 @@ final class WaGgUITests: XCTestCase {
             // El nombre no se monta sobre ‹ ni sobre los botones.
             let back = app.navigationBars.buttons.element(boundBy: 0)
             if back.exists { XCTAssertGreaterThanOrEqual(header.frame.minX, back.frame.maxX - 1, "nombre sobre ‹ en \(name)") }
-            XCTAssertLessThanOrEqual(header.frame.maxX, app.buttons["chat.gg"].frame.minX + 1, "nombre sobre gg en \(name)")
+            // 1.7.13: gg ya no está en la cabecera, sino abajo (píldora «✨ Preguntar a gg» sobre la caja).
+            XCTAssertGreaterThan(app.buttons["chat.gg"].frame.minY, header.frame.maxY + 100, "gg abajo, no en la cabecera, en \(name)")
+            XCTAssertLessThanOrEqual(header.frame.maxX, app.buttons["chat.search"].frame.minX + 1, "nombre sobre 🔍 en \(name)")
             if back.exists { back.tap() }
             sleep(1)
         }

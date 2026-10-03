@@ -29,49 +29,69 @@ struct GgMarkButton: View {
     }
 }
 
-/// Sello gg del encabezado de un chat (chaggu o WhatsApp), junto al nombre: pequeñito (≈ 21 pt), sin círculo oscuro,
-/// con sus estrellitas que titilan. La entrada principal es «✨ Seguir con gg» de abajo; este sigue abriendo gg.
-/// Solo sale cuando el API respondió que existe.
-struct GgHeaderButton: View {
-    @Environment(AppStore.self) private var store
-    let source: String
-    let action: () -> Void
-    static let size: CGFloat = 21
-    /// Lo que ocupa junto al nombre (sello + separación), para el ancho del título.
-    static let slot: CGFloat = 28
-    var body: some View {
-        Button(action: action) {
-            GGMark(ink: Theme.textPrimary, animated: true)
-                .frame(width: Self.size, height: Self.size)
-                .padding(2)
-                .background(Circle().fill(Theme.orange.opacity(0.10)))
-                .frame(width: Self.slot, height: 32)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(L("ggs.title"))
-        .accessibilityIdentifier("chat.gg")
+/// La píldora de un chat se puede esconder con su ✕, por chat (fuente gg: conversación de chaggu o chat de WhatsApp).
+/// Queda guardado en el teléfono; gg sigue en ⋯ › «Preguntar a gg» y en mantener presionado un mensaje.
+enum GgPillPrefs {
+    static let key = "gg.pill.hidden"
+    static func hidden(_ source: String, defaults: UserDefaults = .standard) -> Bool {
+        (defaults.stringArray(forKey: key) ?? []).contains(source)
+    }
+    static func setHidden(_ hide: Bool, _ source: String, defaults: UserDefaults = .standard) {
+        var list = (defaults.stringArray(forKey: key) ?? []).filter { $0 != source }
+        if hide { list.append(source) }
+        // Tope para no crecer sin fin: se olvidan los más viejos.
+        defaults.set(Array(list.suffix(500)), forKey: key)
     }
 }
 
-/// «✨ Seguir con gg» sobre el compositor (queda tras cerrar la hoja; el historial sigue ahí otro día).
-struct GgContinueBar: View {
-    var onTap: () -> Void
+/// 1.7.13: la entrada a gg de un chat vive abajo, sobre la caja de texto (salió de la cabecera). «✨ Preguntar a gg»;
+/// si ya hay conversación con gg en este chat, «✨ Continuar con gg»; con pendientes, su número. La ✕ la esconde
+/// en este chat (GgPillPrefs) y cerrar la hoja de gg no la vuelve a sacar.
+struct GgAskPill: View {
+    @Environment(AppStore.self) private var store
+    let source: String
+    var loading = false
+    var onOpen: () -> Void
+    var onHide: () -> Void
+
     var body: some View {
-        HStack {
-            Button(action: onTap) {
-                HStack(spacing: 6) {
-                    GgMarkButton(size: 18)
-                    Text(L("ggs.continue")).font(.caption.weight(.semibold)).foregroundStyle(Theme.textPrimary)
+        let count = store.ggSide.pending[source] ?? 0
+        let used = store.ggSide.used.contains(source)
+        HStack(spacing: 0) {
+            HStack(spacing: 0) {
+                Button(action: onOpen) {
+                    HStack(spacing: 5) {
+                        if loading { ProgressView().controlSize(.mini) }
+                        Text(L(used ? "ggs.continue" : "ggs.ask")).font(.caption.weight(.semibold)).foregroundStyle(Theme.textPrimary)
+                            .lineLimit(1)
+                        if count > 0 {
+                            Text(count > 9 ? "9+" : "\(count)")
+                                .font(.caption2.weight(.heavy)).monospacedDigit().foregroundStyle(.white)
+                                .padding(.horizontal, 5).frame(minWidth: 17, minHeight: 17)
+                                .background(Capsule().fill(Theme.orange))
+                                .accessibilityIdentifier("gg.button.count")
+                        }
+                    }
+                    .padding(.leading, 10).padding(.trailing, 4).padding(.vertical, 5)
+                    .contentShape(Rectangle())
                 }
-                .padding(.leading, 4).padding(.trailing, 10).padding(.vertical, 4)
-                .background(Capsule().fill(Theme.bubbleOther))
+                .buttonStyle(.plain)
+                .accessibilityLabel(count > 0 ? "\(L(used ? "ggs.continue" : "ggs.ask")), \(L("ggs.pendingA11y", ["n": count]))" : L(used ? "ggs.continue" : "ggs.ask"))
+                .accessibilityIdentifier("chat.gg")
+                Button(action: onHide) {
+                    Image(systemName: "xmark").font(.system(size: 9, weight: .bold)).foregroundStyle(Theme.textSecondary)
+                        .frame(width: 26, height: 26).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(L("ggs.hidePill"))
+                .accessibilityIdentifier("gg.pill.hide")
             }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("gg.continue")
-            Spacer()
+            .background(Capsule().fill(Theme.bubbleOther))
+            .overlay(Capsule().stroke(Theme.textSecondary.opacity(0.15), lineWidth: 0.5))
+            Spacer(minLength: 0)
         }
-        .padding(.horizontal, 12).padding(.top, 6)
+        .padding(.horizontal, 12).padding(.top, 4).padding(.bottom, 2)
+        .accessibilityIdentifier("gg.pill")
     }
 }
 

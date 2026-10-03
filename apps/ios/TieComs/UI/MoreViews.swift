@@ -628,9 +628,12 @@ struct WaChatView: View {
     @State private var ggQueue: [GgOutcome] = []
     @State private var taskPrefill: GgPrefill?
     @State private var reminderPrefill: GgPrefill?
+    /// Cambia al tocar la ✕ de la píldora gg (GgPillPrefs, por chat).
+    @State private var ggPillRev = 0
     @FocusState private var composerFocused: Bool
 
     private var source: String { GgSource.whatsapp(chat) }
+    private var ggPillHidden: Bool { let _ = ggPillRev; return GgPillPrefs.hidden(source) }
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -659,20 +662,24 @@ struct WaChatView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.hidden, for: .tabBar)
         .toolbar {
-            // El nombre y, pegado, el sello gg pequeñito (como en el chat de chaggu).
+            // Solo el nombre (1.7.13: gg vive abajo, en la píldora, como en el chat de chaggu).
             ToolbarItem(placement: .principal) {
-                HStack(spacing: 2) {
-                    Text(chat.name).font(.headline).foregroundStyle(Theme.textPrimary).lineLimit(1).truncationMode(.tail)
-                        .accessibilityAddTraits(.isHeader)
-                        .accessibilityIdentifier("wa.chat.title")
-                    if store.ggSide.available != false { GgHeaderButton(source: source) { ggOpen = true } }
-                }
-                .frame(maxWidth: max(120, UIScreen.main.bounds.width - 150))
+                Text(chat.name).font(.headline).foregroundStyle(Theme.textPrimary).lineLimit(1).truncationMode(.tail)
+                    .accessibilityAddTraits(.isHeader)
+                    .accessibilityIdentifier("wa.chat.title")
+                    .frame(maxWidth: max(120, UIScreen.main.bounds.width - 130))
             }
             ToolbarItem(placement: .primaryAction) {
                 Menu {
                     WaChatMenuItems(chat: chat) { up in patched(up) }
                     Divider()
+                    if store.ggSide.available != false {
+                        Button { ggOpen = true } label: { Label(L("ggs.askPlain"), systemImage: "sparkles") }
+                            .accessibilityIdentifier("wa.chat.gg")
+                        if ggPillHidden {
+                            Button { GgPillPrefs.setHidden(false, source); ggPillRev += 1 } label: { Label(L("ggs.showPill"), systemImage: "eye") }
+                        }
+                    }
                     Button { settings = true } label: { Label(L("wa.chatSettings"), systemImage: "slider.horizontal.3") }
                         .accessibilityIdentifier("wa.chat.settings")
                 } label: { Image(systemName: "ellipsis.circle") }
@@ -685,7 +692,11 @@ struct WaChatView: View {
                 GgSelectionBar(count: selected.count, onCancel: { selecting = false; selected = [] }, onAsk: { suggesting = true })
             } else {
                 VStack(spacing: 0) {
-                    if store.ggSide.used.contains(source) { GgContinueBar { ggOpen = true }.padding(.bottom, 6) }
+                    if store.ggSide.available != false && !ggPillHidden {
+                        GgAskPill(source: source, onOpen: { ggOpen = true },
+                                  onHide: { GgPillPrefs.setHidden(true, source); ggPillRev += 1; store.show(L("ggs.pillHidden")) })
+                            .padding(.bottom, 2)
+                    }
                     composer
                 }
                 .background(.bar)

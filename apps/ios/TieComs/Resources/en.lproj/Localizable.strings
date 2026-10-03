@@ -941,6 +941,10 @@
 "ggs.agreed" = "What did we agree on?";
 "ggs.ask" = "✨ Ask gg";
 "ggs.askN" = "✨ Ask gg ({n})";
+"ggs.askPlain" = "Ask gg";
+"ggs.hidePill" = "Hide “Ask gg” in this chat";
+"ggs.pillHidden" = "Done. gg is still in ⋯ › Ask gg";
+"ggs.showPill" = "Show “Ask gg” below";
 "ggs.askPh" = "Ask gg about this chat…";
 "ggs.button" = "gg for this chat";
 "ggs.buttonN" = "gg for this chat · {n} waiting on you";

@@ -357,7 +357,9 @@ fun IssueDatePicker(value: LocalDate?, onPick: (LocalDate?) -> Unit, onDismiss: 
  * Sin [conversationId] (pestaña Asuntos) también se elige el grupo o chat.
  */
 @Composable
-fun QuickAddIssue(conversationId: String?, modifier: Modifier = Modifier, autoFocus: Boolean = false) {
+fun QuickAddIssue(conversationId: String?, modifier: Modifier = Modifier, autoFocus: Boolean = false,
+                  /** 1.7.15 (compartir desde otra app): título y archivos que llegan listos, y aviso al crear. */
+                  initialTitle: String = "", initialFiles: List<com.tiecoms.app.core.Attachments.Shared> = emptyList(), onCreated: ((String) -> Unit)? = null) {
     val ctx = LocalContext.current
     val client = LocalClient.current
     val scope = rememberCoroutineScope()
@@ -371,7 +373,7 @@ fun QuickAddIssue(conversationId: String?, modifier: Modifier = Modifier, autoFo
     val conv = conversationId ?: picked?.takeIf { p -> p == IssueTasks.PERSONAL || destinations.any { it.id == p } } ?: IssueTasks.PERSONAL
     val personal = conv == IssueTasks.PERSONAL
     val members = if (personal) emptyList() else humansOf(data, conv).sortedByDescending { it.id == data.me.id }
-    var title by rememberSaveable { mutableStateOf("") }
+    var title by rememberSaveable { mutableStateOf(initialTitle.take(200)) }
     var owner by rememberSaveable(conv) { mutableStateOf(data.me.id) }
     var assignees by rememberSaveable(conv) { mutableStateOf(listOf<String>()) }
     var due by rememberSaveable { mutableStateOf<String?>(null) }
@@ -380,7 +382,7 @@ fun QuickAddIssue(conversationId: String?, modifier: Modifier = Modifier, autoFo
     var ownerMenu by remember { mutableStateOf(false) }
     var pickDate by remember { mutableStateOf(false) }
     // 1.7.14: archivos elegidos antes de guardar; se suben a la tarea apenas se crea.
-    var pendingFiles by remember { mutableStateOf(listOf<com.tiecoms.app.core.Attachments.Shared>()) }
+    var pendingFiles by remember { mutableStateOf(initialFiles) }
     var filePicker by remember { mutableStateOf(false) }
     val container = LocalContainer.current
     val focus = remember { FocusRequester() }
@@ -400,6 +402,7 @@ fun QuickAddIssue(conversationId: String?, modifier: Modifier = Modifier, autoFo
                     if (TaskUploads.attach(ctx, client, created.id, files) { msg -> container.toast(msg) } > 0) container.toast(ctx.getString(R.string.tf_uploaded))
                 }
                 title = ""; due = null; pendingFiles = emptyList()
+                onCreated?.invoke(created.id)
                 runCatching { focus.requestFocus() }
             } catch (e: Exception) { error = errorText(ctx, e) } finally { busy = false }
         }

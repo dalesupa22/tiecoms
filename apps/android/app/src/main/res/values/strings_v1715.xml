@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 1.7.15: share to chaggu starts with actions; cleaner chat picker. -->
+<resources>
+    <string name="sh_what">What do you want to do?</string>
+    <string name="sh_send">Send to a chat</string>
+    <string name="sh_send_sub">Pick chaggu conversations or people</string>
+    <string name="sh_sign">Sign</string>
+    <string name="sh_sign_sub">Saved in «You» and the signer opens</string>
+    <string name="sh_analyze">Analyze with gg</string>
+    <string name="sh_analyze_sub">gg reads it and tells you what matters</string>
+    <string name="sh_analyze_prompt">Analyze this file: summary, key points, dates, amounts and what I should do</string>
+    <string name="sh_task">Create task</string>
+    <string name="sh_task_sub">With the file attached, in the group you pick</string>
+    <string name="sh_save">Save to my files</string>
+    <string name="sh_save_sub">Only you can see it</string>
+    <string name="sh_saved">Saved to My files</string>
+    <string name="sh_task_created">Task created</string>
+    <string name="sh_working">Preparing…</string>
+    <string name="sh_pages_one">1 page</string>
+    <string name="sh_pages">%1$d pages</string>
+    <string name="sh_search">Search a chat or person</string>
+    <string name="sh_recent">Recent</string>
+    <string name="sh_all">Chats and groups</string>
+    <string name="sh_pick_hint">Tap who you want to send it to</string>
+    <string name="sh_remove">Remove %1$s</string>
+    <string name="sh_no_results">No conversation matches «%1$s»</string>
+    <string name="sh_text">Text</string>
+</resources>

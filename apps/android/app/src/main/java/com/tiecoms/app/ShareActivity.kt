@@ -39,6 +39,11 @@ class ShareActivity : ComponentActivity() {
                         ShareSheet(incoming, onClose = { finish() }, onOpenApp = {
                             startActivity(Intent(this@ShareActivity, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                             finish()
+                        }, onOpenConversation = { id ->
+                            // «Analizar con gg» (1.7.15): al terminar el envío se abre el chat con gg.
+                            container.pendingLink.value = com.tiecoms.app.core.DeepLink.Conversation(id)
+                            startActivity(Intent(this@ShareActivity, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                            finish()
                         })
                     }
                 }

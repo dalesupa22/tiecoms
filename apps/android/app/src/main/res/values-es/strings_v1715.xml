@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 1.7.15: compartir en chaggu empieza con acciones; selector de chats más limpio. -->
+<resources>
+    <string name="sh_what">¿Qué quieres hacer?</string>
+    <string name="sh_send">Enviar a un chat</string>
+    <string name="sh_send_sub">Elige conversaciones o personas de chaggu</string>
+    <string name="sh_sign">Firmar</string>
+    <string name="sh_sign_sub">Se guarda en «Tú» y se abre el firmador</string>
+    <string name="sh_analyze">Analizar con gg</string>
+    <string name="sh_analyze_sub">gg lo lee y te dice lo importante</string>
+    <string name="sh_analyze_prompt">Analiza este archivo: resumen, puntos clave, fechas, montos y qué debo hacer</string>
+    <string name="sh_task">Crear tarea</string>
+    <string name="sh_task_sub">Con el archivo adjunto, en el grupo que elijas</string>
+    <string name="sh_save">Guardar en mis archivos</string>
+    <string name="sh_save_sub">Solo tú lo ves</string>
+    <string name="sh_saved">Guardado en Mis archivos</string>
+    <string name="sh_task_created">Tarea creada</string>
+    <string name="sh_working">Preparando…</string>
+    <string name="sh_pages_one">1 página</string>
+    <string name="sh_pages">%1$d páginas</string>
+    <string name="sh_search">Buscar chat o persona</string>
+    <string name="sh_recent">Recientes</string>
+    <string name="sh_all">Chats y grupos</string>
+    <string name="sh_pick_hint">Toca a quién quieres enviarlo</string>
+    <string name="sh_remove">Quitar a %1$s</string>
+    <string name="sh_no_results">Ninguna conversación coincide con «%1$s»</string>
+    <string name="sh_text">Texto</string>
+</resources>

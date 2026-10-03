@@ -2008,6 +2008,12 @@ class TieComsClient(
         val r = req("POST", "/workspaces/$workspaceId/conversations", body, IdResult.serializer()); loadBootstrapInternal(); r
     }
 
+    // ---------- 1.7.15: chats especiales para compartir desde otra app ----------
+    /** POST /me/notes: «Tú» (notas para mí); se crea si no existe. */
+    suspend fun notesChatId(): String = withContext(dispatcher) { val r = req("POST", "/me/notes", buildJsonObject { }, IdResult.serializer()); if (s.data?.conversations?.none { it.id == r.id } != false) loadBootstrapInternal(); r.id }
+    /** POST /assistant/chat: mi chat con gg; se crea si no existe. */
+    suspend fun ggChatId(): String = withContext(dispatcher) { val r = req("POST", "/assistant/chat", buildJsonObject { }, IdResult.serializer()); if (s.data?.conversations?.none { it.id == r.id } != false) loadBootstrapInternal(); r.id }
+
     // ---------- Chats (directos y grupales entre empresas) ----------
     /** POST /chats: con una persona devuelve el directo; con varias, un chat `multi`. Recarga el snapshot. */
     suspend fun createChat(userIds: List<String>, name: String?): CreateChatResult = withContext(dispatcher) {

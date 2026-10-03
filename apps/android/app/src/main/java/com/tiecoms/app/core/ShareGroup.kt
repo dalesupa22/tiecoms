@@ -25,3 +25,30 @@ object ShareGroup {
         return ids.takeIf { it.size >= 2 }
     }
 }
+
+/**
+ * 1.7.15: lista del selector de «Compartir en chaggu». Plana, por actividad (lo último arriba), sin encabezados por
+ * empresa: el grupo lleva su empresa y espacio como subtítulo gris, sin repetir lo que ya dice el título.
+ */
+object ShareList {
+    data class Row(val c: ConversationDTO, val title: String, val subtitle: String?)
+
+    fun subtitle(c: ConversationDTO, data: BootstrapDTO, title: String): String? {
+        val parts = when (c.kind) {
+            "direct" -> listOfNotNull(Names.directCompany(c, data))
+            "multi" -> listOf(Names.multiSubtitle(c, data))
+            else -> data.workspaces.firstOrNull { it.id == c.workspaceId }?.let { ws -> listOfNotNull(HomeTree.counterpartOrg(data, ws)?.name, ws.name) } ?: emptyList()
+        }
+        val t = QuickSearch.fold(title)
+        return parts.map { it.trim() }.filter { it.isNotEmpty() && QuickSearch.fold(it) != t }.distinctBy { QuickSearch.fold(it) }.joinToString(" · ").ifEmpty { null }
+    }
+
+    /** Destinos posibles (donde puedo escribir, sin hilos laterales), por actividad; con [query], los que coinciden. */
+    fun rows(data: BootstrapDTO, query: String, title: (ConversationDTO) -> String): List<Row> {
+        val q = QuickSearch.fold(query.trim())
+        return data.conversations.filter { it.canPost && !it.isSide }
+            .sortedByDescending { it.lastMessageAt ?: "" }
+            .map { c -> val t = title(c); Row(c, t, subtitle(c, data, t)) }
+            .filter { r -> q.isEmpty() || QuickSearch.fold(r.title).contains(q) || QuickSearch.fold(r.subtitle ?: "").contains(q) }
+    }
+}

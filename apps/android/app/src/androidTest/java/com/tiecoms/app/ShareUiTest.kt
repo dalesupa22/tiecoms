@@ -168,7 +168,9 @@ class ShareUiTest {
 
         // ShareActivity: vista previa de las 3 fotos y la conversación preseleccionada (si vino por Direct Share).
         // The system chooser briefly leaves no Compose window while ShareActivity is starting.
-        compose.waitUntil(15_000) { exists("sharePreview") }
+        compose.waitUntil(15_000) { exists("shareActSend") || exists("shareSmallPreview") }
+        // 1.7.15: primero la pantalla de acciones; «Enviar a un chat» abre el selector (Direct Share entra directo).
+        if (exists("shareActSend")) { compose.onNodeWithTag("shareActSend").performClick(); compose.waitUntil(5_000) { exists("shareSmallPreview") } }
         compose.waitUntilAtLeastOneExists(hasTestTag("shareRecent-$convId") or hasTestTag("shareTarget-$convId"), 10_000)
         val direct = runBlocking { client.createChat(listOf(peerId), null).id }
         compose.waitUntilAtLeastOneExists(hasTestTag("shareTarget-$direct") or hasTestTag("shareRecent-$direct"), 10_000)
@@ -225,7 +227,9 @@ class ShareUiTest {
             // A second real share demonstrates the foreground notification's Cancel action.
             ins.targetContext.startActivity(Intent(send).setClass(ins.targetContext, ShareActivity::class.java)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-            compose.waitUntil(15_000) { exists("sharePreview") }
+            compose.waitUntil(15_000) { exists("shareActSend") || exists("shareSmallPreview") }
+        // 1.7.15: primero la pantalla de acciones; «Enviar a un chat» abre el selector (Direct Share entra directo).
+        if (exists("shareActSend")) { compose.onNodeWithTag("shareActSend").performClick(); compose.waitUntil(5_000) { exists("shareSmallPreview") } }
             val cancelTarget = if (exists("shareRecent-$convId")) "shareRecent-$convId" else "shareTarget-$convId"
             compose.onNodeWithTag(cancelTarget).performScrollTo().performClick()
             val cancelPeer = if (exists("shareRecent-$direct")) "shareRecent-$direct" else "shareTarget-$direct"

@@ -17,10 +17,11 @@ import { bootstrap } from './bootstrap.ts';
 import { searchAll } from './chat-search.ts';
 import { listMessages, markRead, sendMessage } from './messages.ts';
 import { getOrCreateDirect } from './workspaces.ts';
-import * as wa from './whatsapp.ts';
 import * as mailbox from './mailbox.ts';
 import * as issues from './issues.ts';
 import * as cal from './calendar.ts';
+import * as mwa from './mcp-wa.ts';
+import type { McpCtx } from './mcp-wa.ts';
 
 const PREFIX = 'chgmcp_';
 const MAX_TOKENS = 20;
@@ -28,23 +29,67 @@ const iso = (d: Date | null) => (d ? new Date(d).toISOString() : null);
 
 // ---------- Tokens personales ----------
 
+/** Permisos que puede tener un token (docs/MCP.md). NULL en la base = todos (tokens anteriores). */
+export const SCOPES = ['chats:read', 'chats:write', 'whatsapp:read', 'whatsapp:send', 'whatsapp:draft', 'email', 'tasks:read', 'tasks:write', 'calendar'] as const;
+export type Scope = typeof SCOPES[number];
+
+export interface TokenOptions { scopes?: string[] | null; expiresAt?: string | null; clientName?: string | null; waAccountIds?: string[] | null }
+
 export async function listTokens(userId: string) {
   const { rows } = await pool.query(
-    'SELECT id, name, token_hint, created_at, last_used_at, client_id FROM mcp_tokens WHERE user_id = $1 AND revoked_at IS NULL ORDER BY created_at DESC',
+    `SELECT t.id, t.name, t.token_hint, t.created_at, t.last_used_at, t.client_id, t.scopes, t.expires_at, t.client_name, t.wa_account_ids,
+            (SELECT json_agg(json_build_object('tool', x.tool, 'n', x.n)) FROM (SELECT tool, count(*)::int AS n FROM mcp_audit au
+               WHERE au.token_id = t.id AND au.ok AND au.created_at > now() - interval '24 hours' GROUP BY tool) x) AS today,
+            EXISTS (SELECT 1 FROM mcp_webhooks h WHERE h.token_id = t.id AND h.revoked_at IS NULL) AS webhook
+       FROM mcp_tokens t WHERE t.user_id = $1 AND t.revoked_at IS NULL ORDER BY t.created_at DESC`,
     [userId],
   );
-  return { tokens: rows.map((r) => ({ id: r.id, name: r.name, tokenHint: r.token_hint, createdAt: iso(r.created_at), lastUsedAt: iso(r.last_used_at), oauth: !!r.client_id })) };
+  const accounts = (await pool.query('SELECT id, label FROM wa_accounts WHERE user_id = $1 AND removed_at IS NULL', [userId])).rows;
+  return {
+    tokens: rows.map((r) => ({
+      id: r.id, name: r.name, app: r.client_name ?? r.name, tokenHint: r.token_hint, createdAt: iso(r.created_at), lastUsedAt: iso(r.last_used_at), oauth: !!r.client_id,
+      scopes: r.scopes ?? [...SCOPES], expiresAt: iso(r.expires_at), expired: !!r.expires_at && new Date(r.expires_at) < new Date(),
+      whatsapp: r.wa_account_ids === null ? { mode: 'shared' as const, numbers: [] as string[] } : { mode: 'chosen' as const, numbers: accounts.filter((a) => r.wa_account_ids.includes(a.id)).map((a) => a.label) },
+      waAccountIds: r.wa_account_ids, today: r.today ?? [], webhook: r.webhook,
+    })),
+  };
 }
 
-export async function createToken(userId: string, name: string) {
+/** Normaliza permisos y números (solo los suyos). */
+export async function tokenOptions(userId: string, o: TokenOptions) {
+  const scopes = o.scopes == null ? null : [...new Set(o.scopes.filter((x) => (SCOPES as readonly string[]).includes(x)))];
+  let wa: string[] | null = null;
+  if (o.waAccountIds) {
+    const own = (await pool.query('SELECT id FROM wa_accounts WHERE user_id = $1 AND removed_at IS NULL AND id = ANY($2)', [userId, o.waAccountIds])).rows.map((r) => r.id as string);
+    wa = own;
+  }
+  if (o.expiresAt && Number.isNaN(Date.parse(o.expiresAt))) throw badRequest('Vencimiento inválido');
+  return { scopes: scopes && scopes.length === SCOPES.length ? null : scopes, waAccountIds: wa, expiresAt: o.expiresAt ?? null, clientName: o.clientName?.trim().slice(0, 60) || null };
+}
+
+export async function createToken(userId: string, name: string, o: TokenOptions = {}) {
   const { rows } = await pool.query('SELECT count(*)::int AS n FROM mcp_tokens WHERE user_id = $1 AND revoked_at IS NULL', [userId]);
   if (rows[0].n >= MAX_TOKENS) throw badRequest(`Máximo ${MAX_TOKENS} tokens activos; revoca alguno`);
+  const opt = await tokenOptions(userId, o);
   const token = PREFIX + randomToken(32);
   const ins = await pool.query(
-    'INSERT INTO mcp_tokens (user_id, name, token_hash, token_hint) VALUES ($1,$2,$3,$4) RETURNING id, created_at',
-    [userId, name, sha256(token), `…${token.slice(-4)}`],
+    'INSERT INTO mcp_tokens (user_id, name, token_hash, token_hint, scopes, expires_at, client_name, wa_account_ids) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id, created_at',
+    [userId, name, sha256(token), `…${token.slice(-4)}`, opt.scopes, opt.expiresAt, opt.clientName ?? name, opt.waAccountIds],
   );
-  return { id: ins.rows[0].id, name, token, createdAt: iso(ins.rows[0].created_at), endpoint: '/api/mcp' };
+  return { id: ins.rows[0].id, name, token, createdAt: iso(ins.rows[0].created_at), endpoint: '/api/mcp', scopes: opt.scopes ?? [...SCOPES], expiresAt: opt.expiresAt };
+}
+
+/** Cambiar permisos, números o vencimiento de un token existente (la persona, desde Tú › Conector para IAs). */
+export async function updateToken(userId: string, id: string, o: TokenOptions) {
+  const opt = await tokenOptions(userId, o);
+  const sets: string[] = []; const vals: unknown[] = [id, userId];
+  if (o.scopes !== undefined) { vals.push(opt.scopes); sets.push(`scopes = $${vals.length}`); }
+  if (o.waAccountIds !== undefined) { vals.push(opt.waAccountIds); sets.push(`wa_account_ids = $${vals.length}`); }
+  if (o.expiresAt !== undefined) { vals.push(opt.expiresAt); sets.push(`expires_at = $${vals.length}`); }
+  if (!sets.length) throw badRequest('Nada que cambiar');
+  const { rowCount } = await pool.query(`UPDATE mcp_tokens SET ${sets.join(', ')} WHERE id = $1 AND user_id = $2 AND revoked_at IS NULL`, vals);
+  if (!rowCount) throw notFound('Token');
+  return { ok: true };
 }
 
 export async function revokeToken(userId: string, id: string) {
@@ -53,21 +98,34 @@ export async function revokeToken(userId: string, id: string) {
   return { ok: true };
 }
 
-export async function authenticate(header: string | undefined): Promise<string> {
+/** 4. Bitácora de la persona: qué hizo cada asistente (sin contenido). */
+export async function activity(userId: string, opts: { tokenId?: string; limit?: number } = {}) {
+  const { rows } = await pool.query(
+    `SELECT au.tool, au.target, au.items, au.ok, au.error, au.created_at, COALESCE(t.client_name, t.name) AS app FROM mcp_audit au JOIN mcp_tokens t ON t.id = au.token_id
+      WHERE au.user_id = $1 AND ($2::uuid IS NULL OR au.token_id = $2) ORDER BY au.created_at DESC LIMIT $3`,
+    [userId, opts.tokenId ?? null, Math.min(opts.limit ?? 100, 500)],
+  );
+  return { activity: rows.map((r) => ({ app: r.app, tool: r.tool, target: r.target, items: r.items, ok: r.ok, error: r.error, at: iso(r.created_at) })) };
+}
+
+export async function authenticate(header: string | undefined): Promise<McpCtx> {
   const token = header?.startsWith('Bearer ') ? header.slice(7).trim() : '';
   if (!token.startsWith(PREFIX) || token.length > 120) throw unauthorized('Token MCP inválido');
   const { rows } = await pool.query(
-    `SELECT t.id, t.user_id, t.last_used_at FROM mcp_tokens t JOIN users u ON u.id = t.user_id
+    `SELECT t.id, t.user_id, t.last_used_at, t.scopes, t.wa_account_ids, t.expires_at, COALESCE(t.client_name, t.name) AS app FROM mcp_tokens t JOIN users u ON u.id = t.user_id
       WHERE t.token_hash = $1 AND t.revoked_at IS NULL AND u.disabled_at IS NULL`,
     [sha256(token)],
   );
   const r = rows[0];
   if (!r) throw unauthorized('Token MCP inválido');
+  if (r.expires_at && new Date(r.expires_at) < new Date()) throw unauthorized('Token MCP vencido');
   if (!r.last_used_at || Date.now() - new Date(r.last_used_at).getTime() > 60_000) {
     await pool.query('UPDATE mcp_tokens SET last_used_at = now() WHERE id = $1', [r.id]);
   }
-  return r.user_id as string;
+  return { userId: r.user_id, tokenId: r.id, scopes: r.scopes, waAccountIds: r.wa_account_ids, clientName: r.app };
 }
+
+const can = (ctx: McpCtx, scope: string) => !ctx.scopes || ctx.scopes.includes(scope);
 
 // ---------- Vista compacta para la IA ----------
 
@@ -139,20 +197,6 @@ function eventView(b: BootstrapDTO, e: CalendarEventDTO) {
   };
 }
 
-async function findWa(userId: string, ref: string) {
-  const bar = ref.indexOf('|');
-  if (bar > 0) {
-    const r = await wa.ownChat(userId, ref.slice(0, bar), ref.slice(bar + 1));
-    return { accountId: r.account_id as string, jid: r.jid as string, name: (r.name ?? wa.phoneLabel(r.pn) ?? r.jid) as string, account: r.account_label as string };
-  }
-  const { chats } = await wa.listChats(userId, { search: ref, limit: 20 });
-  const exact = chats.filter((c) => fold(c.name) === fold(ref));
-  const hits = exact.length ? exact : chats;
-  if (hits.length === 1) return { accountId: hits[0]!.accountId, jid: hits[0]!.jid, name: hits[0]!.name, account: hits[0]!.accountLabel };
-  if (!hits.length) throw notFound('Chat de WhatsApp');
-  throw badRequest(`Hay ${hits.length} chats de WhatsApp con ese nombre; usa el valor chat: ${hits.slice(0, 8).map((c) => `${c.name} (${c.accountLabel}) = ${c.accountId}|${c.jid}`).join('; ')}`);
-}
-
 function mailRef(ref: string): { provider: 'google' | 'microsoft'; id: string } {
   const bar = ref.indexOf('|');
   const provider = ref.slice(0, bar);
@@ -172,7 +216,7 @@ function taskView(b: BootstrapDTO, i: IssueDTO) {
 
 // ---------- Herramientas ----------
 
-type Tool = { name: string; description: string; schema: z.ZodObject<any>; readOnly?: boolean; run: (userId: string, a: any) => Promise<unknown> };
+type Tool = { name: string; description: string; scope?: Scope; schema: z.ZodObject<any>; readOnly?: boolean; run: (userId: string, a: any, ctx: McpCtx) => Promise<unknown> };
 
 const tools: Tool[] = [
   {
@@ -185,7 +229,7 @@ const tools: Tool[] = [
     },
   },
   {
-    name: 'list_chats', readOnly: true,
+    name: 'list_chats', readOnly: true, scope: 'chats:read',
     description: 'Lista mis chats (directos, grupos, asuntos), los más recientes primero, con mensajes sin leer y vista previa. Filtra por nombre con query.',
     schema: z.object({
       query: z.string().max(120).optional().describe('Parte del nombre del chat o de la persona'),
@@ -201,7 +245,7 @@ const tools: Tool[] = [
     },
   },
   {
-    name: 'read_messages', readOnly: true,
+    name: 'read_messages', readOnly: true, scope: 'chats:read',
     description: 'Lee los últimos mensajes de un chat (por id o nombre). Para paginar hacia atrás usa before_seq con el seq más viejo recibido.',
     schema: z.object({
       chat: z.string().min(1).max(200).describe('Id del chat o su nombre (p. ej. el nombre de la persona)'),
@@ -219,7 +263,7 @@ const tools: Tool[] = [
     },
   },
   {
-    name: 'send_message',
+    name: 'send_message', scope: 'chats:write',
     description: 'Envía un mensaje de texto a un chat existente (por id o nombre) en mi nombre. Para escribirle a una persona sin chat usa send_direct_message.',
     schema: z.object({
       chat: z.string().min(1).max(200).describe('Id del chat o su nombre'),
@@ -234,7 +278,7 @@ const tools: Tool[] = [
     },
   },
   {
-    name: 'send_direct_message',
+    name: 'send_direct_message', scope: 'chats:write',
     description: 'Envía un mensaje directo a una persona (por id o nombre). Crea el chat directo si no existe.',
     schema: z.object({ person: z.string().min(1).max(200).describe('Id o nombre de la persona'), text: z.string().trim().min(1).max(8000) }),
     run: async (userId, a) => {
@@ -248,7 +292,7 @@ const tools: Tool[] = [
     },
   },
   {
-    name: 'search_messages', readOnly: true,
+    name: 'search_messages', readOnly: true, scope: 'chats:read',
     description: 'Busca en todos mis chats (texto, adjuntos, notas de voz, correos y WhatsApps compartidos). Admite from:Nombre.',
     schema: z.object({ query: z.string().trim().min(2).max(120), limit: z.number().int().min(1).max(50).optional() }),
     run: async (userId, a) => {
@@ -263,7 +307,7 @@ const tools: Tool[] = [
     },
   },
   {
-    name: 'unread_summary', readOnly: true,
+    name: 'unread_summary', readOnly: true, scope: 'chats:read',
     description: 'Resumen de lo pendiente: chats con mensajes sin leer y esos mensajes (hasta 10 por chat). No los marca como leídos.',
     schema: z.object({ max_chats: z.number().int().min(1).max(30).optional() }),
     run: async (userId, a) => {
@@ -277,7 +321,7 @@ const tools: Tool[] = [
     },
   },
   {
-    name: 'mark_read',
+    name: 'mark_read', scope: 'chats:write',
     description: 'Marca un chat como leído hasta el último mensaje.',
     schema: z.object({ chat: z.string().min(1).max(200) }),
     run: async (userId, a) => {
@@ -288,7 +332,7 @@ const tools: Tool[] = [
     },
   },
   {
-    name: 'list_people', readOnly: true,
+    name: 'list_people', readOnly: true, scope: 'chats:read',
     description: 'Personas a las que puedo escribir (comparten grupo o empresa conmigo), con empresa y cargo.',
     schema: z.object({ query: z.string().max(120).optional(), limit: z.number().int().min(1).max(200).optional() }),
     run: async (userId, a) => {
@@ -302,50 +346,117 @@ const tools: Tool[] = [
     },
   },
 
-  // ---------- WhatsApp (solo las cuentas que la persona conectó; escribir exige «Responder desde chaggu») ----------
+  // ---------- WhatsApp: doble llave (números o chats compartidos con esta integración), ver mcp-wa.ts ----------
   {
-    name: 'list_whatsapp_chats', readOnly: true,
-    description: 'Lista mis chats de WhatsApp conectados a chaggu (personas y grupos), con no leídos y si puedo responder desde aquí.',
+    name: 'list_whatsapp_numbers', readOnly: true, scope: 'whatsapp:read',
+    description: 'Mis números de WhatsApp que esta integración puede usar, y si puede enviar por cada uno.',
+    schema: z.object({}),
+    run: async (_u, _a, ctx) => {
+      const acc = await mwa.allowedAccounts(ctx);
+      return { numbers: acc.map((x) => ({ account: x.id, label: x.label, kind: x.kind, connected: x.status === 'connected', canSend: x.send_enabled && x.status === 'connected' })),
+        ...(acc.length ? {} : { note: 'Ningún número está compartido con esta integración. La persona lo activa en chaggu › WhatsApp («Compartir con integraciones») o en Tú › Conector para IAs.' }) };
+    },
+  },
+  {
+    name: 'list_whatsapp_chats', readOnly: true, scope: 'whatsapp:read',
+    description: 'Chats de WhatsApp compartidos con esta integración, los más recientes primero. Pagina con cursor; since = solo con actividad desde esa fecha. Trae teléfono (1 a 1), quién habló de último y si se puede responder. La vista previa solo con include_preview.',
     schema: z.object({
-      query: z.string().max(120).optional().describe('Parte del nombre del chat o grupo'),
+      query: z.string().max(120).optional().describe('Parte del nombre o del número'),
       unread_only: z.boolean().optional(),
-      limit: z.number().int().min(1).max(100).optional(),
+      since: z.string().datetime({ offset: true }).optional(),
+      groups: z.boolean().optional().describe('true = solo grupos; false = solo 1 a 1'),
+      include_preview: z.boolean().optional(),
+      limit: z.number().int().min(1).max(200).optional(),
+      cursor: z.string().max(500).optional(),
     }),
-    run: async (userId, a) => {
-      const accounts = await wa.listAccounts(userId);
-      if (!accounts.length) return { chats: [], note: 'No tienes WhatsApp conectado en chaggu (WhatsApp › Conectar).' };
-      const r = await wa.listChats(userId, { search: a.query, limit: a.limit ?? 30 });
-      const chats = r.chats.filter((c) => !a.unread_only || c.unread > 0).map((c) => {
-        const acc = accounts.find((x) => x.id === c.accountId);
-        return { chat: `${c.accountId}|${c.jid}`, name: c.name, account: c.accountLabel, isGroup: c.isGroup, unread: c.unread, lastMessageAt: c.lastMessageAt, preview: c.lastPreview,
-          canReply: !!acc?.sendEnabled && acc?.status === 'connected' };
-      });
-      return { chats };
+    run: async (_u, a, ctx) => {
+      const r = await mwa.listChats(ctx, { query: a.query, unreadOnly: a.unread_only, since: a.since, groups: a.groups, includePreview: a.include_preview, limit: a.limit ?? 50, cursor: a.cursor });
+      if (r.chats.length || a.cursor) return r;
+      const shared = await mwa.allowedAccounts(ctx);
+      return shared.length ? r : { ...r, note: 'Ningún número de WhatsApp está compartido con esta integración (o no hay WhatsApp conectado). La persona lo activa en chaggu › WhatsApp («Compartir con integraciones») o en Tú › Conector para IAs.' };
     },
   },
   {
-    name: 'read_whatsapp', readOnly: true,
-    description: 'Lee los últimos mensajes de un chat de WhatsApp (usa el valor chat de list_whatsapp_chats o el nombre). No lo marca como leído.',
-    schema: z.object({ chat: z.string().min(1).max(300), limit: z.number().int().min(1).max(100).optional() }),
-    run: async (userId, a) => {
-      const c = await findWa(userId, a.chat);
-      const messages = await wa.messagesForGg(c.accountId, c.jid, { limit: a.limit ?? 30 });
-      return { chat: { chat: `${c.accountId}|${c.jid}`, name: c.name, account: c.account }, messages: messages.map((m) => ({ id: m.id, at: m.at, author: m.mine ? 'Tú' : m.author, text: m.text })) };
-    },
+    name: 'read_whatsapp', readOnly: true, scope: 'whatsapp:read',
+    description: 'Mensajes de un chat de WhatsApp (valor chat o nombre). Cada mensaje trae fromMe, kind, teléfono de quien escribe y la transcripción de las notas de voz. since = solo lo nuevo (orden ascendente, paginar con nextSince); before = hacia atrás. No marca como leído.',
+    schema: z.object({
+      chat: z.string().min(1).max(300),
+      since: z.string().datetime({ offset: true }).optional(),
+      before: z.string().datetime({ offset: true }).optional(),
+      kinds: z.array(z.enum(mwa.KINDS)).max(10).optional(),
+      limit: z.number().int().min(1).max(200).optional(),
+    }),
+    run: async (_u, a, ctx) => mwa.readChat(ctx, a.chat, { limit: a.limit ?? 50, since: a.since, before: a.before, kinds: a.kinds }),
   },
   {
-    name: 'send_whatsapp',
-    description: 'Envía un mensaje de WhatsApp desde MI cuenta conectada a un chat o grupo. Solo funciona si activé «Responder desde chaggu» en esa cuenta. Confirma antes con la persona.',
-    schema: z.object({ chat: z.string().min(1).max(300), text: z.string().trim().min(1).max(4000) }),
-    run: async (userId, a) => {
-      const c = await findWa(userId, a.chat);
-      const r = await wa.sendToChat(userId, c.accountId, c.jid, a.text);
-      return { to: c.name, account: c.account, ...r };
-    },
+    name: 'find_whatsapp_chat', readOnly: true, scope: 'whatsapp:read',
+    description: 'Busca el chat de un número de teléfono (aunque no esté guardado en la libreta) y devuelve el nombre con que se presenta.',
+    schema: z.object({ phone: z.string().min(6).max(30) }),
+    run: async (_u, a, ctx) => mwa.findByPhone(ctx, a.phone),
+  },
+  {
+    name: 'get_whatsapp_group', readOnly: true, scope: 'whatsapp:read',
+    description: 'Asunto, descripción y participantes de un grupo de WhatsApp (nombre, teléfono si se conoce, admin).',
+    schema: z.object({ chat: z.string().min(1).max(300) }),
+    run: async (_u, a, ctx) => mwa.groupInfo(ctx, a.chat),
+  },
+  {
+    name: 'search_whatsapp', readOnly: true, scope: 'whatsapp:read',
+    description: 'Busca texto dentro de mis WhatsApp compartidos (incluye notas de voz transcritas). Devuelve fragmento, chat y fecha.',
+    schema: z.object({ query: z.string().trim().min(2).max(120), since: z.string().datetime({ offset: true }).optional(), limit: z.number().int().min(1).max(50).optional() }),
+    run: async (_u, a, ctx) => mwa.search(ctx, { query: a.query, since: a.since, limit: a.limit ?? 20 }),
+  },
+  {
+    name: 'send_whatsapp', scope: 'whatsapp:send',
+    description: 'Envía un WhatsApp desde mi número a un chat (chat) o a un número nuevo (phone, con indicativo). Usa idempotency_key para que un reintento no duplique. Antes muestra a la persona destinatario, número y texto exacto y espera su sí. Errores con código: not_connected, send_disabled, forbidden_scope, integrations_disabled, invalid_phone.',
+    schema: z.object({
+      chat: z.string().min(1).max(300).optional(), phone: z.string().min(6).max(30).optional(), account: z.string().max(100).optional().describe('Número a usar si tengo varios'),
+      text: z.string().trim().min(1).max(4000), idempotency_key: z.string().min(8).max(120).optional(),
+    }),
+    run: async (_u, a, ctx) => mwa.send(ctx, { chat: a.chat, phone: a.phone, account: a.account, text: a.text, idempotencyKey: a.idempotency_key }),
+  },
+  {
+    name: 'create_whatsapp_draft', scope: 'whatsapp:draft',
+    description: 'Deja un WhatsApp listo para que la persona lo apruebe en chaggu (Enviar, Editar o Descartar), a un chat o a un número nuevo. Preferido cuando son varios mensajes. external_ref vuelve en el aviso whatsapp.draft.sent/discarded.',
+    schema: z.object({
+      chat: z.string().min(1).max(300).optional(), phone: z.string().min(6).max(30).optional(), account: z.string().max(100).optional(),
+      text: z.string().trim().min(1).max(4000), source: z.string().max(60).optional(), external_ref: z.string().max(200).optional(),
+    }),
+    run: async (_u, a, ctx) => mwa.createDraft(ctx, { chat: a.chat, phone: a.phone, account: a.account, text: a.text, source: a.source, externalRef: a.external_ref }),
+  },
+  {
+    name: 'list_whatsapp_drafts', readOnly: true, scope: 'whatsapp:draft',
+    description: 'Borradores que creó esta integración y en qué quedaron (pending, sent, discarded, failed).',
+    schema: z.object({ status: z.enum(['pending', 'sent', 'discarded', 'failed']).optional() }),
+    run: async (userId, a, ctx) => ({ drafts: await mwa.listDrafts(userId, { tokenId: ctx.tokenId, status: a.status }) }),
+  },
+  {
+    name: 'delete_whatsapp_draft', scope: 'whatsapp:draft',
+    description: 'Retira un borrador pendiente que creó esta integración.',
+    schema: z.object({ id: z.string().uuid() }),
+    run: async (userId, a, ctx) => mwa.discardDraft(userId, a.id, ctx.tokenId),
+  },
+  {
+    name: 'set_whatsapp_webhook', scope: 'whatsapp:read',
+    description: 'Avisos al instante (POST firmado) de mensajes nuevos, enviados, transcritos y borradores, SOLO de los chats listados. Reemplaza el webhook anterior de este token. Devuelve el secreto una sola vez.',
+    schema: z.object({ url: z.string().url().max(2000), chats: z.array(z.string().min(1).max(300)).max(500), events: z.array(z.enum(mwa.WEBHOOK_EVENTS)).optional() }),
+    run: async (_u, a, ctx) => mwa.setWebhook(ctx, a),
+  },
+  {
+    name: 'get_whatsapp_webhook', readOnly: true, scope: 'whatsapp:read',
+    description: 'El webhook de WhatsApp de este token (URL, eventos y chats), sin el secreto.',
+    schema: z.object({}),
+    run: async (_u, _a, ctx) => mwa.getWebhook(ctx),
+  },
+  {
+    name: 'delete_whatsapp_webhook', scope: 'whatsapp:read',
+    description: 'Apaga el webhook de WhatsApp de este token.',
+    schema: z.object({}),
+    run: async (_u, _a, ctx) => mwa.deleteWebhook(ctx),
   },
   // ---------- Correo (Gmail u Outlook conectado por la persona) ----------
   {
-    name: 'list_emails', readOnly: true,
+    name: 'list_emails', readOnly: true, scope: 'email',
     description: 'Busca o lista correos de MI buzón conectado (Gmail u Outlook). query admite texto libre; from filtra por remitente.',
     schema: z.object({
       query: z.string().trim().max(200).optional(),
@@ -366,7 +477,7 @@ const tools: Tool[] = [
     },
   },
   {
-    name: 'read_email', readOnly: true,
+    name: 'read_email', readOnly: true, scope: 'email',
     description: 'Lee un correo completo de mi buzón (valor email de list_emails).',
     schema: z.object({ email: z.string().min(3).max(500) }),
     run: async (userId, a) => {
@@ -376,7 +487,7 @@ const tools: Tool[] = [
     },
   },
   {
-    name: 'reply_email',
+    name: 'reply_email', scope: 'email',
     description: 'Responde un correo de mi buzón en el mismo hilo (Re:), desde mi cuenta, a quien lo escribió. Confirma antes con la persona.',
     schema: z.object({ email: z.string().min(3).max(500), text: z.string().trim().min(1).max(20000), cc: z.array(z.string().email()).max(20).optional() }),
     run: async (userId, a) => {
@@ -387,7 +498,7 @@ const tools: Tool[] = [
   },
   // ---------- Tareas y tickets (asuntos; los de la mesa de ayuda llegan por integración) ----------
   {
-    name: 'list_tasks', readOnly: true,
+    name: 'list_tasks', readOnly: true, scope: 'tasks:read',
     description: 'Tareas y tickets que puedo ver. mine=true: solo los asignados a mí. chat: solo las de ese chat o grupo. Incluye los tickets de la mesa de ayuda (con cliente y correo en meta) y los campos dinámicos de cada tarea (fields, que en la app son columnas). field + field_value filtran por un campo.',
     schema: z.object({
       mine: z.boolean().optional(), include_closed: z.boolean().optional(), query: z.string().max(120).optional(), limit: z.number().int().min(1).max(100).optional(),
@@ -411,7 +522,7 @@ const tools: Tool[] = [
     },
   },
   {
-    name: 'get_task', readOnly: true,
+    name: 'get_task', readOnly: true, scope: 'tasks:read',
     description: 'Detalle de una tarea o ticket: estado, responsables, datos del cliente y comentarios.',
     schema: z.object({ id: z.string().uuid() }),
     run: async (userId, a) => {
@@ -424,13 +535,13 @@ const tools: Tool[] = [
     },
   },
   {
-    name: 'comment_task',
+    name: 'comment_task', scope: 'tasks:write',
     description: 'Comenta una tarea o ticket. En los tickets de la mesa de ayuda el comentario también vuelve al sistema del cliente.',
     schema: z.object({ id: z.string().uuid(), text: z.string().trim().min(1).max(4000) }),
     run: async (userId, a) => { await issues.commentIssue(userId, a.id, a.text); return { ok: true }; },
   },
   {
-    name: 'update_task',
+    name: 'update_task', scope: 'tasks:write',
     description: 'Cambia un ticket o tarea: estado (open, in_progress, waiting, done, cancelled), responsables (por nombre o id; reemplaza la lista), fecha límite, título o campos dinámicos (fields: se mezclan con los que ya tiene; null borra un campo). Confirma antes con la persona.',
     schema: z.object({
       id: z.string().uuid(),
@@ -453,19 +564,19 @@ const tools: Tool[] = [
     },
   },
   {
-    name: 'get_task_columns', readOnly: true,
+    name: 'get_task_columns', readOnly: true, scope: 'tasks:read',
     description: 'Columnas de las tareas de un grupo: nombre, tipo (text, select = lista desplegable, number, checkbox) y las opciones de cada lista (p. ej. Tipo: Bug, Funcionalidad nueva, Mejora). Úsalo antes de crear o cambiar tareas con fields para usar las opciones válidas.',
     schema: z.object({ chat: z.string().min(1).max(200).describe('Id o nombre del grupo') }),
     run: async (userId, a) => issues.getTaskColumns(userId, findChat(await bootstrap(userId), a.chat).id),
   },
   {
-    name: 'set_task_columns',
+    name: 'set_task_columns', scope: 'tasks:write',
     description: 'Define las columnas de las tareas de un grupo (reemplaza la lista completa; trae primero las actuales con get_task_columns). type: text, select (lista desplegable con options), number o checkbox. Solo quien administra el grupo. Confirma antes con la persona.',
     schema: z.object({ chat: z.string().min(1).max(200), columns: z.array(TaskColumnInput).max(30) }),
     run: async (userId, a) => issues.setTaskColumns(userId, findChat(await bootstrap(userId), a.chat).id, { columns: a.columns }),
   },
   {
-    name: 'create_task',
+    name: 'create_task', scope: 'tasks:write',
     description: 'Crea una tarea o ticket en un chat de chaggu (por id o nombre), con responsables, fecha límite, descripción (primer comentario) y campos dinámicos opcionales (fields: columnas propias como «Servicios», «Motivo», «Ambiente»). Confirma antes con la persona.',
     schema: z.object({
       chat: z.string().min(1).max(200),
@@ -487,7 +598,7 @@ const tools: Tool[] = [
   },
   // ---------- Calendario (reuniones de chaggu en los chats donde estoy) ----------
   {
-    name: 'list_calendar', readOnly: true,
+    name: 'list_calendar', readOnly: true, scope: 'calendar',
     description: 'Mi agenda en chaggu: reuniones entre from y to (ISO). Por defecto, de hoy a 7 días.',
     schema: z.object({ from: z.string().datetime({ offset: true }).optional(), to: z.string().datetime({ offset: true }).optional(), chat: z.string().max(200).optional() }),
     run: async (userId, a) => {
@@ -500,7 +611,7 @@ const tools: Tool[] = [
     },
   },
   {
-    name: 'create_event',
+    name: 'create_event', scope: 'calendar',
     description: 'Agenda una reunión en un chat de chaggu e invita a personas (por nombre o id). Fechas ISO; zona horaria por defecto America/Bogota. Confirma antes con la persona.',
     schema: z.object({
       chat: z.string().min(1).max(200),
@@ -523,7 +634,7 @@ const tools: Tool[] = [
     },
   },
   {
-    name: 'update_event',
+    name: 'update_event', scope: 'calendar',
     description: 'Cambia o cancela una reunión que organizo (cancel=true la cancela). Confirma antes con la persona.',
     schema: z.object({
       id: z.string().uuid(), cancel: z.boolean().optional(),
@@ -544,31 +655,30 @@ const tools: Tool[] = [
     },
   },
   {
-    name: 'rsvp_event',
+    name: 'rsvp_event', scope: 'calendar',
     description: 'Respondo a una invitación: yes, no o maybe.',
     schema: z.object({ id: z.string().uuid(), answer: z.enum(['yes', 'no', 'maybe']) }),
     run: async (userId, a) => { const b = await bootstrap(userId); return { event: eventView(b, await cal.rsvp(userId, a.id, a.answer) as any) }; },
   },
   // ---------- Responder al cliente ----------
   {
-    name: 'find_client_channels', readOnly: true,
+    name: 'find_client_channels', readOnly: true, scope: 'chats:read',
     description: 'Para responderle a un cliente: busca su nombre, empresa, correo o teléfono en mis chats de chaggu, mis WhatsApp y mi correo, y devuelve por dónde puedo escribirle.',
     schema: z.object({ client: z.string().trim().min(2).max(120).describe('Nombre, empresa, correo o teléfono del cliente') }),
-    run: async (userId, a) => {
+    run: async (userId, a, ctx) => {
       const q = fold(a.client);
       const b = await bootstrap(userId);
       const chaggu = b.conversations.map((c) => chatView(b, c)).filter((c) => fold(`${c.name} ${c.group ?? ''}`).includes(q)).slice(0, 8)
         .map((c) => ({ channel: 'chaggu', chat: c.id, name: c.name, group: c.group, canReply: c.canPost, lastMessageAt: c.lastMessageAt }));
-      const accounts = await wa.listAccounts(userId);
-      const whatsapp = accounts.length ? (await wa.listChats(userId, { search: a.client, limit: 8 })).chats.map((c) => {
-        const acc = accounts.find((x) => x.id === c.accountId);
-        return { channel: 'whatsapp', chat: `${c.accountId}|${c.jid}`, name: c.name, account: c.accountLabel, isGroup: c.isGroup, lastMessageAt: c.lastMessageAt, canReply: !!acc?.sendEnabled && acc?.status === 'connected' };
-      }) : [];
-      const active = (await mailbox.listConnections(userId)).filter((c) => c.status === 'active');
+      const whatsapp = can(ctx, 'whatsapp:read') ? [
+        ...(/\d{7,}/.test(a.client.replace(/\D/g, '')) ? (await mwa.findByPhone(ctx, a.client).catch(() => ({ chats: [] as any[] }))).chats : []),
+        ...(await mwa.listChats(ctx, { query: a.client, limit: 8 })).chats,
+      ].map((c: any) => ({ channel: 'whatsapp', ...c })) : [];
+      const active = can(ctx, 'email') ? (await mailbox.listConnections(userId)).filter((c) => c.status === 'active') : [];
       const mails = (await Promise.all(active.map((c) => mailbox.listMail(userId, { provider: c.provider, box: 'all', q: a.client }).catch(() => ({ items: [] as any[] })))))
         .flatMap((l) => l.items).slice(0, 5)
         .map((m) => ({ channel: 'email', email: `${m.provider}|${m.id}`, from: m.from, subject: m.subject, date: m.date, canReply: true }));
-      const tickets = (await issues.listIssues(userId, { open: false })).filter((i) => i.externalMeta && fold(JSON.stringify(i.externalMeta) + i.title).includes(q)).slice(0, 5)
+      const tickets = !can(ctx, 'tasks:read') ? [] : (await issues.listIssues(userId, { open: false })).filter((i) => i.externalMeta && fold(JSON.stringify(i.externalMeta) + i.title).includes(q)).slice(0, 5)
         .map((i) => ({ channel: 'ticket', task: i.id, title: i.title, status: i.status, meta: i.externalMeta }));
       return { chaggu, whatsapp, email: mails, tickets };
     },
@@ -580,8 +690,10 @@ const tools: Tool[] = [
 const VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
 
 const INSTRUCTIONS = [
-  'chaggu es el chat entre equipos de distintas empresas, con WhatsApp, correo y tareas/tickets en un solo lugar. Todo se hace como la persona dueña del token: solo ves y escribes lo que ella puede.',
-  'Nunca envíes nada (chaggu, WhatsApp, correo, comentario de ticket) sin mostrar antes destinatario, canal y texto exacto y recibir un sí explícito.',
+  'chaggu es el chat entre equipos de distintas empresas, con WhatsApp, correo y tareas/tickets en un solo lugar. Todo se hace como la persona dueña del token: solo ves y escribes lo que ella puede, y solo los números o chats de WhatsApp que compartió con esta integración.',
+  'Nunca envíes nada (chaggu, WhatsApp, correo, comentario de ticket) sin mostrar antes destinatario, canal, número y texto exacto y recibir un sí explícito. Si son varios mensajes, muéstralos todos juntos y pide un solo sí, o usa create_whatsapp_draft para que la persona los apruebe en chaggu.',
+  'En WhatsApp lee solo lo necesario para la tarea; no resumas ni repitas chats personales que no te pidieron.',
+  'Encargos personales (p. ej. «escríbele a 3 ferreterías y pídeles cotización»): consigue los números (de la persona, de find_whatsapp_chat o buscando en la web), propón un mensaje corto y cordial que diga quién escribe y qué necesita, muestra la lista de números con el texto, y tras el sí usa send_whatsapp con phone e idempotency_key. Después revisa las respuestas con read_whatsapp (since) y resúmelas.',
   'REGLA DE TICKETS: cuando termines de resolver o arreglar un ticket, caso, error o pedido de un cliente (aunque lo hayas resuelto en código, fuera de chaggu), pregúntale a la persona si quiere responderle al cliente desde aquí.',
   'Para eso usa find_client_channels (y get_task si hay ticket) y ofrécele los canales encontrados: WhatsApp, correo, chat de chaggu o comentario en el ticket. Propón un borrador breve y claro en el idioma del cliente, sin detalles internos ni secretos, y espera su confirmación antes de enviarlo.',
   'Después de responder, ofrece marcar el ticket como done con update_task.',
@@ -601,7 +713,8 @@ function describeTool(t: Tool) {
   return { name: t.name, description: t.description, inputSchema: schema, annotations: { readOnlyHint: !!t.readOnly, destructiveHint: false, openWorldHint: !t.readOnly } };
 }
 
-async function handleOne(userId: string, msg: any) {
+async function handleOne(ctx: McpCtx, msg: any) {
+  const userId = ctx.userId;
   if (!msg || msg.jsonrpc !== '2.0' || typeof msg.method !== 'string') return rpcError(msg?.id, -32600, 'Invalid Request');
   const isNotification = msg.id === undefined;
   if (isNotification) return null;
@@ -619,19 +732,26 @@ async function handleOne(userId: string, msg: any) {
       };
     }
     case 'ping': return { jsonrpc: '2.0', id: msg.id, result: {} };
-    case 'tools/list': return { jsonrpc: '2.0', id: msg.id, result: { tools: tools.map(describeTool) } };
+    case 'tools/list': return { jsonrpc: '2.0', id: msg.id, result: { tools: tools.filter((t) => !t.scope || can(ctx, t.scope)).map(describeTool) } };
     case 'tools/call': {
       const t = tools.find((x) => x.name === msg.params?.name);
       if (!t) return rpcError(msg.id, -32602, `Herramienta desconocida: ${msg.params?.name}`);
+      const fail = (code: string, message: string) => ({ jsonrpc: '2.0', id: msg.id, result: { content: [{ type: 'text', text: `[${code}] ${message}` }], structuredContent: { error: { code, message } }, isError: true } });
+      if (t.scope && !can(ctx, t.scope)) {
+        await audit(ctx, t.name, msg.params?.arguments, null, 'forbidden_scope');
+        return fail('forbidden_scope', `Este token no tiene el permiso ${t.scope}. La persona lo cambia en chaggu › Tú › Conector para IAs.`);
+      }
       try {
         const args = t.schema.parse(msg.params?.arguments ?? {});
-        const out = await t.run(userId, args);
+        const out = await t.run(userId, args, ctx);
+        await audit(ctx, t.name, args, out, null);
         return { jsonrpc: '2.0', id: msg.id, result: { content: [{ type: 'text', text: JSON.stringify(out, null, 1) }], structuredContent: out } };
       } catch (err: any) {
-        const text = err instanceof z.ZodError ? `Datos inválidos: ${err.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ')}`
-          : err instanceof ApiError ? err.message : 'Error interno';
-        if (!(err instanceof z.ZodError) && !(err instanceof ApiError)) console.error('[mcp] fallo en', t.name, err?.message ?? err);
-        return { jsonrpc: '2.0', id: msg.id, result: { content: [{ type: 'text', text }], isError: true } };
+        if (err instanceof z.ZodError) return fail('bad_request', `Datos inválidos: ${err.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ')}`);
+        if (!(err instanceof ApiError)) console.error('[mcp] fallo en', t.name, err?.message ?? err);
+        const code = err instanceof ApiError ? (err.code === 'forbidden' && t.name.includes('whatsapp') ? 'send_disabled' : err.code) : 'internal';
+        await audit(ctx, t.name, msg.params?.arguments, null, code);
+        return fail(code, err instanceof ApiError ? err.message : 'Error interno');
       }
     }
     case 'resources/list': return { jsonrpc: '2.0', id: msg.id, result: { resources: [] } };
@@ -648,12 +768,20 @@ async function handleOne(userId: string, msg: any) {
 }
 
 /** Devuelve el cuerpo de la respuesta, o null si solo eran notificaciones (202 sin cuerpo). */
-export async function handleRpc(userId: string, body: unknown): Promise<unknown | null> {
+export async function handleRpc(ctx: McpCtx, body: unknown): Promise<unknown | null> {
   if (Array.isArray(body)) {
-    const out = (await Promise.all(body.map((m) => handleOne(userId, m)))).filter(Boolean);
+    const out = (await Promise.all(body.map((m) => handleOne(ctx, m)))).filter(Boolean);
     return out.length ? out : null;
   }
-  return handleOne(userId, body);
+  return handleOne(ctx, body);
+}
+
+/** Bitácora sin contenido: herramienta, a qué (chat, número, id) y cuántos elementos devolvió. */
+async function audit(ctx: McpCtx, tool: string, args: any, out: any, error: string | null) {
+  const target = args && typeof args === 'object' ? String(args.chat ?? args.phone ?? args.person ?? args.email ?? args.id ?? '').slice(0, 300) || null : null;
+  const items = out && typeof out === 'object' ? Object.values(out).reduce<number>((n, v) => n + (Array.isArray(v) ? v.length : 0), 0) : 0;
+  await pool.query('INSERT INTO mcp_audit (token_id, user_id, tool, target, items, ok, error) VALUES ($1,$2,$3,$4,$5,$6,$7)',
+    [ctx.tokenId, ctx.userId, tool, target, items, !error, error]).catch(() => {});
 }
 
 export const toolNames = () => tools.map((t) => t.name);

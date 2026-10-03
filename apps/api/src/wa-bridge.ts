@@ -1,3 +1,4 @@
+import { queueWaWebhooks } from './modules/mcp-wa.ts';
 import { startWaLeaseHeartbeat,waLeaseQuery } from './modules/wa-lease.ts';
 import { applyWaLocks, requireWaVisible, finishWaPrivacy, shutdownWaPrivacy,quarantineWaSession } from './modules/wa-privacy.ts';
 import { privacyAppState, PRIVACY_COLLECTIONS } from './modules/wa-privacy-hydration.ts';
@@ -20,7 +21,7 @@ import makeWASocket, { Browsers, DisconnectReason, fetchLatestWaWebVersion, jidN
 import { pool,tx } from './db.ts';
 import {
   bridgeToTieComs, chatFromWa, dbAuthState, groupRow, msgRow, notifyOwner, organizeAccount, setStatus as persistStatus, skipJid, storeMessages, tsOf,
-  upsertChats, upsertContacts, type ChatRow, type MsgRow, type Session,
+  upsertChats, upsertContacts, storeGroupMembers, type ChatRow, type MsgRow, type Session,
   storeReaction, aliasOf, rememberSenders, storeAliases,
 } from './modules/wa-sync.ts';
 
@@ -52,6 +53,7 @@ async function syncGroups(s: Session) {
   try {
     const groups = await s.sock.groupFetchAllParticipating();
     await upsertChats(s, Object.values(groups).map(groupRow));
+    await storeGroupMembers(s, Object.values(groups)).catch((e) => console.error(`[wa] ${s.id} participantes`, e?.message));
     // Los participantes traen LID y número: con eso se ponen nombres a los mensajes.
     await storeAliases(s, Object.values(groups).flatMap((g) => g.participants ?? []).map(aliasOf));
     await resolveLids(s);
@@ -278,7 +280,7 @@ async function connect(s: Session) {
   sock.ev.on('contacts.update', (c) => void upsertContacts(s, c).catch(() => {}));
   sock.ev.on('chats.upsert', (c) => void upsertChats(s, c.map(chatFromWa).filter(Boolean) as ChatRow[]).then(() => notifyOwner(s)).catch(() => {}));
   sock.ev.on('chats.update', (c) => void upsertChats(s, c.map(chatFromWa).filter(Boolean) as ChatRow[],false).then(() => notifyOwner(s)).catch(() => {}));
-  sock.ev.on('groups.upsert', (g) => void upsertChats(s, g.map(groupRow)).then(() => notifyOwner(s)).catch(() => {}));
+  sock.ev.on('groups.upsert', (g) => void upsertChats(s, g.map(groupRow)).then(() => storeGroupMembers(s, g)).then(() => notifyOwner(s)).catch(() => {}));
   sock.ev.on('groups.update', (g) => void upsertChats(s, g.filter((x) => x.id).map((x) => ({
     jid: x.id!, name: x.subject ?? null, isGroup: true, participants: x.size ?? null, description: x.desc ?? null,
   }))).then(() => notifyOwner(s)).catch(() => {}));
@@ -291,6 +293,8 @@ async function connect(s: Session) {
       const rows = messages.map((m) => msgRow(s, m)).filter(Boolean) as MsgRow[];
       const inserted = await storeMessages(s, rows, type === 'notify');
       if (inserted.length) notifyOwner(s);
+      // Avisos al instante a las integraciones que escuchan esos chats (docs/MCP.md); nunca frena el puente.
+      if (type === 'notify' && inserted.length) await queueWaWebhooks(s.id, inserted).catch((e) => console.error(`[wa] ${s.id} avisos MCP`, e?.message));
       if (type === 'notify') await bridgeToTieComs(s, inserted);
       // El nombre que se puso quien escribe (y su número junto al LID) sirve cuando no está en la libreta.
       await rememberSenders(s, messages);
@@ -361,7 +365,7 @@ async function processOutbox() {
         await waLeaseQuery(s.id,BRIDGE_ID,'SELECT 1',[ ]);
         await requireWaVisible(pool,r.account_id,r.jid);
         const sent=await s.sock.sendMessage(r.jid,{text:r.body});
-        if(sent) { const row=msgRow(s,sent); if(row) await storeMessages(s,[row],false); }
+        if(sent) { const row=msgRow(s,sent); if(row) { await storeMessages(s,[row],false); await queueWaWebhooks(s.id,[row]).catch(()=>{}); } }
         await pool.query("UPDATE wa_outbox SET status = 'sent', sent_at = now(), body = '' WHERE id = $1", [r.id]);
         notifyOwner(s);
       } catch (e: any) {

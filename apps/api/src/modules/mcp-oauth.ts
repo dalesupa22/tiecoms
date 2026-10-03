@@ -13,6 +13,7 @@ import { config } from '../config.ts';
 import { pool, tx } from '../db.ts';
 import { badRequest, notFound } from '../errors.ts';
 import { randomToken, sha256 } from '../security.ts';
+import { tokenOptions } from './mcp.ts';
 
 const ACCESS = 'chgmcp_';
 const REFRESH = 'chgmcr_';
@@ -22,7 +23,7 @@ export const resourceUrl = () => `${config.publicOrigin}/api/mcp`;
 export const resourceMetadataUrl = () => `${config.publicOrigin}/.well-known/oauth-protected-resource/api/mcp`;
 
 export function protectedResource() {
-  return { resource: resourceUrl(), authorization_servers: [config.publicOrigin], bearer_methods_supported: ['header'], scopes_supported: ['chaggu'], resource_name: 'chaggu' };
+  return { resource: resourceUrl(), authorization_servers: [config.publicOrigin], bearer_methods_supported: ['header'], scopes_supported: ['chaggu', 'chats:read', 'chats:write', 'whatsapp:read', 'whatsapp:send', 'whatsapp:draft', 'email', 'tasks:read', 'tasks:write', 'calendar'], resource_name: 'chaggu' };
 }
 
 export function authorizationServer() {
@@ -37,7 +38,7 @@ export function authorizationServer() {
     grant_types_supported: ['authorization_code', 'refresh_token'],
     code_challenge_methods_supported: ['S256'],
     token_endpoint_auth_methods_supported: ['none'],
-    scopes_supported: ['chaggu'],
+    scopes_supported: ['chaggu', 'chats:read', 'chats:write', 'whatsapp:read', 'whatsapp:send', 'whatsapp:draft', 'email', 'tasks:read', 'tasks:write', 'calendar'],
   };
 }
 
@@ -94,16 +95,21 @@ export const ApproveInput = z.object({
   codeChallenge: z.string().regex(/^[A-Za-z0-9_-]{43,128}$/),
   codeChallengeMethod: z.literal('S256'),
   state: z.string().max(2000).optional(),
+  /** Permisos que la persona dejó marcados (null/ausente = todos). */
+  scopes: z.array(z.string().max(40)).max(20).nullable().optional(),
+  /** Números de WhatsApp que la persona eligió para esta IA (ausente = los que tienen «Compartir con integraciones»). */
+  waAccountIds: z.array(z.uuid()).max(10).nullable().optional(),
 });
 
 /** La persona (con su sesión de la web) aprueba: devuelve la URL de regreso con el código. */
 export async function approve(userId: string, input: z.infer<typeof ApproveInput>) {
   await client(input.clientId, input.redirectUri);
+  const opt = await tokenOptions(userId, { scopes: input.scopes ?? null, waAccountIds: input.waAccountIds ?? null });
   const code = randomToken(32);
   await pool.query(
-    `INSERT INTO mcp_oauth_codes (code_hash, client_id, user_id, redirect_uri, code_challenge, expires_at)
-     VALUES ($1,$2,$3,$4,$5, now() + make_interval(mins => $6))`,
-    [sha256(code), input.clientId, userId, input.redirectUri, input.codeChallenge, CODE_TTL_MIN],
+    `INSERT INTO mcp_oauth_codes (code_hash, client_id, user_id, redirect_uri, code_challenge, expires_at, scopes, wa_account_ids)
+     VALUES ($1,$2,$3,$4,$5, now() + make_interval(mins => $6), $7, $8)`,
+    [sha256(code), input.clientId, userId, input.redirectUri, input.codeChallenge, CODE_TTL_MIN, opt.scopes, opt.waAccountIds],
   );
   const u = new URL(input.redirectUri);
   u.searchParams.set('code', code);
@@ -142,8 +148,8 @@ export async function token(body: Record<string, unknown>) {
       const access = ACCESS + randomToken(32);
       const refresh = REFRESH + randomToken(32);
       await c.query(
-        'INSERT INTO mcp_tokens (user_id, name, token_hash, token_hint, client_id, refresh_hash) VALUES ($1,$2,$3,$4,$5,$6)',
-        [row.user_id, String(name).slice(0, 60), sha256(access), hint(access), row.client_id, sha256(refresh)],
+        'INSERT INTO mcp_tokens (user_id, name, token_hash, token_hint, client_id, refresh_hash, scopes, wa_account_ids, client_name) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$2)',
+        [row.user_id, String(name).slice(0, 60), sha256(access), hint(access), row.client_id, sha256(refresh), row.scopes, row.wa_account_ids],
       );
       return tokenResponse(access, refresh);
     });

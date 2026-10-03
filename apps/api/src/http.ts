@@ -58,6 +58,7 @@ import * as ggSide from './modules/gg-side.ts';
 import * as mcp from './modules/mcp.ts';
 import * as agentsDirectory from './modules/agents-directory.ts';
 import * as mcpOAuth from './modules/mcp-oauth.ts';
+import * as mcpWa from './modules/mcp-wa.ts';
 import { getOrCreateDirect } from './modules/workspaces.ts';
 import * as signatures from './modules/signatures.ts';
 import * as mentions from './modules/mentions.ts';
@@ -265,12 +266,12 @@ export async function buildHttp() {
   // Streamable HTTP sin estado: POST con JSON-RPC; GET/DELETE no aplican (sin SSE ni sesiones).
   const mcpLimit = { config: { rateLimit: { max: 120, timeWindow: '1 minute', keyGenerator: (r: FastifyRequest) => `mcp:${r.headers.authorization?.slice(-12) ?? r.ip}` } } };
   app.post('/api/mcp', mcpLimit, async (req, reply) => {
-    let userId: string;
-    try { userId = await mcp.authenticate(req.headers.authorization); } catch (err) {
+    let ctx: Awaited<ReturnType<typeof mcp.authenticate>>;
+    try { ctx = await mcp.authenticate(req.headers.authorization); } catch (err) {
       reply.header('www-authenticate', `Bearer realm="chaggu", error="invalid_token", resource_metadata="${mcpOAuth.resourceMetadataUrl()}"`);
       throw err;
     }
-    const out = await mcp.handleRpc(userId, req.body);
+    const out = await mcp.handleRpc(ctx, req.body);
     if (out === null) return reply.status(202).send();
     return reply.header('cache-control', 'no-store').send(out);
   });
@@ -338,8 +339,24 @@ export async function buildHttp() {
     priv.get('/api/v1/bootstrap', async (req) => bootstrap(req.userId));
     // Tokens personales del conector MCP (se muestran una vez al crearlos).
     priv.get('/api/v1/me/mcp-tokens', async (req) => mcp.listTokens(req.userId));
-    priv.post('/api/v1/me/mcp-tokens', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (req) =>
-      mcp.createToken(req.userId, z.object({ name: z.string().trim().min(1).max(60).default('Mi IA') }).parse(req.body ?? {}).name));
+    const TokenOpts = z.object({
+      scopes: z.array(z.enum(mcp.SCOPES)).max(20).nullable().optional(),
+      expiresAt: z.iso.datetime({ offset: true }).nullable().optional(),
+      waAccountIds: z.array(z.uuid()).max(10).nullable().optional(),
+    });
+    priv.post('/api/v1/me/mcp-tokens', { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (req) => {
+      const b = TokenOpts.extend({ name: z.string().trim().min(1).max(60).default('Mi IA') }).parse(req.body ?? {});
+      return mcp.createToken(req.userId, b.name, { scopes: b.scopes, expiresAt: b.expiresAt, waAccountIds: b.waAccountIds, clientName: b.name });
+    });
+    priv.patch<{ Params: { id: string } }>('/api/v1/me/mcp-tokens/:id', async (req) => mcp.updateToken(req.userId, z.uuid().parse(req.params.id), TokenOpts.parse(req.body ?? {})));
+    // Bitácora: qué leyó o envió cada asistente (sin contenido).
+    priv.get<{ Querystring: { tokenId?: string; limit?: string } }>('/api/v1/me/mcp-activity', async (req) =>
+      mcp.activity(req.userId, { tokenId: req.query.tokenId ? z.uuid().parse(req.query.tokenId) : undefined, limit: req.query.limit ? Number(req.query.limit) : undefined }));
+    // Borradores de WhatsApp que dejaron las integraciones («Por enviar»): la persona envía, edita o descarta.
+    priv.get('/api/v1/whatsapp/drafts', async (req) => ({ drafts: await mcpWa.listDrafts(req.userId, { status: 'pending' }) }));
+    priv.post<{ Params: { id: string } }>('/api/v1/whatsapp/drafts/:id/send', { config: { rateLimit: { max: 60, timeWindow: '1 minute' } } }, async (req) =>
+      mcpWa.sendDraft(req.userId, z.uuid().parse(req.params.id), z.object({ text: z.string().trim().min(1).max(4000).optional() }).parse(req.body ?? {}).text));
+    priv.delete<{ Params: { id: string } }>('/api/v1/whatsapp/drafts/:id', async (req) => mcpWa.discardDraft(req.userId, z.uuid().parse(req.params.id)));
     priv.delete<{ Params: { id: string } }>('/api/v1/me/mcp-tokens/:id', async (req) => mcp.revokeToken(req.userId, z.uuid().parse(req.params.id)));
     // Pantalla /autorizar-ia: qué IA pide acceso, y aprobar o rechazar con la sesión de la persona.
     priv.get<{ Querystring: { client_id?: string; redirect_uri?: string } }>('/api/v1/mcp-oauth/client', async (req) =>

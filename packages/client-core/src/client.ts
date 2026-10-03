@@ -741,7 +741,7 @@ export class TieComsClient {
     }
     if (e.type === 'reminders.changed') void this.loadReminders().catch(() => {});
     if (e.type === 'scheduled.updated') this.putScheduled(e.scheduled);
-    if (e.type === 'whatsapp.updated') this.set({ waRevision: this.state.waRevision + 1 });
+    if (e.type === 'whatsapp.updated' || e.type === 'wa.drafts') this.set({ waRevision: this.state.waRevision + 1 });
     if (e.type === 'wa.privacy') this.invalidateWaPrivacy(e);
     // WhatsApp en la bandeja: la fila se reemplaza al vuelo (se movió, fijó, sacó o le entró un mensaje).
     if (e.type === 'wa.inbox') this.putWaInbox(e.chat);
@@ -2017,8 +2017,15 @@ export class TieComsClient {
   sessions() { return this.request<{ sessions: { id: string; deviceName: string; platform: string; lastSeenAt: string }[]; current: string }>('/sessions'); }
   revokeSession(id: string) { return this.request(`/sessions/${id}`, { method: 'DELETE' }); }
   // Conector MCP para IAs (Claude, Codex…): el token se muestra una sola vez.
-  mcpTokens() { return this.request<{ tokens: { id: string; name: string; tokenHint: string; createdAt: string; lastUsedAt: string | null }[] }>('/me/mcp-tokens'); }
-  createMcpToken(name: string) { return this.request<{ id: string; name: string; token: string }>('/me/mcp-tokens', { method: 'POST', json: { name } }); }
+  mcpTokens() { return this.request<{ tokens: McpTokenInfo[] }>('/me/mcp-tokens'); }
+  createMcpToken(name: string, opts: { scopes?: string[] | null; waAccountIds?: string[] | null; expiresAt?: string | null } = {}) {
+    return this.request<{ id: string; name: string; token: string }>('/me/mcp-tokens', { method: 'POST', json: { name, ...opts } });
+  }
+  updateMcpToken(id: string, opts: { scopes?: string[] | null; waAccountIds?: string[] | null; expiresAt?: string | null }) { return this.request(`/me/mcp-tokens/${id}`, { method: 'PATCH', json: opts }); }
+  mcpActivity(tokenId?: string) { return this.request<{ activity: { app: string; tool: string; target: string | null; items: number; ok: boolean; error: string | null; at: string }[] }>(`/me/mcp-activity${tokenId ? `?tokenId=${tokenId}` : ''}`); }
+  waDrafts() { return this.request<{ drafts: WaDraftInfo[] }>('/whatsapp/drafts'); }
+  sendWaDraft(id: string, text?: string) { return this.request<{ status: string; error?: string }>(`/whatsapp/drafts/${id}/send`, { method: 'POST', json: text ? { text } : {} }); }
+  discardWaDraft(id: string) { return this.request(`/whatsapp/drafts/${id}`, { method: 'DELETE' }); }
   revokeMcpToken(id: string) { return this.request(`/me/mcp-tokens/${id}`, { method: 'DELETE' }); }
 }
 
@@ -2028,3 +2035,12 @@ function upsertMessage(list: MessageDTO[], m: MessageDTO): MessageDTO[] {
   if (!list.length || list[list.length - 1]!.seq < m.seq) return [...list, m];
   return [...list, m].sort((a, b) => a.seq - b.seq);
 }
+
+/** Token del conector MCP como lo ve su dueño (Tú › Conector para IAs). */
+export interface McpTokenInfo {
+  id: string; name: string; app: string; tokenHint: string; createdAt: string; lastUsedAt: string | null; oauth: boolean;
+  scopes: string[]; expiresAt: string | null; expired: boolean; whatsapp: { mode: 'shared' | 'chosen'; numbers: string[] }; waAccountIds: string[] | null;
+  today: { tool: string; n: number }[]; webhook: boolean;
+}
+/** WhatsApp que dejó una integración para que la persona lo apruebe. */
+export interface WaDraftInfo { id: string; chat: string; to: string | null; account: string; text: string; source: string | null; externalRef: string | null; status: string; createdAt: string }

@@ -1647,8 +1647,10 @@ export const PushTokenInput = z.object({
 export interface PushData {
   /** side = mensaje de un sidechat (categoría TC_SIDE; trae sideOf). reaction = reaccionaron a mi mensaje (abre el mensaje). */
   /** call = llamada entrante (categoría TC_CALL; trae callId y kind). */
-  type: 'message' | 'reminder' | 'event' | 'side' | 'mention' | 'reaction' | 'issue' | 'call';
+  /** wa.drafts = hay WhatsApp por aprobar que dejó una integración (abrir WhatsApp › Por enviar; conversationId vacío). */
+  type: 'message' | 'reminder' | 'event' | 'side' | 'mention' | 'reaction' | 'issue' | 'call' | 'wa.drafts';
   conversationId: string;
+  count?: number;
   callId?: string;
   kind?: 'audio' | 'video';
   /** type 'issue': me asignaron esta tarea. Abrir el asunto; si inChat es false, sin abrir el chat (no lo puedo leer). */
@@ -1683,7 +1685,8 @@ export type WaStatus = 'pending' | 'qr' | 'connected' | 'reconnecting' | 'expire
 /** Número con indicativo para vincular con código de 8 letras en vez de QR (útil desde el mismo teléfono). */
 const PairPhone = z.string().trim().max(24).regex(/^[+\d\s()-]*$/, 'Solo números').nullable().optional();
 export const CreateWaAccountInput = z.object({ label: z.string().trim().min(1).max(60), kind: WaKind, pairPhone: PairPhone });
-export const UpdateWaAccountInput = z.object({ label: z.string().trim().min(1).max(60).optional(), kind: WaKind.optional(), /** Permitir responder desde chaggu con esta cuenta (apagado por defecto: solo lectura). */ sendEnabled: z.boolean().optional() });
+export const UpdateWaAccountInput = z.object({ label: z.string().trim().min(1).max(60).optional(), kind: WaKind.optional(), /** Permitir responder desde chaggu con esta cuenta (apagado por defecto: solo lectura). */ sendEnabled: z.boolean().optional(),
+  /** Compartir este número con integraciones (Claude, ChatGPT, Semillero…). Personal: apagado por defecto (docs/MCP.md). */ integrationsEnabled: z.boolean().optional() });
 /** Responder un chat de WhatsApp desde chaggu: solo si la cuenta lo tiene activado. */
 export const WaSendInput = z.object({ text: z.string().trim().min(1).max(4000) });
 export const RelinkWaAccountInput = z.object({ pairPhone: PairPhone });
@@ -1710,11 +1713,15 @@ export const UpdateWaChatInput = z.object({
   inboxPlace: z.enum(['groups', 'dms', 'auto']).nullable().optional(),
   /** true = fijarlo arriba en la bandeja (si no estaba, lo mueve con 'auto'); false = quitar de fijados. */
   inboxPinned: z.boolean().optional(),
+  /** Compartir este chat con integraciones aunque su número no esté compartido (docs/MCP.md). */
+  integrationsShared: z.boolean().optional(),
 });
 export const WaMessagesQuery = z.object({ before: z.iso.datetime().optional(), limit: z.coerce.number().int().min(1).max(200).default(60) });
 
 export interface WaAccountDTO {
   id: string;
+  /** Lo ven las integraciones (MCP). Ausente = servidor anterior. */
+  integrationsEnabled?: boolean;
   /** False mientras el puente comprueba los chats bloqueados de WhatsApp. */
   privacyReady?: boolean;
   /** ¿Se puede responder desde chaggu con esta cuenta? Por defecto no. */
@@ -1759,6 +1766,8 @@ export interface WaChatDTO {
   inboxPinnedAt?: string | null;
   /** Estado de la cuenta: si no es 'connected', la fila sale atenuada con «WhatsApp desconectado». */
   accountStatus?: WaStatus;
+  /** Compartido con integraciones aunque su número no lo esté. Ausente = servidor anterior. */
+  integrationsShared?: boolean;
 }
 export interface WaMediaDTO { status: 'pending' | 'ready' | 'failed' | 'unavailable' | 'restricted'; attachment?: AttachmentDTO | null; error?: string | null }
 export interface WaMessageDTO { media?: WaMediaDTO; id: string; fromMe: boolean; author: string | null; kind: string; body: string; sentAt: string; reactions?: { emoji: string; name: string }[] }
@@ -1821,6 +1830,8 @@ export type AccountEvent =
   | { type: 'me.sleep'; sleep: SleepDTO }
   | { type: 'person.availability'; userId: string; availability: AvailabilityDTO }
   | { type: 'whatsapp.updated'; accountId: string }
+  /** Cambiaron los WhatsApp por aprobar que dejaron las integraciones (docs/MCP.md). */
+  | { type: 'wa.drafts' }
   /** Revoca de inmediato la vista local; reset invalida toda la cuenta durante su verificación. */
   | { type: 'wa.privacy'; accountId: string; jids?: string[]; reset?: boolean }
   /** Cambió un chat de WhatsApp de la bandeja (se movió, fijó o sacó, o le entró un mensaje): reemplazar la fila por accountId+jid. */

@@ -46,6 +46,16 @@ export async function setWaSend(a: { id: string; label: string }, on: boolean): 
   } catch (e) { toast(errorText(e)); return false; }
 }
 
+/** «Compartir con integraciones» (MCP: Claude, ChatGPT, Semillero…). El personal viene apagado (docs/MCP.md). */
+export async function setWaIntegrations(a: { id: string; label: string }, on: boolean): Promise<boolean> {
+  if (on && !confirm(t('wa.intConfirm', { name: a.label }))) return false;
+  try {
+    await client.request(`/whatsapp/accounts/${a.id}`, { method: 'PATCH', json: { integrationsEnabled: on } });
+    toast(t(on ? 'wa.intOnToast' : 'wa.intOffToast'));
+    return true;
+  } catch (e) { toast(errorText(e)); return false; }
+}
+
 function when(iso: string | null) {
   if (!iso) return '';
   const d = new Date(iso);
@@ -143,6 +153,7 @@ export function WhatsAppScreen() {
         {(accounts?.length ?? 0) < max && <button className="btn primary small" onClick={() => setConnectOpen(true)}>{t('wa.connect')}</button>}
       </div>
       <p className="muted" style={{ margin: '0 0 16px', maxWidth: 680 }}>{t('wa.intro')}</p>
+      <WaDrafts revision={revision} />
 
       <div className="wa-accounts">
         {accounts?.map((a) => <AccountCard key={a.id} a={a} onChanged={loadAccounts} />)}
@@ -261,6 +272,10 @@ function AccountCard({ a, onChanged }: { a: WaAccountDTO; onChanged: () => void 
           <span><b>{t('wa.sendOpt')}</b><span className="small muted" style={{ display: 'block' }}>{t('wa.sendHint')}</span></span>
         </label>
       )}
+      <label className="wa-send-opt">
+        <input type="checkbox" checked={!!a.integrationsEnabled} disabled={busy} onChange={(e) => void run(() => setWaIntegrations(a, e.target.checked))} />
+        <span><b>{t('wa.intOpt')}</b><span className="small muted" style={{ display: 'block' }}>{t('wa.intHint')}</span></span>
+      </label>
       <div className="row" style={{ marginTop: 10, justifyContent: 'flex-end' }}>
         <button className="btn ghost small" disabled={busy} onClick={() => { if (confirm(t('wa.disconnectConfirm', { label: a.label }))) void run(() => api.remove(a.id)); }}>{t('wa.disconnect')}</button>
       </div>
@@ -412,6 +427,7 @@ function ChatPanel({ c, revision, onClose, onPatch, onChanged }: { c: WaChatDTO;
         <div className="row" style={{ flexWrap: 'wrap' }}>
           <button className="btn small" onClick={() => onPatch({ pinned: !c.pinned })}>{c.pinned ? t('wa.unpin') : t('wa.pin')}</button>
           <button className="btn small" onClick={() => onPatch({ hidden: !c.hidden })}>{c.hidden ? t('wa.unhide') : t('wa.hide')}</button>
+          <button className="btn small" title={t('wa.shareChatHint')} onClick={() => onPatch({ integrationsShared: !c.integrationsShared })}>{c.integrationsShared ? t('wa.unshareChat') : t('wa.shareChat')}</button>
           {c.categoryManual && <button className="btn ghost small" onClick={() => onPatch({ category: null })}>{t('wa.resetCategory')}</button>}
         </div>
         <label className="field" style={{ marginTop: 10 }}>
@@ -424,5 +440,40 @@ function ChatPanel({ c, revision, onClose, onPatch, onChanged }: { c: WaChatDTO;
         </label>
       </div>
     </aside>
+  );
+}
+
+/**
+ * «Por enviar»: WhatsApp que dejó una integración (Semillero, ChatGPT…) con create_whatsapp_draft. Nada sale sin que la
+ * persona toque Enviar; puede editar el texto o descartarlo. La integración recibe el resultado por su webhook.
+ */
+function WaDrafts({ revision }: { revision: number }) {
+  const [drafts, setDrafts] = useState<Awaited<ReturnType<typeof client.waDrafts>>['drafts']>([]);
+  const [edit, setEdit] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState<string | null>(null);
+  const load = useCallback(() => client.waDrafts().then((r) => setDrafts(r.drafts)).catch(() => {}), []);
+  useEffect(() => { void load(); }, [load, revision]);
+  if (!drafts.length) return null;
+  async function act(id: string, fn: () => Promise<unknown>, ok: string) {
+    setBusy(id);
+    try { await fn(); toast(ok); await load(); } catch (e) { toast(errorText(e)); } finally { setBusy(null); }
+  }
+  return (
+    <div className="card wa-drafts">
+      <div className="row"><b className="grow">{t('wa.drafts', { n: drafts.length })}</b>
+        {drafts.length > 1 && <button className="btn ghost small" disabled={!!busy} onClick={() => { if (confirm(t('wa.draftsDiscardAll'))) void Promise.all(drafts.map((d) => client.discardWaDraft(d.id))).then(load); }}>{t('wa.draftDiscardAll')}</button>}
+      </div>
+      <div className="small muted">{t('wa.draftsHint')}</div>
+      {drafts.map((d) => (
+        <div key={d.id} className="wa-draft">
+          <div className="small"><b>{d.to ?? '—'}</b> <span className="muted">· {d.account}{d.source ? ` · ${t('wa.draftFrom', { app: d.source })}` : ''}</span></div>
+          <textarea className="input" value={edit[d.id] ?? d.text} onChange={(e) => setEdit({ ...edit, [d.id]: e.target.value })} />
+          <div className="row" style={{ gap: 8 }}>
+            <button className="btn primary small" disabled={busy === d.id || !(edit[d.id] ?? d.text).trim()} onClick={() => void act(d.id, () => client.sendWaDraft(d.id, edit[d.id] !== undefined && edit[d.id] !== d.text ? edit[d.id] : undefined), t('wa.draftSent'))}>{t('wa.draftSend')}</button>
+            <button className="btn ghost small" disabled={busy === d.id} onClick={() => void act(d.id, () => client.discardWaDraft(d.id), t('wa.draftDiscarded'))}>{t('wa.draftDiscard')}</button>
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }

@@ -26,6 +26,8 @@ import { cleanupPending as cleanupAttachments } from './modules/attachments.ts';
 import { transcribeAttachment } from './modules/voice.ts';
 import { deliverIntegrationEvent } from './modules/integration-events.ts';
 import { deliverAgentEvent } from './modules/agents.ts';
+import { deliverWebhook as deliverMcpWebhook, queueSharedVoiceNotes, transcribeWaVoice } from './modules/mcp-wa.ts';
+import { pushWaDrafts } from './modules/push.ts';
 import { reapCalls, summarizeCall } from './modules/calls.ts';
 
 const WORKER_ID = `${hostname()}:${process.pid}`;
@@ -59,6 +61,11 @@ const handlers: Record<string, Handler> = {
   async 'integration.deliver'(p) { await deliverIntegrationEvent(p.deliveryId); },
   /** Webhook de un agente miembro: le escribieron, lo mencionaron o le respondieron (docs/AGENTES.md). */
   async 'agent.deliver'(p) { await deliverAgentEvent(p.deliveryId); },
+  /** Conector MCP (docs/MCP.md): avisos de WhatsApp a integraciones, notas de voz de WhatsApp y borradores por aprobar. */
+  async 'mcp.webhook'(p) { await deliverMcpWebhook(p.deliveryId); },
+  async 'wa.transcribe'(p) { await transcribeWaVoice(p); },
+  async 'push.wa_drafts'(p) { await pushWaDrafts(p.userId); },
+  async 'wa.transcribe_scan'() { const n = await queueSharedVoiceNotes(); if (n) console.log(`[worker] notas de voz de WhatsApp por transcribir: ${n}`); },
   /** Llamada entrante: push para las apps cerradas. */
   async 'push.call'(p) { await pushCall(p); },
   /** «Llamada perdida» (reemplaza el aviso de la llamada entrante). */
@@ -110,6 +117,9 @@ const handlers: Record<string, Handler> = {
   async 'housekeeping.cleanup'() {
     await pool.query("DELETE FROM outbox WHERE dispatched_at < now() - interval '3 days'");
     await pool.query("DELETE FROM jobs WHERE done_at < now() - interval '7 days'");
+    await pool.query("DELETE FROM mcp_audit WHERE created_at < now() - interval '90 days'");
+    await pool.query("DELETE FROM mcp_webhook_deliveries WHERE created_at < now() - interval '14 days'");
+    await pool.query("DELETE FROM mcp_idempotency WHERE created_at < now() - interval '24 hours'");
     await pool.query("DELETE FROM sessions WHERE (revoked_at < now() - interval '30 days') OR (expires_at < now() - interval '30 days')");
     await pool.query("DELETE FROM socket_io_attachments WHERE created_at < now() - interval '1 hour'");
     await pool.query("DELETE FROM audit_events WHERE created_at < now() - interval '24 months'");
@@ -126,9 +136,9 @@ const handlers: Record<string, Handler> = {
 async function schedule() {
   const minute = Math.floor(Date.now() / 60_000);
   await pool.query(
-    `INSERT INTO jobs (kind, dedupe_key) VALUES ('housekeeping.expire_guests', $1), ('housekeeping.cleanup', $2), ('housekeeping.availability', $3)
+    `INSERT INTO jobs (kind, dedupe_key) VALUES ('housekeeping.expire_guests', $1), ('housekeeping.cleanup', $2), ('housekeeping.availability', $3), ('wa.transcribe_scan', $4)
      ON CONFLICT (dedupe_key) DO NOTHING`,
-    [`expire:${minute}`, `cleanup:${Math.floor(minute / 60)}`, `availability:${minute}`],
+    [`expire:${minute}`, `cleanup:${Math.floor(minute / 60)}`, `availability:${minute}`, `wa-transcribe:${minute}`],
   );
   // Resumen de enlaces: los lunes desde las 13:00 UTC (8:00 en Colombia), una vez por semana.
   const now = new Date();

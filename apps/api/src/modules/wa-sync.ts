@@ -269,6 +269,22 @@ export function chatFromWa(c: Partial<Chat>): ChatRow | null {
   };
 }
 
+/** Participantes de cada grupo (para get_whatsapp_group del MCP): jid, número si WhatsApp lo da y si es admin. */
+export async function storeGroupMembers(s: Session, groups: GroupMetadata[]) {
+  const list = groups.filter((g) => g.id && Array.isArray(g.participants));
+  for (let i = 0; i < list.length; i += 200) {
+    const part = list.slice(i, i + 200);
+    await waLeaseQuery(s.id, s.leaseOwner,
+      `UPDATE wa_chats c SET members = t.members FROM unnest($2::text[], $3::jsonb[]) AS t(jid, members) WHERE c.account_id = $1 AND c.jid = t.jid`,
+      [s.id, part.map((g) => g.id), part.map((g) => JSON.stringify((g.participants ?? []).slice(0, 1100).map((p: any) => ({
+        jid: jidNormalizedUser(p.id) || p.id,
+        pn: p.phoneNumber ? jidNormalizedUser(p.phoneNumber) : (String(p.id).endsWith('@s.whatsapp.net') ? p.id : null),
+        admin: p.admin ?? null,
+      }))))],
+    );
+  }
+}
+
 export function groupRow(g: GroupMetadata): ChatRow {
   return { jid: g.id, name: g.subject || null, isGroup: true, participants: g.size ?? g.participants?.length ?? null, description: g.desc ?? null };
 }

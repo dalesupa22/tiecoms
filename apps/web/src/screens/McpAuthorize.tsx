@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { client, useClient } from '../app-client.ts';
 import { errorText, t } from '../i18n.ts';
 import { asset } from '../router.ts';
+import { MCP_SCOPES, McpPermsPicker, permsPayload, useWaAccounts, type McpPermsValue } from './McpPerms.tsx';
 
 /**
  * /autorizar-ia: una IA (Claude, Codex, ChatGPT…) pide entrar a chaggu por el conector MCP (docs/MCP.md).
@@ -17,6 +18,10 @@ export function McpAuthorizeScreen() {
   const [info, setInfo] = useState<{ name: string; redirectHost: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Permisos: los que pidió la IA (scope=…) o todos; WhatsApp: los números con «Compartir con integraciones».
+  const asked = (q.get('scope') ?? '').split(/\s+/).filter((x) => (MCP_SCOPES as readonly string[]).includes(x));
+  const [perms, setPerms] = useState<McpPermsValue>({ scopes: asked.length ? asked : [...MCP_SCOPES], wa: 'shared' });
+  const accounts = useWaAccounts();
   const valid = q.get('response_type') === 'code' && req.clientId && req.redirectUri && req.codeChallenge && req.codeChallengeMethod === 'S256';
 
   useEffect(() => {
@@ -27,7 +32,7 @@ export function McpAuthorizeScreen() {
 
   const go = (path: 'approve' | 'deny') => {
     setBusy(true);
-    client.request<{ redirect: string }>(`/mcp-oauth/${path}`, { method: 'POST', json: path === 'approve' ? req : { clientId: req.clientId, redirectUri: req.redirectUri, state: req.state } })
+    client.request<{ redirect: string }>(`/mcp-oauth/${path}`, { method: 'POST', json: path === 'approve' ? { ...req, ...permsPayload(perms, accounts) } : { clientId: req.clientId, redirectUri: req.redirectUri, state: req.state } })
       .then((r) => { location.href = r.redirect; }).catch((e) => { setError(errorText(e)); setBusy(false); });
   };
 
@@ -43,11 +48,12 @@ export function McpAuthorizeScreen() {
             <ul className="small" style={{ paddingLeft: 18, lineHeight: 1.6 }}>
               <li>{t('mcpAuth.can1')}</li><li>{t('mcpAuth.can2')}</li><li>{t('mcpAuth.can3')}</li>
             </ul>
-            <p className="small muted">{t('mcpAuth.only')}</p>
+            <McpPermsPicker value={perms} onChange={setPerms} accounts={accounts} />
+            <p className="small muted" style={{ marginTop: 10 }}>{t('mcpAuth.only')}</p>
             <p className="small muted">{t('mcpAuth.returnsTo', { host: info.redirectHost })}</p>
             <div className="row" style={{ gap: 8, marginTop: 14 }}>
               <button className="btn" disabled={busy} onClick={() => go('deny')}>{t('mcpAuth.deny')}</button>
-              <button className="btn primary grow" disabled={busy} onClick={() => go('approve')}>{busy ? t('common.wait') : t('mcpAuth.allow')}</button>
+              <button className="btn primary grow" disabled={busy || !perms.scopes.length} onClick={() => go('approve')}>{busy ? t('common.wait') : t('mcpAuth.allow')}</button>
             </div>
           </>
         )}

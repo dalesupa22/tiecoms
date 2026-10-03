@@ -1,4 +1,5 @@
 import { AppearanceSettings } from './Appearance.tsx';
+import { MCP_SCOPES, McpPermsPicker, permsPayload, todaySummary, useWaAccounts, type McpPermsValue } from './McpPerms.tsx';
 import { TodayTaskStats } from './TaskReports.tsx';
 import { MailConnectNudge, ProviderIcon } from './Mail.tsx';
 import { useEffect, useMemo, useState, useSyncExternalStore, type FormEvent } from 'react';
@@ -432,11 +433,16 @@ function AiConnector() {
   const [fresh, setFresh] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [perms, setPerms] = useState<McpPermsValue>({ scopes: [...MCP_SCOPES], wa: 'shared' });
+  const [expires, setExpires] = useState<'never' | '30' | '90' | '365'>('never');
+  const [activity, setActivity] = useState<Awaited<ReturnType<typeof client.mcpActivity>>['activity'] | null>(null);
+  const accounts = useWaAccounts();
   const load = () => client.mcpTokens().then((r) => setTokens(r.tokens)).catch(() => {});
   useEffect(() => { void load(); }, []);
   const endpoint = `${location.origin}/api/mcp`;
   const cmd = fresh ? `claude mcp add --transport http chaggu ${endpoint} --header "Authorization: Bearer ${fresh}"` : '';
   const copy = (text: string) => { void navigator.clipboard?.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 1500); };
+  const accLabel = (id: string) => accounts?.find((a) => a.id === id)?.label ?? '';
   return (
     <>
       <div className="eyebrow" style={{ marginBottom: 10 }}>{t('mcp.title')}</div>
@@ -445,12 +451,19 @@ function AiConnector() {
         <div className="small" style={{ marginBottom: 10 }}>URL: <code>{endpoint}</code></div>
         <div className="small muted" style={{ marginBottom: 4 }}>Claude Code / Codex:</div>
         <div className="row" style={{ gap: 8, marginBottom: 12 }}><code className="grow small" style={{ wordBreak: 'break-all' }}>{`claude mcp add --transport http chaggu ${endpoint}`}</code><button className="btn small" onClick={() => copy(`claude mcp add --transport http chaggu ${endpoint}`)}>{t('mcp.copy')}</button></div>
-        <form className="row" style={{ gap: 8, flexWrap: 'wrap' }} onSubmit={(e) => {
+        <form onSubmit={(e) => {
           e.preventDefault(); setBusy(true);
-          client.createMcpToken(name.trim() || 'Mi IA').then((r) => { setFresh(r.token); setName(''); return load(); }).catch(() => {}).finally(() => setBusy(false));
+          const expiresAt = expires === 'never' ? null : new Date(Date.now() + Number(expires) * 86400_000).toISOString();
+          client.createMcpToken(name.trim() || 'Mi IA', { ...permsPayload(perms, accounts), expiresAt }).then((r) => { setFresh(r.token); setName(''); return load(); }).catch((err) => toast(errorText(err))).finally(() => setBusy(false));
         }}>
-          <input className="grow" value={name} maxLength={60} placeholder={t('mcp.namePh')} onChange={(e) => setName(e.target.value)} />
-          <button className="btn primary" disabled={busy}>{busy ? t('common.wait') : t('mcp.create')}</button>
+          <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+            <input className="grow" value={name} maxLength={60} placeholder={t('mcp.namePh')} onChange={(e) => setName(e.target.value)} />
+            <select value={expires} onChange={(e) => setExpires(e.target.value as typeof expires)} aria-label={t('mcpPerms.expires')}>
+              <option value="never">{t('mcpPerms.never')}</option><option value="30">{t('mcpPerms.days', { n: 30 })}</option><option value="90">{t('mcpPerms.days', { n: 90 })}</option><option value="365">{t('mcpPerms.days', { n: 365 })}</option>
+            </select>
+            <button className="btn primary" disabled={busy || !perms.scopes.length}>{busy ? t('common.wait') : t('mcp.create')}</button>
+          </div>
+          <McpPermsPicker value={perms} onChange={setPerms} accounts={accounts} />
         </form>
         {fresh && (
           <div style={{ marginTop: 12 }}>
@@ -461,13 +474,53 @@ function AiConnector() {
           </div>
         )}
         {!!tokens.length && <div className="list" style={{ marginTop: 12 }}>
-          {tokens.map((tk) => (
-            <div key={tk.id} className="card conv-card">
-              <span className="grow"><b>{tk.name}</b> <span className="tag">{tk.tokenHint}</span><span className="small muted" style={{ display: 'block' }}>{tk.lastUsedAt ? t('mcp.lastUsed', { date: new Date(tk.lastUsedAt).toLocaleString(locale()) }) : t('mcp.never')}</span></span>
-              <button className="btn small" onClick={() => client.revokeMcpToken(tk.id).then(load)}>{t('mcp.revoke')}</button>
-            </div>
-          ))}
+          {tokens.map((tk) => {
+            const all = tk.scopes.length === MCP_SCOPES.length;
+            const wa = tk.scopes.some((s) => s.startsWith('whatsapp:'))
+              ? (tk.whatsapp.mode === 'shared' ? t('mcpPerms.waShared') : tk.whatsapp.numbers.length ? tk.whatsapp.numbers.join(', ') : t('mcpPerms.waNone')) : null;
+            const today = todaySummary(tk.today);
+            return (
+              <div key={tk.id} className="card conv-card">
+                <span className="grow" style={{ minWidth: 0 }}>
+                  <b>{tk.app}</b> <span className="tag">{tk.tokenHint}</span>{tk.oauth && <span className="tag">OAuth</span>}{tk.webhook && <span className="tag">{t('mcpPerms.webhook')}</span>}{tk.expired && <span className="tag">{t('mcpPerms.expired')}</span>}
+                  <span className="small muted" style={{ display: 'block' }}>{all ? t('mcpPerms.allScopes') : tk.scopes.filter((s): s is typeof MCP_SCOPES[number] => (MCP_SCOPES as readonly string[]).includes(s)).map((s) => t(`mcpPerms.${s}`)).join(' · ')}</span>
+                  {wa && <span className="small muted" style={{ display: 'block' }}>WhatsApp: {wa}</span>}
+                  <span className="small muted" style={{ display: 'block' }}>
+                    {tk.lastUsedAt ? t('mcp.lastUsed', { date: new Date(tk.lastUsedAt).toLocaleString(locale()) }) : t('mcp.never')}
+                    {tk.expiresAt && !tk.expired ? ` · ${t('mcpPerms.until', { date: new Date(tk.expiresAt).toLocaleDateString(locale()) })}` : ''}
+                  </span>
+                  {today && <span className="small" style={{ display: 'block' }}>{today}</span>}
+                </span>
+                {tk.waAccountIds && accounts && accounts.length > 0 && tk.scopes.some((s) => s.startsWith('whatsapp:')) && (
+                  <select className="small" value="" aria-label={t('mcpPerms.waNumbers')} onChange={(e) => {
+                    const id = e.target.value; if (!id) return;
+                    const next = tk.waAccountIds!.includes(id) ? tk.waAccountIds!.filter((x) => x !== id) : [...tk.waAccountIds!, id];
+                    void client.updateMcpToken(tk.id, { waAccountIds: next }).then(load).catch((err) => toast(errorText(err)));
+                  }}>
+                    <option value="">{t('mcpPerms.changeNumbers')}</option>
+                    {accounts.map((a) => <option key={a.id} value={a.id}>{tk.waAccountIds!.includes(a.id) ? '✓ ' : ''}{accLabel(a.id)}</option>)}
+                  </select>
+                )}
+                <button className="btn small" onClick={() => client.revokeMcpToken(tk.id).then(load)}>{t('mcp.revoke')}</button>
+              </div>
+            );
+          })}
         </div>}
+        <div style={{ marginTop: 10 }}>
+          <button className="btn ghost small" onClick={() => activity ? setActivity(null) : void client.mcpActivity().then((r) => setActivity(r.activity)).catch(() => {})}>{activity ? t('mcpPerms.hideActivity') : t('mcpPerms.showActivity')}</button>
+          {activity && (
+            <div className="list small" style={{ marginTop: 8 }}>
+              {!activity.length && <div className="hint">{t('mcpPerms.noActivity')}</div>}
+              {activity.map((a, i) => (
+                <div key={i} className="row" style={{ gap: 8 }}>
+                  <span className="muted" style={{ whiteSpace: 'nowrap' }}>{new Date(a.at).toLocaleString(locale(), { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
+                  <b>{a.app}</b><span>{a.tool}</span>{a.items ? <span className="muted">({a.items})</span> : null}
+                  {!a.ok && <span className="tag">{a.error}</span>}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </>
   );

@@ -505,3 +505,24 @@ export async function pushCall(p: { callId: string; userIds: string[]; callerNam
   }));
   return targets.length;
 }
+
+/** Borradores de WhatsApp que dejaron las integraciones (docs/MCP.md): un aviso agrupado con cuántos hay por aprobar. */
+export async function pushWaDrafts(userId: string) {
+  const { rows } = await pool.query("SELECT count(*)::int AS n, (array_agg(to_label ORDER BY created_at DESC))[1] AS last FROM wa_drafts WHERE user_id = $1 AND status = 'pending'", [userId]);
+  const n = rows[0]?.n ?? 0;
+  if (!n) return 0;
+  const { rows: targets } = await pool.query<Target>(
+    `SELECT u.id AS user_id, ps.id AS sub_id, ps.provider, ps.token, ps.environment, ps.lang
+       FROM users u ${ACTIVE_SESSION} WHERE u.id = $1 AND u.disabled_at IS NULL`,
+    [userId],
+  );
+  await deliver(targets, (t) => ({
+    title: t.lang === 'en' ? 'WhatsApp to approve' : 'WhatsApp por aprobar',
+    subtitle: null,
+    body: t.lang === 'en' ? `${n} message${n === 1 ? '' : 's'} ready to send${rows[0].last ? ` (latest to ${rows[0].last})` : ''}`
+      : `${n} mensaje${n === 1 ? '' : 's'} listo${n === 1 ? '' : 's'} para enviar${rows[0].last ? ` (el último a ${rows[0].last})` : ''}`,
+    threadId: 'wa-drafts', category: 'TC_WA_DRAFTS', collapseId: 'wa-drafts',
+    data: { type: 'wa.drafts', conversationId: '', count: n },
+  }));
+  return targets.length;
+}

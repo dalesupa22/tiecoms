@@ -2449,3 +2449,12 @@ body.is-pane-resizing, body.is-pane-resizing * { user-select: none !important; }
   .agents-stats > div { flex: 1 1 30%; padding: 8px 10px; }
 }
 .input.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+/* Conector MCP: permisos por IA (screens/McpPerms.tsx). */
+.mcp-perms { margin-top: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; }
+.mcp-perms-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 4px 12px; }
+.mcp-perm { display: flex; gap: 6px; align-items: center; cursor: pointer; }
+.wa-drafts { margin-bottom: 14px; padding: 12px 14px; }
+.wa-draft { padding: 10px 0; border-top: 1px solid var(--line); }
+.wa-draft:first-of-type { border-top: 0; }
+.wa-draft textarea { width: 100%; min-height: 60px; margin: 6px 0; }

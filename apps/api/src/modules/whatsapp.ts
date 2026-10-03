@@ -21,6 +21,7 @@ async function toAccountDTO(r: any): Promise<WaAccountDTO> {
     id: r.id,
     privacyReady: r.privacy_ready === true,
     sendEnabled: r.send_enabled === true,
+    integrationsEnabled: r.integrations_enabled === true,
     label: r.label,
     kind: r.kind,
     status: r.status,
@@ -65,7 +66,7 @@ export async function createAccount(userId: string, input: { label: string; kind
     const { rows: n } = await c.query('SELECT count(*)::int AS n FROM wa_accounts WHERE user_id = $1 AND removed_at IS NULL', [userId]);
     if (n[0].n >= MAX_WA_ACCOUNTS) throw conflict(`Puedes conectar hasta ${MAX_WA_ACCOUNTS} cuentas de WhatsApp`);
     const { rows } = await c.query(
-      'INSERT INTO wa_accounts (user_id, label, kind, pair_phone) VALUES ($1,$2,$3,$4) RETURNING id',
+      'INSERT INTO wa_accounts (user_id, label, kind, pair_phone, integrations_enabled) VALUES ($1,$2,$3,$4,$3 = \'business\') RETURNING id',
       [userId, input.label, input.kind, phone],
     );
     return rows[0].id as string;
@@ -74,11 +75,12 @@ export async function createAccount(userId: string, input: { label: string; kind
   return (await listAccounts(userId)).find((a) => a.id === id)!;
 }
 
-export async function updateAccount(userId: string, id: string, input: { label?: string; kind?: 'personal' | 'business'; sendEnabled?: boolean }) {
+export async function updateAccount(userId: string, id: string, input: { label?: string; kind?: 'personal' | 'business'; sendEnabled?: boolean; integrationsEnabled?: boolean }) {
   await ownAccount(pool, userId, id);
   await pool.query(
-    'UPDATE wa_accounts SET label = COALESCE($3, label), kind = COALESCE($4, kind), send_enabled = COALESCE($5, send_enabled), updated_at = now() WHERE id = $1 AND user_id = $2',
-    [id, userId, input.label ?? null, input.kind ?? null, input.sendEnabled ?? null],
+    `UPDATE wa_accounts SET label = COALESCE($3, label), kind = COALESCE($4, kind), send_enabled = COALESCE($5, send_enabled),
+        integrations_enabled = COALESCE($6, integrations_enabled), updated_at = now() WHERE id = $1 AND user_id = $2`,
+    [id, userId, input.label ?? null, input.kind ?? null, input.sendEnabled ?? null, input.integrationsEnabled ?? null],
   );
   return (await listAccounts(userId)).find((a) => a.id === id)!;
 }
@@ -114,7 +116,7 @@ export async function removeAccount(userId: string, id: string) {
  * Nombre y número de un jid de WhatsApp. Muchos llegan como LID (@lid): el nombre se busca por el LID
  * y por el número equivalente (wa_jid_alias). Primero la libreta, luego el pushName (wa_contacts.push_name).
  */
-const whoSql = (acc: string, jid: string) => `(SELECT
+export const whoSql = (acc: string, jid: string) => `(SELECT
     COALESCE((SELECT name FROM wa_contacts WHERE account_id = ${acc} AND jid = ${jid}),
              (SELECT k.name FROM wa_jid_alias al JOIN wa_contacts k ON k.account_id = al.account_id AND k.jid = al.pn
                WHERE al.account_id = ${acc} AND al.lid = ${jid}),
@@ -152,6 +154,7 @@ function toChatDTO(r: any): WaChatDTO {
     linkedConversationId: r.linked_conversation_id,
     inboxPlace: r.inbox_place ?? null,
     inboxPinnedAt: r.inbox_pinned_at ? new Date(r.inbox_pinned_at).toISOString() : null,
+    integrationsShared: r.integrations_shared === true,
     ...(r.account_status ? { accountStatus: r.account_status } : {}),
   };
 }
@@ -217,7 +220,7 @@ export async function ownChat(userId: string, accountId: string, jid: string) {
 
 export async function updateChat(userId: string, accountId: string, jid: string, input: {
   category?: WaCategory | null; pinned?: boolean; hidden?: boolean; linkedConversationId?: string | null;
-  inboxPlace?: 'groups' | 'dms' | 'auto' | null; inboxPinned?: boolean;
+  inboxPlace?: 'groups' | 'dms' | 'auto' | null; inboxPinned?: boolean; integrationsShared?: boolean;
 }) {
   const chat = await ownChat(userId, accountId, jid);
   // Vincular exige poder publicar en esa conversación: los mensajes entran a nombre de quien vincula.
@@ -231,10 +234,11 @@ export async function updateChat(userId: string, accountId: string, jid: string,
         hidden = COALESCE($7, hidden),
         linked_conversation_id = CASE WHEN $8 THEN $9::uuid ELSE linked_conversation_id END,
         linked_since = CASE WHEN $8 THEN (CASE WHEN $9::uuid IS NULL THEN NULL ELSE now() END) ELSE linked_since END,
+        integrations_shared = COALESCE($10, integrations_shared),
         updated_at = now()
       WHERE account_id = $1 AND jid = $2`,
     [accountId, jid, input.category ?? auto, input.category !== undefined, input.category !== null, input.pinned ?? null, input.hidden ?? null,
-      input.linkedConversationId !== undefined, input.linkedConversationId ?? null],
+      input.linkedConversationId !== undefined, input.linkedConversationId ?? null, input.integrationsShared ?? null],
   );
   // Bandeja (docs/WA-BANDEJA-GG-CHAT.md): 'auto' = grupo → Grupos, 1 a 1 → DMs; fijar sin haberlo movido lo mueve solo.
   const touchesInbox = input.inboxPlace !== undefined || input.inboxPinned !== undefined;

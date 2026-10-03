@@ -19,6 +19,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.DropdownMenu
@@ -175,32 +177,41 @@ fun ReactionChips(m: MessageDTO, data: BootstrapDTO, canReact: Boolean, onToggle
 /**
  * Barra rápida encima del menú del mensaje (como WhatsApp): 👍 ❤️ 😂 👀 ✅ 🙏 y «＋». 👀 y ✅ llevan un punto
  * si mi empresa tiene las reacciones con acción; las que ya puse van resaltadas.
+ * 1.7.13: cabe entera en un teléfono de 360 dp (7 × 36 dp + márgenes = 264 dp, por debajo del ancho máximo del menú)
+ * y el «＋» va fijo al final: si algún día no caben los emojis, se deslizan ellos, nunca el «＋».
  */
 @Composable
 fun QuickReactionBar(mine: Set<String>, actions: Boolean, onPick: (String) -> Unit, onMore: () -> Unit) {
     val ctx = LocalContext.current
-    Row(Modifier.padding(horizontal = 8.dp, vertical = 4.dp).testTag("quickReactions"), verticalAlignment = Alignment.CenterVertically) {
-        Reactions.QUICK.forEach { e ->
-            val on = e in mine
-            val hint = reactionHint(ctx, e, actions)
-            Box(
-                Modifier.size(40.dp).background(if (on) Brand.Orange.copy(alpha = 0.18f) else Color.Transparent, CircleShape)
-                    .clickable(onClickLabel = hint) { onPick(e) }
-                    .semantics { contentDescription = hint ?: e; selected = on; if (on) stateDescription = ctx.getString(R.string.react_mine_on) }
-                    .testTag("quick-$e"),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(e, fontSize = 22.sp)
-                if (hint != null) Box(Modifier.align(Alignment.BottomCenter).padding(bottom = 2.dp).size(5.dp).background(Brand.Orange, CircleShape).testTag("quickAction-$e"))
+    Row(Modifier.padding(horizontal = 6.dp, vertical = 4.dp).testTag("quickReactions"), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.weight(1f, fill = false).horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
+            Reactions.QUICK.forEach { e ->
+                val on = e in mine
+                val hint = reactionHint(ctx, e, actions)
+                Box(
+                    Modifier.size(QuickReactionSize).background(if (on) Brand.Orange.copy(alpha = 0.18f) else Color.Transparent, CircleShape)
+                        .clickable(onClickLabel = hint) { onPick(e) }
+                        .semantics { contentDescription = hint ?: e; selected = on; if (on) stateDescription = ctx.getString(R.string.react_mine_on) }
+                        .testTag("quick-$e"),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    // Tamaño fijo en dp: con la letra grande del sistema el emoji no se sale de su círculo.
+                    Text(e, fontSize = with(androidx.compose.ui.platform.LocalDensity.current) { 20.dp.toSp() })
+                    if (hint != null) Box(Modifier.align(Alignment.BottomCenter).padding(bottom = 1.dp).size(5.dp).background(Brand.Orange, CircleShape).testTag("quickAction-$e"))
+                }
             }
         }
+        Spacer(Modifier.width(2.dp))
         Box(
-            Modifier.size(40.dp).background(MaterialTheme.colorScheme.surfaceContainerHigh, CircleShape).clickable(onClick = onMore)
+            Modifier.size(QuickReactionSize).background(MaterialTheme.colorScheme.surfaceContainerHigh, CircleShape).clickable(onClick = onMore)
                 .semantics { contentDescription = ctx.getString(R.string.react_more) }.testTag("quickMore"),
             contentAlignment = Alignment.Center,
-        ) { Text("＋", fontSize = 18.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        ) { Text("＋", fontSize = with(androidx.compose.ui.platform.LocalDensity.current) { 18.dp.toSp() }, color = MaterialTheme.colorScheme.onSurfaceVariant) }
     }
 }
+
+/** Cada círculo de la barra rápida: 6 emojis + «＋» = 252 dp. */
+private val QuickReactionSize = 36.dp
 
 /** Selector completo: los emojis de trabajo más comunes y un campo que acepta un emoji del teclado del sistema. */
 @OptIn(ExperimentalLayoutApi::class)

@@ -117,6 +117,22 @@ final class V10IssueTasksTests: XCTestCase {
         XCTAssertTrue(try issue("f2").fields.isEmpty, "servidor anterior: sin campos")
     }
 
+    /// 1.7.14: archivos de una tarea.
+    func testTaskAttachmentRules() throws {
+        let json = issueJSON("a1").replacingOccurrences(of: #""commentCount":0"#, with: #""commentCount":0,"attachments":[{"id":"x1","name":"plan.pdf","contentType":"application/pdf","sizeBytes":10,"url":"/api/v1/attachments/x1"},{"bad":true}]"#)
+        let i = try dec(IssueDTO.self, json)
+        XCTAssertEqual(i.attachments.map(\.id), ["x1"], "lee los adjuntos y salta los dañados")
+        XCTAssertTrue(try issue("a2").attachments.isEmpty, "servidor anterior: sin archivos")
+        XCTAssertEqual(TaskAttachmentRules.merged(i.attachments, adding: ["n1", "x1", "n2"]), ["x1", "n1", "n2"], "los de antes primero, sin repetir")
+        let small = LocalAttachment(name: "a.txt", contentType: "text/plain", data: Data([1]))
+        XCTAssertNil(TaskAttachmentRules.problem(existing: 19, adding: [small]))
+        XCTAssertNotNil(TaskAttachmentRules.problem(existing: 20, adding: [small]), "máximo 20 por tarea")
+        let big = LocalAttachment(name: "big.mov", contentType: "video/quicktime", data: Data(count: AttachmentRules.maxBytes + 1))
+        XCTAssertEqual(TaskAttachmentRules.problem(existing: 0, adding: [big]), L("att.tooBig", ["name": "big.mov"]))
+        XCTAssertEqual(TaskAttachmentRules.title(fromFileName: "Contrato_Nestlé 2026.pdf"), "Contrato Nestlé 2026")
+        XCTAssertEqual(TaskAttachmentRules.title(fromFileName: ".pdf"), ".pdf")
+    }
+
     func testDropHasUndoToPreviousStatus() async throws {
         let s = store()
         s.issues["i4"] = try issue("i4", status: "in_progress")

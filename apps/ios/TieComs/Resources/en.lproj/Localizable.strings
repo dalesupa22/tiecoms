@@ -943,8 +943,7 @@
 "ggs.askN" = "✨ Ask gg ({n})";
 "ggs.askPlain" = "Ask gg";
 "ggs.hidePill" = "Hide “Ask gg” in this chat";
-"ggs.pillHidden" = "Done. gg is still in ⋯ › Ask gg";
-"ggs.showPill" = "Show “Ask gg” below";
+"ggs.pillHidden" = "gg hidden in this chat. Bring it back with ⋯ › Ask gg";
 "ggs.askPh" = "Ask gg about this chat…";
 "ggs.button" = "gg for this chat";
 "ggs.buttonN" = "gg for this chat · {n} waiting on you";
@@ -2992,3 +2991,14 @@
 "task.fieldNo" = "No";
 "task.fieldEmpty" = "No value";
 "task.toTomorrow" = "To tomorrow";
+"taskFiles.title" = "Files";
+"taskFiles.attach" = "Attach";
+"taskFiles.attachN" = "Attached: {n}";
+"taskFiles.empty" = "No files yet.";
+"taskFiles.uploading" = "Uploading files…";
+"taskFiles.max" = "A task can have up to {n} files.";
+"taskFiles.failedAfterCreate" = "The task was created, but the files weren’t uploaded: {error}";
+"viewer.createTask" = "Create task";
+"viewer.share" = "Share";
+"viewer.shareSystem" = "Share…";
+"viewer.forward" = "Forward to a chat";

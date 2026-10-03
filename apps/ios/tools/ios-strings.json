@@ -5992,12 +5992,8 @@
     "Hide “Ask gg” in this chat"
   ],
   "ggs.pillHidden": [
-    "Listo. gg sigue en ⋯ › Preguntar a gg",
-    "Done. gg is still in ⋯ › Ask gg"
-  ],
-  "ggs.showPill": [
-    "Mostrar «Preguntar a gg» abajo",
-    "Show “Ask gg” below"
+    "gg oculto en este chat. Vuelve con ⋯ › Preguntar a gg",
+    "gg hidden in this chat. Bring it back with ⋯ › Ask gg"
   ],
   "tasks.f.mine": [
     "Mías",
@@ -6122,5 +6118,49 @@
   "task.toTomorrow": [
     "Para mañana",
     "To tomorrow"
+  ],
+  "taskFiles.title": [
+    "Archivos",
+    "Files"
+  ],
+  "taskFiles.attach": [
+    "Adjuntar",
+    "Attach"
+  ],
+  "taskFiles.attachN": [
+    "Adjuntos: {n}",
+    "Attached: {n}"
+  ],
+  "taskFiles.empty": [
+    "Sin archivos todavía.",
+    "No files yet."
+  ],
+  "taskFiles.uploading": [
+    "Subiendo archivos…",
+    "Uploading files…"
+  ],
+  "taskFiles.max": [
+    "Una tarea puede tener hasta {n} archivos.",
+    "A task can have up to {n} files."
+  ],
+  "taskFiles.failedAfterCreate": [
+    "La tarea se creó, pero los archivos no se subieron: {error}",
+    "The task was created, but the files weren’t uploaded: {error}"
+  ],
+  "viewer.createTask": [
+    "Crear tarea",
+    "Create task"
+  ],
+  "viewer.share": [
+    "Compartir",
+    "Share"
+  ],
+  "viewer.shareSystem": [
+    "Compartir…",
+    "Share…"
+  ],
+  "viewer.forward": [
+    "Reenviar a un chat",
+    "Forward to a chat"
   ]
 }

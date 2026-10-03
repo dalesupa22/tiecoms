@@ -67,8 +67,12 @@ struct PdfSignScreen: View {
     @State private var confirmDiscard = false
     private var saved: SavedSignatures { .shared }
 
-    init(att: AttachmentDTO, startSigning: Bool) {
+    /// 1.7.14: gg, tarea y compartir abajo mientras se ve (no al firmar).
+    var actions: FileViewerActions? = nil
+
+    init(att: AttachmentDTO, startSigning: Bool, actions: FileViewerActions? = nil) {
         self.att = att
+        self.actions = actions
         _session = State(initialValue: SignSession(signing: startSigning))
     }
 
@@ -101,6 +105,7 @@ struct PdfSignScreen: View {
                 }
             }
             if session.signing, document != nil { toolbar }
+            if !session.signing, let actions { FileViewerActionBar(att: att, actions: actions) }
         }
         .background(Theme.background.ignoresSafeArea())
         .task { await load() }

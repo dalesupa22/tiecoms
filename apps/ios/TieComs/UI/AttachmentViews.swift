@@ -110,6 +110,11 @@ struct AttachmentsBlock: View {
     @State private var loadingFile: String?
     @State private var pdf: PdfOpen?
     @State private var textFile: AttachmentDTO?
+    /// El archivo abierto en Quick Look (para su barra de acciones).
+    @State private var previewAtt: AttachmentDTO?
+    @Environment(\.askGgAboutMessage) private var askGgAboutMessage
+    /// Tareas: el visor solo comparte (sin gg ni tarea nueva).
+    var shareOnly = false
 
     /// PDF abierto en el visor (ver) o directo en modo firma.
     struct PdfOpen: Identifiable { let att: AttachmentDTO; let sign: Bool; var id: String { att.id + (sign ? "-s" : "") } }
@@ -130,9 +135,32 @@ struct AttachmentsBlock: View {
             }
         }
         .sheet(item: $textFile) { UTF8FileSheet(attachment: $0) }
-        .fullScreenCover(item: $pdf) { p in PdfSignScreen(att: p.att, startSigning: p.sign) }
-        .fullScreenCover(item: $viewer) { v in MediaViewer(items: media, start: v.index) }
-        .sheet(item: Binding(get: { preview.map(URLBox.init) }, set: { preview = $0?.url })) { box in QuickLookView(url: box.url).ignoresSafeArea() }
+        .fullScreenCover(item: $pdf) { p in PdfSignScreen(att: p.att, startSigning: p.sign, actions: viewerActions) }
+        .fullScreenCover(item: $viewer) { v in MediaViewer(items: media, start: v.index, actions: viewerActions) }
+        .sheet(item: Binding(get: { preview.map(URLBox.init) }, set: { preview = $0?.url })) { box in
+            FileQuickLookScreen(url: box.url, att: previewAtt, actions: viewerActions)
+        }
+    }
+
+    private var originMessage: MessageDTO? {
+        guard let conversationId, let messageId else { return nil }
+        return store.conversations[conversationId]?.messages.first { $0.id == messageId }
+    }
+
+    /// Cierra el visor abierto y, cuando ya se fue, hace la acción (una hoja no se puede abrir encima mientras se cierra).
+    private func afterClosing(_ action: @escaping () -> Void) {
+        viewer = nil; pdf = nil; preview = nil
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: action)
+    }
+
+    /// Acciones del visor: solo con un chat donde se puede escribir (en el visor de una tarea, solo compartir).
+    private var viewerActions: FileViewerActions? {
+        if shareOnly { return FileViewerActions() }
+        guard let conversationId, let c = store.meta(conversationId) else { return nil }
+        return FileViewerActions(
+            askGg: messageId.flatMap { id in askGgAboutMessage.map { ask in { afterClosing { ask(id) } } } },
+            taskConversationId: c.canPost ? conversationId : nil,
+            origin: originMessage)
     }
 
     @ViewBuilder private func grid(_ media: [AttachmentDTO]) -> some View {
@@ -202,7 +230,7 @@ struct AttachmentsBlock: View {
             loadingFile = f.id
             Task {
                 defer { loadingFile = nil }
-                do { preview = try await AttachmentCache.shared.fileURL(f, api: store.api) } catch { store.show(L10n.errorText(error)) }
+                do { previewAtt = f; preview = try await AttachmentCache.shared.fileURL(f, api: store.api) } catch { store.show(L10n.errorText(error)) }
             }
         } label: {
             HStack(spacing: 10) {
@@ -238,6 +266,7 @@ struct MediaViewer: View {
     @Environment(\.dismiss) private var dismiss
     let items: [AttachmentDTO]
     @State var start: Int
+    var actions: FileViewerActions? = nil
 
     var body: some View {
         NavigationStack {
@@ -251,6 +280,9 @@ struct MediaViewer: View {
             }
             .tabViewStyle(.page(indexDisplayMode: items.count > 1 ? .automatic : .never))
             .background(Color.black.ignoresSafeArea())
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if let actions, items.indices.contains(start) { FileViewerActionBar(att: items[start], actions: actions, dark: true) }
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button(L("common.close")) { dismiss() }.accessibilityIdentifier("viewer.close") }
                 ToolbarItem(placement: .primaryAction) {
@@ -411,6 +443,8 @@ struct AttachButton: View {
     /// «✨ Ideas de respuesta de gg» (antes una ✨ suelta en la barra; 1.7.13).
     var onReplyIdeas: (() -> Void)? = nil
     var formatting: ComposerFormattingController? = nil
+    /// Con texto («📎 Adjuntar» en tareas) en vez del «＋» del compositor.
+    var title: String? = nil
     var onError: (String) -> Void
 
     var body: some View {
@@ -438,11 +472,16 @@ struct AttachButton: View {
             if let onMail { Button(action: onMail) { Label(L("mail.fromChat"), systemImage: "envelope") }.accessibilityIdentifier("composer.plus.mail") }
             if let onWhatsApp { Button(action: onWhatsApp) { Label(L("wa.fromChat"), systemImage: "phone.bubble") }.accessibilityIdentifier("composer.plus.whatsapp") }
         } label: {
-            Image(systemName: "plus").font(.system(size: 20, weight: .semibold)).foregroundStyle(Theme.accentText)
-                .frame(width: 36, height: 40)
+            if let title {
+                Label(title, systemImage: "paperclip").font(.subheadline.weight(.semibold)).foregroundStyle(Theme.accentText)
+                    .frame(minHeight: 44)
+            } else {
+                Image(systemName: "plus").font(.system(size: 20, weight: .semibold)).foregroundStyle(Theme.accentText)
+                    .frame(width: 36, height: 40)
+            }
         }
-        .accessibilityLabel(onEvent != nil || onIssue != nil || onMeeting != nil ? L("bar.plus") : L("att.attach"))
-        .accessibilityIdentifier("composer.attach")
+        .accessibilityLabel(title ?? (onEvent != nil || onIssue != nil || onMeeting != nil ? L("bar.plus") : L("att.attach")))
+        .accessibilityIdentifier(title != nil ? "taskFiles.attach" : "composer.attach")
         .photosPicker(isPresented: $showPhotos, selection: $photos, maxSelectionCount: max(1, AttachmentRules.maxPerMessage - staged.count - otherStagedCount),
                       matching: .any(of: [.images, .videos]), photoLibrary: .shared())
         .onChange(of: photos) { _, items in

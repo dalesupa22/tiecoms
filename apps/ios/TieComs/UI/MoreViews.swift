@@ -674,11 +674,11 @@ struct WaChatView: View {
                     WaChatMenuItems(chat: chat) { up in patched(up) }
                     Divider()
                     if store.ggSide.available != false {
-                        Button { ggOpen = true } label: { Label(L("ggs.askPlain"), systemImage: "sparkles") }
+                        Button {
+                            if ggPillHidden { GgPillPrefs.setHidden(false, source); ggPillRev += 1 }
+                            ggOpen = true
+                        } label: { Label(L("ggs.askPlain"), systemImage: "sparkles") }
                             .accessibilityIdentifier("wa.chat.gg")
-                        if ggPillHidden {
-                            Button { GgPillPrefs.setHidden(false, source); ggPillRev += 1 } label: { Label(L("ggs.showPill"), systemImage: "eye") }
-                        }
                     }
                     Button { settings = true } label: { Label(L("wa.chatSettings"), systemImage: "slider.horizontal.3") }
                         .accessibilityIdentifier("wa.chat.settings")
@@ -694,7 +694,11 @@ struct WaChatView: View {
                 VStack(spacing: 0) {
                     if store.ggSide.available != false && !ggPillHidden {
                         GgAskPill(source: source, onOpen: { ggOpen = true },
-                                  onHide: { GgPillPrefs.setHidden(true, source); ggPillRev += 1; store.show(L("ggs.pillHidden")) })
+                                  onHide: {
+                                      let s = source
+                                      GgPillPrefs.setHidden(true, s); ggPillRev += 1
+                                      store.show(L("ggs.pillHidden")) { GgPillPrefs.setHidden(false, s); ggPillRev += 1 }
+                                  })
                             .padding(.bottom, 2)
                     }
                     composer

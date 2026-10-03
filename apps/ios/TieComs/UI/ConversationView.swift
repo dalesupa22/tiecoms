@@ -205,6 +205,11 @@ struct ConversationView: View {
         Group {
             if let d = store.data, let c = store.meta(conversationId) {
                 content(d, c).modifier(removeTopicDialog)
+                    // 1.7.14: «✨ Preguntar a gg» desde el visor de un archivo cita el mensaje que lo trae.
+                    .environment(\.askGgAboutMessage, embedded || store.ggSide.available != true ? nil : { id in
+                        guard let d = store.data, let m = store.conversations[conversationId]?.messages.first(where: { $0.id == id }) else { return }
+                        showGgPill(); gg.quotes = [ggQuote(d, m)]; gg.open = true
+                    })
             } else {
                 ContentUnavailableView(L("chat.notFound"), systemImage: "lock.slash")
             }
@@ -577,14 +582,10 @@ struct ConversationView: View {
                     }
                     if (store.pins[conversationId]?.count ?? 0) > 0 { Button { sheet = .pins } label: { Label(L("pins.title"), systemImage: "pin") } }
                     Button { openSearch() } label: { Label(L("search.inChat"), systemImage: "magnifyingglass") }
-                    // gg también desde ⋯ (sobre todo si se escondió la píldora de abajo con su ✕).
+                    // gg también desde ⋯: abre la hoja y, si se había escondido con su ✕, la píldora vuelve abajo (1.7.14).
                     if store.ggSide.available != false {
-                        Button { gg.open = true } label: { Label(L("ggs.askPlain"), systemImage: "sparkles") }
+                        Button { showGgPill(); gg.open = true } label: { Label(L("ggs.askPlain"), systemImage: "sparkles") }
                             .accessibilityIdentifier("chat.menu.gg")
-                        if ggPillHidden {
-                            Button { GgPillPrefs.setHidden(false, ggSource); ggPillRev += 1 } label: { Label(L("ggs.showPill"), systemImage: "eye") }
-                                .accessibilityIdentifier("chat.menu.ggShowPill")
-                        }
                     }
                     NavigationLink(value: Route.details(conversationId)) { Label(L("chat.details"), systemImage: "info.circle") }
                 } label: { Image(systemName: "ellipsis.circle") }
@@ -607,6 +608,18 @@ struct ConversationView: View {
 
     /// ¿Escondió la píldora gg de este chat con su ✕? (ggPillRev la vuelve a leer al cambiar).
     private var ggPillHidden: Bool { let _ = ggPillRev; return GgPillPrefs.hidden(ggSource) }
+
+    /// ✕ de la píldora: se esconde en este chat con «Deshacer» y el aviso de dónde recuperarla.
+    private func hideGgPill() {
+        let source = ggSource
+        GgPillPrefs.setHidden(true, source); ggPillRev += 1
+        store.show(L("ggs.pillHidden")) { [self] in GgPillPrefs.setHidden(false, source); ggPillRev += 1 }
+    }
+
+    private func showGgPill() {
+        guard ggPillHidden else { return }
+        GgPillPrefs.setHidden(false, ggSource); ggPillRev += 1
+    }
 
     /// Línea bajo el título del chat: la empresa en un grupo (sin repetirla si el nombre ya la trae).
     private func headerSubtitle(_ d: BootstrapDTO, _ c: ConversationDTO) -> String {
@@ -1595,7 +1608,7 @@ struct ConversationView: View {
                 // 1.7.13: la entrada a gg de este chat (salió de la cabecera). Ocupa su propia fila del compositor:
                 // empuja los mensajes hacia arriba en vez de taparlos, y el aviso de descanso va debajo, aparte.
                 GgAskPill(source: ggSource, loading: gg.loadingBubbles, onOpen: { gg.open = true },
-                          onHide: { GgPillPrefs.setHidden(true, ggSource); ggPillRev += 1; store.show(L("ggs.pillHidden")) })
+                          onHide: hideGgPill)
             }
             if showQuickReplies(d, c) {
                 SideQuickReplies(onSend: { store.send(conversationId, body: $0) }, onAskOther: { addingToSide = true })

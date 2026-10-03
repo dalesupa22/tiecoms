@@ -112,7 +112,16 @@ final class Capturas1713UITests: XCTestCase {
         XCTAssertTrue(app.buttons["chat.menu.gg"].waitForExistence(timeout: 4), "⋯ › Preguntar a gg")
         sleep(1)
         shot("05-menu-preguntar-a-gg")
-        app.buttons["chat.menu.ggShowPill"].tap()
+        // 1.7.14: ⋯ › Preguntar a gg abre gg y vuelve a mostrar la píldora.
+        app.buttons["chat.menu.gg"].tap()
+        sleep(2)
+        // La hoja de gg puede pedir el permiso de IA: se cancela y se cierra la hoja.
+        let cancelAI = app.alerts.buttons["Cancelar"]
+        if cancelAI.exists { cancelAI.tap(); sleep(1) }
+        if !app.buttons["chat.menu"].isHittable {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.1)).press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.95)))
+            sleep(1)
+        }
         XCTAssertTrue(app.buttons["chat.gg"].waitForExistence(timeout: 4), "se vuelve a mostrar")
 
         // Grupo: la misma píldora; la cabecera solo con 📞 · 🔎 · ⋯.

@@ -6162,5 +6162,97 @@
   "viewer.forward": [
     "Reenviar a un chat",
     "Forward to a chat"
+  ],
+  "share.pickTitle": [
+    "Enviar a…",
+    "Send to…"
+  ],
+  "share.nFiles": [
+    "{n} archivos",
+    "{n} files"
+  ],
+  "share.onePage": [
+    "1 página",
+    "1 page"
+  ],
+  "share.nPages": [
+    "{n} páginas",
+    "{n} pages"
+  ],
+  "share.actSend": [
+    "Enviar a un chat",
+    "Send to a chat"
+  ],
+  "share.actSendSub": [
+    "Personas, grupos o varios a la vez",
+    "People, groups or several at once"
+  ],
+  "share.actSign": [
+    "Firmar",
+    "Sign"
+  ],
+  "share.actSignSub": [
+    "Abre el PDF en el firmador de chaggu (queda en «Tú»)",
+    "Opens the PDF in chaggu’s signer (kept in “You”)"
+  ],
+  "share.actAnalyze": [
+    "Analizar con gg",
+    "Analyze with gg"
+  ],
+  "share.actAnalyzeSub": [
+    "Resumen, puntos clave, fechas, montos y qué hacer",
+    "Summary, key points, dates, amounts and what to do"
+  ],
+  "share.actTask": [
+    "Crear tarea",
+    "Create task"
+  ],
+  "share.actTaskSub": [
+    "Con el archivo adjunto; eliges el grupo en chaggu",
+    "With the file attached; pick the group in chaggu"
+  ],
+  "share.actSave": [
+    "Guardar en mis archivos",
+    "Save to my files"
+  ],
+  "share.actSaveSub": [
+    "En «Mis archivos», solo para ti",
+    "In “My files”, only for you"
+  ],
+  "share.continueInApp": [
+    "Sigue en chaggu",
+    "Continue in chaggu"
+  ],
+  "share.continueHint": [
+    "Si chaggu no se abrió solo, ábrelo: lo retoma donde lo dejaste.",
+    "If chaggu didn’t open on its own, open it: it picks up where you left off."
+  ],
+  "share.ggSent": [
+    "Enviado a gg",
+    "Sent to gg"
+  ],
+  "share.savedFiles": [
+    "Guardado en Mis archivos",
+    "Saved to My files"
+  ],
+  "share.analyzePrompt": [
+    "Analiza este archivo: resumen, puntos clave, fechas, montos y qué debo hacer",
+    "Analyze this file: summary, key points, dates, amounts and what I should do"
+  ],
+  "share.chats": [
+    "Chats",
+    "Chats"
+  ],
+  "share.groups": [
+    "Grupos",
+    "Groups"
+  ],
+  "share.noResults": [
+    "Sin resultados",
+    "No results"
+  ],
+  "share.remove": [
+    "Quitar a {name}",
+    "Remove {name}"
   ]
 }

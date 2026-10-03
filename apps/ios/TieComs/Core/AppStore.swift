@@ -92,6 +92,9 @@ final class AppStore {
     var clockTick = 0
     /// Hoja «Todas las noches» (desde «No molestar» o Tú).
     var showSleepSettings = false
+    /// 1.7.15: «Crear tarea» y «Firmar» desde la extensión Compartir (los presenta la raíz).
+    var shareTask: ShareTaskRequest?
+    var shareSign: AttachmentDTO?
     /// Push de tarea tocado antes de tener sesión.
     var pendingIssue: PendingIssue?
     /// «＋ Tarea derivada» / «💬 Hablar aparte» desde el menú de un asunto.
@@ -1633,6 +1636,7 @@ final class AppStore {
         case .whatsapp: tab = .settings; settingsPath = [.whatsapp]
         case .share(let text): shareText = text ?? ""
         case .guestCall(let token): openGuestLink(token)
+        case .handoff(let id): runShareHandoff(id)
         }
     }
 
@@ -1652,6 +1656,7 @@ final class AppStore {
             return
         }
         socket.reconnectNow()
+        resumePendingShareHandoff()
         Task { await retryPushRegistration() }
         Task { await resync() }
     }

@@ -14,6 +14,8 @@ enum DeepLink: Equatable, Hashable {
     case share(text: String?)
     /// /llamada/<token>: entrar a una llamada como invitado, con o sin sesión (docs/LLAMADAS.md › Invitados por enlace).
     case guestCall(String)
+    /// chaggu://handoff/<id>: lo que dejó la extensión Compartir (crear tarea, firmar) en el App Group (1.7.15).
+    case handoff(String)
 
     static let hosts: Set<String> = ["app.chaggu.com", "chaggu.com", "www.chaggu.com",
                                      // Dominio anterior de la marca: los enlaces ya compartidos siguen abriendo la app.
@@ -51,6 +53,7 @@ enum DeepLink: Equatable, Hashable {
         case "trazo": return .trazo
         case "whatsapp": return .whatsapp
         case "llamada": return arg.flatMap { validCallToken($0) ? .guestCall($0) : nil }
+        case "handoff": return customSchemes.contains(scheme) ? arg.flatMap { valid($0) ? .handoff($0) : nil } : nil
         case "share":
             let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
             let text = ["title", "text", "url"].compactMap { k in items.first(where: { $0.name == k })?.value }.filter { !$0.isEmpty }.joined(separator: "\n")

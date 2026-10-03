@@ -102,6 +102,7 @@ targets:
       - TieComs/Core/SocketIOProtocol.swift
       - TieComs/Core/Attachments.swift
       - TieComs/Core/ShareItems.swift
+      - TieComs/Core/ShareHandoff.swift
       - TieComs/Core/Keyboard.swift
       - TieComs/Core/TextSize.swift
       - path: TieComs/Resources

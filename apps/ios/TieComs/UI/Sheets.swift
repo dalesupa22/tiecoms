@@ -213,6 +213,8 @@ struct NewIssueSheet: View {
     var prefill: GgPrefill? = nil
     /// 1.7.14: archivos de un mensaje que quedan en la tarea al crearla («Crear tarea» desde el visor).
     var attachFrom: [AttachmentDTO] = []
+    /// Archivos que ya vienen elegidos (extensión Compartir, 1.7.15).
+    var initialFiles: [LocalAttachment] = []
     /// Archivos elegidos aquí antes de guardar (se suben cuando la tarea ya existe).
     @State private var files: [LocalAttachment] = []
     @State private var uploadProgress: Double?
@@ -266,6 +268,7 @@ struct NewIssueSheet: View {
         }
         .onAppear {
             if conv.isEmpty { conv = conversationId ?? IssueTasks.personalKey }
+            if files.isEmpty && !initialFiles.isEmpty { files = initialFiles }
             if ownerId.isEmpty { ownerId = d?.me.id ?? ""; assigneeIds = ownerId.isEmpty ? [] : [ownerId] }
             if title.isEmpty, let p = prefill {
                 title = String(p.title.prefix(200))

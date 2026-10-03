@@ -108,12 +108,16 @@ final class ShareUITests: XCTestCase {
             for surface in [photos, ext, springboard] { let e = surface.descendants(matching: .any)[id]; if e.exists { return e } }
             return photos.descendants(matching: .any)[id]
         }
+        // 1.7.15: primero la pantalla de acciones; «Enviar a un chat» abre el selector.
         var waited = 0
+        while !q("share.action.send").exists && waited < 40 { usleep(500_000); waited += 1 }
+        q("share.action.send").tap()
+        waited = 0
         while !q("share.target.\(f.conversationId)").exists && waited < 40 { usleep(500_000); waited += 1 }
         shot("v4-06-extension")
         let target = q("share.target.\(f.conversationId)")
         XCTAssertTrue(target.exists, "la extensión ve la sesión y los destinos del App Group")
-        XCTAssertTrue(q("share.preview").exists, "vista previa de la foto")
+        XCTAssertTrue(q("share.search").exists, "buscador arriba en el selector")
         target.tap()
         let others = (ext.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'share.target.'")).count > 0 ? ext : photos).buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'share.target.' AND identifier != %@", "share.target.\(f.conversationId)"))
         if others.count > 0 { others.firstMatch.tap() }

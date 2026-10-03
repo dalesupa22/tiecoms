@@ -130,3 +130,35 @@ enum ShareGroupRule {
         return out.count >= 2 ? out : nil
     }
 }
+
+
+/// Selector de la extensión rediseñado (1.7.15): sin encabezados por empresa. Arriba «Recientes» (avatares), luego
+/// «Chats» (directos y de varias personas) y «Grupos», cada uno por actividad; la empresa o el grupo van de subtítulo.
+enum SharePicker {
+    struct Lists: Equatable { var recents: [ShareTargets.Target]; var chats: [ShareTargets.Target]; var groups: [ShareTargets.Target] }
+
+    static func lists(_ targets: [ShareTargets.Target], query: String, suggested: String?, recentCount: Int = 8) -> Lists {
+        let fold: (String) -> String = { $0.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil) }
+        let q = fold(query.trimmingCharacters(in: .whitespaces))
+        let byRecent = targets.sorted { ($0.lastMessageAt ?? "") > ($1.lastMessageAt ?? "") }
+        let list = byRecent.filter { q.isEmpty || fold($0.title).contains(q) || fold(subtitle($0)).contains(q) }
+        var recents: [ShareTargets.Target] = []
+        if q.isEmpty {
+            if let s = suggested, let t = targets.first(where: { $0.id == s }) { recents.append(t) }
+            for t in byRecent where recents.count < recentCount && !recents.contains(where: { $0.id == t.id }) { recents.append(t) }
+        }
+        let isChat: (ShareTargets.Target) -> Bool = { ($0.kind == "direct" || $0.kind == "multi") && !$0.isSide }
+        return Lists(recents: recents, chats: list.filter(isChat), groups: list.filter { !isChat($0) })
+    }
+
+    /// «Empresa · Espacio» sin repetir («La Mafia · La Mafia» → «La Mafia») y sin repetir el propio nombre.
+    static func subtitle(_ t: ShareTargets.Target) -> String {
+        if t.isSide { return L("side.kind") }
+        let raw = t.group ?? t.subtitle
+        var parts: [String] = []
+        for p in raw.components(separatedBy: " · ").map({ $0.trimmingCharacters(in: .whitespaces) }) where !p.isEmpty {
+            if !parts.contains(where: { $0.caseInsensitiveCompare(p) == .orderedSame }) && p.caseInsensitiveCompare(t.title) != .orderedSame { parts.append(p) }
+        }
+        return parts.joined(separator: " · ")
+    }
+}

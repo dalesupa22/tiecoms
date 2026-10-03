@@ -188,6 +188,11 @@ struct MainView: View {
                                               set: { if !$0 { store.callCenter.expanded = false } })) { CallScreen() }
         .sheet(isPresented: $store.showPushPrompt) { PushPromptView() }
         .sheet(isPresented: $store.showSleepSettings) { SleepSheet() }
+        // Desde la extensión Compartir (1.7.15): tarea nueva con el archivo y firmar un PDF.
+        .sheet(item: $store.shareTask) { r in
+            NewIssueSheet(conversationId: nil, origin: nil, prefill: r.title.count >= 2 ? GgPrefill(title: r.title) : nil, initialFiles: r.files)
+        }
+        .fullScreenCover(item: $store.shareSign) { att in PdfSignScreen(att: att, startSigning: true) }
         .sheet(isPresented: Binding(get: { store.shareText != nil }, set: { if !$0 { store.shareText = nil } })) {
             ShareIntoTieComsView(text: store.shareText ?? "")
         }

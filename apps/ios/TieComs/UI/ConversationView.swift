@@ -1604,7 +1604,9 @@ struct ConversationView: View {
             if gg.draftActive { GgDraftBar { gg.draftActive = false } }
             if let b = gg.bubbles, !b.isEmpty {
                 GgReplyBubbles(drafts: b, onPick: { putGgDraft($0.text); gg.bubbles = nil }, onClose: { gg.bubbles = nil })
-            } else if !embedded && !gg.draftActive && editing == nil && !commenting && store.ggSide.available != false && !ggPillHidden {
+            } else if !embedded && !gg.draftActive && editing == nil && !commenting && store.ggSide.available != false && !ggPillHidden
+                        // En el propio chat con gg la píldora sobra: ya se le está hablando a gg.
+                        && !(c.kind == .direct && c.memberIds.contains(GG.id)) {
                 // 1.7.13: la entrada a gg de este chat (salió de la cabecera). Ocupa su propia fila del compositor:
                 // empuja los mensajes hacia arriba en vez de taparlos, y el aviso de descanso va debajo, aparte.
                 GgAskPill(source: ggSource, loading: gg.loadingBubbles, onOpen: { gg.open = true },

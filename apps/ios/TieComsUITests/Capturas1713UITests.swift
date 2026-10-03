@@ -262,7 +262,11 @@ final class Capturas1713UITests: XCTestCase {
             for surface in [photos, ext, springboard] { let e = surface.descendants(matching: .any)[id]; if e.exists { return e } }
             return photos.descendants(matching: .any)[id]
         }
+        // 1.7.15: primero la pantalla de acciones; «Enviar a un chat» abre el selector.
         var waited = 0
+        while !q("share.action.send").exists && waited < 40 { usleep(500_000); waited += 1 }
+        q("share.action.send").tap()
+        waited = 0
         while !q("share.target.\(f.dmBrunoId)").exists && waited < 40 { usleep(500_000); waited += 1 }
         shot("30-compartir-sin-eleccion")
         q("share.target.\(f.dmBrunoId)").tap()

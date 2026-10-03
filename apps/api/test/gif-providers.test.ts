@@ -169,7 +169,7 @@ describe('memegen.link (plantillas de memes)', () => {
     minted.length = 0;
     const items = normalizeMemegen(MEMEGEN, mint);
     expect(items.map((i) => i.id)).toEqual(['memegen:drake', 'memegen:trio']);
-    expect(items[0]).toMatchObject({ provider: 'memegen', title: 'Drake Hotline Bling', boxCount: 2, attribution: expect.stringContaining('Plantilla vía memegen.link') });
+    expect(items[0]).toMatchObject({ provider: 'memegen', title: 'Drake Hotline Bling', boxCount: 2, attribution: 'Meme «Drake Hotline Bling» · vía memegen.link' });
     expect(sealed(items[0]!.previewUrl).url).toBe('https://api.memegen.link/images/drake.jpg?width=300');
     expect(sealed(items[0]!.url).url).toBe('https://api.memegen.link/images/drake.jpg?width=800');
     expect(items[1]!.boxCount).toBe(3);

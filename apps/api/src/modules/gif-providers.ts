@@ -184,7 +184,8 @@ export function normalizeMemegen(json: any, mint: Mint): GifItemDTO[] {
     const title = String(m.name ?? 'Meme').replace(/\s+/g, ' ').trim().slice(0, 80) || 'Meme';
     const lines = Math.min(6, Math.max(1, Number(m.lines) || 2));
     const sourceUrl = provenanceUrl(m.source);
-    const attribution = `Meme: «${title}» · Plantilla vía memegen.link${sourceUrl ? ` · Fuente: ${sourceUrl}` : ''} · Texto añadido en Chaggu`;
+    // Corta: va como pie del meme en el chat. La fuente queda en la procedencia (sourceUrl), no como enlace en el texto.
+    const attribution = `Meme «${title}» · vía memegen.link`;
     // memegen redimensiona con ?width= (la vista previa pesa unos 10 KB; la plantilla para el editor, ≤ 800 px).
     out.push({
       id, provider: 'memegen', title,

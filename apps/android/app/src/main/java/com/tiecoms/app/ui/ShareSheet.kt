@@ -383,7 +383,7 @@ private fun ShareBigPreview(p: Attachments.Plan) {
 private fun ShareSmallPreview(p: Attachments.Plan) {
     val first = p.files.firstOrNull()
     Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).testTag("shareSmallPreview"), verticalAlignment = Alignment.CenterVertically) {
-        if (first != null) SharedThumb(first, Modifier.size(44.dp), px = 120)
+        if (first != null) SharedThumb(first, Modifier.size(44.dp), px = 120, compact = true)
         else Box(Modifier.size(44.dp).clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.surfaceContainerHigh), contentAlignment = Alignment.Center) { Text("¶") }
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
@@ -447,7 +447,7 @@ private fun SharePreview(p: Attachments.Plan, work: WorkInfo?) {
 }
 
 @Composable
-internal fun SharedThumb(f: Attachments.Shared, modifier: Modifier = Modifier.size(84.dp), px: Int = 200) {
+internal fun SharedThumb(f: Attachments.Shared, modifier: Modifier = Modifier.size(84.dp), px: Int = 200, compact: Boolean = false) {
     val img by produceState<androidx.compose.ui.graphics.ImageBitmap?>(null, f.path) {
         value = withContext(Dispatchers.IO) {
             runCatching {
@@ -466,7 +466,8 @@ internal fun SharedThumb(f: Attachments.Shared, modifier: Modifier = Modifier.si
         val i = img
         if (i != null) Image(i, f.name, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
         if (f.kind == Attachments.Kind.VIDEO) Icon(Icons.Outlined.PlayCircle, null, tint = androidx.compose.ui.graphics.Color.White, modifier = Modifier.size(32.dp))
-        if (f.kind == Attachments.Kind.FILE) Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(6.dp)) {
+        if (f.kind == Attachments.Kind.FILE && compact) Icon(Icons.Outlined.Description, null)
+        else if (f.kind == Attachments.Kind.FILE) Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(6.dp)) {
             Icon(Icons.Outlined.Description, null)
             Text(f.name, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall)
             Text(Attachments.size(f.sizeBytes), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)

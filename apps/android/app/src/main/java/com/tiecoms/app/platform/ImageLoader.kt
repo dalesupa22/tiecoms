@@ -60,7 +60,15 @@ class ImageLoader(context: Context, base: OkHttpClient, private val privacyCheck
     fun cached(url: String, px: Int): ImageBitmap? = memory.get(key(url, px))
 
     /** Bounded authenticated bytes; once-only signed URLs bypass every disk/memory cache. */
-    suspend fun loadBytes(url: String, bearer: String?, private: Boolean = false): ByteArray? {
+    /**
+     * 1.7.14: la lectura del cuerpo va en IO. `await()` vuelve al hilo de quien llama (Main en un produceState) y, si
+     * el cuerpo no llegó junto con las cabeceras, leerlo ahí lanzaba NetworkOnMainThreadException y la imagen quedaba
+     * en blanco (se vio con las miniaturas de los archivos de una tarea).
+     */
+    suspend fun loadBytes(url: String, bearer: String?, private: Boolean = false): ByteArray? =
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { loadBytesIo(url, bearer, private) }
+
+    private suspend fun loadBytesIo(url: String, bearer: String?, private: Boolean): ByteArray? {
         val source = com.tiecoms.app.core.WaPrivacy.source(url)
         val token = source?.let { runCatching { privacyCheck(it) }.getOrNull() ?: return null }
         val transport = if (private || source != null) uncachedHttp else http

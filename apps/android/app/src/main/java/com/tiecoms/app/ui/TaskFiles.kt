@@ -88,6 +88,9 @@ object TaskUploads {
                     val a = client.uploadIssueAttachment(issueId, File(f.path), f.name, f.contentType) { sent, size ->
                         progress.value = progress.value + (issueId to Triple(n + 1, files.size, if (size > 0) sent.toFloat() / size else 0f))
                     }
+                    // Miniatura como en el chat (≤ 480 px): la lista de archivos de la tarea carga liviano.
+                    val kind = Attachments.kind(a.contentType)
+                    if (kind != Attachments.Kind.FILE) runCatching { com.tiecoms.app.platform.AttachmentUpload.thumbnail(ctx, File(f.path), kind)?.let { client.uploadThumb(a.id, it) } }
                     ok += a.id
                 } catch (e: Exception) {
                     if (e is kotlinx.coroutines.CancellationException) throw e
@@ -193,7 +196,7 @@ fun TaskFilesSection(i: IssueDTO, canEdit: Boolean) {
                 Row(Modifier.padding(6.dp), verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.size(48.dp).clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceVariant), contentAlignment = Alignment.Center) {
                         val img = if (a.isImage) rememberAttachmentImage(a, full = false, px = 160) else null
-                        if (img != null) Image(img, null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                        if (img != null) Image(img, null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize().testTag("taskFileThumb-${a.id}"))
                         else Icon(Icons.Outlined.Description, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     Spacer(Modifier.width(10.dp))

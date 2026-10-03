@@ -1181,7 +1181,7 @@ fun ConversationScreen(
                     if (TaskUploads.attach(ctx, client, iid, listOf(local)) { msg -> container.toast(msg) } > 0) container.toast(ctx.getString(R.string.fa_task_created))
                 } catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e; container.toast(errorText(ctx, e)) }
             }
-            onOpenIssue(iid)
+            // Sin saltar de pantalla: la tarjeta de la tarea aparece en el chat y el aviso confirma el adjunto.
         })
     }
     voiceIssue?.let { (t, m) -> NewIssueDialog(id, m.id, t, onClose = { voiceIssue = null }, onCreated = onOpenIssue) }

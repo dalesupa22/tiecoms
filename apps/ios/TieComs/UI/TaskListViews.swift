@@ -266,3 +266,58 @@ struct TaskFieldRow: View {
         if next != value { onSave(next) }
     }
 }
+
+/// «Archivos» en el detalle de una tarea (1.7.14): lo que tiene (vista previa y abrir, con compartir en el visor) y
+/// «📎 Adjuntar» (fotos, cámara, archivos). Sube en cuanto se eligen, con progreso; un error se queda a la vista.
+struct TaskFilesSection: View {
+    @Environment(AppStore.self) private var store
+    let issue: IssueDTO
+    @State private var picked: [LocalAttachment] = []
+    @State private var progress: Double?
+    @State private var error: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if issue.attachments.isEmpty && progress == nil {
+                Text(L("taskFiles.empty")).font(.footnote).foregroundStyle(Theme.textSecondary)
+            }
+            if !issue.attachments.isEmpty {
+                AttachmentsBlock(attachments: issue.attachments, mine: false, conversationId: issue.conversationId, shareOnly: true)
+                    .accessibilityIdentifier("taskFiles.list")
+            }
+            if let progress {
+                HStack(spacing: 8) {
+                    ProgressView(value: progress).tint(Theme.orange)
+                    Text("\(Int(progress * 100)) %").font(.caption).monospacedDigit().foregroundStyle(Theme.textSecondary)
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel(L("taskFiles.uploading"))
+                .accessibilityIdentifier("taskFiles.progress")
+            }
+            if let error {
+                Label(error, systemImage: "exclamationmark.triangle.fill").font(.footnote).foregroundStyle(.red)
+                    .accessibilityIdentifier("taskFiles.error")
+            }
+            if issue.attachments.count < TaskAttachmentRules.maxPerTask {
+                AttachButton(staged: $picked, otherStagedCount: 0, title: L("taskFiles.attach")) { error = $0 }
+                    .disabled(progress != nil)
+            }
+        }
+        .onChange(of: picked) { _, files in
+            guard !files.isEmpty else { return }
+            picked = []
+            upload(files)
+        }
+    }
+
+    private func upload(_ files: [LocalAttachment]) {
+        error = nil
+        progress = 0
+        let id = issue.id
+        Task {
+            do { try await store.attachToIssue(id, files: files) { p in Task { @MainActor in progress = p } } }
+            catch { self.error = L10n.errorText(error) }
+            progress = nil
+        }
+    }
+}

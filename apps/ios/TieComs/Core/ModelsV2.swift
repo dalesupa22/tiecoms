@@ -210,6 +210,8 @@ struct IssueDTO: Codable, Equatable, Identifiable, Sendable {
     var topicId: String?
     /// Campos propios de la tarea (migración 097): nombre → texto, número o sí/no. Vacío = sin campos o servidor anterior.
     var fields: [String: IssueFieldValue] = [:]
+    /// Archivos de la tarea (POST /issues/:id/attachments + PATCH attachmentIds). Vacío = sin archivos o servidor anterior.
+    var attachments: [AttachmentDTO] = []
 
     init(from decoder: Decoder) throws {
         let c = try container(decoder)
@@ -237,6 +239,7 @@ struct IssueDTO: Codable, Equatable, Identifiable, Sendable {
         viewerIds = c.v("viewerIds", [])
         topicId = c.o("topicId")
         fields = (try? c.decodeIfPresent([String: IssueFieldValue].self, forKey: AnyKey("fields"))) ?? [:]
+        attachments = c.lossyArray("attachments")
     }
 
     /// Restringida: 'org' (solo mi empresa) o 'private'.

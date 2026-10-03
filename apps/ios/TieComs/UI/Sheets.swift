@@ -211,6 +211,11 @@ struct NewIssueSheet: View {
     var topicId: String? = nil
     /// gg (Responder por mí › «Con acción», o «Pedir a gg»): título, responsable y fecha ya puestos; la persona confirma.
     var prefill: GgPrefill? = nil
+    /// 1.7.14: archivos de un mensaje que quedan en la tarea al crearla («Crear tarea» desde el visor).
+    var attachFrom: [AttachmentDTO] = []
+    /// Archivos elegidos aquí antes de guardar (se suben cuando la tarea ya existe).
+    @State private var files: [LocalAttachment] = []
+    @State private var uploadProgress: Double?
     @State private var conv = ""
     @State private var title = ""
     @State private var ownerId: String = ""
@@ -245,6 +250,18 @@ struct NewIssueSheet: View {
                 }
                 Toggle(L("issue.due"), isOn: $hasDue)
                 if hasDue { DatePicker(L("issue.due"), selection: $due, displayedComponents: .date) }
+            }
+            Section(L("taskFiles.title")) {
+                ForEach(attachFrom) { a in
+                    Label(a.name, systemImage: AttachmentRules.icon(a.contentType, a.name)).lineLimit(1)
+                        .accessibilityIdentifier("issue.newFile.\(a.id)")
+                }
+                StagedAttachments(staged: $files, progress: [:])
+                HStack {
+                    AttachButton(staged: $files, otherStagedCount: attachFrom.count, title: L("taskFiles.attach")) { error = $0 }
+                    Spacer()
+                    if let p = uploadProgress { ProgressView(value: p).frame(width: 90).accessibilityLabel(L("taskFiles.uploading")) }
+                }
             }
         }
         .onAppear {
@@ -281,6 +298,19 @@ struct NewIssueSheet: View {
                     : try await store.createIssue(conversationId: conv, title: title, ownerId: assigneeIds.sorted().first,
                                                   dueDate: hasDue ? IssueDates.iso(due) : nil, originMessageId: origin?.id,
                                                   topicId: conv == conversationId ? topicId : nil, assigneeIds: assigneeIds.sorted())
+                // Los archivos se suben ya con la tarea creada; si fallan, la tarea queda y se avisa.
+                if !attachFrom.isEmpty || !files.isEmpty {
+                    uploadProgress = 0
+                    do {
+                        if !attachFrom.isEmpty { try await store.copyAttachmentsToIssue(i.id, attachFrom) { p in Task { @MainActor in uploadProgress = p * 0.5 } } }
+                        if !files.isEmpty { try await store.attachToIssue(i.id, files: files) { p in Task { @MainActor in uploadProgress = 0.5 + p * 0.5 } } }
+                    } catch {
+                        dismiss()
+                        store.show(L("taskFiles.failedAfterCreate", ["error": L10n.errorText(error)]))
+                        busy = false
+                        return
+                    }
+                }
                 dismiss()
                 store.show(i.title)
             } catch { self.error = L10n.errorText(error) }

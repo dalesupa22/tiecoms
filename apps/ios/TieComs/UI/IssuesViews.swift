@@ -365,6 +365,9 @@ struct QuickAddIssue: View {
     @State private var due: String?
     @State private var pickDate = false
     @State private var busy = false
+    /// 1.7.14: archivos elegidos antes de guardar; se suben cuando la tarea ya existe.
+    @State private var files: [LocalAttachment] = []
+    @State private var uploadProgress: Double?
     @FocusState private var focused: Bool
 
     var body: some View {
@@ -430,13 +433,21 @@ struct QuickAddIssue: View {
                         }
                         .accessibilityLabel(L("issue.due"))
                         .accessibilityIdentifier("issue.quickDue")
+                        AttachButton(staged: $files, title: files.isEmpty ? L("taskFiles.attach") : L("taskFiles.attachN", ["n": files.count])) { store.show($0) }
                     }
                     .padding(.leading, 48)
+                    if !files.isEmpty {
+                        StagedAttachments(staged: $files, progress: [:]).padding(.leading, 48)
+                    }
                     if pickDate {
                         DatePicker(L("issue.pickDate"), selection: Binding(get: { IssueDates.date(due) ?? Date() }, set: { due = IssueDates.iso($0) }),
                                    displayedComponents: .date)
                             .padding(.leading, 48)
                     }
+                }
+                if let p = uploadProgress {
+                    ProgressView(value: p).tint(Theme.orange).padding(.leading, 48).accessibilityLabel(L("taskFiles.uploading"))
+                        .accessibilityIdentifier("issue.quickUploading")
                 }
             }
             .onAppear { if ownerId.isEmpty { ownerId = d.me.id; assigneeIds = [d.me.id] } }
@@ -463,9 +474,17 @@ struct QuickAddIssue: View {
         busy = true
         Task {
             do {
-                if target == IssueTasks.personalKey { _ = try await store.createPersonalIssue(title: text, dueDate: due) }
-                else { _ = try await store.createIssue(conversationId: target, title: text, ownerId: assigneeIds.sorted().first, dueDate: due, originMessageId: nil, assigneeIds: assigneeIds.sorted()) }
-                title = ""; due = nil; pickDate = false
+                let created = target == IssueTasks.personalKey
+                    ? try await store.createPersonalIssue(title: text, dueDate: due)
+                    : try await store.createIssue(conversationId: target, title: text, ownerId: assigneeIds.sorted().first, dueDate: due, originMessageId: nil, assigneeIds: assigneeIds.sorted())
+                let pending = files
+                title = ""; due = nil; pickDate = false; files = []
+                if !pending.isEmpty {
+                    uploadProgress = 0
+                    do { try await store.attachToIssue(created.id, files: pending) { p in Task { @MainActor in uploadProgress = p } } }
+                    catch { store.show(L("taskFiles.failedAfterCreate", ["error": L10n.errorText(error)])) }
+                    uploadProgress = nil
+                }
                 Haptics.tap()
             } catch { store.show(L10n.errorText(error)) }
             busy = false
@@ -1038,6 +1057,10 @@ struct IssueDetailView: View {
                         }
                         .accessibilityIdentifier("issue.fields")
                     }
+                }
+
+                question(L("taskFiles.title") + (i.attachments.isEmpty ? "" : " · \(i.attachments.count)")) {
+                    TaskFilesSection(issue: i)
                 }
 
                 if i.parentIssueId == nil && !i.isPersonal {

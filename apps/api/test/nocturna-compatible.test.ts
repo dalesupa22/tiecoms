@@ -198,4 +198,11 @@ describe.skipIf(!process.env.DATABASE_URL)('nocturna compatible: API and canonic
     const own=await req('POST','/gg/calendar/slots',b.token,body);expect(own.status).toBe(200);expect(own.json.status).toBe('needs_connect');
   });
 
+  it('event, task, mail and WhatsApp cards take emoji reactions; plain notices do not',async()=>{
+    const {appendMessage}=await import('../src/modules/messages.ts');
+    const put=async(kind:string,body:string)=>{const c=await db.pool.connect();try{await c.query('BEGIN');const m=await appendMessage(c,{conversationId:cid,authorId:a.id,kind,body} as any);await c.query('COMMIT');return (m as any).id ?? (m as any).message?.id;}finally{c.release();}};
+    for(const k of ['event.created','issue.created','mail.shared','wa.shared']){const id=await put('system',JSON.stringify({k,title:'Tarjeta'}));const r=await req('PUT',`/messages/${id}/reactions/${encodeURIComponent('👍')}`,b.token,{});expect(r.status).toBe(200);}
+    const notice=await put('system',JSON.stringify({k:'member.joined'}));expect((await req('PUT',`/messages/${notice}/reactions/${encodeURIComponent('👍')}`,b.token,{})).status).toBe(400);
+  });
+
 });

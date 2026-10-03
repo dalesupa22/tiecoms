@@ -55,15 +55,22 @@ export interface ReactResult {
   openIssueId?: string;
 }
 
+/** Tarjetas del chat (evento, tarea, correo o WhatsApp compartido) también llevan reacciones; los avisos («se unió») no. */
+const REACTABLE_CARDS = new Set(['event.created', 'issue.created', 'mail.shared', 'wa.shared']);
+function reactableCard(kind: string, body: string | null) {
+  if (kind !== 'system' || !body) return false;
+  try { return REACTABLE_CARDS.has(JSON.parse(body)?.k); } catch { return false; }
+}
+
 export async function react(userId: string, messageId: string, rawEmoji: string, on: boolean, opts: { remindAt?: string } = {}): Promise<ReactResult> {
   const emoji = normalizeEmoji(rawEmoji);
   if (!emoji) throw badRequest('Eso no es un emoji');
   return tx(async (c) => {
-    const { rows } = await c.query('SELECT id, conversation_id, seq, kind, author_id, deleted_at FROM messages WHERE id = $1', [messageId]);
+    const { rows } = await c.query('SELECT id, conversation_id, seq, kind, body, author_id, deleted_at FROM messages WHERE id = $1', [messageId]);
     const m = rows[0];
     if (!m) throw notFound('Mensaje');
     const a = await conversationAccess(c, userId, m.conversation_id, 'post', true);
-    if (m.seq <= a.historyFromSeq || m.kind !== 'text' || m.deleted_at) throw badRequest('A ese mensaje no se le puede reaccionar');
+    if (m.seq <= a.historyFromSeq || !(m.kind === 'text' || reactableCard(m.kind, m.body)) || m.deleted_at) throw badRequest('A ese mensaje no se le puede reaccionar');
     const cur = (await c.query('SELECT external_reactions FROM messages WHERE id = $1 FOR UPDATE', [messageId])).rows[0];
     const out: Omit<ReactResult, 'message'> = {};
     const actions = (await c.query('SELECT COALESCE(o.reaction_actions, true) AS on FROM users u LEFT JOIN organizations o ON o.id = u.primary_org_id WHERE u.id = $1', [userId])).rows[0]?.on !== false;

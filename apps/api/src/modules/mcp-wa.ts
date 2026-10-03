@@ -163,7 +163,7 @@ export async function groupInfo(ctx: McpCtx, ref: string) {
   let people: any[] = [];
   if (members.length) {
     const { rows } = await pool.query(
-      `SELECT m.jid, w.name, w.pn, (SELECT push_name FROM wa_contacts k WHERE k.account_id = $1 AND (k.jid = m.jid OR k.jid = w.pn)) AS push_name
+      `SELECT m.jid, w.name, w.pn, (SELECT push_name FROM wa_contacts k WHERE k.account_id = $1 AND (k.jid = m.jid OR k.jid = w.pn) AND push_name IS NOT NULL ORDER BY (k.jid = m.jid) DESC LIMIT 1) AS push_name
          FROM unnest($2::text[]) AS m(jid) LEFT JOIN LATERAL ${whoSql('$1::uuid', 'm.jid')} w ON true`,
       [c.account_id, members.map((m) => m.jid)],
     );

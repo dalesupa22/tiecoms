@@ -3716,7 +3716,7 @@
     "Ask gg about this chat…"
   ],
   "ggs.continue": [
-    "Seguir con gg",
+    "Continuar con gg",
     "Continue with gg"
   ],
   "ggs.new": [
@@ -5970,5 +5970,121 @@
   "wa.reorganize": [
     "Reorganizar",
     "Reorganise"
+  ],
+  "share.sendGroup": [
+    "Enviar en un grupo",
+    "Send in a group"
+  ],
+  "share.sendSeparately": [
+    "Enviar por separado ({n})",
+    "Send separately ({n})"
+  ],
+  "share.sentGroup": [
+    "Enviado al grupo",
+    "Sent to the group"
+  ],
+  "ggs.askPlain": [
+    "Preguntar a gg",
+    "Ask gg"
+  ],
+  "ggs.hidePill": [
+    "Ocultar «Preguntar a gg» en este chat",
+    "Hide “Ask gg” in this chat"
+  ],
+  "ggs.pillHidden": [
+    "Listo. gg sigue en ⋯ › Preguntar a gg",
+    "Done. gg is still in ⋯ › Ask gg"
+  ],
+  "ggs.showPill": [
+    "Mostrar «Preguntar a gg» abajo",
+    "Show “Ask gg” below"
+  ],
+  "tasks.f.mine": [
+    "Mías",
+    "Mine"
+  ],
+  "tasks.f.open": [
+    "Abiertas",
+    "Open"
+  ],
+  "tasks.f.done": [
+    "Hechas",
+    "Done"
+  ],
+  "tasks.sort": [
+    "Ordenar",
+    "Sort"
+  ],
+  "tasks.byDate": [
+    "Por fecha",
+    "By date"
+  ],
+  "tasks.due.overdue": [
+    "Vencidas",
+    "Overdue"
+  ],
+  "tasks.due.today": [
+    "Hoy",
+    "Today"
+  ],
+  "tasks.due.week": [
+    "Esta semana",
+    "This week"
+  ],
+  "tasks.due.later": [
+    "Más adelante",
+    "Later"
+  ],
+  "tasks.due.none": [
+    "Sin fecha",
+    "No date"
+  ],
+  "tasks.done.recent": [
+    "Hechas recientemente",
+    "Recently done"
+  ],
+  "tasks.chip.today": [
+    "Vence hoy",
+    "Due today"
+  ],
+  "tasks.chip.tomorrow": [
+    "Mañana",
+    "Tomorrow"
+  ],
+  "tasks.chip.yesterday": [
+    "Venció ayer",
+    "Due yesterday"
+  ],
+  "tasks.chip.overdueN": [
+    "Venció hace {n} días",
+    "{n} days overdue"
+  ],
+  "tasks.quiet": [
+    "Sin movimiento {n} d",
+    "No activity {n}d"
+  ],
+  "tasks.personal": [
+    "Personal",
+    "Personal"
+  ],
+  "tasks.empty.mine": [
+    "Nada pendiente para ti",
+    "Nothing waiting on you"
+  ],
+  "tasks.empty.open": [
+    "No hay tareas abiertas",
+    "No open tasks"
+  ],
+  "tasks.empty.done": [
+    "Todavía no hay tareas hechas",
+    "No finished tasks yet"
+  ],
+  "tasks.empty.hint": [
+    "Escribe abajo para añadir una tarea.",
+    "Type below to add a task."
+  ],
+  "tasks.empty.doneHint": [
+    "Lo que completes aparecerá aquí.",
+    "What you finish will show up here."
   ]
 }

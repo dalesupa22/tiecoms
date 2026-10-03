@@ -4,6 +4,9 @@ import Foundation
 enum Reactions {
     /// Barra rápida (mismo orden en web, iOS y Android).
     static let quick = ["👍", "❤️", "😂", "👀", "✅", "🙏"]
+    /// Los que caben en el menú de mantener presionado de iOS junto al «＋» sin hacer scroll, incluso en un iPhone
+    /// de 375 pt (la paleta del menú mide ~250 pt). 🙏 queda en el selector completo.
+    static let menuQuick = Array(quick.prefix(5))
     /// 👀 «Lo reviso» y ✅ «Hecho» tienen acción si la empresa la tiene activa.
     static let look = "👀"
     static let done = "✅"

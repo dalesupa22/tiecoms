@@ -173,6 +173,14 @@ final class V7GroupsReactionsTests: XCTestCase {
         for e in Reactions.common { XCTAssertNotNil(Reactions.normalize(e), "selector: \(e)") }
     }
 
+    func testMenuBarFitsWithMoreButtonVisible() {
+        // 1.7.13: con 6 emojis el «＋» solo aparecía tras hacer scroll en la paleta del menú.
+        XCTAssertLessThanOrEqual(Reactions.menuQuick.count + 1, 6, "5 emojis + «＋» caben en un iPhone de 375 pt")
+        XCTAssertTrue(Reactions.menuQuick.contains(Reactions.look))
+        XCTAssertTrue(Reactions.menuQuick.contains(Reactions.done))
+        XCTAssertEqual(Array(Reactions.quick.prefix(Reactions.menuQuick.count)), Reactions.menuQuick, "mismo orden que la barra del contrato")
+    }
+
     func testJumboOnlyForOneToThreeEmoji() {
         XCTAssertTrue(Reactions.isJumbo("😂"))
         XCTAssertTrue(Reactions.isJumbo(" 👍 👍 "))

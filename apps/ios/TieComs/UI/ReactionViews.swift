@@ -130,7 +130,8 @@ enum EmojiImage {
     }
 }
 
-/// Barra rápida de reacciones (arriba del menú del mensaje, como WhatsApp / iMessage): 👍 ❤️ 😂 👀 ✅ 🙏 y «＋».
+/// Barra rápida de reacciones (arriba del menú del mensaje, como WhatsApp / iMessage): 👍 ❤️ 😂 👀 ✅ y «＋».
+/// Son pocos a propósito: la paleta del menú hace scroll horizontal si no caben y el «＋» quedaba escondido al final.
 struct QuickReactionBar: View {
     let mineEmojis: Set<String>
     var actions: Bool
@@ -139,7 +140,7 @@ struct QuickReactionBar: View {
 
     var body: some View {
         ControlGroup {
-            ForEach(Array(Reactions.quick.enumerated()), id: \.offset) { i, e in
+            ForEach(Array(Reactions.menuQuick.enumerated()), id: \.offset) { i, e in
                 let hint = actions && e == Reactions.look ? L("react.lookHint") : actions && e == Reactions.done ? L("react.doneHint") : nil
                 Button { onPick(e) } label: {
                     Label { Text(hint ?? e) } icon: {

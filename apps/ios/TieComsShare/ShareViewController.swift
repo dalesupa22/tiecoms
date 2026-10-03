@@ -49,6 +49,7 @@ final class ShareModel {
     var progress: [String: Double] = [:]
     var error: String?
     var sentCount = 0
+    var sentToGroup = false
 
     init(context: NSExtensionContext?, opener: @escaping (URL) -> Void) {
         self.context = context
@@ -67,6 +68,9 @@ final class ShareModel {
     var attachments: [SharedItem] { items.filter(\.isAttachment) }
     var problems: [String] { ShareItems.problems(items) }
     var canSend: Bool { !selected.isEmpty && !sending && problems.isEmpty && (!attachments.isEmpty || !text.isEmpty || !comment.trimmingCharacters(in: .whitespaces).isEmpty) }
+
+    /// Personas de los directos elegidos si se puede «Enviar en un grupo»; nil si hay grupos mezclados.
+    var groupPeers: [String]? { ShareGroupRule.peers(selected: selected, in: targets) }
 
     func toggle(_ id: String) {
         if let i = selected.firstIndex(of: id) { selected.remove(at: i) }
@@ -119,7 +123,9 @@ final class ShareModel {
         }
     }
 
-    func send() async {
+    /// `asGroup`: crea (o retoma, si ya existe con las mismas personas) el chat grupal con las personas de los
+    /// directos elegidos —el mismo POST /chats que «Mensaje nuevo» de la app— y envía ahí una sola vez.
+    func send(asGroup: Bool = false) async {
         guard let apiURL, canSend else { return }
         sending = true
         error = nil
@@ -128,7 +134,13 @@ final class ShareModel {
         // Fotos de la galería no son reenvíos; un texto de WhatsApp/correo sí conserva su origen.
         let source = attachments.isEmpty && !text.isEmpty ? SharedText.detectSource(text) : nil
         do {
-            for target in selected {
+            var destinations = selected
+            if asGroup, let peers = groupPeers {
+                let chat: CreateChatResult = try await api.request("/chats", method: "POST", json: ["userIds": peers])
+                destinations = [chat.id]
+                sentToGroup = true
+            }
+            for target in destinations {
                 var ids: [String] = []
                 for item in attachments {
                     guard let file = item.asAttachment else { continue }
@@ -179,7 +191,7 @@ struct ShareExtensionView: View {
                     }
                     .padding(32)
                 } else if model.sentCount > 0 && !model.sending {
-                    ContentUnavailableView(model.sentCount == 1 ? L("share.sentOne") : L("share.sentMany", ["n": model.sentCount]), systemImage: "checkmark.circle.fill")
+                    ContentUnavailableView(model.sentToGroup ? L("share.sentGroup") : model.sentCount == 1 ? L("share.sentOne") : L("share.sentMany", ["n": model.sentCount]), systemImage: "checkmark.circle.fill")
                 } else {
                     content
                 }
@@ -188,14 +200,49 @@ struct ShareExtensionView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button(L("common.cancel")) { model.cancel() }.disabled(model.sending) }
-                ToolbarItem(placement: .confirmationAction) {
-                    if model.sending { ProgressView() } else if model.hasSession {
-                        Button(model.selected.count > 1 ? L("share.sendTo", ["n": model.selected.count]) : L("share.send")) { Task { await model.send() } }.bold().disabled(!model.canSend).accessibilityIdentifier("share.send")
-                    }
-                }
             }
         }
         .tint(accent)
+    }
+
+    /// Enviar abajo, grande y a mano del pulgar (como Instagram), sobre el teclado y la zona segura. Con 2+ directos:
+    /// «Enviar por separado» (un mensaje a cada uno) o «Enviar en un grupo» (un chat con todos, un solo mensaje).
+    @ViewBuilder private var sendBar: some View {
+        if !model.selected.isEmpty || model.sending {
+            VStack(spacing: 8) {
+                if model.sending {
+                    HStack(spacing: 8) { ProgressView(); Text(L("wa.sending")).font(.subheadline) }
+                        .frame(maxWidth: .infinity, minHeight: 50)
+                } else if model.groupPeers != nil {
+                    // Como Instagram: «por separado» es lo de siempre (principal); el grupo, la segunda opción.
+                    sendButton(L("share.sendSeparately", ["n": model.selected.count]), icon: "paperplane.fill", prominent: true, id: "share.send") {
+                        Task { await model.send() }
+                    }
+                    sendButton(L("share.sendGroup"), icon: "person.3.fill", prominent: false, id: "share.sendGroup") {
+                        Task { await model.send(asGroup: true) }
+                    }
+                } else {
+                    sendButton(model.selected.count > 1 ? L("share.sendTo", ["n": model.selected.count]) : L("share.send"),
+                               icon: "paperplane.fill", prominent: true, id: "share.send") { Task { await model.send() } }
+                }
+            }
+            .padding(.horizontal, 16).padding(.top, 10).padding(.bottom, 8)
+            .background(.bar)
+            .overlay(alignment: .top) { Divider() }
+        }
+    }
+
+    private func sendButton(_ title: String, icon: String, prominent: Bool, id: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: icon).font(.body.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.8)
+                .frame(maxWidth: .infinity, minHeight: prominent ? 50 : 44)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(prominent ? Color.white : accent)
+        .background(RoundedRectangle(cornerRadius: 14).fill(prominent ? orange : orange.opacity(0.14)))
+        .opacity(model.canSend ? 1 : 0.45)
+        .disabled(!model.canSend)
+        .accessibilityIdentifier(id)
     }
 
     private var content: some View {
@@ -223,6 +270,7 @@ struct ShareExtensionView: View {
             }
         }
         .searchable(text: $query, prompt: L("fwd.search"))
+        .safeAreaInset(edge: .bottom, spacing: 0) { sendBar }
     }
 
     private func thumb(_ i: SharedItem) -> some View {

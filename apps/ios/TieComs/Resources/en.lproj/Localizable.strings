@@ -2261,6 +2261,9 @@
 "share.recent" = "Recent";
 "share.send" = "Send";
 "share.sendTo" = "Send to {n}";
+"share.sendGroup" = "Send in a group";
+"share.sendSeparately" = "Send separately ({n})";
+"share.sentGroup" = "Sent to the group";
 "share.sent" = "Sent to “{name}”";
 "share.sentMany" = "Shared to {n} conversations";
 "share.sentOne" = "Shared";

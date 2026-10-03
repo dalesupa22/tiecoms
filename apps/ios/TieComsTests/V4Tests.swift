@@ -159,6 +159,21 @@ final class V4Tests: XCTestCase {
         let old = try dec([ShareTargets.Target].self, #"[{"id":"x","title":"General","subtitle":"Lanzamiento"}]"#)
         XCTAssertEqual(old[0].kind, "group")
         XCTAssertNil(old[0].group)
+        XCTAssertNil(old[0].peerId, "datos viejos: sin «Enviar en un grupo» hasta que la app refresque")
+    }
+
+    func testShareSendInGroupOnlyWithDirects() throws {
+        let targets = ShareTargets.targets(try boot())
+        XCTAssertEqual(targets.first { $0.id == "d1" }?.peerId, "bob", "directo: la otra persona")
+        XCTAssertNil(targets.first { $0.id == "c1" }?.peerId)
+        let dm = { (id: String, peer: String?) in ShareTargets.Target(id: id, title: id, subtitle: "", kind: "direct", peerId: peer) }
+        let list = [dm("d1", "bob"), dm("d2", "ana"), dm("d3", "bob"), dm("viejo", nil),
+                    ShareTargets.Target(id: "g1", title: "G", subtitle: "", kind: "group")]
+        XCTAssertEqual(ShareGroupRule.peers(selected: ["d1", "d2"], in: list), ["bob", "ana"])
+        XCTAssertNil(ShareGroupRule.peers(selected: ["d1"], in: list), "con uno solo no hay grupo")
+        XCTAssertNil(ShareGroupRule.peers(selected: ["d1", "g1"], in: list), "grupos mezclados: solo «Enviar»")
+        XCTAssertNil(ShareGroupRule.peers(selected: ["d1", "viejo"], in: list), "directo sin persona conocida")
+        XCTAssertNil(ShareGroupRule.peers(selected: ["d1", "d3"], in: list), "la misma persona dos veces no es un grupo")
     }
 
     @MainActor

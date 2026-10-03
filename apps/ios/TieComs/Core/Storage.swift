@@ -121,11 +121,14 @@ enum ShareTargets {
         var lastMessageAt: String? = nil
         var avatarPath: String? = nil
         var isSide: Bool = false
+        /// En un directo, la otra persona (humana). Con dos o más directos elegidos la extensión ofrece
+        /// «Enviar en un grupo» (POST /chats con estas personas). nil en grupos, notas propias, gg y datos viejos.
+        var peerId: String? = nil
 
         init(id: String, title: String, subtitle: String, group: String? = nil, kind: String = "group", lastMessageAt: String? = nil,
-             avatarPath: String? = nil, isSide: Bool = false) {
+             avatarPath: String? = nil, isSide: Bool = false, peerId: String? = nil) {
             self.id = id; self.title = title; self.subtitle = subtitle; self.group = group; self.kind = kind
-            self.lastMessageAt = lastMessageAt; self.avatarPath = avatarPath; self.isSide = isSide
+            self.lastMessageAt = lastMessageAt; self.avatarPath = avatarPath; self.isSide = isSide; self.peerId = peerId
         }
 
         init(from decoder: Decoder) throws {
@@ -138,15 +141,18 @@ enum ShareTargets {
             lastMessageAt = c.o("lastMessageAt")
             avatarPath = c.o("avatarPath")
             isSide = c.v("isSide", false)
+            peerId = c.o("peerId")
         }
     }
 
     static func targets(_ d: BootstrapDTO) -> [Target] {
         d.conversations.filter(\.canPost).map { c in
-            Target(id: c.id, title: Naming.title(d, c),
+            let other = c.kind == .direct ? Naming.otherInDirect(d, c) : nil
+            let peer = other.flatMap { $0.id != d.me.id && $0.kind == "human" && !Naming.isSide(c) ? $0.id : nil }
+            return Target(id: c.id, title: Naming.title(d, c),
                    subtitle: d.workspaces.first(where: { $0.id == c.workspaceId })?.name ?? Naming.subtitle(d, c),
                    group: Naming.route(d, c), kind: c.kind.rawValue, lastMessageAt: c.lastMessageAt,
-                   avatarPath: c.avatarUrl ?? (c.kind == .direct ? Naming.otherInDirect(d, c)?.avatarUrl : nil), isSide: Naming.isSide(c))
+                   avatarPath: c.avatarUrl ?? other?.avatarUrl, isSide: Naming.isSide(c), peerId: peer)
         }
     }
 

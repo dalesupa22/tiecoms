@@ -115,3 +115,18 @@ enum ShareSections {
     }
 }
 
+
+/// «Enviar en un grupo» de la extensión (1.7.13): solo si se eligieron 2 o más conversaciones y TODAS son
+/// directos con una persona. Devuelve esas personas (sin repetir) para POST /chats; nil si no aplica y solo
+/// queda «Enviar» por separado.
+enum ShareGroupRule {
+    static func peers(selected: [String], in targets: [ShareTargets.Target]) -> [String]? {
+        guard selected.count >= 2 else { return nil }
+        var out: [String] = []
+        for id in selected {
+            guard let t = targets.first(where: { $0.id == id }), t.kind == "direct", !t.isSide, let p = t.peerId else { return nil }
+            if !out.contains(p) { out.append(p) }
+        }
+        return out.count >= 2 ? out : nil
+    }
+}

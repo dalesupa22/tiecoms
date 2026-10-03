@@ -119,7 +119,8 @@ const StartQuery = z.object({
   code_challenge_method: z.literal('S256'),
   org: z.string().min(16).max(200).optional(),
   org_name: z.string().trim().min(2).max(120).optional(),
-  next: z.string().max(300).regex(/^\/(?!\/)[^\s\\]*$/).optional(),
+  // MCP OAuth continues through /autorizar-ia with state, redirect_uri and PKCE in the query.
+  next: z.string().max(4096).regex(/^\/(?!\/)[^\s\\]*$/).optional(),
   device_id: z.string().max(64).optional(),
   /** Apps nuevas: 'chaggu' (chaggu://auth/callback). Sin valor: config.nativeRedirect (apps anteriores). */
   redirect_scheme: z.enum(['chaggu', 'tiecoms']).optional(),

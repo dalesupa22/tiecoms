@@ -287,6 +287,8 @@ const fieldLines = (f: Record<string, unknown> | null | undefined) => Object.ent
 /** Un asunto por ticket. El mismo externalId devuelve el mismo asunto (idempotente). Sin externalId, siempre crea. */
 export async function createIssue(integ: IntegrationAuth, input: Omit<z.infer<typeof IntegrationCreateIssueInput>, 'externalId'> & { externalId?: string | null }, existing?: Tx) {
   const run = async (c: Tx) => {
+    // Validate even on externalId replays: an invalid destination never becomes a successful receipt.
+    if (input.topicId) await issues.assertTopic(c, integ.conversationId, input.topicId);
     // Candado por (integración, externalId): dos reintentos simultáneos no crean dos asuntos.
     if (input.externalId) {
       await c.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [`${integ.id}:${input.externalId}`]);
@@ -295,7 +297,7 @@ export async function createIssue(integ: IntegrationAuth, input: Omit<z.infer<ty
     }
     const who = await membersByEmail(c, integ.conversationId, input.assigneeEmails);
     const dto = await issues.createIssue(integ.botUserId, integ.conversationId, {
-      title: input.title, ownerId: null, visibility: 'all', ...(who.ids.length ? { assigneeIds: who.ids } : {}),
+      title: input.title, ownerId: null, visibility: 'all', topicId: input.topicId, ...(who.ids.length ? { assigneeIds: who.ids } : {}),
       ...(input.dueDate ? { dueDate: input.dueDate } : {}), ...(input.fields ? { fields: input.fields } : {}),
     } as any, c);
     // The issue, source binding, comments, announcement and outbox are one atomic import.
@@ -308,7 +310,7 @@ export async function createIssue(integ: IntegrationAuth, input: Omit<z.infer<ty
     if (input.announce) {
       const meta = [...fieldLines(input.externalMeta), ...fieldLines(dto.fields)].join('\n');
       const excerpt = input.description ? `\n\n${input.description.slice(0, 600)}${input.description.length > 600 ? '…' : ''}` : '';
-      await appendMessage(c, { conversationId: integ.conversationId, authorId: integ.botUserId, body: `${input.title}${meta ? `\n${meta}` : ''}${excerpt}` });
+      await appendMessage(c, { conversationId: integ.conversationId, authorId: integ.botUserId, topicId: dto.topicId, body: `${input.title}${meta ? `\n${meta}` : ''}${excerpt}` });
     }
     return { issue: (await issues.getIssue(integ.botUserId, dto.id, c)).issue, created: true, ...(who.ignored.length ? { ignoredAssignees: who.ignored } : {}) };
   };
@@ -350,6 +352,7 @@ export async function updateIssue(integ: IntegrationAuth, issueId: string, input
     const patch: Record<string, unknown> = {};
     if (input.status) patch.status = input.status;
     if (input.title) patch.title = input.title;
+    if (input.topicId !== undefined) patch.topicId = input.topicId;
     if (input.fields) patch.fields = input.fields;
     // Permission check and metadata update belong to the same transaction as the status/title.
     await issues.updateIssue(integ.botUserId, issueId, patch as any, c);
@@ -369,6 +372,5 @@ export async function commentIssue(integ: IntegrationAuth, issueId: string, inpu
 
 export async function describe(integ: IntegrationAuth) {
   const { rows } = await pool.query('SELECT c.name FROM conversations c WHERE c.id = $1', [integ.conversationId]);
-  return { id: integ.id, name: integ.name, conversationId: integ.conversationId, conversationName: rows[0]?.name ?? null, workspaceId: integ.workspaceId };
+  return { id: integ.id, name: integ.name, conversationId: integ.conversationId, conversationName: rows[0]?.name ?? null, workspaceId: integ.workspaceId, capabilities: { issueTopics: true } };
 }
-

@@ -1245,6 +1245,8 @@ const ExternalMeta = z.record(z.string().max(60), z.string().max(500)).refine((m
 /** API de asuntos para integraciones (token del grupo). */
 export const IntegrationCreateIssueInput = z.object({
   title: z.string().trim().min(2).max(200),
+  /** Tema activo del mismo grupo; al omitirlo, la tarea queda sin tema. */
+  topicId: z.uuid().nullable().optional(),
   /** Primer comentario (la descripción del ticket). */
   description: z.string().max(20_000).optional(),
   externalId: z.string().trim().min(1).max(120),
@@ -1274,6 +1276,8 @@ export const WebhookTaskInput = IntegrationCreateIssueInput.extend({
 export const IntegrationUpdateIssueInput = z.object({
   status: z.enum(['open', 'in_progress', 'waiting', 'done', 'cancelled']).optional(),
   title: z.string().trim().min(2).max(200).optional(),
+  /** Omitir conserva el tema; null lo quita. Solo acepta un tema activo del mismo grupo. */
+  topicId: z.uuid().nullable().optional(),
   externalMeta: ExternalMeta.optional(),
   /** Se mezclan con los que ya tiene; `null` borra un campo. */
   fields: IssueFieldsInput.optional(),

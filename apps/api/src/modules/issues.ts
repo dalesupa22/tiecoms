@@ -3,7 +3,7 @@ import { ISSUE_FIELDS_MAX, type TaskColumnDTO, type TaskColumnsInput, type Creat
 import { conversationAccess } from '../access.ts';
 import { audit, enqueueOutbox, pool, tx, type Db, type Tx } from '../db.ts';
 import { badRequest, forbidden, notFound, taskNotFound } from '../errors.ts';
-import { appendEvent, appendMessage } from './messages.ts';
+import { appendEvent, appendMessage, toMessageDTO } from './messages.ts';
 import { queueIntegrationEvent } from './integration-events.ts';
 import { bumpCommentNotice } from './chat-notices.ts';
 import { viewOnceConflict } from '../errors.ts';
@@ -231,7 +231,7 @@ export async function createIssue(userId: string, conversationId: string, input:
     if (visibility !== 'all') await addViewers(c, id, userId, [userId, ...assignees, ...(input.viewerIds ?? [])]);
     await c.query("INSERT INTO issue_events (issue_id, actor_id, kind, payload) VALUES ($1,$2,'created',$3)", [id, userId, JSON.stringify({ title: input.title, ownerId: owner, parentIssueId: parentId, visibility })]);
     // Solo lo que ve todo el chat se anuncia en el chat.
-    if (visibility === 'all') await appendMessage(c, { conversationId, authorId: userId, kind: 'system', body: sys('issue.created', { title: input.title, issueId: id, ...(parentId ? { parentIssueId: parentId } : {}) }) });
+    if (visibility === 'all') await appendMessage(c, { conversationId, authorId: userId, kind: 'system', topicId, body: sys('issue.created', { title: input.title, issueId: id, ...(parentId ? { parentIssueId: parentId } : {}) }) });
     const dto = await load(c, id);
     await publish(c, dto);
     for (const uid of assignees) await queueAssignedPush(c, id, uid, userId);
@@ -370,10 +370,11 @@ export async function updateIssue(userId: string, issueId: string, input: z.infe
       }
     }
     let topicChanged = false;
-    if (input.topicId !== undefined && input.topicId !== cur.topic_id) {
+    const currentTopicId = moving ? null : cur.topic_id;
+    if (input.topicId !== undefined) {
       if (!cur.conversation_id) throw badRequest('Una tarea personal no lleva tema');
       if (input.topicId) await assertTopic(c, destination, input.topicId);
-      add('topic_id', input.topicId); topicChanged = true;
+      if (input.topicId !== currentTopicId) { add('topic_id', input.topicId); topicChanged = true; }
     }
     if (!events.length && !topicChanged && !(input.viewerIds?.length)) return load(c, issueId);
     await c.query(`UPDATE issues SET ${sets.join(', ')} WHERE id = $1`, vals);
@@ -381,14 +382,16 @@ export async function updateIssue(userId: string, issueId: string, input: z.infe
       await c.query('INSERT INTO issue_events (issue_id, actor_id, kind, payload) VALUES ($1,$2,$3,$4)', [issueId, userId, kind, JSON.stringify(payload)]);
     }
     // Tarea hecha (tanda 1.7): «✅ Ana completó la tarea» con confeti, también en las hijas. Cada cierre publica uno.
+    const topicId = input.topicId !== undefined ? input.topicId : currentTopicId;
+    if (topicChanged) await syncIssueMessageTopics(c, destination, issueId, topicId, userId);
     const doneNow = nextVis === 'all' && input.status === 'done' && cur.status !== 'done';
     if (doneNow) {
       const byName = (await c.query('SELECT name FROM users WHERE id = $1', [userId])).rows[0]?.name ?? '';
-      await appendMessage(c, { conversationId: destination, authorId: userId, kind: 'system', body: sys('issue.done', { issueId, title: input.title ?? cur.title, byId: userId, byName }) });
+      await appendMessage(c, { conversationId: destination, authorId: userId, kind: 'system', topicId, body: sys('issue.done', { issueId, title: input.title ?? cur.title, byId: userId, byName }) });
     }
     // Cancelar o reabrir se avisa en la conversación (solo si todo el chat ve el asunto y no es una tarea hija).
     else if (nextVis === 'all' && !cur.parent_issue_id && input.status && input.status !== cur.status && (CLOSED.has(input.status) || CLOSED.has(cur.status))) {
-      await appendMessage(c, { conversationId: destination, authorId: userId, kind: 'system', body: sys(CLOSED.has(input.status) ? 'issue.closed' : 'issue.reopened', { title: input.title ?? cur.title, issueId }) });
+      await appendMessage(c, { conversationId: destination, authorId: userId, kind: 'system', topicId, body: sys(CLOSED.has(input.status) ? 'issue.closed' : 'issue.reopened', { title: input.title ?? cur.title, issueId }) });
     }
     const dto = await load(c, issueId);
     if (moving) {
@@ -472,9 +475,27 @@ export async function setTaskColumns(userId: string, conversationId: string, inp
 }
 
 /** Solo un tema activo del mismo chat. */
-async function assertTopic(c: Tx, conversationId: string, topicId: string) {
+export async function assertTopic(c: Tx, conversationId: string, topicId: string) {
   const { rowCount } = await c.query('SELECT 1 FROM conversation_topics WHERE id = $1 AND conversation_id = $2 AND archived_at IS NULL', [topicId, conversationId]);
   if (!rowCount) throw badRequest('Ese tema no está activo en esta conversación');
+}
+
+/** Keep existing task cards and lifecycle notices in the task's current topic on every client. */
+async function syncIssueMessageTopics(c: Tx, conversationId: string, issueId: string, topicId: string | null, userId: string) {
+  const { rows } = await c.query(
+    `SELECT id, body FROM messages WHERE conversation_id=$1 AND kind='system' AND deleted_at IS NULL
+       AND body LIKE $2 AND topic_id IS DISTINCT FROM $3::uuid FOR UPDATE`,
+    [conversationId, `%${issueId}%`, topicId],
+  );
+  const kinds = new Set(['issue.created', 'issue.done', 'issue.closed', 'issue.reopened']);
+  const ids = rows.filter((m) => {
+    // System bodies may be legacy plain text or malformed; never cast arbitrary bodies in SQL.
+    try { const payload = JSON.parse(m.body); return payload?.issueId === issueId && kinds.has(payload?.k); }
+    catch { return false; }
+  }).map((m) => m.id as string);
+  if (!ids.length) return;
+  const { rows: updated } = await c.query('UPDATE messages SET topic_id=$2, topic_by=$3 WHERE id=ANY($1::uuid[]) RETURNING *', [ids, topicId, topicId ? userId : null]);
+  for (const m of updated) await appendEvent(c, conversationId, { type: 'message.updated', conversationId, message: toMessageDTO(m) }, m.id);
 }
 
 export async function commentIssue(userId: string, issueId: string, body: string, extra: { author?: string; at?: string } = {}, existing?: Tx) {

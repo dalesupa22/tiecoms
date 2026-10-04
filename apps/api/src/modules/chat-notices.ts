@@ -20,6 +20,7 @@ const excerptOf = (s: string) => { const t = s.replace(/\s+/g, ' ').trim(); retu
  */
 export async function bumpCommentNotice(c: Tx, p: {
   kind: 'issue' | 'event' | 'mail'; conversationId: string; itemId: string; title: string; actorId: string; actorName: string; body: string;
+  /** Tema vigente de la tarea; eventos y correos conservan su comportamiento. */ topicId?: string | null;
   /** Datos extra del aviso (p. ej. provider del correo o WhatsApp). */ extra?: Record<string, unknown>;
 }) {
   const key = p.kind === 'issue' ? 'issue.comments' : p.kind === 'mail' ? 'mail.comments' : 'event.comments';
@@ -38,12 +39,14 @@ export async function bumpCommentNotice(c: Tx, p: {
     if (b[idField] !== p.itemId) continue;
     const { k: _k, ...prev } = b;
     const body = sys(key, { ...prev, ...p.extra, title: p.title, count: Number(b.count ?? 1) + 1, ...last });
-    const up = await c.query('UPDATE messages SET body = $2 WHERE id = $1 RETURNING *', [r.id, body]);
+    const topicId = p.kind === 'issue' ? p.topicId ?? null : r.topic_id;
+    const topicBy = topicId === r.topic_id ? r.topic_by : topicId ? p.actorId : null;
+    const up = await c.query('UPDATE messages SET body = $2, topic_id = $3, topic_by = $4 WHERE id = $1 RETURNING *', [r.id, body, topicId, topicBy]);
     const message = toMessageDTO(up.rows[0]);
     await appendEvent(c, p.conversationId, { type: 'message.updated', conversationId: p.conversationId, message }, r.id);
     return message;
   }
-  return appendMessage(c, { conversationId: p.conversationId, authorId: p.actorId, kind: 'system', body: sys(key, { [idField]: p.itemId, ...p.extra, title: p.title, count: 1, ...last }) });
+  return appendMessage(c, { conversationId: p.conversationId, authorId: p.actorId, kind: 'system', topicId: p.kind === 'issue' ? p.topicId : undefined, body: sys(key, { [idField]: p.itemId, ...p.extra, title: p.title, count: 1, ...last }) });
 }
 
 /** Lo llama el worker cada 15 s: el aviso «es hoy» de cada evento, una sola vez. */
@@ -82,7 +85,7 @@ export async function fireOverdueIssues(now = new Date()): Promise<number> {
   const today = localDate(now, ORG_TZ);
   return tx(async (c) => {
     const { rows } = await c.query(
-      `SELECT i.id, i.title, i.conversation_id, i.owner_id, i.assignee_ids, i.created_by, i.visibility, to_char(i.due_date, 'YYYY-MM-DD') AS due, u.name AS owner_name
+      `SELECT i.id, i.title, i.conversation_id, i.topic_id, i.owner_id, i.assignee_ids, i.created_by, i.visibility, to_char(i.due_date, 'YYYY-MM-DD') AS due, u.name AS owner_name
          FROM issues i LEFT JOIN users u ON u.id = i.owner_id
         WHERE i.due_date IS NOT NULL AND i.due_date < $1::date AND i.status NOT IN ('done', 'cancelled')
           AND (i.overdue_posted_for IS NULL OR i.overdue_posted_for <> i.due_date)
@@ -95,7 +98,7 @@ export async function fireOverdueIssues(now = new Date()): Promise<number> {
         const archived = (await c.query('SELECT archived_at FROM conversations WHERE id = $1', [r.conversation_id])).rows[0]?.archived_at;
         if (!archived) {
           await appendMessage(c, {
-            conversationId: r.conversation_id, authorId: r.owner_id ?? r.created_by, kind: 'system',
+            conversationId: r.conversation_id, authorId: r.owner_id ?? r.created_by, kind: 'system', topicId: r.topic_id,
             body: sys('issue.overdue', { issueId: r.id, title: r.title, ownerId: r.owner_id ?? null, ownerName: r.owner_name ?? null, dueDate: r.due }),
           });
         }

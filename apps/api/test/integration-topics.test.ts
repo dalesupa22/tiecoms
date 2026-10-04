@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { IntegrationCreateIssueInput, IntegrationUpdateIssueInput, WebhookTaskInput } from '@tiecoms/contracts';
 import { pool, tx } from '../src/db.ts';
 import { appendMessage } from '../src/modules/messages.ts';
+import { bumpCommentNotice, fireOverdueIssues } from '../src/modules/chat-notices.ts';
 
 const API = process.env.API_URL ?? '';
 const dbTarget = new URL(process.env.DATABASE_URL ?? 'http://invalid');
@@ -34,15 +35,13 @@ async function snapshot() {
     (SELECT count(*)::int FROM outbox WHERE payload->>'conversationId'=$2::text OR payload->'event'->>'conversationId'=$2::text) AS outbox,
     last_message_seq, last_event_seq FROM conversations WHERE id=$2`, [integration, group])).rows[0];
 }
+async function systemRows(issueId: string) {
+  const rows = (await pool.query("SELECT id, body, topic_id FROM messages WHERE conversation_id=$1 AND kind='system' ORDER BY seq", [group])).rows;
+  // Inspect every system notice for this issue: a key whitelist would hide forgotten producers.
+  return rows.filter((m) => { try { return JSON.parse(m.body)?.issueId === issueId; } catch { return false; } });
+}
 async function systemMessages(issueId: string) {
-  const rows = (await pool.query("SELECT body, topic_id FROM messages WHERE conversation_id=$1 AND kind='system' ORDER BY seq", [group])).rows;
-  return rows.flatMap((m) => {
-    try {
-      const payload = JSON.parse(m.body);
-      return payload?.issueId === issueId && ['issue.created', 'issue.done', 'issue.closed', 'issue.reopened'].includes(payload?.k)
-        ? [{ event: payload.k, topic_id: m.topic_id }] : [];
-    } catch { return []; }
-  });
+  return (await systemRows(issueId)).map((m) => ({ event: JSON.parse(m.body).k, topic_id: m.topic_id }));
 }
 
 beforeAll(async () => {
@@ -92,7 +91,7 @@ describe('integration topics', () => {
     expect(new Set(replies.map((r) => r.json.issue.id)).size).toBe(1);
     const issue = replies[0]!.json.issue;
     expect(issue).toMatchObject({ topicId: topic, status: 'done', fields: input.fields, externalMeta: input.externalMeta });
-    expect(await systemMessages(issue.id)).toEqual([{ event: 'issue.created', topic_id: topic }, { event: 'issue.done', topic_id: topic }]);
+    expect(await systemMessages(issue.id)).toEqual([{ event: 'issue.created', topic_id: topic }, { event: 'issue.comments', topic_id: topic }, { event: 'issue.done', topic_id: topic }]);
     const announcements = (await pool.query("SELECT topic_id FROM messages WHERE conversation_id=$1 AND kind='text' AND body LIKE $2", [group, `${input.title}%`])).rows;
     expect(announcements).toEqual([{ topic_id: topic }]);
     const before = await snapshot();
@@ -136,7 +135,7 @@ describe('integration topics', () => {
     });
     const before = await snapshot();
     expect((await update(id, { topicId: alternateTopic })).status).toBe(200);
-    expect(await systemMessages(id)).toEqual([{ event: 'issue.created', topic_id: alternateTopic }, { event: 'issue.done', topic_id: alternateTopic }]);
+    expect(await systemMessages(id)).toEqual([{ event: 'issue.created', topic_id: alternateTopic }, { event: 'issue.done', topic_id: alternateTopic }, { event: 'unrelated.event', topic_id: topic }]);
     expect(await systemMessages(other.json.issue.id)).toEqual([{ event: 'issue.created', topic_id: topic }, { event: 'issue.done', topic_id: topic }]);
     expect((await pool.query('SELECT topic_id FROM messages WHERE id=ANY($1::uuid[])', [untouchedIds])).rows.map((m) => m.topic_id)).toEqual([topic, topic, topic]);
     const updates = (await pool.query("SELECT payload FROM conversation_events WHERE conversation_id=$1 AND event_seq>$2 AND type='message.updated'", [group, before.last_event_seq])).rows;
@@ -190,6 +189,62 @@ describe('integration topics', () => {
     expect(created.json.issue.topicId).toBeNull();
     const done = await update(created.json.issue.id, { status: 'done' }); expect(done.status).toBe(200);
     expect(await systemMessages(created.json.issue.id)).toEqual([{ event: 'issue.created', topic_id: null }, { event: 'issue.done', topic_id: null }]);
+  });
+
+  it('routes and aggregates description/history comments, repairing a stale notice when it is bumped', async () => {
+    const created = await create({ topicId: topic, description: 'Description comment', history: [{ author: 'QA', body: 'Imported comment' }], announce: false });
+    expect(created.status).toBe(200); const id = created.json.issue.id;
+    expect(await systemMessages(id)).toEqual([{ event: 'issue.created', topic_id: topic }, { event: 'issue.comments', topic_id: topic }]);
+    const before = (await systemRows(id)).find((m) => JSON.parse(m.body).k === 'issue.comments')!;
+    expect(JSON.parse(before.body).count).toBe(2);
+    await pool.query('UPDATE messages SET topic_id=NULL, topic_by=NULL WHERE id=$1', [before.id]);
+    const commented = await request(`/api/integration/v1/issues/${id}/comments`, token, { body: 'Follow-up comment' });
+    expect(commented.status).toBe(200);
+    const after = (await systemRows(id)).filter((m) => JSON.parse(m.body).k === 'issue.comments');
+    expect(after).toHaveLength(1);
+    expect(after[0]).toMatchObject({ id: before.id, topic_id: topic });
+    expect(JSON.parse(after[0].body)).toMatchObject({ count: 3, lastExcerpt: 'Follow-up comment' });
+  });
+
+  it('routes overdue notices and moves, clears or repairs all task notices even when the topic is unchanged', async () => {
+    const created = await create({ topicId: topic, description: 'Overdue description', dueDate: '2000-01-01', announce: false });
+    expect(created.status).toBe(200); const id = created.json.issue.id;
+    await fireOverdueIssues(new Date('2000-01-02T12:00:00Z'));
+    const expectedEvents = ['issue.created', 'issue.comments', 'issue.overdue'];
+    expect(await systemMessages(id)).toEqual(expectedEvents.map((event) => ({ event, topic_id: topic })));
+    await fireOverdueIssues(new Date('2000-01-02T12:00:00Z'));
+    expect(await systemMessages(id)).toHaveLength(3);
+    const ids = (await systemRows(id)).map((m) => m.id);
+    await pool.query('UPDATE messages SET topic_id=NULL, topic_by=NULL WHERE id=ANY($1::uuid[])', [ids]);
+    const before = await snapshot();
+    expect((await update(id, { topicId: topic })).status).toBe(200);
+    expect(await systemMessages(id)).toEqual(expectedEvents.map((event) => ({ event, topic_id: topic })));
+    const repairEvents = (await pool.query("SELECT payload FROM conversation_events WHERE conversation_id=$1 AND event_seq>$2 AND type='message.updated'", [group, before.last_event_seq])).rows;
+    expect(repairEvents).toHaveLength(3);
+    expect(repairEvents.every((r) => r.payload.message.topicId === topic && ids.includes(r.payload.message.id))).toBe(true);
+    const repaired = await snapshot();
+    expect((await update(id, { topicId: topic })).status).toBe(200);
+    expect(await snapshot()).toEqual(repaired);
+    expect((await update(id, { topicId: alternateTopic })).status).toBe(200);
+    expect(await systemMessages(id)).toEqual(expectedEvents.map((event) => ({ event, topic_id: alternateTopic })));
+    expect((await update(id, { topicId: null })).status).toBe(200);
+    expect(await systemMessages(id)).toEqual(expectedEvents.map((event) => ({ event, topic_id: null })));
+    // Explicit null must also repair stale historical tags when the task is already untagged.
+    await pool.query('UPDATE messages SET topic_id=$2, topic_by=$3 WHERE id=ANY($1::uuid[])', [ids, topic, actor]);
+    expect((await update(id, { topicId: null })).status).toBe(200);
+    expect(await systemMessages(id)).toEqual(expectedEvents.map((event) => ({ event, topic_id: null })));
+  });
+
+  it('keeps event and mail comment notices unchanged by task-specific topic routing', async () => {
+    for (const kind of ['event', 'mail'] as const) {
+      const input = { kind, conversationId: group, itemId: randomUUID(), title: 'Existing comments', actorId: actor, actorName: 'QA', body: 'First comment', extra: kind === 'mail' ? { provider: 'google' } : undefined };
+      const first = await tx((c) => bumpCommentNotice(c, input));
+      expect(first?.topicId).toBeNull();
+      await pool.query('UPDATE messages SET topic_id=$2, topic_by=$3 WHERE id=$1', [first!.id, alternateTopic, actor]);
+      const bumped = await tx((c) => bumpCommentNotice(c, { ...input, body: 'Second comment', topicId: topic }));
+      expect(bumped).toMatchObject({ id: first!.id, topicId: alternateTopic });
+      expect(JSON.parse(bumped!.body)).toMatchObject({ k: `${kind}.comments`, count: 2, ...(kind === 'mail' ? { provider: 'google' } : {}) });
+    }
   });
 
   it('preserves domain moves with an explicit destination topic or no destination topic', async () => {

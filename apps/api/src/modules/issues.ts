@@ -376,14 +376,15 @@ export async function updateIssue(userId: string, issueId: string, input: z.infe
       if (input.topicId) await assertTopic(c, destination, input.topicId);
       if (input.topicId !== currentTopicId) { add('topic_id', input.topicId); topicChanged = true; }
     }
-    if (!events.length && !topicChanged && !(input.viewerIds?.length)) return load(c, issueId);
+    const topicId = input.topicId !== undefined ? input.topicId : currentTopicId;
+    // Re-applying the current topic also repairs historical notices left untagged by older clients.
+    const repairedNotices = input.topicId !== undefined ? await syncIssueMessageTopics(c, destination, issueId, topicId, userId) : 0;
+    if (!events.length && !topicChanged && !repairedNotices && !(input.viewerIds?.length)) return load(c, issueId);
     await c.query(`UPDATE issues SET ${sets.join(', ')} WHERE id = $1`, vals);
     for (const [kind, payload] of events) {
       await c.query('INSERT INTO issue_events (issue_id, actor_id, kind, payload) VALUES ($1,$2,$3,$4)', [issueId, userId, kind, JSON.stringify(payload)]);
     }
     // Tarea hecha (tanda 1.7): «✅ Ana completó la tarea» con confeti, también en las hijas. Cada cierre publica uno.
-    const topicId = input.topicId !== undefined ? input.topicId : currentTopicId;
-    if (topicChanged) await syncIssueMessageTopics(c, destination, issueId, topicId, userId);
     const doneNow = nextVis === 'all' && input.status === 'done' && cur.status !== 'done';
     if (doneNow) {
       const byName = (await c.query('SELECT name FROM users WHERE id = $1', [userId])).rows[0]?.name ?? '';
@@ -487,20 +488,21 @@ async function syncIssueMessageTopics(c: Tx, conversationId: string, issueId: st
        AND body LIKE $2 AND topic_id IS DISTINCT FROM $3::uuid FOR UPDATE`,
     [conversationId, `%${issueId}%`, topicId],
   );
-  const kinds = new Set(['issue.created', 'issue.done', 'issue.closed', 'issue.reopened']);
+  const kinds = new Set(['issue.created', 'issue.done', 'issue.closed', 'issue.reopened', 'issue.comments', 'issue.overdue']);
   const ids = rows.filter((m) => {
     // System bodies may be legacy plain text or malformed; never cast arbitrary bodies in SQL.
     try { const payload = JSON.parse(m.body); return payload?.issueId === issueId && kinds.has(payload?.k); }
     catch { return false; }
   }).map((m) => m.id as string);
-  if (!ids.length) return;
+  if (!ids.length) return 0;
   const { rows: updated } = await c.query('UPDATE messages SET topic_id=$2, topic_by=$3 WHERE id=ANY($1::uuid[]) RETURNING *', [ids, topicId, topicId ? userId : null]);
   for (const m of updated) await appendEvent(c, conversationId, { type: 'message.updated', conversationId, message: toMessageDTO(m) }, m.id);
+  return updated.length;
 }
 
 export async function commentIssue(userId: string, issueId: string, body: string, extra: { author?: string; at?: string } = {}, existing?: Tx) {
   return inTransaction(existing, async (c) => {
-    const { rows } = await c.query('SELECT conversation_id, visibility, integration_id, title FROM issues WHERE id = $1 FOR UPDATE', [issueId]);
+    const { rows } = await c.query('SELECT conversation_id, topic_id, visibility, integration_id, title FROM issues WHERE id = $1 FOR UPDATE', [issueId]);
     if (!rows[0]) throw taskNotFound();
     await loadVisible(c, userId, issueId);
     if (rows[0].visibility === 'all') await conversationAccess(c, userId, rows[0].conversation_id, 'post', true);
@@ -511,7 +513,7 @@ export async function commentIssue(userId: string, issueId: string, body: string
     // Aviso agrupado en el chat (tanda 1.7): solo lo que ve todo el chat.
     if (rows[0].visibility === 'all' && rows[0].conversation_id) {
       const actorName = extra.author || (await c.query('SELECT name FROM users WHERE id = $1', [userId])).rows[0]?.name || '';
-      await bumpCommentNotice(c, { kind: 'issue', conversationId: rows[0].conversation_id, itemId: issueId, title: rows[0].title, actorId: userId, actorName, body });
+      await bumpCommentNotice(c, { kind: 'issue', conversationId: rows[0].conversation_id, topicId: rows[0].topic_id, itemId: issueId, title: rows[0].title, actorId: userId, actorName, body });
     }
     const dto = await load(c, issueId);
     await publish(c, dto);

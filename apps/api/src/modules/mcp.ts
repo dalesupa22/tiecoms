@@ -10,7 +10,8 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { BootstrapDTO, CalendarEventDTO, ConversationDTO, IssueDTO, MessageDTO } from '@tiecoms/contracts';
 import { IssueFieldsInput, TaskColumnInput } from '@tiecoms/contracts';
-import { pool } from '../db.ts';
+import { pool, type Tx } from '../db.ts';
+import { conversationAccess } from '../access.ts';
 import { ApiError, badRequest, notFound, unauthorized } from '../errors.ts';
 import { randomToken, sha256 } from '../security.ts';
 import { bootstrap } from './bootstrap.ts';
@@ -19,6 +20,9 @@ import { listMessages, markRead, sendMessage } from './messages.ts';
 import { getOrCreateDirect } from './workspaces.ts';
 import * as mailbox from './mailbox.ts';
 import * as issues from './issues.ts';
+import * as mcpAttachments from './mcp-attachments.ts';
+import { MAX_BASE64_LENGTH } from './mcp-file-input.ts';
+import { idempotent, requestHash } from './mcp-idempotency.ts';
 import * as cal from './calendar.ts';
 import * as mwa from './mcp-wa.ts';
 import * as reading from './reading.ts';
@@ -158,7 +162,7 @@ function messageView(b: BootstrapDTO, m: MessageDTO) {
   const files = (m.attachments ?? []).map((a: any) => a.name ?? a.kind ?? 'adjunto');
   return {
     id: m.id, seq: m.seq, at: (m as any).createdAt ?? null, author, text,
-    ...(files.length ? { attachments: files } : {}), ...(m.replyTo ? { replyTo: m.replyTo } : {}), ...((m as any).deletedAt ? { deleted: true } : {}),
+    ...(files.length ? { attachments: files, attachment_details: m.attachments } : {}), ...(m.replyTo ? { replyTo: m.replyTo } : {}), ...((m as any).deletedAt ? { deleted: true } : {}),
   };
 }
 
@@ -210,7 +214,7 @@ function taskView(b: BootstrapDTO, i: IssueDTO) {
   const name = (id: string | null | undefined) => (id ? (id === b.me.id ? `${b.me.name} (tú)` : (b.people.find((p) => p.id === id)?.name ?? 'Alguien')) : null);
   const c = i.conversationId ? b.conversations.find((x) => x.id === i.conversationId) : null;
   return {
-    id: i.id, title: i.title, status: i.status, due: i.dueDate,
+    id: i.id, title: i.title, status: i.status, due: i.dueDate, attachments: i.attachments ?? [],
     assignees: (i.assigneeIds ?? (i.ownerId ? [i.ownerId] : [])).map(name), requestedBy: name(i.requestedBy), chat: c ? chatName(b, c) : null, chatId: i.conversationId,
     ...(i.externalId ? { ticket: i.externalId } : {}), ...(i.externalMeta ? { meta: i.externalMeta } : {}), ...(i.fields ? { fields: i.fields } : {}), comments: i.commentCount, updatedAt: i.updatedAt,
   };
@@ -219,6 +223,20 @@ function taskView(b: BootstrapDTO, i: IssueDTO) {
 // ---------- Herramientas ----------
 
 type Tool = { name: string; description: string; scope?: Scope; schema: z.ZodObject<any>; readOnly?: boolean; run: (userId: string, a: any, ctx: McpCtx) => Promise<unknown> };
+
+const idempotencyKey = z.string().min(8).max(120).describe('Llave única por operación: reutiliza exactamente la misma llave y contenido al reintentar');
+const fileFields = {
+  name: z.string().trim().min(1).max(200).describe('Nombre del archivo con extensión'),
+  content_type: z.string().trim().min(3).max(100).describe('MIME real: imagen, application/pdf, text/plain, text/csv, text/markdown, application/json, application/zip u application/octet-stream'),
+  data_base64: z.string().min(4).max(MAX_BASE64_LENGTH).describe('Bytes en base64 estándar, sin prefijo data:, espacios, URL ni ruta local; máximo 25 MiB decodificados'),
+  idempotency_key: idempotencyKey,
+};
+
+async function assertMessageAvailable(c: Tx, userId: string, chatId: string, messageId: string) {
+  const access = await conversationAccess(c, userId, chatId, 'read');
+  const row = (await c.query('SELECT id FROM messages WHERE id = $1 AND conversation_id = $2 AND deleted_at IS NULL AND NOT view_once AND seq > $3', [messageId, chatId, access.historyFromSeq])).rows[0];
+  if (!row) throw notFound('Mensaje');
+}
 
 const tools: Tool[] = [
   {
@@ -248,7 +266,7 @@ const tools: Tool[] = [
   },
   {
     name: 'read_messages', readOnly: true, scope: 'chats:read',
-    description: 'Lee los últimos mensajes de un chat (por id o nombre). Para paginar hacia atrás usa before_seq con el seq más viejo recibido.',
+    description: 'Lee los últimos mensajes de un chat (por id o nombre). attachments conserva los nombres y attachment_details incluye id, nombre, MIME, tamaño y URL de cada adjunto asociado. Para paginar hacia atrás usa before_seq con el seq más viejo recibido.',
     schema: z.object({
       chat: z.string().min(1).max(200).describe('Id del chat o su nombre (p. ej. el nombre de la persona)'),
       limit: z.number().int().min(1).max(100).optional().describe('Cuántos mensajes (30 por defecto)'),
@@ -265,18 +283,38 @@ const tools: Tool[] = [
     },
   },
   {
+    name: 'upload_chat_attachment', scope: 'chats:write',
+    description: 'Sube una imagen o archivo (hasta 25 MiB) a un chat existente con mis permisos. Devuelve attachment.id pendiente: inclúyelo en send_message. Reintenta con la misma idempotency_key; no acepta URLs ni rutas locales.',
+    schema: z.object({ chat: z.string().min(1).max(200), ...fileFields }),
+    run: async (userId, a, ctx) => mcpAttachments.uploadChat(ctx, findChat(await bootstrap(userId), a.chat).id, a),
+  },
+  {
     name: 'send_message', scope: 'chats:write',
-    description: 'Envía un mensaje de texto a un chat existente (por id o nombre) en mi nombre. Para escribirle a una persona sin chat usa send_direct_message.',
+    description: 'Envía texto y/o hasta 10 adjuntos propios previamente subidos con upload_chat_attachment a un chat existente. Con adjuntos, idempotency_key es obligatoria para evitar duplicados. Devuelve messageId y attachments; read_messages permite verificar la asociación. Para escribirle a una persona sin chat usa send_direct_message.',
     schema: z.object({
       chat: z.string().min(1).max(200).describe('Id del chat o su nombre'),
-      text: z.string().trim().min(1).max(8000),
+      text: z.string().trim().max(8000).optional(),
+      attachment_ids: z.array(z.string().uuid()).min(1).max(10).optional(),
+      idempotency_key: idempotencyKey.optional(),
       reply_to: z.string().uuid().optional().describe('Id del mensaje al que se responde'),
     }),
-    run: async (userId, a) => {
+    run: async (userId, a, ctx) => {
       const b = await bootstrap(userId);
-      const c = findChat(b, a.chat);
-      const out = await sendMessage(userId, c.id, { clientMessageId: `mcp-${randomUUID()}`, body: a.text, replyTo: a.reply_to ?? null });
-      return { sent: true, chat: chatName(b, c), chatId: c.id, message: messageView(b, out.message) };
+      const chat = findChat(b, a.chat);
+      const attachmentIds = a.attachment_ids ?? [];
+      if (!a.text && !attachmentIds.length) throw badRequest('Incluye texto o al menos un adjunto');
+      if (attachmentIds.length && !a.idempotency_key) throw badRequest('Los mensajes con adjuntos requieren idempotency_key');
+      const payload = { chatId: chat.id, body: a.text ?? '', attachmentIds, replyTo: a.reply_to ?? null };
+      return idempotent(ctx, a.idempotency_key, 'send_message', payload,
+        (c) => conversationAccess(c, userId, chat.id, 'post', true),
+        async (c) => {
+          const clientMessageId = a.idempotency_key ? `mcp-${requestHash('message-client', [ctx.tokenId, a.idempotency_key]).toString('base64url')}` : `mcp-${randomUUID()}`;
+          const out = await sendMessage(userId, chat.id, { clientMessageId, body: payload.body, attachmentIds, replyTo: payload.replyTo }, undefined, c);
+          await assertMessageAvailable(c, userId, chat.id, out.message.id);
+          return { sent: true, chat: chatName(b, chat), chatId: chat.id, messageId: out.message.id,
+            attachments: out.message.attachments ?? [], message: messageView(b, out.message) };
+        },
+        (c, response) => assertMessageAvailable(c, userId, chat.id, response.messageId));
     },
   },
   {
@@ -560,7 +598,7 @@ const tools: Tool[] = [
   },
   {
     name: 'get_task', readOnly: true, scope: 'tasks:read',
-    description: 'Detalle de una tarea o ticket: estado, responsables, datos del cliente y comentarios.',
+    description: 'Detalle de una tarea o ticket: estado, responsables, datos del cliente, adjuntos (id, nombre, tipo, tamaño y URL) y comentarios.',
     schema: z.object({ id: z.string().uuid() }),
     run: async (userId, a) => {
       const [b, r] = await Promise.all([bootstrap(userId), issues.getIssue(userId, a.id)]);
@@ -572,23 +610,31 @@ const tools: Tool[] = [
     },
   },
   {
+    name: 'upload_task_attachment', scope: 'tasks:write',
+    description: 'Sube y adjunta una imagen o archivo (hasta 25 MiB) a una tarea existente, conservando sus archivos actuales (máximo 20). Usa mis permisos, valida el tipo real y evita duplicados con idempotency_key. get_task verifica los adjuntos.',
+    schema: z.object({ id: z.string().uuid().describe('Id de la tarea'), ...fileFields }),
+    run: async (_userId, a, ctx) => mcpAttachments.uploadTask(ctx, a.id, a),
+  },
+  {
     name: 'comment_task', scope: 'tasks:write',
-    description: 'Comenta una tarea o ticket. En los tickets de la mesa de ayuda el comentario también vuelve al sistema del cliente.',
-    schema: z.object({ id: z.string().uuid(), text: z.string().trim().min(1).max(4000) }),
-    run: async (userId, a) => { await issues.commentIssue(userId, a.id, a.text); return { ok: true }; },
+    description: 'Comenta una tarea o ticket. En los tickets de la mesa de ayuda el comentario también vuelve al sistema del cliente. Usa idempotency_key para reintentar sin duplicar el comentario.',
+    schema: z.object({ id: z.string().uuid(), text: z.string().trim().min(1).max(4000), idempotency_key: idempotencyKey.optional() }),
+    run: async (userId, a, ctx) => idempotent(ctx, a.idempotency_key, 'comment_task', { id: a.id, text: a.text },
+      (c) => mcpAttachments.taskWriteAccess(c, userId, a.id),
+      async (c) => { const task = await issues.commentIssue(userId, a.id, a.text, {}, c); return { ok: true, taskId: task.id, status: task.status, comments: task.commentCount }; }),
   },
   {
     name: 'update_task', scope: 'tasks:write',
-    description: 'Cambia un ticket o tarea: estado (open, in_progress, waiting, done, cancelled), responsables (por nombre o id; reemplaza la lista), fecha límite, título o campos dinámicos (fields: se mezclan con los que ya tiene; null borra un campo). Confirma antes con la persona.',
+    description: 'Cambia un ticket o tarea (idempotency_key evita repetir el cambio): estado (open, in_progress, waiting, done, cancelled), responsables (por nombre o id; reemplaza la lista), fecha límite, título o campos dinámicos (fields: se mezclan con los que ya tiene; null borra un campo). Confirma antes con la persona.',
     schema: z.object({
-      id: z.string().uuid(),
+      id: z.string().uuid(), idempotency_key: idempotencyKey.optional(),
       status: z.enum(['open', 'in_progress', 'waiting', 'done', 'cancelled']).optional(),
       assignees: z.array(z.string().min(1).max(200)).max(20).optional().describe('Responsables (nombres o ids). [] = sin responsable'),
       due_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional().describe('AAAA-MM-DD o null para quitarla'),
       title: z.string().trim().min(2).max(200).optional(),
       fields: IssueFieldsInput.optional().describe('Campos dinámicos { "Servicios": "…", "Prioridad": 2, "Bloqueado": true }; null borra'),
     }),
-    run: async (userId, a) => {
+    run: async (userId, a, ctx) => {
       const b = await bootstrap(userId);
       const input: Record<string, unknown> = {};
       if (a.status) input.status = a.status;
@@ -597,7 +643,10 @@ const tools: Tool[] = [
       if (a.due_date !== undefined) input.dueDate = a.due_date;
       if (a.assignees) input.assigneeIds = a.assignees.map((x: string) => personId(b, x));
       if (!Object.keys(input).length) throw badRequest('Nada que cambiar');
-      return { task: taskView(b, await issues.updateIssue(userId, a.id, input as any)) };
+      return idempotent(ctx, a.idempotency_key, 'update_task', { id: a.id, input },
+        (c) => mcpAttachments.taskWriteAccess(c, userId, a.id),
+        async (c) => ({ task: taskView(b, await issues.updateIssue(userId, a.id, input as any, c)) }),
+        async (c, response) => { response.task.attachments = (await issues.loadVisible(c, userId, a.id)).attachments ?? []; });
     },
   },
   {

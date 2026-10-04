@@ -63,7 +63,7 @@ describe('conector MCP', () => {
     const l = await rpc(mcpDanny, 'tools/list');
     const names = l.json.result.tools.map((t: any) => t.name);
     expect(names).toEqual(expect.arrayContaining(['whoami', 'list_chats', 'read_messages', 'send_message', 'send_direct_message', 'search_messages', 'unread_summary', 'mark_read', 'list_people']));
-    expect(l.json.result.tools.find((t: any) => t.name === 'send_message').inputSchema.required).toContain('text');
+    expect(l.json.result.tools.find((t: any) => t.name === 'send_message').inputSchema.required).toEqual(['chat']);
   });
 
   it('envía un directo por nombre, Laura lo ve sin leer y lo lee por MCP', async () => {

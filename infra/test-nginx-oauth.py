@@ -105,6 +105,24 @@ http {
         request('/assets/fixture.js?hook=kept', referer='https://app.chaggu.com/api/hooks/local-id/FAKE_REFERER_HOOK')
         request('/assets/fixture.js?encoded=kept', referer='https://app.chaggu.com/api/%68ooks/local-id/FAKE_REFERER_HOOK%ZZ')
         request('/assets/fixture.js?encoded-api=kept', referer='https://app.chaggu.com/%61pi%2Fhooks/local-id/FAKE_REFERER_PREFIX%ZZ')
+        # Only the exact MCP endpoint accepts the base64 attachment envelope.
+        # Synthetic upstream deliberately returns 302; no app or external S3 is contacted.
+        body_checks = []
+        for size, filename in [(256 * 1024, 'mcp-medium.json'), (37 * 1024 * 1024, 'mcp-too-large.json')]:
+            (web / 'app' / filename).write_bytes(b' ' * size)
+        for path, filename, expected in [
+            ('/api/mcp', 'mcp-medium.json', 302),
+            ('/api/mcp', 'mcp-too-large.json', 413),
+            ('/api/mcp/oauth/register', 'mcp-medium.json', 413),
+            ('/api/v1/me', 'mcp-medium.json', 413),
+        ]:
+            status = command('docker', 'exec', NAME, 'curl', '-ksS', '--max-time', '10',
+                '-o', '/dev/null', '-w', '%{http_code}', '-H', 'Host: app.chaggu.com',
+                '-H', 'Content-Type: application/json', '-H', 'Expect:',
+                '--data-binary', '@/opt/tiecoms/web/current/app/' + filename,
+                'https://127.0.0.1' + path).stdout
+            assert int(status) == expected, (path, filename, status)
+            body_checks.append({'path': path, 'body': filename, 'status': expected})
         # Only synthetic local logs are inspected; never read production log contents.
         access = '\n'.join(p.read_text() for p in logs.glob('*access.log'))
         assert 'FAKE_' not in access
@@ -114,6 +132,6 @@ http {
         assert 'FAKE_' not in errors
         print(json.dumps({'nginxSyntax': 'passed', 'containerImage': IMAGE, 'network': 'isolated local loopback',
                           'routeChecks': checks, 'malformedEncodedHookStatus': 400, 'syntheticSecretsInAccessLogs': 0, 'syntheticSecretsInErrorLogs': 0,
-                          'ordinaryQueryAndRefererPreserved': True}, indent=2))
+                          'ordinaryQueryAndRefererPreserved': True, 'mcpBodyLimitChecks': body_checks}, indent=2))
     finally:
         command('docker', 'rm', '-f', NAME, check=False)

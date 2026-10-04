@@ -1,6 +1,6 @@
 import type { ConversationEvent, EventsPage, ForwardedInfo, MessageDTO, SendMessageInput } from '@tiecoms/contracts';
 import { conversationAccess } from '../access.ts';
-import { enqueueOutbox, pool, tx, type Tx } from '../db.ts';
+import { enqueueOutbox, pool, tx, type Db, type Tx } from '../db.ts';
 import { badRequest, conflict, forbidden, notFound, viewOnceConflict } from '../errors.ts';
 import { sha256 } from '../security.ts';
 import { claimForMessage, hideForMessage, linkToMessage } from './attachments.ts';
@@ -113,8 +113,8 @@ export async function appendMessage(c: Tx, p: {
   return m;
 }
 
-async function findByClientId(conversationId: string, authorId: string, clientMessageId: string) {
-  const { rows } = await pool.query(
+async function findByClientId(conversationId: string, authorId: string, clientMessageId: string, db: Db = pool) {
+  const { rows } = await db.query(
     'SELECT * FROM messages WHERE conversation_id = $1 AND author_id = $2 AND client_message_id = $3',
     [conversationId, authorId, clientMessageId],
   );
@@ -144,12 +144,12 @@ export function cardExcerpt(body: string): string | null {
 }
 
 export async function sendMessage(userId: string, conversationId: string, input: SendMessageInput,
-  afterCreate?: (c: Tx, message: MessageDTO) => Promise<void>,
+  afterCreate?: (c: Tx, message: MessageDTO) => Promise<void>, existingTx?: Tx,
 ): Promise<{ message: MessageDTO; duplicate: boolean; droppedMentions?: string[] }> {
-  const existing = await findByClientId(conversationId, userId, input.clientMessageId);
+  const existing = await findByClientId(conversationId, userId, input.clientMessageId, existingTx ?? pool);
   if (existing) {
     // Aun así revalida el acceso: un duplicado no debe filtrar datos a quien perdió permiso.
-    await conversationAccess(pool, userId, conversationId, 'read');
+    await conversationAccess(existingTx ?? pool, userId, conversationId, 'read');
     if (!sameBody(existing, input)) throw conflict('clientMessageId reutilizado con otro contenido');
     return { message: forViewer(toMessageDTO(existing), userId), duplicate: true };
   }
@@ -157,7 +157,7 @@ export async function sendMessage(userId: string, conversationId: string, input:
   if (input.viewOnce && (input.forwarded || input.forwardAttachmentIds?.length)) throw badRequest('Un mensaje de una sola vista no puede ser un reenvío');
   try {
     let dropped: string[] = [];
-    const message = await tx(async (c) => {
+    const run = async (c: Tx) => {
       const access = await conversationAccess(c, userId, conversationId, 'post', true);
       if (input.replyTo) {
         const { rowCount } = await c.query('SELECT 1 FROM messages WHERE id = $1 AND conversation_id = $2', [input.replyTo, conversationId]);
@@ -216,11 +216,12 @@ export async function sendMessage(userId: string, conversationId: string, input:
       // Agentes miembro con webhook a quienes va dirigido (docs/AGENTES.md).
       await queueAgentEvents(c, m);
       return m;
-    });
+    };
+    const message = existingTx ? await run(existingTx) : await tx(run);
     return { message: forViewer(message, userId), duplicate: false, ...(dropped.length ? { droppedMentions: dropped } : {}) };
   } catch (err: any) {
     // Dos reintentos simultáneos: el segundo choca con la restricción única y devuelve el primero.
-    if (err?.code === '23505') {
+    if (!existingTx && err?.code === '23505') {
       const row = await findByClientId(conversationId, userId, input.clientMessageId);
       if (row && sameBody(row, input)) return { message: forViewer(toMessageDTO(row), userId), duplicate: true };
       if (row) throw conflict('clientMessageId reutilizado con otro contenido');

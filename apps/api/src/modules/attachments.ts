@@ -11,7 +11,7 @@ import { MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS_PER_MESSAGE, MAX_VIDEO_BYTES, MAX
 import { transcriptionEnabled } from './voice-providers.ts';
 import { conversationAccess } from '../access.ts';
 import { loadVisible } from './issues.ts';
-import { pool, type Tx } from '../db.ts';
+import { pool, type Db, type Tx } from '../db.ts';
 import { ApiError, badRequest, forbidden, notFound, viewOnceConflict } from '../errors.ts';
 import { deleteObject, getObject, objectKey, presignDownload, putObject, putObjectStream } from '../storage.ts';
 
@@ -146,38 +146,47 @@ export async function upload(userId: string, conversationId: string, input: {
   if (input.body.length > MAX_ATTACHMENT_BYTES) throw new ApiError(413, 'too_large', 'El archivo pesa más de 25 MB');
   await conversationAccess(pool, userId, conversationId, 'post');
   if (input.voice) return uploadVoice(userId, conversationId, input);
-  const sniffed = sniffImage(input.body);
-  const declared = String(input.type ?? '').toLowerCase().split(';')[0]!.trim();
-  // Imágenes: manda el tipo real. Lo declarado como imagen que no lo es se guarda como archivo genérico.
-  const contentType = sniffed ?? (declared.startsWith('image/') || !/^[a-z]+\/[\w.+-]+$/.test(declared) ? 'application/octet-stream' : declared);
-  const size = sniffed ? imageSize(input.body) : null;
-  const id = randomUUID();
-  const key = objectKey(`attachments/${conversationId}/${id}`);
-  await putObject(key, input.body, contentType);
-  const { rows } = await pool.query(
-    `INSERT INTO attachments (id, conversation_id, owner_id, name, content_type, size_bytes, width, height, s3_key)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
-    [id, conversationId, userId, cleanName(input.name), contentType, input.body.length, size?.width ?? null, size?.height ?? null, key],
-  );
-  return toDTO(rows[0]);
+  const prepared = await prepareFileUpload(userId, { conversationId }, input);
+  return persistFileUpload(pool, prepared);
 }
 
 /** Archivo pendiente de una tarea, también personal. PATCH /issues/:id lo vincula y publica. */
 export async function uploadForIssue(userId: string, issueId: string, input: { body: Buffer; name?: string; type?: string }) {
   const issue = await loadVisible(pool, userId, issueId);
   if (issue.visibility === 'all' && issue.conversationId) await conversationAccess(pool, userId, issue.conversationId, 'post', true);
+  const prepared = await prepareFileUpload(userId, { conversationId: issue.conversationId, issueId }, input);
+  return persistFileUpload(pool, prepared);
+}
+
+/** Shared product upload preparation. Caller must authorize the target first. No SQL/transaction here. */
+export async function prepareFileUpload(userId: string, target: { conversationId: string | null; issueId?: string },
+  input: { body: Buffer; name?: string; type?: string }, id: string = randomUUID()) {
   if (!Buffer.isBuffer(input.body) || !input.body.length) throw badRequest('Falta el archivo');
   if (input.body.length > MAX_ATTACHMENT_BYTES) throw new ApiError(413, 'too_large', 'El archivo pesa más de 25 MB');
   const sniffed = sniffImage(input.body);
   const declared = String(input.type ?? '').toLowerCase().split(';')[0]!.trim();
+  // Imágenes: manda el tipo real. Lo declarado como imagen que no lo es se guarda como archivo genérico.
   const contentType = sniffed ?? (declared.startsWith('image/') || !/^[a-z]+\/[\w.+-]+$/.test(declared) ? 'application/octet-stream' : declared);
   const size = sniffed ? imageSize(input.body) : null;
-  const id = randomUUID();
-  const key = objectKey(`task-attachments/${issueId}/${id}`);
+  const key = objectKey(target.issueId ? `task-attachments/${target.issueId}/${id}` : `attachments/${target.conversationId}/${id}`);
   await putObject(key, input.body, contentType);
-  const { rows } = await pool.query(`INSERT INTO attachments (id, conversation_id, owner_id, name, content_type, size_bytes, width, height, s3_key)
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`, [id, issue.conversationId, userId, cleanName(input.name), contentType, input.body.length, size?.width ?? null, size?.height ?? null, key]);
-  return toDTO(rows[0]);
+  return { id, conversationId: target.conversationId, userId, name: cleanName(input.name), contentType,
+    sizeBytes: input.body.length, width: size?.width ?? null, height: size?.height ?? null, key };
+}
+
+/** Persist a prepared upload inside the caller's transaction; S3 has already completed. */
+export async function persistFileUpload(db: Db, p: Awaited<ReturnType<typeof prepareFileUpload>>) {
+  const { rows } = await db.query(
+    `INSERT INTO attachments (id, conversation_id, owner_id, name, content_type, size_bytes, width, height, s3_key)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (id) DO NOTHING RETURNING *`,
+    [p.id, p.conversationId, p.userId, p.name, p.contentType, p.sizeBytes, p.width, p.height, p.key],
+  );
+  const row = rows[0] ?? (await db.query('SELECT * FROM attachments WHERE id = $1', [p.id])).rows[0];
+  // Deterministic IDs are used only by MCP retries. Never resurrect a deleted file.
+  if (!row || row.deleted_at || row.owner_id !== p.userId || row.conversation_id !== p.conversationId || row.s3_key !== p.key
+    || row.content_type !== p.contentType || Number(row.size_bytes) !== p.sizeBytes || row.name !== p.name) throw badRequest('El adjunto ya no está disponible');
+  await readable(p.userId, p.id, db);
+  return toDTO(row);
 }
 
 // ---------- Videos ----------
@@ -385,16 +394,16 @@ export async function hideForMessage(c: Tx, messageId: string) {
 
 // ---------- Servir ----------
 /** Solo quien puede leer el mensaje (respeta historyFromSeq). Los pendientes, solo su dueño. */
-export async function readable(userId: string, attachmentId: string) {
-  const { rows } = await pool.query(
+export async function readable(userId: string, attachmentId: string, db: Db = pool) {
+  const { rows } = await db.query(
     'SELECT a.*, m.seq AS message_seq, m.deleted_at AS message_deleted_at, m.view_once FROM attachments a LEFT JOIN messages m ON m.id = a.message_id WHERE a.id = $1',
     [attachmentId],
   );
   const a = rows[0];
   if (!a || a.deleted_at || a.message_deleted_at) throw notFound('Adjunto');
-  if (a.issue_id) { await loadVisible(pool, userId, a.issue_id).catch(() => { throw notFound('Adjunto'); }); return a; }
+  if (a.issue_id) { await loadVisible(db, userId, a.issue_id).catch(() => { throw notFound('Adjunto'); }); return a; }
   if (!a.message_id) { if (a.owner_id !== userId) throw notFound('Adjunto'); return a; }
-  const acc = await conversationAccess(pool, userId, a.conversation_id, 'read').catch(() => { throw notFound('Adjunto'); });
+  const acc = await conversationAccess(db, userId, a.conversation_id, 'read').catch(() => { throw notFound('Adjunto'); });
   if (a.message_seq <= acc.historyFromSeq) throw forbidden('Este adjunto está fuera de tu historial');
   // Una sola vista: solo por la URL firmada que entrega POST /messages/:id/open.
   if (a.view_once) throw forbidden('Este adjunto es de una sola vista');

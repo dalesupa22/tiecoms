@@ -56,6 +56,7 @@ import * as assistant from './modules/assistant.ts';
 import * as gg from './modules/gg.ts';
 import * as ggSide from './modules/gg-side.ts';
 import * as mcp from './modules/mcp.ts';
+import { MCP_BODY_LIMIT } from './modules/mcp-file-input.ts';
 import * as agentsDirectory from './modules/agents-directory.ts';
 import * as mcpOAuth from './modules/mcp-oauth.ts';
 import * as mcpWa from './modules/mcp-wa.ts';
@@ -266,13 +267,17 @@ export async function buildHttp() {
   // ---------- Conector MCP (Claude, Codex y otras IAs) ----------
   // Streamable HTTP sin estado: POST con JSON-RPC; GET/DELETE no aplican (sin SSE ni sesiones).
   const mcpLimit = { config: { rateLimit: { max: 120, timeWindow: '1 minute', keyGenerator: (r: FastifyRequest) => `mcp:${r.headers.authorization?.slice(-12) ?? r.ip}` } } };
-  app.post('/api/mcp', mcpLimit, async (req, reply) => {
-    let ctx: Awaited<ReturnType<typeof mcp.authenticate>>;
-    try { ctx = await mcp.authenticate(req.headers.authorization); } catch (err) {
-      reply.header('www-authenticate', `Bearer realm="chaggu", error="invalid_token", resource_metadata="${mcpOAuth.resourceMetadataUrl()}"`);
-      throw err;
-    }
-    const out = await mcp.handleRpc(ctx, req.body);
+  app.post('/api/mcp', {
+    ...mcpLimit, bodyLimit: MCP_BODY_LIMIT,
+    // Authenticate before Fastify reads/parses a potentially 36 MiB JSON upload.
+    onRequest: async (req, reply) => {
+      try { (req as any).mcpCtx = await mcp.authenticate(req.headers.authorization); } catch (err) {
+        reply.header('www-authenticate', `Bearer realm="chaggu", error="invalid_token", resource_metadata="${mcpOAuth.resourceMetadataUrl()}"`);
+        throw err;
+      }
+    },
+  }, async (req, reply) => {
+    const out = await mcp.handleRpc((req as any).mcpCtx, req.body);
     if (out === null) return reply.status(202).send();
     return reply.header('cache-control', 'no-store').send(out);
   });

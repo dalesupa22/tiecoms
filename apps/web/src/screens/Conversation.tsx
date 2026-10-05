@@ -21,6 +21,7 @@ import { contextHandler, copyText, menuProps, openMenuAt, toast, type MenuItem }
 import { navigate, queryParam } from '../router.ts';
 import { flashPane } from '../split.ts';
 import './MsgActions.css';
+import { installHideActionsWhileSelecting } from '../msg-select.ts';
 import { MAX_PANES, ZOOM_MAX, ZOOM_MIN, convZoomNow, setConvZoom, splitAvailable, useConvZoom } from '../split.ts';
 import { SplitPicker } from './SplitPicker.tsx';
 import { directOtherId, Avatar, ConvAvatar, Modal, OrgMark, conversationSubtitle, conversationTitle, dayLabel, isGgChat, isSelfChat, orgById, personById, personColor, personInk } from '../ui.tsx';
@@ -56,6 +57,9 @@ import { GifButton, openGifPicker } from './Gifs.tsx';
 import { parseGifCommand } from '../gifs.ts';
 import { ChatHeaderPopover } from './ChatHeaderPopover.tsx';
 import { startCall } from '../call.ts';
+
+// La barra de acciones no tapa el texto mientras lo seleccionas (msg-select.ts).
+installHideActionsWhileSelecting();
 
 type Row =
   | { kind: 'day'; key: string; label: string }

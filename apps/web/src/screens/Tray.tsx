@@ -18,7 +18,7 @@ import { type DragPayload, paneOf, pinToSlot, readDrag, shareToChat } from '../g
 import {
   MAX_PANES, type DragKind, dragKindOf, fitsChat, fitsSlot, setDragging, setGridSide, splitAvailable, togglePin, useDragging, useGridSide, useMetas, usePanes, usePinned, useWide, rememberBack,
 } from '../split.ts';
-import { TASKS_KEY, TASKS_SLOT, slots, splitMain } from '../grid-keys.ts';
+import { CLASSIC_PANES, TASKS_KEY, TASKS_SLOT, slots, splitMain } from '../grid-keys.ts';
 import { ProviderIcon, WaIcon } from './Mail.tsx';
 
 /** Lo que dice un cuadrito: qué es y cómo se llama. */
@@ -50,12 +50,16 @@ export function SlotMap({ onPick, drop, over }: { onPick?: (i: number) => void; 
   const tasksOpen = splitMain(panes).tasks;
   const tasksCls = `slot slot-tall ${tasksOpen ? 'is-full' : ''} ${tasksOpen && pinned.has(TASKS_KEY) ? 'is-pinned' : ''} ${over === TASKS_SLOT ? 'is-over' : ''}`;
   const tasksInner = <><span className="slot-what"><span aria-hidden>☑</span><b>{t('nav.issues')}</b></span><span className="slot-free">{tasksOpen ? (pinned.has(TASKS_KEY) ? `📌 ${t('grid.pinned')}` : '') : `＋ ${t('grid.free')}`}</span></>;
+  // 4 cuaditos; con más paneles abiertos, los que hay más uno libre (hasta 8), en dos filas.
+  const shown = Math.min(MAX_PANES, Math.max(CLASSIC_PANES, splitMain(panes).main.length + 1));
+  const cols = Math.ceil(shown / 2);
+  const tasksCol = cols > 2 ? { gridColumn: cols + 1 } : undefined;
   return (
-    <div className="slot-map">
+    <div className="slot-map" style={cols > 2 ? { gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr)) minmax(0, .62fr)` } : undefined}>
       {onPick
-        ? <button type="button" className={tasksCls} title={t('grid.tasksSlot')} onClick={() => onPick(TASKS_SLOT)}>{tasksInner}</button>
-        : <div className={tasksCls} title={t('grid.tasksSlot')} onDragOver={drop ? (e) => drop.onOver(TASKS_SLOT, e) : undefined} onDrop={drop ? (e) => drop.onDrop(TASKS_SLOT, e) : undefined} onDragLeave={drop?.onLeave}>{tasksInner}</div>}
-      {slots(panes, MAX_PANES).map((key, i) => {
+        ? <button type="button" className={tasksCls} style={tasksCol} title={t('grid.tasksSlot')} onClick={() => onPick(TASKS_SLOT)}>{tasksInner}</button>
+        : <div className={tasksCls} style={tasksCol} title={t('grid.tasksSlot')} onDragOver={drop ? (e) => drop.onOver(TASKS_SLOT, e) : undefined} onDrop={drop ? (e) => drop.onDrop(TASKS_SLOT, e) : undefined} onDragLeave={drop?.onLeave}>{tasksInner}</div>}
+      {slots(panes, shown).map((key, i) => {
         const on = over === i;
         const inner = key ? (
           <>
@@ -107,7 +111,7 @@ export function GridGlyph({ big }: { big?: boolean }) {
   const panes = usePanes();
   const pinned = usePinned();
   const tasksOpen = splitMain(panes).tasks;
-  return <span className={`grid-glyph ${big ? 'big' : ''}`} aria-hidden>{slots(panes, MAX_PANES).map((k, i) => <i key={i} className={k ? (pinned.has(k) ? 'is-pinned' : 'is-on') : ''} />)}<i className={`tall ${tasksOpen ? (pinned.has(TASKS_KEY) ? 'is-pinned' : 'is-on') : ''}`} /></span>;
+  return <span className={`grid-glyph ${big ? 'big' : ''}`} aria-hidden>{slots(panes, CLASSIC_PANES).map((k, i) => <i key={i} className={k ? (pinned.has(k) ? 'is-pinned' : 'is-on') : ''} />)}<i className={`tall ${tasksOpen ? (pinned.has(TASKS_KEY) ? 'is-pinned' : 'is-on') : ''}`} /></span>;
 }
 
 /** Los chats a mano para la zona 1: fijados primero y luego los más recientes. */

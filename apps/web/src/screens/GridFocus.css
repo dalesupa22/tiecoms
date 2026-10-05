@@ -29,3 +29,11 @@
 .split:not(.n1):has(> .split-cell.is-active) > .split-cell { transition: opacity .18s ease, filter .18s ease; }
 .split:not(.n1):has(> .split-cell.is-active) > .split-cell:not(.is-active):not(:hover):not(.is-drop-candidate):not(.is-flash) { opacity: .62; filter: saturate(.45); }
 @media (prefers-reduced-motion: reduce) { .split:not(.n1) > .split-cell { transition: none; } }
+/* Tres estados (5-oct-2026): activo prendido, inactivos apagados y, entre ellos, los que tienen mensajes sin leer: casi a
+   color, con un borde suave del acento. Fijo, sin parpadeo, para no marear. */
+.split:not(.n1):has(> .split-cell.is-active) > .split-cell.has-unread:not(:hover):not(.is-drop-candidate):not(.is-flash) { opacity: .9; filter: saturate(.85); }
+.split:not(.n1) > .split-cell.has-unread::after {
+  content: ""; position: absolute; inset: 0; border-radius: 8px; pointer-events: none; z-index: 4;
+  border: 1.5px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  box-shadow: inset 0 0 12px color-mix(in srgb, var(--accent) 14%, transparent);
+}

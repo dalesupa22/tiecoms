@@ -2,7 +2,10 @@
    Una sola fila (nunca se parte en dos encima del texto) y más arriba, sobre el borde superior del mensaje.
    En chats angostos (panel de la cuadrícula) solo íconos, con su nombre al pasar el mouse. */
 .conv-main { container-type: inline-size; }
-.msg .msg-actions { flex-wrap: nowrap; top: -24px; max-width: none; gap: 2px; padding: 2px; }
+/* .conv-main delante: styles.css (que carga después) volvía a partirla en dos filas a -13px, tapando la primera línea. */
+.conv-main .msg .msg-actions { flex-wrap: nowrap; top: -24px; max-width: calc(100% - 16px); overflow-x: auto; scrollbar-width: none; gap: 2px; padding: 2px; }
+/* Seleccionando texto (msg-select.ts): la barra no aparece ni recibe clics. */
+.conv-main .msgs.is-selecting .msg .msg-actions { opacity: 0; visibility: hidden; pointer-events: none; transition: none; }
 .msg .msg-actions .msg-act { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
 @container (max-width: 760px) {
   .msg .msg-actions .msg-act-label { display: none; }

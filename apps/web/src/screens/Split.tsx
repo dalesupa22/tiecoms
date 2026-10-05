@@ -10,7 +10,7 @@ import { useClient } from '../app-client.ts';
 import { locale, t } from '../i18n.ts';
 import { navigate } from '../router.ts';
 import { conversationTitle } from '../ui.tsx';
-import { TASKS_KEY, parseKey } from '../grid-keys.ts';
+import { CLASSIC_PANES, TASKS_KEY, parseKey } from '../grid-keys.ts';
 import { openInGrid, readDrag, shareToChat } from '../grid-actions.ts';
 import {
   MAX_PANES, closePane, dragKindOf, fitsChat, fitsSlot, focusPane, onlyPane, rememberBack, setSplitSize, syncActive, togglePin,
@@ -85,8 +85,10 @@ export function GridArea({ id, search = '', side }: { id: string | null; search?
   useEffect(() => { if (id) restoreFromDock(id); }, [id]);
   useEffect(() => { if (wide && d) pruneCollapsed(panes.filter(exists)); }, [panes.join('|'), wide, !!d]);
   const expanded = expandedKey && list.includes(expandedKey) ? expandedKey : null;
-  const customLayout = wide && !side && layout === 'custom';
-  const mixedLayout = wide && !side && layout !== 'classic' && layout !== 'custom' && list.length >= 4;
+  // Más de 4 no caben en los diseños fijos: se dibujan «a tu medida», con desplazamiento a lo ancho.
+  const many = list.filter((k) => k !== TASKS_KEY).length > CLASSIC_PANES;
+  const customLayout = wide && !side && (layout === 'custom' || many);
+  const mixedLayout = wide && !side && !customLayout && layout !== 'classic' && list.length >= 4;
   const ordered = [...order.filter((k) => list.includes(k)), ...list.filter((k) => !order.includes(k))];
   const arranged = mixedLayout || customLayout ? ordered : list;
   const visible = mixedLayout ? arranged.slice(0, 4) : arranged;
@@ -247,7 +249,7 @@ export function GridArea({ id, search = '', side }: { id: string | null; search?
         style={!expanded && customLayout && list.length > 1 ? { gridColumn: `${spanLayout.cells[x]!.column} / span ${spanLayout.cells[x]!.width}`, gridRow: `${spanLayout.cells[x]!.row} / span ${spanLayout.cells[x]!.span}` }
           : mixedLayout && !expanded ? { gridArea: ['a', 'b', 'c', 'd'][arranged.indexOf(x)] } : classicCellStyle(x)}
         data-drop-label={toChat && ref.kind === 'chat' ? `⤵ ${t('grid.dropShare', { name: paneName(x) })}` : undefined}
-        className={`split-cell ${pinned.has(x) ? 'is-pinned-pane' : ''} ${x === active ? 'is-active' : ''} ${flash === x ? 'is-flash' : ''} ${toChat && ref.kind === 'chat' ? 'is-drop-candidate' : ''} ${drop && drop.over === x && (full || (chatOver(x) && fitsChat(drop.kind))) ? 'is-target' : ''}`}
+        className={`split-cell ${pinned.has(x) ? 'is-pinned-pane' : ''} ${x === active ? 'is-active' : (known?.find((c) => c.id === x)?.unread ?? 0) > 0 ? 'has-unread' : ''} ${flash === x ? 'is-flash' : ''} ${toChat && ref.kind === 'chat' ? 'is-drop-candidate' : ''} ${drop && drop.over === x && (full || (chatOver(x) && fitsChat(drop.kind))) ? 'is-target' : ''}`}
         // Tocar un panel lo vuelve el activo (antes del clic, para que el clic siga funcionando adentro).
         onPointerDownCapture={() => { if (x !== active) focusPane(x); }}>
         {ref.kind === 'chat' ? <ConversationScreen key={list.length === 1 && x === id ? x + search : x} id={x} search={x === id ? search : ''} pane={list.length > 1 || !id ? frame : undefined} />
@@ -308,12 +310,12 @@ export function GridArea({ id, search = '', side }: { id: string | null; search?
       {docked.length > 0 && !expanded && <GridDock keys={docked} name={paneName} unread={(k) => known?.find((c) => c.id === k)?.unread ?? 0} tints={tints} />}
       {(expanded || (wide && list.length > 1)) && <div className="grid-layout-tools">
         {expanded ? <button className="btn small" onClick={collapsePane}>↙ {locale().startsWith('en') ? 'Back to grid' : 'Volver a la cuadrícula'}</button>
-          : <><label>{locale().startsWith('en') ? 'Layout' : 'Diseño'} <select value={layout} onChange={(e) => setGridLayout(e.target.value as GridLayout)}>
-            <option value="classic">{locale().startsWith('en') ? 'Classic' : 'Clásico'}</option>
+          : <><label>{locale().startsWith('en') ? 'Layout' : 'Diseño'} <select value={many ? 'custom' : layout} onChange={(e) => setGridLayout(e.target.value as GridLayout)}>
+            <option value="classic" disabled={many}>{locale().startsWith('en') ? 'Classic' : 'Clásico'}</option>
             <option value="custom">{locale().startsWith('en') ? 'Custom panels' : 'Paneles a tu medida'}</option>
-            <option value="tall-center">{locale().startsWith('en') ? '2 tall + 2 small (center)' : '2 largos + 2 pequeños (centro)'}</option>
-            <option value="tall-left">{locale().startsWith('en') ? 'Small on left' : 'Pequeños a la izquierda'}</option>
-            <option value="tall-right">{locale().startsWith('en') ? 'Small on right' : 'Pequeños a la derecha'}</option>
+            <option value="tall-center" disabled={many}>{locale().startsWith('en') ? '2 tall + 2 small (center)' : '2 largos + 2 pequeños (centro)'}</option>
+            <option value="tall-left" disabled={many}>{locale().startsWith('en') ? 'Small on left' : 'Pequeños a la izquierda'}</option>
+            <option value="tall-right" disabled={many}>{locale().startsWith('en') ? 'Small on right' : 'Pequeños a la derecha'}</option>
           </select></label>
           <details className="grid-pane-sizes"><summary>{locale().startsWith('en') ? 'Panel sizes' : 'Tamaño de paneles'}</summary>
             {arranged.map((key) => <label key={key}>{paneName(key)}<select aria-label={`${locale().startsWith('en') ? 'Height of' : 'Alto de'} ${paneName(key)}`}

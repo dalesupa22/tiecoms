@@ -4,7 +4,10 @@
  *   mail:<google|microsoft>:<id del correo>      wa:<cuenta>:<jid>
  * Puro y sin navegador, para poder probarlo.
  */
-export const MAX_PANES_DEFAULT = 4;
+/** Hasta 8 paneles (5-oct-2026: «N paneles con scroll horizontal»); del quinto en adelante la cuadrícula es «a tu medida». */
+export const MAX_PANES_DEFAULT = 8;
+/** Lo que caben los diseños fijos (2×2 y los de 2 largos + 2 pequeños). */
+export const CLASSIC_PANES = 4;
 export type MailProviderKey = 'google' | 'microsoft';
 /** Las secciones enteras que también caben en un cuadrito: la lista de tareas, la bandeja de correo y todas las conversaciones de WhatsApp. */
 export type Section = 'tasks' | 'inbox' | 'wachats' | 'agenda' | 'trazo' | 'calls';
@@ -40,8 +43,8 @@ export const isChatKey = (key: string) => parseKey(key).kind === 'chat';
  * Si está abierta, su clave va siempre al final de la lista guardada.
  */
 export const TASKS_KEY = sectionKey('tasks');
-/** En el mapa de cuaditos, la columna de Tareas es el número 5 (los 4 cuaditos son 0–3). */
-export const TASKS_SLOT = 4;
+/** En el mapa de cuaditos, la columna de Tareas (fuera del rango 0–7 de los paneles, que ya no son solo 4). */
+export const TASKS_SLOT = 99;
 export function splitMain(panes: string[]): { main: string[]; tasks: boolean } {
   const main = panes.filter((k) => k !== TASKS_KEY);
   return { main, tasks: main.length !== panes.length };

@@ -9,7 +9,7 @@
  */
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { navigate } from './router.ts';
-import { MAX_PANES_DEFAULT, TASKS_KEY, isChatKey, placeIntoGrid, replaceIndex, splitMain } from './grid-keys.ts';
+import { CLASSIC_PANES, MAX_PANES_DEFAULT, TASKS_KEY, isChatKey, placeIntoGrid, replaceIndex, splitMain } from './grid-keys.ts';
 import { gridSpanLayout, layoutAfterPlacement, sanitizePanePositions, type PanePosition } from './grid-span-layout.ts';
 
 export const MAX_PANES = MAX_PANES_DEFAULT;
@@ -177,7 +177,9 @@ function compactStoredPositions() {
 }
 
 function set(next: string[]) {
+  const prev = panes;
   panes = next.slice(0, MAX_STORED);
+  sizeNewPanes(prev);
   compactStoredPositions();
   saveLayout();
   // Lo que ya no está en la cuadrícula deja de estar fijado y de guardar su nombre.
@@ -186,6 +188,28 @@ function set(next: string[]) {
   if (activeKey && !panes.includes(activeKey)) activeKey = null;
   write(KEY, panes); write(PIN_KEY, [...pinned]); write(META_KEY, metas);
   emit();
+}
+/**
+ * Tamaño de los paneles que entran (5-oct-2026: «que ocupe todo por defecto, 2 filas»): el que reemplaza a otro hereda su
+ * lugar y tamaño; uno nuevo entra a lo alto. Con más de 4 la cuadrícula pasa a «a tu medida», cada uno en su columna, y se
+ * desplaza a lo ancho.
+ */
+function sizeNewPanes(prev: readonly string[]) {
+  const added = panes.filter((k) => !prev.includes(k)), removed = prev.filter((k) => !panes.includes(k));
+  if (!added.length) return;
+  const inherit = (from: string, to: string) => {
+    if (tallPanes.includes(from)) tallPanes = [...tallPanes, to];
+    if (widePanes.includes(from)) widePanes = [...widePanes, to];
+    if (panePositions[from]) panePositions = { ...panePositions, [to]: panePositions[from]! };
+    layoutOrder = layoutOrder.map((k) => k === from ? to : k);
+  };
+  if (layout !== 'custom' && splitMain(panes).main.length > CLASSIC_PANES) {
+    layout = 'custom'; panePositions = {};
+    tallPanes = [...new Set([...splitMain(panes).main, TASKS_KEY])];
+    return;
+  }
+  if (layout !== 'custom') return;
+  added.forEach((key, i) => { const from = removed[i]; if (from) inherit(from, key); else if (!tallPanes.includes(key)) tallPanes = [...tallPanes, key]; });
 }
 export const usePanes = () => useSyncExternalStore(subscribe, () => panes);
 export const currentPanes = () => panes;

@@ -152,7 +152,7 @@ function parseBoundary(raw: string | undefined): string | HistoryCursorValue | n
       const data = raw.slice(HISTORY_CURSOR_PREFIX.length);
       if (raw.length > 4096 || !/^[A-Za-z0-9_-]+$/.test(data)) throw new Error('cursor');
       return HistoryCursor.parse(JSON.parse(Buffer.from(data, 'base64url').toString('utf8')));
-    } catch { throw badRequest('Cursor de historial inválido; usa nextBefore o nextSince sin modificarlo'); }
+    } catch { throw badRequest('Cursor de historial inválido; usa nextCursor sin modificarlo'); }
   }
   if (!isoDate.safeParse(raw).success) throw badRequest('since/before debe ser una fecha ISO o el cursor devuelto por read_whatsapp');
   return raw;
@@ -179,8 +179,15 @@ function historyPage(c: any, q: { since?: string; before?: string; kinds?: strin
 }
 
 /** Authorized PN/LID history, de-duplicated before filtering/pagination. */
-export async function readChat(ctx: McpCtx, ref: string, q: { limit: number; since?: string; before?: string; kinds?: string[] }) {
+export async function readChat(ctx: McpCtx, ref: string, q: { limit: number; since?: string; before?: string; cursor?: string; kinds?: string[] }) {
   const c = await findChat(ctx, ref);
+  if (q.cursor !== undefined) {
+    const cursor = parseBoundary(q.cursor);
+    if (!cursor || typeof cursor === 'string' || q.since !== undefined || q.before !== undefined) {
+      throw badRequest('Usa cursor: nextCursor sin combinarlo con since/before');
+    }
+    q = { ...q, [cursor.direction]: q.cursor };
+  }
   const pageState = historyPage(c, q);
   const order = pageState.ascending ? 'ASC' : 'DESC';
   const { rows } = await pool.query(
@@ -220,7 +227,9 @@ export async function readChat(ctx: McpCtx, ref: string, q: { limit: number; sin
   const edge = pageState.ascending ? ordered.at(-1) : ordered[0];
   const next = edge ? encodeHistoryCursor({ v: 1, account: c.account_id, contact: c.logical_jid, direction: pageState.ascending ? 'since' : 'before',
     at: edge.cursor_at, id: edge.id, kinds: pageState.kinds as HistoryCursorValue['kinds'], opposite: pageState.opposite }) : null;
-  const cursors: { nextSince?: string; nextBefore?: string } = more && next ? (pageState.ascending ? { nextSince: next } : { nextBefore: next }) : {};
+  // Keep ISO outputs for clients whose cached schemas still require date-time inputs.
+  const cursors: { nextSince?: string; nextBefore?: string; nextCursor?: string } = more && next
+    ? { nextCursor: next, ...(pageState.ascending ? { nextSince: edge.cursor_at } : { nextBefore: edge.cursor_at }) } : {};
   return { chat: mapChat(c, false), messages, hasMore: more, ...cursors };
 }
 

@@ -65,10 +65,11 @@ async function allPages(direction: 'before' | 'since', kinds?: string[]) {
   let boundary = direction === 'since' ? since : undefined;
   const pages: any[][] = [];
   for (let n = 0; n < 100; n++) {
-    const page = await wa.readChat(ctx, ref(n % 2 ? LID : PN), { limit: 37, [direction]: boundary, ...(n === 0 && kinds ? { kinds } : {}) });
+    const page = await wa.readChat(ctx, ref(n % 2 ? LID : PN), { limit: 37, ...(n === 0 ? { [direction]: boundary } : { cursor: boundary }), ...(n === 0 && kinds ? { kinds } : {}) });
     pages.push(page.messages);
     if (!page.hasMore) return (direction === 'before' ? pages.reverse() : pages).flat();
-    boundary = direction === 'before' ? page.nextBefore : page.nextSince;
+    boundary = page.nextCursor;
+    expect(direction === 'before' ? page.nextBefore : page.nextSince).toMatch(/^2026-/);
     expect(boundary).toMatch(/^wa1\./);
   }
   throw new Error('Pagination never completed');
@@ -120,13 +121,13 @@ describe('authorized logical WhatsApp history', () => {
     const first = await wa.readChat(ctx, ref(), { limit: 5 });
     await pool.query('UPDATE wa_chats SET integrations_shared=false WHERE account_id=$1 AND jid=$2', [account, LID]);
     try {
-      const next = await wa.readChat(ctx, ref(), { limit: 200, before: first.nextBefore });
+      const next = await wa.readChat(ctx, ref(), { limit: 200, cursor: first.nextCursor });
       expect(next.chat.aliasCount).toBe(1);
       expect(next.messages.every((m) => Number(m.id.slice(1)) < 490)).toBe(true);
     } finally { await pool.query('UPDATE wa_chats SET integrations_shared=true WHERE account_id=$1 AND jid=$2', [account, LID]); }
     await pool.query('UPDATE wa_chats SET wa_locked=true WHERE account_id=$1 AND jid=$2', [account, LID]);
     try {
-      await expect(wa.readChat(ctx, ref(), { limit: 5, before: first.nextBefore })).rejects.toMatchObject({ code: 'not_found' });
+      await expect(wa.readChat(ctx, ref(), { limit: 5, cursor: first.nextCursor })).rejects.toMatchObject({ code: 'not_found' });
       expect((await wa.findByPhone(ctx, PN.split('@')[0]!)).chats.map((c) => c.chat)).not.toContain(ref());
       expect((await wa.search(ctx, { query: 'duplicate latest', limit: 10 })).results).toHaveLength(0);
     } finally { await pool.query('UPDATE wa_chats SET wa_locked=false WHERE account_id=$1 AND jid=$2', [account, LID]); }
@@ -158,16 +159,18 @@ describe('authorized logical WhatsApp history', () => {
     expect(images).toHaveLength(107);
     expect(images.every((m) => m.kind === 'image')).toBe(true);
     const first = await wa.readChat(ctx, ref(), { limit: 5, since, before: until, kinds: ['image'] });
-    const second = await wa.readChat(ctx, ref(), { limit: 200, since: first.nextSince });
+    const second = await wa.readChat(ctx, ref(), { limit: 200, cursor: first.nextCursor });
     expect(second.messages).toHaveLength(51);
     expect(second.messages.every((m) => m.kind === 'image' && Number(m.id.slice(1)) < 280)).toBe(true);
-    await expect(wa.readChat(ctx, ref(), { limit: 5, before: first.nextSince })).rejects.toMatchObject({ code: 'bad_request' });
-    await expect(wa.readChat(ctx, ref(PN, secondAccount), { limit: 5, since: first.nextSince })).rejects.toMatchObject({ code: 'bad_request' });
-    await expect(wa.readChat(ctx, ref(), { limit: 5, since: first.nextSince, kinds: ['text'] })).rejects.toMatchObject({ code: 'bad_request' });
-    await expect(wa.readChat(ctx, ref(), { limit: 5, since: first.nextSince, before: '2026-10-03T00:00:00Z' })).rejects.toMatchObject({ code: 'bad_request' });
+    await expect(wa.readChat(ctx, ref(), { limit: 5, before: first.nextCursor })).rejects.toMatchObject({ code: 'bad_request' });
+    await expect(wa.readChat(ctx, ref(PN, secondAccount), { limit: 5, since: first.nextCursor })).rejects.toMatchObject({ code: 'bad_request' });
+    await expect(wa.readChat(ctx, ref(), { limit: 5, since: first.nextCursor, kinds: ['text'] })).rejects.toMatchObject({ code: 'bad_request' });
+    await expect(wa.readChat(ctx, ref(), { limit: 5, since: first.nextCursor, before: '2026-10-03T00:00:00Z' })).rejects.toMatchObject({ code: 'bad_request' });
     for (const boundary of ['wa1.!bad', 'wa1.eyJ2IjoyfQ', 'tomorrow', 'wa1.' + 'a'.repeat(5000)]) {
       await expect(wa.readChat(ctx, ref(), { limit: 5, before: boundary })).rejects.toMatchObject({ code: 'bad_request' });
     }
+    await expect(wa.readChat(ctx, ref(), { limit: 5, cursor: first.nextCursor, before: until })).rejects.toMatchObject({ code: 'bad_request' });
+    await expect(wa.readChat(ctx, ref(), { limit: 5, cursor: since })).rejects.toMatchObject({ code: 'bad_request' });
     // Deduplicate first: an older alias copy cannot reappear inside an older ISO window.
     const oldWindow = await wa.readChat(ctx, ref(), { limit: 1000, before: '2026-10-01T00:30:00Z' });
     expect(oldWindow.messages).toHaveLength(534);

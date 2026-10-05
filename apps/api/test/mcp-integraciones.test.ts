@@ -159,6 +159,17 @@ describe('datos completos', () => {
     expect(since.messages[0].kind).toBe('audio');
   });
 
+  it('pagina por cursor y conserva fechas ISO para conectores con esquema anterior', async () => {
+    const first = (await tool(t, 'read_whatsapp', { chat: 'Coopcentral', limit: 1 })).structuredContent;
+    expect(first.nextBefore).toMatch(/^\d{4}-.*Z$/);
+    expect(first.nextCursor).toMatch(/^wa1\./);
+    const next = (await tool(t, 'read_whatsapp', { chat: 'Coopcentral', limit: 1, cursor: first.nextCursor })).structuredContent;
+    const legacy = (await tool(t, 'read_whatsapp', { chat: 'Coopcentral', limit: 1, before: first.nextBefore })).structuredContent;
+    expect(next.messages).toHaveLength(1);
+    expect(next.messages[0].id).not.toBe(first.messages[0].id);
+    expect(legacy.messages[0].id).toBe(next.messages[0].id);
+  });
+
   it('lista con teléfono del 1 a 1, quién habló de último y paginación', async () => {
     const p1 = (await tool(t, 'list_whatsapp_chats', { limit: 2 })).structuredContent;
     expect(p1.hasMore).toBe(true);

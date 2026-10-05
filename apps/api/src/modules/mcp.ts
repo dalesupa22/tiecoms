@@ -418,15 +418,16 @@ const tools: Tool[] = [
   },
   {
     name: 'read_whatsapp', readOnly: true, scope: 'whatsapp:read',
-    description: 'Mensajes de un contacto o grupo de WhatsApp (valor chat o nombre), reuniendo sus aliases PN/LID autorizados en la misma cuenta sin duplicar IDs. Cada mensaje trae fromMe, kind, teléfono de quien escribe y la transcripción de las notas de voz. since = solo lo nuevo (ascendente); before = hacia atrás. Ambos aceptan fecha ISO o el cursor opaco nextSince/nextBefore: reenvíalo sin modificar para no perder mensajes con la misma fecha. No marca como leído.',
+    description: 'Mensajes de un contacto o grupo de WhatsApp (valor chat o nombre), reuniendo sus aliases PN/LID autorizados en la misma cuenta sin duplicar IDs. Cada mensaje trae fromMe, kind, teléfono de quien escribe y transcripción. since = solo lo nuevo (ascendente); before = hacia atrás. Para paginar sin perder empates, envía cursor: nextCursor sin since/before. nextSince/nextBefore conservan fechas ISO para clientes anteriores. No marca como leído.',
     schema: z.object({
       chat: z.string().min(1).max(300),
-      since: z.string().min(1).max(4096).optional().describe('Fecha ISO inicial o nextSince devuelto por read_whatsapp'),
-      before: z.string().min(1).max(4096).optional().describe('Fecha ISO inicial o nextBefore devuelto por read_whatsapp'),
+      since: z.string().min(1).max(4096).optional().describe('Fecha ISO inicial o nextSince; se recomienda cursor para continuar'),
+      before: z.string().min(1).max(4096).optional().describe('Fecha ISO inicial o nextBefore; se recomienda cursor para continuar'),
+      cursor: z.string().min(1).max(4096).optional().describe('nextCursor opaco de read_whatsapp, sin since/before; conserva filtros y empates'),
       kinds: z.array(z.enum(WA_KINDS)).max(10).optional(),
       limit: z.number().int().min(1).max(200).optional(),
     }),
-    run: async (_u, a, ctx) => mwa.readChat(ctx, a.chat, { limit: a.limit ?? 50, since: a.since, before: a.before, kinds: a.kinds }),
+    run: async (_u, a, ctx) => mwa.readChat(ctx, a.chat, { limit: a.limit ?? 50, since: a.since, before: a.before, cursor: a.cursor, kinds: a.kinds }),
   },
   {
     name: 'find_whatsapp_chat', readOnly: true, scope: 'whatsapp:read',

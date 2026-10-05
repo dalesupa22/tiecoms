@@ -72,10 +72,10 @@ WhatsApp puede guardar parte de un contacto bajo su número (`@s.whatsapp.net`) 
 
 Para recorrer todo el historial:
 
-1. Hacia atrás: `read_whatsapp {chat, limit: 200}`. Mientras `hasMore` sea verdadero, repetir con `before: nextBefore`.
-2. Hacia adelante: `read_whatsapp {chat, since: "2026-10-01T00:00:00Z", limit: 200}`. Continuar con `since: nextSince`.
+1. Hacia atrás: `read_whatsapp {chat, limit: 200}`. Mientras `hasMore` sea verdadero, repetir con `cursor: nextCursor`.
+2. Hacia adelante: `read_whatsapp {chat, since: "2026-10-01T00:00:00Z", limit: 200}`. Continuar con `cursor: nextCursor`.
 
-`before` y `since` siguen aceptando fechas ISO, con sus límites exclusivos anteriores. `nextBefore` y `nextSince` ahora son **cursores opacos versionados `wa1.…`**, no fechas: se deben reenviar completos, sin editarlos ni pasarlos por un parser de fechas. Conservan la precisión de microsegundos de PostgreSQL y el ID como desempate, para no perder mensajes que comparten fecha. También conservan `kinds` y el límite ISO opuesto, si se suministraron; los siguientes pedidos pueden omitir esos filtros. Cambiar dirección, contacto, cuenta o filtros da `bad_request`. El tamaño de página puede cambiar.
+`before` y `since` siguen aceptando fechas ISO, con sus límites exclusivos anteriores. `nextBefore` y `nextSince` conservan ese formato para clientes que validan una definición anterior de la herramienta. El nuevo **`nextCursor` opaco versionado `wa1.…`** se reenvía en `cursor`, sin `before` ni `since`; conserva microsegundos, ID de desempate, dirección, `kinds` y el límite ISO opuesto. Es la forma recomendada para no perder mensajes que comparten fecha. Cambiar contacto, cuenta o filtros da `bad_request`; el tamaño de página puede cambiar. También se aceptan cursores en `before`/`since` para clientes que ya adoptaron ese formato. La paginación antigua por fecha conserva su limitación ante empates; actualizar el catálogo permite usar `cursor`.
 
 La respuesta mantiene el orden de presentación cronológico: `since` avanza en orden ascendente; cada página hacia atrás contiene del más viejo al más nuevo entre los mensajes de esa página. Las notas de voz se encolan usando el JID real de cada mensaje. No se marca el chat como leído ni se modifica la sincronización de WhatsApp.
 

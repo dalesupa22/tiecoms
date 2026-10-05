@@ -77,6 +77,7 @@ final class AppStore {
     private(set) var typing: [String: [TypingEntry]] = [:]
     /// Asuntos conocidos por id (se cargan por filtro y se actualizan en vivo).
     var issues: [String: IssueDTO] = [:]
+    @ObservationIgnored var issueLiveRevisions: [String: UInt64] = [:]
     /// Mensajes fijados por conversación.
     var pins: [String: [String]] = [:]
     /// Temas por conversación (activos y archivados), en el orden de la fila (docs/TEMAS.md).
@@ -259,7 +260,7 @@ final class AppStore {
         meetingAttemptStorageError = false
         meetingAttempts = [:]
         meetingPayloads = [:]
-        issues = [:]; events = [:]; mails = [:]; mailsMissing = []
+        issues = [:]; issueLiveRevisions = [:]; events = [:]; mails = [:]; mailsMissing = []
         for task in readTasks.values { task.cancel() }
         readTasks = [:]; readTargets = [:]; readFailures = []
     }
@@ -617,7 +618,7 @@ final class AppStore {
         conversations = [:]
         pending = []
         typing = [:]
-        issues = [:]; pins = [:]; topics = [:]; taskCardComments = [:]; reminders = []; events = [:]; scheduled = []
+        issues = [:]; issueLiveRevisions = [:]; pins = [:]; topics = [:]; taskCardComments = [:]; reminders = []; events = [:]; scheduled = []
         mails = [:]; mailsMissing = []; mailWanted = []; mailConnectionsKnown = nil; mailPins = []
         blockedUserIds = []
         localDndUntil = nil; dndLocalOnly = false; dndExpiryTask?.cancel(); dndExpiryTask = nil
@@ -816,14 +817,17 @@ final class AppStore {
         case .sleepChanged(let s): patchMe { $0.sleep = s }
         // Asuntos restringidos ('org' o 'private') llegan por la cuenta, no por la conversación.
         case .issueUpdated(let i):
+            issueLiveRevisions[i.id, default: 0] &+= 1
             guard canCacheIssue(i) else { return }
             issues[i.id] = i
             recountIssues(i.conversationId)
         // Mis asuntos personales (sin conversación): solo llegan a mi cuenta y no cuentan en ningún chat.
         case .issuePersonal(let i):
+            issueLiveRevisions[i.id, default: 0] &+= 1
             guard canCacheIssue(i) else { return }
             issues[i.id] = i
         case .issueHidden(let id, let conv):
+            issueLiveRevisions[id, default: 0] &+= 1
             issues[id] = nil
             recountIssues(conv)
         case .callRinging(let call, let title, let caller):
@@ -876,6 +880,7 @@ final class AppStore {
     private func sideEffects(_ e: ConversationEvent, live: Bool) {
         switch e {
         case .issueUpdated(let cid, _, let issue):
+            issueLiveRevisions[issue.id, default: 0] &+= 1
             issues[issue.id] = issue
             recountIssues(cid)
         case .pinsChanged(let cid, _, let ids):

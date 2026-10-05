@@ -194,16 +194,49 @@ extension AppStore {
     @discardableResult
     func loadIssues(workspaceId: String? = nil, conversationId: String? = nil, mine: Bool = false, open: Bool = false) async throws -> [IssueDTO] {
         let stamp = sessionStamp
+        let revisions = issueLiveRevisions
         var q: [String] = []
         if let workspaceId { q.append("workspaceId=\(workspaceId)") }
         if let conversationId { q.append("conversationId=\(conversationId)") }
         if mine { q.append("mine=1") }
         if open { q.append("open=1") }
-        let r: ListOf<IssueDTO> = try await api.request("/issues?\(q.joined(separator: "&"))")
-        try requireSession(stamp)
-        let visible = r.items.filter(canCacheIssue)
-        for i in visible { issues[i.id] = i }
-        return visible
+        // The global task hub needs all authorized rows before applying combinable filters.
+        // Legacy servers ignore these opt-in parameters and return their original list without nextOffset.
+        let paginated = workspaceId == nil && conversationId == nil && !mine && !open
+        struct Page: Decodable {
+            var issues: [IssueDTO]
+            var nextOffset: Int?
+            init(from decoder: Decoder) throws {
+                let c = try container(decoder)
+                issues = c.lossyArray("issues")
+                nextOffset = c.intOpt("nextOffset")
+            }
+        }
+        var offset = 0
+        var collected: [IssueDTO] = []
+        repeat {
+            try Task.checkCancellation()
+            let paging = paginated ? ["limit=200", "offset=\(offset)"] : []
+            let page: Page = try await api.request("/issues?\((q + paging).joined(separator: "&"))")
+            try requireSession(stamp)
+            try Task.checkCancellation()
+            collected.append(contentsOf: page.issues)
+            guard paginated, let next = page.nextOffset else { break }
+            guard next > offset, !page.issues.isEmpty else { throw CocoaError(.coderInvalidValue) }
+            offset = next
+        } while true
+        let visible = collected.filter(canCacheIssue)
+        var unique: [String: IssueDTO] = [:]
+        for i in visible {
+            guard issueLiveRevisions[i.id, default: 0] == revisions[i.id, default: 0] else {
+                unique[i.id] = issues[i.id]
+                continue
+            }
+            if let current = issues[i.id], current.updatedAt > i.updatedAt { unique[i.id] = current }
+            else { unique[i.id] = i; issues[i.id] = i }
+        }
+        var seen = Set<String>()
+        return visible.compactMap { seen.insert($0.id).inserted ? unique[$0.id] : nil }
     }
 
     @discardableResult

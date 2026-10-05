@@ -155,13 +155,15 @@ final class GgSideCenter {
     /// «Abrir en gg»: RootView abre el asistente general cuando sube.
     var openGeneral = 0
     @ObservationIgnored private var pendingAt: [String: Date] = [:]
+    @ObservationIgnored private var recalculatedAt: [String: Date] = [:]
 
     func purge(where affected: (String) -> Bool) {
         pending = pending.filter { !affected($0.key) }; threads = threads.filter { !affected($0.key) }
         used = used.filter { !affected($0) }; pendingAt = pendingAt.filter { !affected($0.key) }
+        recalculatedAt = recalculatedAt.filter { !affected($0.key) }
     }
 
-    func reset() { available = nil; pending = [:]; threads = [:]; used = []; consented = false; pendingAt = [:] }
+    func reset() { available = nil; pending = [:]; threads = [:]; used = []; consented = false; pendingAt = [:]; recalculatedAt = [:] }
 
     /// ¿Se piden de nuevo los pendientes? (como mucho cada 2 min por fuente, salvo `force`).
     func shouldRefreshPending(_ source: String, force: Bool) -> Bool {
@@ -170,6 +172,11 @@ final class GgSideCenter {
         return Date().timeIntervalSince(at) > 120
     }
     func markPending(_ source: String) { pendingAt[source] = Date() }
+    func beginRecalculation(_ source: String, now: Date = Date()) -> Bool {
+        if let last = recalculatedAt[source], now.timeIntervalSince(last) < 600 { return false }
+        recalculatedAt[source] = now
+        return true
+    }
 }
 
 /// 403 `ai_consent_required`: la UI muestra el permiso de IA y reintenta.
@@ -190,9 +197,11 @@ extension AppStore {
 
     /// Al entrar a un chat con mensajes nuevos de otra persona: el API recalcula (tope 1 cada 10 min por fuente).
     func ggSideRefreshPending(_ source: String) async {
-        guard ggSide.available == true, ggConsented else { return }
+        guard ggSide.available == true, ggConsented, waPrivacy.allows(source), ggSide.beginRecalculation(source) else { return }
+        let stamp = sessionStamp, revision = waPrivacy.revision
         struct R: Decodable { var pending: Int; init(from decoder: Decoder) throws { pending = (try container(decoder)).int("pending") } }
-        if let r: R = try? await api.request("/gg/side/pending/refresh", method: "POST", json: ["source": source]) { ggSide.pending[source] = max(0, r.pending) }
+        if let r: R = try? await api.request("/gg/side/pending/refresh", method: "POST", json: ["source": source]),
+           stamp == sessionStamp, !Task.isCancelled, revision == waPrivacy.revision, waPrivacy.allows(source) { ggSide.pending[source] = max(0, r.pending) }
     }
 
     private func ggBody(_ base: [String: Any]) -> [String: Any] {
@@ -221,7 +230,7 @@ extension AppStore {
 
     /// Número del botón (GET /gg/side/pending, sin IA). Un 404 esconde el botón.
     func ggSidePending(_ sources: [String], force: Bool = false) async {
-        let revision = waPrivacy.revision
+        let revision = waPrivacy.revision, stamp = sessionStamp
         let want = sources.filter { waPrivacy.allows($0) && ggSide.shouldRefreshPending($0, force: force) }
         guard !want.isEmpty, ggSide.available != false else { return }
         want.forEach(ggSide.markPending)
@@ -236,6 +245,7 @@ extension AppStore {
         }
         do {
             let r: R = try await ggGuard { try await api.request("/gg/side/pending?sources=\(want.map(GgSource.query).joined(separator: ","))") }
+            guard stamp == sessionStamp, !Task.isCancelled else { return }
             for s in want where !s.hasPrefix("wa:") || (revision == waPrivacy.revision && waPrivacy.allows(s)) { ggSide.pending[s] = max(0, r.map[s] ?? 0) }
         } catch let e as ApiRequestError where e.status == 404 {
             if Self.ggRouteMissing(e) { ggSide.available = false }

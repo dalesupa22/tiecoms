@@ -3025,3 +3025,20 @@
 "share.groups" = "Groups";
 "share.noResults" = "No results";
 "share.remove" = "Remove {name}";
+
+// Combinable task filters
+"tasks.filter.results" = "{n} tasks";
+"tasks.filter.anyone" = "Anyone";
+"tasks.filter.people" = "{n} people";
+"tasks.filter.responsible" = "Assignees";
+"tasks.filter.allStates" = "All statuses";
+"tasks.filter.pending" = "Pending";
+"tasks.filter.completed" = "Completed";
+"tasks.filter.cancelled" = "Cancelled";
+"tasks.filter.states" = "{n} statuses";
+"wa.shareDraft" = "Share to WhatsApp";
+"tasks.filter.combine" = "Combine statuses";
+"tasks.filter.empty" = "No tasks match these filters";
+"tasks.filter.emptyHint" = "Try other assignees or statuses.";
+"tasks.filter.closed" = "Recently closed";
+"tasks.filter.result" = "1 task";

@@ -3025,3 +3025,20 @@
 "share.groups" = "Grupos";
 "share.noResults" = "Sin resultados";
 "share.remove" = "Quitar a {name}";
+
+// Combinable task filters
+"tasks.filter.results" = "{n} tareas";
+"tasks.filter.anyone" = "Todos";
+"tasks.filter.people" = "{n} responsables";
+"tasks.filter.responsible" = "Responsables";
+"tasks.filter.allStates" = "Todos los estados";
+"tasks.filter.pending" = "Pendientes";
+"tasks.filter.completed" = "Completadas";
+"tasks.filter.cancelled" = "Canceladas";
+"tasks.filter.states" = "{n} estados";
+"wa.shareDraft" = "Compartir en WhatsApp";
+"tasks.filter.combine" = "Combinar estados";
+"tasks.filter.empty" = "No hay tareas con estos filtros";
+"tasks.filter.emptyHint" = "Prueba otros responsables o estados.";
+"tasks.filter.closed" = "Cerradas recientes";
+"tasks.filter.result" = "1 tarea";

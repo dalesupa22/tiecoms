@@ -184,14 +184,15 @@ struct TaskListRow: View {
 /// Estado vacío amable según el filtro.
 struct TasksEmptyState: View {
     let filter: IssueTree.Filter
+    var combined = false
     var body: some View {
         VStack(spacing: 10) {
             Image(systemName: filter == .closed ? "checkmark.circle" : "sun.max")
                 .font(.system(size: 40, weight: .light)).foregroundStyle(Theme.accentText.opacity(0.8))
                 .accessibilityHidden(true)
-            Text(L(filter == .mine ? "tasks.empty.mine" : filter == .closed ? "tasks.empty.done" : "tasks.empty.open"))
+            Text(L(combined ? "tasks.filter.empty" : filter == .mine ? "tasks.empty.mine" : filter == .closed ? "tasks.empty.done" : "tasks.empty.open"))
                 .font(.headline).foregroundStyle(Theme.textPrimary).multilineTextAlignment(.center)
-            Text(L(filter == .closed ? "tasks.empty.doneHint" : "tasks.empty.hint"))
+            Text(L(combined ? "tasks.filter.emptyHint" : filter == .closed ? "tasks.empty.doneHint" : "tasks.empty.hint"))
                 .font(.subheadline).foregroundStyle(Theme.textSecondary).multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)

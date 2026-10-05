@@ -482,6 +482,8 @@ struct AttachButton: View {
     @State private var showPhotos = false
     @State private var showCamera = false
     @State private var showFiles = false
+    @State private var showActions = false
+    @State private var afterActions: (() -> Void)?
     /// El «＋» del compositor también crea un evento o un asunto del chat (nil = no se ofrece).
     var onEvent: (() -> Void)? = nil
     var onIssue: (() -> Void)? = nil
@@ -490,6 +492,7 @@ struct AttachButton: View {
     /// «✉ Correo» y «Mensaje de WhatsApp» (docs/CORREO.md), solo con features.mail.
     var onMail: (() -> Void)? = nil
     var onWhatsApp: (() -> Void)? = nil
+    var onWhatsAppShare: (() -> Void)? = nil
     var onGifs: (() -> Void)? = nil
     /// «✨ Ideas de respuesta de gg» (antes una ✨ suelta en la barra; 1.7.13).
     var onReplyIdeas: (() -> Void)? = nil
@@ -499,30 +502,7 @@ struct AttachButton: View {
     var onError: (String) -> Void
 
     var body: some View {
-        Menu {
-            if let onReplyIdeas {
-                Button(action: onReplyIdeas) { Label(L("ggs.replyIdeas"), systemImage: "sparkles") }.accessibilityIdentifier("composer.ggReplies")
-                Divider()
-            }
-            if let formatting { ComposerFormatMenu(controller: formatting); Divider() }
-            Button { showPhotos = true } label: { Label(L("att.fromPhotos"), systemImage: "photo.on.rectangle") }
-            if UIImagePickerController.isSourceTypeAvailable(.camera) {
-                Button { showCamera = true } label: { Label(L("att.fromCamera"), systemImage: "camera") }
-            }
-            Button { showFiles = true } label: { Label(L("att.fromFiles"), systemImage: "folder") }
-            if let onGifs { Button(action: onGifs) { Label(L("gifs.title"), systemImage: "face.smiling") }.accessibilityIdentifier("composer.plus.gifs") }
-            if onEvent != nil || onIssue != nil { Divider() }
-            if let onEvent { Button(action: onEvent) { Label(L("bar.newEvent"), systemImage: "calendar.badge.plus") }.accessibilityIdentifier("composer.plus.event") }
-            if let onIssue { Button(action: onIssue) { Label(L("bar.newIssue"), systemImage: "diamond") }.accessibilityIdentifier("composer.plus.issue") }
-            if let onMeeting {
-                Divider()
-                Button { onMeeting(true) } label: { Text(L("meet.now")) }.accessibilityIdentifier("composer.plus.meetNow")
-                Button { onMeeting(false) } label: { Text(L("meet.schedule")) }.accessibilityIdentifier("composer.plus.meetSchedule")
-            }
-            if onMail != nil || onWhatsApp != nil { Divider() }
-            if let onMail { Button(action: onMail) { Label(L("mail.fromChat"), systemImage: "envelope") }.accessibilityIdentifier("composer.plus.mail") }
-            if let onWhatsApp { Button(action: onWhatsApp) { Label(L("wa.fromChat"), systemImage: "phone.bubble") }.accessibilityIdentifier("composer.plus.whatsapp") }
-        } label: {
+        Button { showActions = true } label: {
             if let title {
                 Label(title, systemImage: "paperclip").font(.subheadline.weight(.semibold)).foregroundStyle(Theme.accentText)
                     .frame(minHeight: 44)
@@ -533,6 +513,56 @@ struct AttachButton: View {
         }
         .accessibilityLabel(title ?? (onEvent != nil || onIssue != nil || onMeeting != nil ? L("bar.plus") : L("att.attach")))
         .accessibilityIdentifier(title != nil ? "taskFiles.attach" : "composer.attach")
+        .sheet(isPresented: $showActions, onDismiss: {
+            let action = afterActions; afterActions = nil
+            action?()
+        }) {
+            NavigationStack {
+                ScrollView {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 76), spacing: 12)], spacing: 22) {
+                        actionTile(L("att.fromPhotos"), "photo.on.rectangle.fill", .blue, "photos") { showPhotos = true }
+                        if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                            actionTile(L("att.fromCamera"), "camera.fill", .secondary, "camera") { showCamera = true }
+                        }
+                        actionTile(L("att.fromFiles"), "doc.fill", .cyan, "files") { showFiles = true }
+                        if let onWhatsAppShare { actionTile(L("wa.shareDraft"), "arrow.up.right", .green, "whatsappShare", onWhatsAppShare) }
+                        if let onWhatsApp { actionTile(L("wa.fromChat"), "phone.bubble.fill", .green, "whatsapp", onWhatsApp) }
+                        if let onGifs { actionTile(L("gifs.title"), "face.smiling.fill", .purple, "gifs", onGifs) }
+                        if let onEvent { actionTile(L("bar.newEvent"), "calendar", .pink, "event", onEvent) }
+                        if let onIssue { actionTile(L("bar.newIssue"), "checkmark.diamond.fill", .orange, "issue", onIssue) }
+                        if let onMail { actionTile(L("mail.fromChat"), "envelope.fill", .blue, "mail", onMail) }
+                        if let onMeeting {
+                            actionTile(L("meet.now"), "video.fill", .mint, "meetNow") { onMeeting(true) }
+                            actionTile(L("meet.schedule"), "calendar.badge.clock", .indigo, "meetSchedule") { onMeeting(false) }
+                        }
+                        if let onReplyIdeas { actionTile(L("ggs.replyIdeas"), "sparkles", Theme.orange, "ggReplies", onReplyIdeas) }
+                        if let formatting {
+                            Menu {
+                                ForEach(ComposerFormattingController.items, id: \.command) { item in
+                                    Button { chooseAction { formatting.apply(item.command) } } label: {
+                                        Label(L(item.label), systemImage: item.symbol)
+                                    }
+                                    .disabled(!formatting.available.contains(item.command))
+                                    .accessibilityIdentifier("composer.format." + item.command)
+                                }
+                            } label: { tileLabel(L("composer.format"), "textformat", Theme.ink) }
+                            .accessibilityIdentifier("composer.plus.format")
+                        }
+                    }
+                    .padding(.horizontal, 18).padding(.top, 16).padding(.bottom, 28)
+                }
+                .background(Theme.background)
+                .accessibilityIdentifier("composer.actions")
+                .navigationTitle(title ?? L("bar.plus"))
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar { ToolbarItem(placement: .confirmationAction) {
+                    Button(L("common.close")) { showActions = false }
+                } }
+            }
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+            .presentationCornerRadius(30)
+        }
         .photosPicker(isPresented: $showPhotos, selection: $photos, maxSelectionCount: max(1, AttachmentRules.maxPerMessage - staged.count - otherStagedCount),
                       matching: .any(of: [.images, .videos]), photoLibrary: .shared())
         .onChange(of: photos) { _, items in
@@ -579,6 +609,29 @@ struct AttachButton: View {
                 else { add(LocalAttachment(name: url.lastPathComponent, contentType: type, data: d)) }
             }
         }
+    }
+
+    private func chooseAction(_ action: @escaping () -> Void) {
+        afterActions = action
+        showActions = false
+    }
+
+    private func actionTile(_ text: String, _ symbol: String, _ color: Color, _ id: String, _ action: @escaping () -> Void) -> some View {
+        Button { chooseAction(action) } label: { tileLabel(text, symbol, color) }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier(id == "ggReplies" ? "composer.ggReplies" : "composer.plus." + id)
+    }
+
+    private func tileLabel(_ text: String, _ symbol: String, _ color: Color) -> some View {
+        VStack(spacing: 9) {
+            Image(systemName: symbol).font(.system(size: 25, weight: .semibold))
+                .foregroundStyle(color)
+                .frame(width: 60, height: 60)
+                .background(color.opacity(0.11), in: RoundedRectangle(cornerRadius: 21))
+            Text(text).font(.caption.weight(.medium)).foregroundStyle(Theme.textPrimary)
+                .multilineTextAlignment(.center).lineLimit(3).frame(minHeight: 30, alignment: .top)
+        }
+        .frame(maxWidth: .infinity).contentShape(Rectangle())
     }
 
     private func add(_ a: LocalAttachment) {

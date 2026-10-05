@@ -56,6 +56,8 @@ enum ScopedPreference {
 }
 enum DraftStorage {
     private static let lock = NSLock()
+    // Disk writes serialize off-main; reserving the next draft never waits for file I/O.
+    private static let writerLock = NSLock()
     nonisolated(unsafe) private static var generations: [URL: UInt64] = [:]
     static func reserve(_ url: URL) -> UInt64 {
         lock.lock(); defer { lock.unlock() }
@@ -67,16 +69,20 @@ enum DraftStorage {
         let scope = server + "|" + account + "|" + conversation
         let name = SHA256.hash(data: Data(scope.utf8)).map { String(format: "%02x", $0) }.joined()
         guard let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?.appendingPathComponent("ChatDrafts", isDirectory: true) else { return nil }
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        var values = URLResourceValues(); values.isExcludedFromBackup = true
-        var mutable = dir; try? mutable.setResourceValues(values)
         return dir.appendingPathComponent(name + ".json")
     }
     static func save(_ draft: ComposerDraft, to url: URL, generation: UInt64? = nil) throws {
         let empty = draft.text.isEmpty && draft.files.isEmpty && draft.gifs.isEmpty && draft.voice == nil
         let bytes = empty ? nil : try JSONEncoder().encode(draft)
-        lock.lock(); defer { lock.unlock() }
-        if let generation, generations[url] != generation { return }
+        writerLock.lock(); defer { writerLock.unlock() }
+        lock.lock()
+        let current = generation == nil || generations[url] == generation
+        lock.unlock()
+        guard current else { return }
+        let dir = url.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        var values = URLResourceValues(); values.isExcludedFromBackup = true
+        var mutable = dir; try? mutable.setResourceValues(values)
         if empty { if FileManager.default.fileExists(atPath: url.path) { try FileManager.default.removeItem(at: url) }; return }
         try bytes?.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
     }

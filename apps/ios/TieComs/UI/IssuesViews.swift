@@ -638,7 +638,7 @@ struct IssuesScreen: View {
     /// Pestaña «Todo» (1.7.3, variante 2 del mockup): arriba los atajos pequeños a Correo, WhatsApp, Archivos y Trazo;
     /// debajo, Tareas.
     var hub = false
-    @State private var filter = IssueTree.Filter.mine
+    @State private var taskFilter = IssueTaskFilter()
     @State private var preferenceScope: String?
     @State private var restoringPreferences = false
     @State private var groupByRaw = IssueTree.GroupBy.date.rawValue
@@ -651,13 +651,14 @@ struct IssuesScreen: View {
                 // Los restringidos pueden ser de un chat que no leo (me asignaron una tarea): el servidor ya filtró.
                 // Los personales (sin chat) son míos: el servidor solo me los manda a mí.
                 let scoped = store.issues.values.filter { store.canCacheIssue($0) && ($0.conversationId.map(visible.contains) ?? true || $0.isRestricted) }
-                let list = IssueTree.filter(Array(scoped), filter, me: d.me.id)
-                    .sorted(by: filter == .closed ? IssueSort.recentlyClosed : IssueSort.order)
+                let list = taskFilter.apply(Array(scoped), me: d.me.id)
+                    .sorted(by: taskFilter.onlyClosed ? IssueSort.recentlyClosed : IssueSort.order)
+                let matchingIds = Set(list.map(\.id))
                 let groupBy = IssueTree.GroupBy(rawValue: groupByRaw) ?? .date
                 // Por grupo, las tareas van debajo de su asunto (en la sección del asunto); por fecha y por responsable, sueltas.
                 let shown = groupBy == .group ? IssueTasks.tops(list, store.issues) : list
                 let sections: [IssueTree.Bucket] = switch groupBy {
-                case .date: filter == .closed ? (list.isEmpty ? [] : [IssueTree.Bucket(id: "done.recent", issues: list)]) : IssueTree.dateSections(list)
+                case .date: taskFilter.onlyClosed ? (list.isEmpty ? [] : [IssueTree.Bucket(id: "done.recent", issues: list)]) : IssueTree.dateSections(list)
                 case .group, .person: IssueTree.sections(shown, by: groupBy, me: d.me.id, groupKey: { IssueTasks.groupConversation($0, store.issues) }) { sectionTitle(d, $0, groupBy) }
                 }
                 List {
@@ -668,21 +669,20 @@ struct IssuesScreen: View {
                                 .listRowBackground(Color.clear)
                         }
                     }
-                    // 1.7.13: un solo control compacto (Mías · Abiertas · Hechas) y, a su lado, el orden en un menú pequeño.
                     Section {
                         HStack(spacing: 8) {
-                            Picker(L("nav.issues"), selection: $filter) {
-                                ForEach([IssueTree.Filter.mine, .open, .closed], id: \.self) { f in
-                                    Text("\(label(f)) \(IssueTree.filter(Array(scoped), f, me: d.me.id).count)").tag(f)
-                                }
-                            }
-                            .pickerStyle(.segmented)
-                            .controlSize(.small)
-                            .accessibilityIdentifier("issues.filter")
+                            responsibleMenu(d, Array(scoped))
+                            statusMenu
+                            Spacer(minLength: 0)
                             sortMenu(groupBy)
                         }
                         .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
                         .listRowBackground(Color.clear)
+                        Text(L(list.count == 1 ? "tasks.filter.result" : "tasks.filter.results", ["n": list.count]))
+                            .font(.caption).foregroundStyle(Theme.textSecondary)
+                            .accessibilityIdentifier("issues.filter.results")
+                            .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 4, trailing: 0))
+                            .listRowBackground(Color.clear)
                         if let error { Text(error).foregroundStyle(.red).font(.footnote) }
                     } header: {
                         if hub {
@@ -691,14 +691,14 @@ struct IssuesScreen: View {
                         }
                     }
                     if list.isEmpty {
-                        Section { TasksEmptyState(filter: filter).listRowBackground(Color.clear) }
+                        Section { TasksEmptyState(filter: taskFilter.onlyClosed ? .closed : .all, combined: true).listRowBackground(Color.clear) }
                     }
                     ForEach(sections) { s in
                         Section {
                             ForEach(s.issues) { i in
                                 TaskListRow(issue: i, showWhere: groupBy != .group, showOwner: groupBy != .person) { store.push(.issue(i.id)) }
                                 if groupBy == .group && i.parentIssueId == nil {
-                                    ForEach(IssueTasks.children(store.issues, of: i.id)) { k in
+                                    ForEach(IssueTasks.children(store.issues, of: i.id).filter { matchingIds.contains($0.id) }) { k in
                                         IssueRow(issue: k, showWhere: false, child: true) { store.push(.issue(k.id)) }
                                     }
                                 }
@@ -716,7 +716,7 @@ struct IssuesScreen: View {
                 .refreshable { await load() }
                 // «Añadir tarea» fijo abajo (no ocupa la primera pantalla); en Hechas no hace falta.
                 .safeAreaInset(edge: .bottom, spacing: 0) {
-                    if filter != .closed {
+                    if !taskFilter.onlyClosed {
                         QuickAddIssue(conversationId: nil)
                             .padding(.horizontal, 8).padding(.vertical, 2)
                             .background(.bar)
@@ -734,13 +734,19 @@ struct IssuesScreen: View {
             if let key = preferenceScope {
                 // «.groupBy2» (1.7.13): la preferencia vieja era «Por grupo» por defecto; ahora se arranca por fecha.
                 groupByRaw = UserDefaults.standard.string(forKey: key + ".groupBy2") ?? IssueTree.GroupBy.date.rawValue
-                filter = IssueTree.Filter(rawValue: UserDefaults.standard.string(forKey: key + ".filter") ?? "") ?? .mine
+                if let people = UserDefaults.standard.stringArray(forKey: key + ".assignees") {
+                    taskFilter.assignees = Set(people)
+                    taskFilter.statuses = Set((UserDefaults.standard.stringArray(forKey: key + ".statuses") ?? []).compactMap(IssueStatus.init(rawValue:)))
+                } else {
+                    let old = IssueTree.Filter(rawValue: UserDefaults.standard.string(forKey: key + ".filter") ?? "") ?? .mine
+                    taskFilter = IssueTaskFilter(assignees: old == .mine ? [IssueTaskFilter.me] : [], statuses: old == .closed ? [.done, .cancelled] : old == .all ? [] : IssueTaskFilter.pending)
+                }
             }
             restoringPreferences = false
             await load()
         }
         .onChange(of: groupByRaw) { _, _ in savePreferences() }
-        .onChange(of: filter) { _, _ in savePreferences() }
+        .onChange(of: taskFilter) { _, _ in savePreferences() }
     }
 
     /// Ícono de orden: Por fecha (por defecto) · Por grupo · Por responsable.
@@ -768,20 +774,66 @@ struct IssuesScreen: View {
     private func savePreferences() {
         guard !restoringPreferences, let key = preferenceScope else { return }
         UserDefaults.standard.set(groupByRaw, forKey: key + ".groupBy2")
-        UserDefaults.standard.set(filter.rawValue, forKey: key + ".filter")
+        UserDefaults.standard.set(taskFilter.assignees.sorted(), forKey: key + ".assignees")
+        UserDefaults.standard.set(taskFilter.statuses.map(\.rawValue).sorted(), forKey: key + ".statuses")
     }
 
-    private func label(_ f: IssueTree.Filter) -> String {
-        switch f {
-        case .mine: return L("tasks.f.mine")
-        case .open: return L("tasks.f.open")
-        case .closed, .all: return L("tasks.f.done")
-        }
+    private func filterLabel(_ label: String, _ icon: String) -> some View {
+        Label(label, systemImage: icon).font(.caption.weight(.semibold)).lineLimit(1)
+            .padding(.horizontal, 11).frame(minHeight: 40)
+            .background(Theme.bubbleOther, in: Capsule()).foregroundStyle(Theme.textPrimary)
+    }
+
+    private func responsibleMenu(_ d: BootstrapDTO, _ issues: [IssueDTO]) -> some View {
+        let selected = taskFilter.assignees
+        let ids = Set(issues.flatMap(\.assignedIds))
+        let people = d.people.filter { ids.contains($0.id) && $0.id != d.me.id }.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        let label = selected.isEmpty ? L("tasks.filter.anyone") : selected == [IssueTaskFilter.me] ? L("tasks.f.mine") : selected.count == 1 ? (selected.first == IssueTaskFilter.unassigned ? L("issue.noOwner") : people.first { selected.contains($0.id) }?.name ?? L("common.participant")) : L("tasks.filter.people", ["n": selected.count])
+        return Menu {
+            Button(L("tasks.filter.anyone")) { taskFilter.assignees = [] }
+            Toggle(L("tasks.f.mine"), isOn: assigneeBinding(IssueTaskFilter.me))
+            Toggle(L("issue.noOwner"), isOn: assigneeBinding(IssueTaskFilter.unassigned))
+            ForEach(people) { person in Toggle(person.name, isOn: assigneeBinding(person.id)) }
+        } label: { filterLabel(label, "person") }
+        .accessibilityLabel(L("tasks.filter.responsible"))
+        .accessibilityValue(label)
+        .accessibilityIdentifier("issues.filter.assignee")
+    }
+
+    private func assigneeBinding(_ id: String) -> Binding<Bool> {
+        Binding(get: { taskFilter.assignees.contains(id) }, set: { on in
+            if on { taskFilter.assignees.insert(id) } else { taskFilter.assignees.remove(id) }
+        })
+    }
+
+    private var statusMenu: some View {
+        let chosen = taskFilter.statuses
+        let label = chosen.isEmpty ? L("tasks.filter.allStates") : chosen == IssueTaskFilter.pending ? L("tasks.filter.pending") : chosen == [.done] ? L("tasks.filter.completed") : chosen == [.cancelled] ? L("tasks.filter.cancelled") : L("tasks.filter.states", ["n": chosen.count])
+        return Menu {
+            Button(L("tasks.filter.allStates")) { taskFilter.statuses = [] }
+            Button(L("tasks.filter.pending")) { taskFilter.statuses = IssueTaskFilter.pending }
+            Button(L("tasks.filter.completed")) { taskFilter.statuses = [.done] }
+            Button(L("tasks.filter.cancelled")) { taskFilter.statuses = [.cancelled] }
+            Menu(L("tasks.filter.combine")) {
+                Toggle(L("tasks.filter.pending"), isOn: statusesBinding(IssueTaskFilter.pending))
+                Toggle(L("tasks.filter.completed"), isOn: statusesBinding([.done]))
+                Toggle(L("tasks.filter.cancelled"), isOn: statusesBinding([.cancelled]))
+            }
+        } label: { filterLabel(label, "line.3.horizontal.decrease") }
+        .accessibilityLabel(L("issue.status"))
+        .accessibilityValue(label)
+        .accessibilityIdentifier("issues.filter.status")
+    }
+
+    private func statusesBinding(_ values: Set<IssueStatus>) -> Binding<Bool> {
+        Binding(get: { values.isSubset(of: taskFilter.statuses) }, set: { on in
+            if on { taskFilter.statuses.formUnion(values) } else { taskFilter.statuses.subtract(values) }
+        })
     }
 
     private func sectionTitle(_ d: BootstrapDTO, _ k: String, _ by: IssueTree.GroupBy) -> String {
         if by == .date {
-            if k == "done.recent" { return L("tasks.done.recent") }
+            if k == "done.recent" { return L(taskFilter.statuses == [.done] ? "tasks.done.recent" : taskFilter.statuses == [.cancelled] ? "tasks.filter.cancelled" : "tasks.filter.closed") }
             return L("tasks.due.\(k.replacingOccurrences(of: "due.", with: ""))")
         }
         if by == .person {

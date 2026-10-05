@@ -182,6 +182,61 @@ import AVFoundation
         player.resetScope(); XCTAssertTrue(player.heard.isEmpty)
     }
 
+    func testCompoundFiltersSeparateCompletedCancelledAndMultipleAssignees() throws {
+        func issue(_ id: String, _ status: String, _ people: String, parent: String = "") throws -> IssueDTO {
+            try JSONDecoder().decode(IssueDTO.self, from: Data("{\"id\":\"\(id)\",\"status\":\"\(status)\",\"assigneeIds\":\(people),\"parentIssueId\":\"\(parent)\"}".utf8))
+        }
+        let mine = try issue("mine", "open", "[\"me\",\"lorena\"]")
+        let done = try issue("done", "done", "[\"lorena\"]")
+        let cancelled = try issue("cancelled", "cancelled", "[\"lorena\"]")
+        let child = try issue("child", "done", "[\"me\"]", parent: "mine")
+        let items = [mine, done, cancelled, child, mine]
+        XCTAssertEqual(IssueTaskFilter().apply(items, me: "me").map(\.id), ["mine"])
+        var filter = IssueTaskFilter(assignees: ["lorena"], statuses: [.done])
+        XCTAssertEqual(filter.apply(items, me: "me").map(\.id), ["done"])
+        filter.assignees.insert(IssueTaskFilter.me)
+        XCTAssertEqual(filter.apply(items, me: "me").map(\.id), ["done", "child"])
+        filter.statuses.insert(.cancelled)
+        XCTAssertEqual(filter.apply(items, me: "me").map(\.id), ["done", "cancelled", "child"])
+        XCTAssertEqual(IssueTasks.tops(filter.apply(items, me: "me"), Dictionary(uniqueKeysWithValues: [mine, done, cancelled, child].map { ($0.id, $0) })).map(\.id), ["done", "cancelled", "child"], "A matching child stays visible even if its parent does not match")
+    }
+
+    func testGgRecalculationIsThrottledAndPurgedWithSource() {
+        let center = GgSideCenter(), now = Date()
+        XCTAssertTrue(center.beginRecalculation("c:one", now: now))
+        XCTAssertFalse(center.beginRecalculation("c:one", now: now.addingTimeInterval(20)))
+        XCTAssertTrue(center.beginRecalculation("c:two", now: now))
+        XCTAssertTrue(center.beginRecalculation("c:one", now: now.addingTimeInterval(601)))
+        center.purge { $0 == "c:one" }
+        XCTAssertTrue(center.beginRecalculation("c:one", now: now))
+        center.reset()
+        XCTAssertTrue(center.beginRecalculation("c:two", now: now))
+    }
+
+    func testTaskPaginationDeduplicatesAndKeepsLiveUpdatesAndRevocations() async throws {
+        let store = try ControlledURLProtocol.store(user: "a")
+        let bootstrap = try JSONDecoder().decode(BootstrapDTO.self, from: Data(#"{"me":{"id":"a","name":"QA","kind":"human"},"conversations":[{"id":"c","kind":"group","memberIds":["a"]}]}"#.utf8))
+        store.seedForTesting(bootstrap)
+        var pages = 0
+        ControlledURLProtocol.handler = { request in
+            pages += 1
+            if pages == 1 {
+                request.respond(#"{"issues":[{"id":"old","conversationId":"c","status":"open"},{"id":"hidden","conversationId":"c","status":"open"}],"nextOffset":200}"#)
+            } else {
+                store.issueLiveRevisions["hidden", default: 0] += 1
+                store.issueLiveRevisions["old", default: 0] += 1
+                store.issues["old"] = try! JSONDecoder().decode(IssueDTO.self, from: Data(#"{"id":"old","conversationId":"c","status":"done"}"#.utf8))
+                request.respond(#"{"issues":[{"id":"old","conversationId":"c","status":"open"},{"id":"new","conversationId":"c","status":"done"}],"nextOffset":null}"#)
+            }
+        }
+        defer { ControlledURLProtocol.handler = nil }
+        let rows = try await store.loadIssues()
+        XCTAssertEqual(pages, 2)
+        XCTAssertEqual(rows.map(\.id), ["old", "new"])
+        XCTAssertEqual(store.issues["old"]?.status, .done)
+        XCTAssertNil(store.issues["hidden"])
+    }
+
 }
 
 

@@ -63,3 +63,24 @@ enum IssueTasks {
         }
     }
 }
+
+/// Independent dimensions: OR within a dimension, AND between responsible people and statuses.
+struct IssueTaskFilter: Equatable {
+    static let me = "__me"
+    static let unassigned = "__unassigned"
+    static let pending: Set<IssueStatus> = [.open, .in_progress, .waiting]
+    var assignees: Set<String> = [me]
+    var statuses: Set<IssueStatus> = pending
+    var onlyClosed: Bool { !statuses.isEmpty && statuses.allSatisfy(\.closed) }
+
+    func matches(_ issue: IssueDTO, me: String) -> Bool {
+        let people = Set(assignees.map { $0 == Self.me ? me : $0 })
+        let personMatches = people.isEmpty || !people.isDisjoint(with: issue.assignedIds)
+            || (people.contains(Self.unassigned) && issue.assignedIds.isEmpty)
+        return personMatches && (statuses.isEmpty || statuses.contains(issue.status))
+    }
+    func apply(_ list: [IssueDTO], me: String) -> [IssueDTO] {
+        var seen = Set<String>()
+        return list.filter { matches($0, me: me) && seen.insert($0.id).inserted }
+    }
+}

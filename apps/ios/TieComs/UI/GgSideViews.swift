@@ -60,7 +60,8 @@ struct GgAskPill: View {
         HStack(spacing: 0) {
             HStack(spacing: 0) {
                 Button(action: onOpen) {
-                    HStack(spacing: 5) {
+                    HStack(spacing: 7) {
+                        GgMarkButton(size: 23)
                         if loading { ProgressView().controlSize(.mini) }
                         Text(L(used ? "ggs.continue" : "ggs.ask")).font(.caption.weight(.semibold)).foregroundStyle(Theme.textPrimary)
                             .lineLimit(1)
@@ -72,7 +73,7 @@ struct GgAskPill: View {
                                 .accessibilityIdentifier("gg.button.count")
                         }
                     }
-                    .padding(.leading, 10).padding(.trailing, 4).padding(.vertical, 5)
+                    .padding(.leading, 5).padding(.trailing, 8).padding(.vertical, 4)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)

@@ -39,6 +39,12 @@ private struct ChatDividerYKey: PreferenceKey {
     static func reduce(value: inout CGFloat?, nextValue: () -> CGFloat?) { value = nextValue() ?? value }
 }
 
+/// Emitted only after SwiftUI has laid out the requested initial anchor.
+private struct ChatInitialLayoutKey: PreferenceKey {
+    static let defaultValue: String? = nil
+    static func reduce(value: inout String?, nextValue: () -> String?) { value = nextValue() ?? value }
+}
+
 private struct PendingVoiceSend: Codable {
     let data: Data
     let durationMs: Int
@@ -193,6 +199,9 @@ struct ConversationView: View {
     @State private var readPauseID: UUID?
     @State private var positioning = false
     @State private var positioningFailed = false
+    @State private var initialLayoutAnchor: String?
+    @State private var waitingForUnreadViewport = false
+    @State private var dividerPositionY: CGFloat?
     // gg dentro del chat (contrato 1-oct-2026, parte B).
     @State private var gg = GgChatState()
     /// Cambia al tocar la ✕ de la píldora gg o al volver a mostrarla (GgPillPrefs vive en UserDefaults).
@@ -720,6 +729,7 @@ struct ConversationView: View {
                 .padding(.vertical, 8)
                 .background(GeometryReader { g in
                     Color.clear.preference(key: ChatContentBottomKey.self, value: g.frame(in: .named("chat.scroll")).maxY)
+                        .preference(key: ChatInitialLayoutKey.self, value: initialLayoutAnchor)
                 })
             }
             .coordinateSpace(name: "chat.scroll")
@@ -728,6 +738,18 @@ struct ConversationView: View {
                     .onAppear { viewportHeight = g.size.height }
                     .onChange(of: g.size.height) { _, h in viewportHeight = h }
             })
+            .onPreferenceChange(ChatInitialLayoutKey.self) { anchor in
+                guard let anchor, initialLayoutAnchor == anchor else { return }
+                if !jumped && store.jumpTo[conversationId] == nil && store.jumpToMessage[conversationId] == nil {
+                    var transaction = Transaction(); transaction.disablesAnimations = true
+                    withTransaction(transaction) { proxy.scrollTo(anchor, anchor: anchor == ChatNavIds.divider ? .top : .bottom) }
+                }
+                initialLayoutAnchor = nil
+                track.seenSeqs = []
+                let jumping = jumped || store.jumpTo[conversationId] != nil || store.jumpToMessage[conversationId] != nil
+                waitingForUnreadViewport = anchor == ChatNavIds.divider && !jumping
+                if !waitingForUnreadViewport || dividerPositionY.map({ $0 >= -1 && $0 < viewportHeight }) == true { finishInitialPosition() }
+            }
             .onPreferenceChange(ChatSeenSeqKey.self) { seqs in
                 track.visibleSeqs = seqs
                 if positioned { markReadIfVisible() }
@@ -754,6 +776,8 @@ struct ConversationView: View {
                 }
             }
             .onPreferenceChange(ChatDividerYKey.self) { y in
+                dividerPositionY = y
+                if waitingForUnreadViewport, let y, y >= -1, y < viewportHeight { finishInitialPosition() }
                 let above = y.map { $0 < 0 } ?? false
                 if above != dividerAbove { dividerAbove = above }
             }
@@ -788,7 +812,7 @@ struct ConversationView: View {
             .animation(.easeInOut(duration: 0.2), value: dividerAbove)
             // Al abrir: si hay no leídos, al primero (cargando todas las páginas necesarias) con la línea «N mensajes nuevos».
             // Tras la recuperación (ios-avisos) la primera página llega con loaded y aún loading: se espera a que termine.
-            .task(id: state.loaded && !state.loading) {
+            .task(id: state.loaded && (!state.loading || positioning)) {
                 guard state.loaded, !state.loading, !positioned else { return }
                 Perf.mark("chat.loaded", "\(Int(Date().timeIntervalSince(openedAt) * 1000)) ms desde abrir")
                 await positionAtFirstUnread(proxy)
@@ -1062,13 +1086,23 @@ struct ConversationView: View {
         }
     }
 
+    private func finishInitialPosition() {
+        waitingForUnreadViewport = false
+        positioned = true
+        positioning = false
+        bottomSeq = store.conversations[conversationId]?.messages.last?.seq ?? 0
+        // The unread divider is now measured in the viewport (or there were no unread rows).
+        markReadIfVisible()
+        Perf.mark("chat.positioned", "\(Int(Date().timeIntervalSince(openedAt) * 1000)) ms desde abrir")
+    }
+
     private func positionAtFirstUnread(_ proxy: ScrollViewProxy) async {
         guard !positioning else { return }
         snapshotUnread()
         guard let snap = unreadSnap else { return }
         let retry = positioningFailed
         positioning = true; positioningFailed = false; positioned = false; track.seenSeqs = []
-        defer { positioning = false }
+        initialLayoutAnchor = nil
         do {
             if retry { try await store.openConversation(conversationId, force: true) }
             let first = try await store.firstUnreadMessage(conversationId, snapshot: snap)
@@ -1086,16 +1120,12 @@ struct ConversationView: View {
                 }
                 dividerId = first.id
                 mentionQueue = ChatNav.mentionIds(store.conversations[conversationId]?.messages ?? [], after: first.seq - 1, me: store.me?.id ?? "")
-                try await Task.sleep(nanoseconds: 200_000_000)
-                if !(jumped || store.jumpTo[conversationId] != nil || store.jumpToMessage[conversationId] != nil) {
-                    proxy.scrollTo(ChatNavIds.divider, anchor: .top)
-                }
+
             }
-            try await Task.sleep(nanoseconds: 350_000_000)
-            positioned = true
-            bottomSeq = store.conversations[conversationId]?.messages.last?.seq ?? 0
-            markReadIfVisible()
+            try Task.checkCancellation()
+            initialLayoutAnchor = first == nil ? ChatNavIds.bottom : ChatNavIds.divider
         } catch {
+            positioning = false
             if !Task.isCancelled { positioningFailed = true }
         }
     }
@@ -1648,6 +1678,9 @@ struct ConversationView: View {
                                  // Correo en el chat (docs/CORREO.md): ＋ › Correo con este chat como destino; WhatsApp va a su pantalla.
                                  onMail: embedded || !store.mailEnabled || Naming.isGuest(d, c) ? nil : { store.push(.mailBox(conversationId: conversationId)) },
                                  onWhatsApp: embedded || !store.mailEnabled || Naming.isGuest(d, c) ? nil : { store.push(.whatsapp) },
+                                 onWhatsAppShare: trimmed.isEmpty || viewOnceNext || !staged.isEmpty || !stagedGifs.isEmpty || pendingVoice != nil ? nil : {
+                                     if let url = URL(string: "https://wa.me/?text=\(draft.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? "")") { openURL(url) }
+                                 },
                                  onGifs: { pickingGifs = true },
                                  // ✨ 3 respuestas de gg sobre la caja si el último mensaje es de la otra persona (solo al pedirlas).
                                  onReplyIdeas: trimmed.isEmpty && !gg.loadingBubbles && store.ggSide.available == true && lastIsFromOther(d) ? { loadReplyBubbles() } : nil,

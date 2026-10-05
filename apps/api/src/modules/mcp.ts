@@ -418,11 +418,11 @@ const tools: Tool[] = [
   },
   {
     name: 'read_whatsapp', readOnly: true, scope: 'whatsapp:read',
-    description: 'Mensajes de un chat de WhatsApp (valor chat o nombre). Cada mensaje trae fromMe, kind, teléfono de quien escribe y la transcripción de las notas de voz. since = solo lo nuevo (orden ascendente, paginar con nextSince); before = hacia atrás. No marca como leído.',
+    description: 'Mensajes de un contacto o grupo de WhatsApp (valor chat o nombre), reuniendo sus aliases PN/LID autorizados en la misma cuenta sin duplicar IDs. Cada mensaje trae fromMe, kind, teléfono de quien escribe y la transcripción de las notas de voz. since = solo lo nuevo (ascendente); before = hacia atrás. Ambos aceptan fecha ISO o el cursor opaco nextSince/nextBefore: reenvíalo sin modificar para no perder mensajes con la misma fecha. No marca como leído.',
     schema: z.object({
       chat: z.string().min(1).max(300),
-      since: z.string().datetime({ offset: true }).optional(),
-      before: z.string().datetime({ offset: true }).optional(),
+      since: z.string().min(1).max(4096).optional().describe('Fecha ISO inicial o nextSince devuelto por read_whatsapp'),
+      before: z.string().min(1).max(4096).optional().describe('Fecha ISO inicial o nextBefore devuelto por read_whatsapp'),
       kinds: z.array(z.enum(WA_KINDS)).max(10).optional(),
       limit: z.number().int().min(1).max(200).optional(),
     }),

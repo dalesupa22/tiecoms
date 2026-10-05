@@ -61,6 +61,26 @@ Pruebas: `apps/api/test/mcp-attachments.test.ts` (DM autorizado, PNG/PDF, asocia
 3. **Chat suelto:** `wa_chats.integrations_shared` («🤖 Compartir con integraciones» en el panel del chat), aunque el número esté apagado.
 Siempre aplican además el dueño de la cuenta y los chats bloqueados de WhatsApp (`wa-privacy.ts`). La app de la persona no cambia.
 
+### Historial de un contacto con direcciones PN/LID
+
+WhatsApp puede guardar parte de un contacto bajo su número (`@s.whatsapp.net`) y parte bajo uno o varios identificadores `@lid`. `read_whatsapp` reúne el historial del mismo contacto **dentro de una sola cuenta**, usando únicamente los aliases que cumplen individualmente las reglas de integración y Chat Lock. Compartir un alias no comparte sus demás direcciones ni habilita toda la cuenta.
+
+- `find_whatsapp_chat`, `list_whatsapp_chats` y la búsqueda por nombre muestran un contacto por cuenta; cuentas diferentes y grupos siguen separados. La referencia representativa usa el PN si está permitido; de lo contrario, un alias permitido. Una referencia explícita `cuenta|jid` debe seguir autorizada y conserva ese JID para envíos, borradores y webhooks.
+- `aliasCount` indica cuántas direcciones autorizadas reúne la vista. Nombre, fecha, vista previa y dirección/tipo del último mensaje se calculan solo con esos aliases. `unread` usa el máximo de los contadores del proveedor, evitando sumar dos veces el mismo contador replicado en aliases.
+- `read_whatsapp` y `search_whatsapp` deduplican por ID de mensaje dentro del contacto y la cuenta. Si hay varias copias autorizadas, eligen la más reciente de forma determinista antes de aplicar filtros. El mismo ID en otro contacto, grupo o cuenta no desaparece.
+- Cada página vuelve a comprobar permisos. Una revocación o Chat Lock puede reducir el historial disponible o hacer que la referencia deje de estar disponible. Los cursores nunca otorgan acceso.
+
+Para recorrer todo el historial:
+
+1. Hacia atrás: `read_whatsapp {chat, limit: 200}`. Mientras `hasMore` sea verdadero, repetir con `before: nextBefore`.
+2. Hacia adelante: `read_whatsapp {chat, since: "2026-10-01T00:00:00Z", limit: 200}`. Continuar con `since: nextSince`.
+
+`before` y `since` siguen aceptando fechas ISO, con sus límites exclusivos anteriores. `nextBefore` y `nextSince` ahora son **cursores opacos versionados `wa1.…`**, no fechas: se deben reenviar completos, sin editarlos ni pasarlos por un parser de fechas. Conservan la precisión de microsegundos de PostgreSQL y el ID como desempate, para no perder mensajes que comparten fecha. También conservan `kinds` y el límite ISO opuesto, si se suministraron; los siguientes pedidos pueden omitir esos filtros. Cambiar dirección, contacto, cuenta o filtros da `bad_request`. El tamaño de página puede cambiar.
+
+La respuesta mantiene el orden de presentación cronológico: `since` avanza en orden ascendente; cada página hacia atrás contiene del más viejo al más nuevo entre los mensajes de esa página. Las notas de voz se encolan usando el JID real de cada mensaje. No se marca el chat como leído ni se modifica la sincronización de WhatsApp.
+
+Pruebas: `apps/api/test/mcp-wa-history.test.ts`, con una base local aislada y un contacto sintético de **490 mensajes PN + 45 LID**; verifica los 535 IDs en ambos sentidos, permisos separados por alias/cuenta/persona, Chat Lock, duplicados, microsegundos, empates, filtros, búsqueda y transcripción.
+
 ## Notas de voz, avisos y borradores
 
 - **Transcripción:** las notas de voz descargadas (`media_info.kind = voice`) de números o chats compartidos se transcriben solas (job `wa.transcribe`, escaneo cada minuto, últimos 3 días, tope `WA_TRANSCRIBE_DAILY_MAX`=300/día por cuenta y `WA_TRANSCRIBE_MAX_MS`=10 min). `read_whatsapp` también encola las que lea. Mismo proveedor que las notas de chaggu (Inworld + resumen DeepSeek).

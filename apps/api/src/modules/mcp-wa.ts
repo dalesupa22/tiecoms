@@ -8,10 +8,11 @@
  * La app de la persona no pasa por aquí y sigue igual.
  */
 import { createHash, randomUUID } from 'node:crypto';
+import { z } from 'zod';
 import { enqueueOutbox, pool, tx } from '../db.ts';
 import { ApiError, badRequest, notFound } from '../errors.ts';
 import { visibleWaChatSql } from './wa-privacy.ts';
-import { WA_WEBHOOK_EVENTS } from './mcp-consts.ts';
+import { WA_KINDS, WA_WEBHOOK_EVENTS } from './mcp-consts.ts';
 import { phoneLabel, sendToChat, whoSql } from './whatsapp.ts';
 import { seal, sign, post, unseal, validateOutgoingUrl } from './integration-events.ts';
 
@@ -50,7 +51,7 @@ function mapChat(r: any, preview: boolean) {
   return {
     chat: chatRef(r.account_id, r.jid), name: r.name ?? phoneLabel(r.pn) ?? r.jid.split('@')[0], account: r.account_label, accountKind: r.account_kind,
     isGroup: r.is_group, ...(r.is_group ? { participants: r.participants } : { phone: e164(r.pn) }),
-    unread: r.unread, lastMessageAt: r.last_message_at ? new Date(r.last_message_at).toISOString() : null,
+    unread: r.unread, aliasCount: Number(r.alias_count ?? 1), lastMessageAt: r.last_message_at ? new Date(r.last_message_at).toISOString() : null,
     lastMessageFromMe: r.last_from_me ?? null, lastMessageKind: r.last_kind ?? null,
     canReply: !!r.send_enabled && r.account_status === 'connected',
     ...(r.integrations_shared ? { sharedChat: true } : {}),
@@ -58,71 +59,154 @@ function mapChat(r: any, preview: boolean) {
   };
 }
 
-const CHAT_SELECT = `SELECT c.account_id, c.jid, c.is_group, c.participants, c.unread, c.last_message_at, c.last_preview, c.integrations_shared,
+const CHAT_SELECT = `SELECT c.account_id, c.jid, CASE WHEN c.is_group THEN c.jid ELSE COALESCE(ct.pn, c.jid) END AS logical_jid, c.is_group, c.participants, c.unread, c.last_message_at, c.last_preview, c.integrations_shared,
     COALESCE(c.name, ct.name) AS name, ct.pn, a.label AS account_label, a.kind AS account_kind, a.status AS account_status, a.send_enabled,
     lm.from_me AS last_from_me, lm.kind AS last_kind
   FROM wa_chats c JOIN wa_accounts a ON a.id = c.account_id
   LEFT JOIN LATERAL ${whoSql('c.account_id', 'c.jid')} ct ON true
-  LEFT JOIN LATERAL (SELECT m.from_me, m.kind FROM wa_messages m WHERE m.account_id = c.account_id AND m.chat_jid = c.jid ORDER BY m.sent_at DESC LIMIT 1) lm ON true`;
+  LEFT JOIN LATERAL (SELECT m.from_me, m.kind FROM wa_messages m WHERE m.account_id = c.account_id AND m.chat_jid = c.jid ORDER BY m.sent_at DESC, m.id DESC LIMIT 1) lm ON true`;
 
-const encCursor = (at: string | null, jid: string) => Buffer.from(JSON.stringify([at, jid])).toString('base64url');
-const decCursor = (c: string) => { try { const [at, jid] = JSON.parse(Buffer.from(c, 'base64url').toString()); return { at: at as string | null, jid: String(jid) }; } catch { throw badRequest('cursor inválido'); } };
+/** Group only already-authorized rows. Sharing one alias never grants access to its siblings. */
+const logicalChatsCte = (extra = '') => `allowed_chats AS (${CHAT_SELECT} WHERE ${ALLOWED} ${extra}),
+  logical_chats AS (
+    SELECT account_id, logical_jid,
+      (array_agg(jid ORDER BY (jid = logical_jid) DESC, last_message_at DESC NULLS LAST, jid))[1] AS jid,
+      bool_or(is_group) AS is_group, max(participants) AS participants,
+      max(unread) AS unread, max(last_message_at) AS last_message_at,
+      (array_agg(last_preview ORDER BY last_message_at DESC NULLS LAST, jid))[1] AS last_preview,
+      (array_agg(last_from_me ORDER BY last_message_at DESC NULLS LAST, jid))[1] AS last_from_me,
+      (array_agg(last_kind ORDER BY last_message_at DESC NULLS LAST, jid))[1] AS last_kind,
+      bool_or(integrations_shared) AS integrations_shared,
+      (array_agg(name ORDER BY name IS NULL, (jid = logical_jid) DESC, last_message_at DESC NULLS LAST, jid))[1] AS name,
+      array_agg(DISTINCT name) FILTER (WHERE name IS NOT NULL) AS names,
+      max(pn) AS pn, max(account_label) AS account_label, max(account_kind) AS account_kind,
+      max(account_status) AS account_status, bool_or(send_enabled) AS send_enabled, count(*)::int AS alias_count
+    FROM allowed_chats GROUP BY account_id, logical_jid
+  )`;
 
-/** 7. Lista paginada, filtrable por actividad, con teléfono y quién habló de último. */
+const isoDate = z.string().datetime({ offset: true });
+const encCursor = (at: string | null, jid: string, account: string) => Buffer.from(JSON.stringify([at, jid, account])).toString('base64url');
+const decCursor = (raw: string) => {
+  try {
+    const values = z.tuple([isoDate.nullable(), z.string().min(1).max(300)]).rest(z.string().uuid()).parse(JSON.parse(Buffer.from(raw, 'base64url').toString()));
+    if (values.length > 3) throw new Error('cursor');
+    return { at: values[0], jid: values[1], account: values[2] ?? null };
+  } catch { throw badRequest('cursor inválido'); }
+};
+
+/** One contact per account; unrelated accounts and groups remain separate. */
 export async function listChats(ctx: McpCtx, q: { query?: string; unreadOnly?: boolean; since?: string; groups?: boolean; limit: number; cursor?: string; includePreview?: boolean }) {
   const cur = q.cursor ? decCursor(q.cursor) : null;
   const { rows } = await pool.query(
-    `${CHAT_SELECT}
-      WHERE ${ALLOWED} AND NOT c.hidden
-        AND ($3::text IS NULL OR COALESCE(c.name, ct.name, '') ILIKE '%' || $3 || '%' OR ct.pn LIKE '%' || $3 || '%')
+    `WITH ${logicalChatsCte('AND NOT c.hidden')}
+      SELECT c.*, to_char(c.last_message_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS cursor_at FROM logical_chats c
+      WHERE ($3::text IS NULL OR EXISTS (SELECT 1 FROM unnest(c.names) n WHERE n ILIKE '%' || $3 || '%') OR c.pn LIKE '%' || $3 || '%')
         AND (NOT $4 OR c.unread > 0) AND ($5::timestamptz IS NULL OR c.last_message_at >= $5) AND ($6::boolean IS NULL OR c.is_group = $6)
-        AND ($7::timestamptz IS NULL AND $8::text IS NULL OR (COALESCE(c.last_message_at, '-infinity'), c.jid) < (COALESCE($7::timestamptz, '-infinity'), $8))
-      ORDER BY c.last_message_at DESC NULLS LAST, c.jid DESC LIMIT $9`,
+        AND ($8::text IS NULL OR CASE WHEN $9::uuid IS NULL
+          THEN (COALESCE(c.last_message_at, '-infinity'), c.jid) < (COALESCE($7::timestamptz, '-infinity'), $8)
+          ELSE (COALESCE(c.last_message_at, '-infinity'), c.jid, c.account_id) < (COALESCE($7::timestamptz, '-infinity'), $8, $9::uuid) END)
+      ORDER BY c.last_message_at DESC NULLS LAST, c.jid DESC, c.account_id DESC LIMIT $10`,
     [ctx.userId, ctx.waAccountIds, q.query?.trim() || null, !!q.unreadOnly, q.since ?? null, q.groups ?? null,
-      cur ? cur.at : null, cur ? cur.jid : null, q.limit + 1],
+      cur?.at ?? null, cur?.jid ?? null, cur?.account ?? null, q.limit + 1],
   );
   const more = rows.length > q.limit;
   const page = rows.slice(0, q.limit);
   const last = page.at(-1);
-  return { chats: page.map((r) => mapChat(r, !!q.includePreview)), hasMore: more, ...(more && last ? { nextCursor: encCursor(last.last_message_at ? new Date(last.last_message_at).toISOString() : null, last.jid) } : {}) };
+  return { chats: page.map((r) => mapChat(r, !!q.includePreview)), hasMore: more,
+    ...(more && last ? { nextCursor: encCursor(last.cursor_at, last.jid, last.account_id) } : {}) };
 }
 
-/** Un chat permitido por su valor `cuenta|jid` o por su nombre exacto/parcial. */
+/** Explicit references must themselves be allowed; names collapse authorized aliases first. */
 export async function findChat(ctx: McpCtx, ref: string) {
   const bar = ref.indexOf('|');
   if (bar > 0) {
-    const { rows } = await pool.query(`${CHAT_SELECT} WHERE ${ALLOWED} AND c.account_id::text = $3 AND c.jid = $4`, [ctx.userId, ctx.waAccountIds, ref.slice(0, bar), ref.slice(bar + 1)]);
+    const { rows } = await pool.query(`WITH ${logicalChatsCte()}
+      SELECT l.*, $4::text AS jid FROM logical_chats l WHERE l.account_id::text = $3 AND l.logical_jid IN
+        (SELECT logical_jid FROM allowed_chats WHERE account_id::text = $3 AND jid = $4)`,
+    [ctx.userId, ctx.waAccountIds, ref.slice(0, bar), ref.slice(bar + 1)]);
     if (!rows[0]) throw waError('not_found', 'Ese chat no existe o no está compartido con esta integración', 404);
     return rows[0];
   }
-  const { rows } = await pool.query(`${CHAT_SELECT} WHERE ${ALLOWED} AND COALESCE(c.name, ct.name, '') ILIKE '%' || $3 || '%' ORDER BY c.last_message_at DESC NULLS LAST LIMIT 20`,
-    [ctx.userId, ctx.waAccountIds, ref.trim()]);
-  const exact = rows.filter((r) => (r.name ?? '').toLowerCase() === ref.trim().toLowerCase());
+  const { rows } = await pool.query(`WITH ${logicalChatsCte()}
+    SELECT * FROM logical_chats WHERE EXISTS (SELECT 1 FROM unnest(names) n WHERE n ILIKE '%' || $3 || '%')
+    ORDER BY last_message_at DESC NULLS LAST, account_id, jid LIMIT 20`, [ctx.userId, ctx.waAccountIds, ref.trim()]);
+  const exact = rows.filter((r) => (r.names ?? []).some((name: string) => name.toLowerCase() === ref.trim().toLowerCase()));
   const hits = exact.length ? exact : rows;
   if (hits.length === 1) return hits[0];
   if (!hits.length) throw waError('not_found', 'No encontré ese chat de WhatsApp entre los compartidos con esta integración', 404);
   throw badRequest(`Hay ${hits.length} chats con ese nombre; usa el valor chat: ${hits.slice(0, 8).map((r) => `${r.name} (${r.account_label}) = ${chatRef(r.account_id, r.jid)}`).join('; ')}`);
 }
 
+const HISTORY_CURSOR_PREFIX = 'wa1.';
+const HistoryCursor = z.object({
+  v: z.literal(1), account: z.string().uuid(), contact: z.string().min(1).max(300),
+  direction: z.enum(['before', 'since']), at: isoDate, id: z.string().min(1).max(1000),
+  kinds: z.array(z.enum(WA_KINDS)).max(10), opposite: isoDate.nullable(),
+}).strict();
+type HistoryCursorValue = z.infer<typeof HistoryCursor>;
+const encodeHistoryCursor = (value: HistoryCursorValue) => HISTORY_CURSOR_PREFIX + Buffer.from(JSON.stringify(value)).toString('base64url');
+function parseBoundary(raw: string | undefined): string | HistoryCursorValue | null {
+  if (raw === undefined) return null;
+  if (raw.startsWith(HISTORY_CURSOR_PREFIX)) {
+    try {
+      const data = raw.slice(HISTORY_CURSOR_PREFIX.length);
+      if (raw.length > 4096 || !/^[A-Za-z0-9_-]+$/.test(data)) throw new Error('cursor');
+      return HistoryCursor.parse(JSON.parse(Buffer.from(data, 'base64url').toString('utf8')));
+    } catch { throw badRequest('Cursor de historial inválido; usa nextBefore o nextSince sin modificarlo'); }
+  }
+  if (!isoDate.safeParse(raw).success) throw badRequest('since/before debe ser una fecha ISO o el cursor devuelto por read_whatsapp');
+  return raw;
+}
 
-/** 5. Mensajes con dirección, tipo, teléfono y transcripción; incremental con since/before. */
+/** ISO bounds stay compatible; cursor bounds preserve timestamp ties and the opposite ISO limit. */
+function historyPage(c: any, q: { since?: string; before?: string; kinds?: string[] }) {
+  const since = parseBoundary(q.since), before = parseBoundary(q.before);
+  const cursor = typeof since === 'object' && since ? since : typeof before === 'object' && before ? before : null;
+  const requestedKinds = q.kinds ? [...new Set(q.kinds)].sort() : null;
+  if (cursor) {
+    const fromSince = typeof since === 'object' && since !== null;
+    const opposite = fromSince ? before : since;
+    if ((opposite !== null && typeof opposite !== 'string') || cursor.direction !== (fromSince ? 'since' : 'before')
+      || cursor.account !== c.account_id || cursor.contact !== c.logical_jid
+      || (requestedKinds && JSON.stringify(requestedKinds) !== JSON.stringify(cursor.kinds))
+      || (opposite !== null && opposite !== cursor.opposite)) throw badRequest('El cursor no corresponde a este chat, dirección o filtros');
+    return { ascending: fromSince, sinceAt: fromSince ? cursor.at : cursor.opposite, sinceId: fromSince ? cursor.id : null,
+      beforeAt: fromSince ? cursor.opposite : cursor.at, beforeId: fromSince ? null : cursor.id, kinds: cursor.kinds,
+      opposite: cursor.opposite };
+  }
+  return { ascending: since !== null, sinceAt: since as string | null, sinceId: null, beforeAt: before as string | null,
+    beforeId: null, kinds: requestedKinds ?? [], opposite: (since !== null ? before : since) as string | null };
+}
+
+/** Authorized PN/LID history, de-duplicated before filtering/pagination. */
 export async function readChat(ctx: McpCtx, ref: string, q: { limit: number; since?: string; before?: string; kinds?: string[] }) {
   const c = await findChat(ctx, ref);
+  const pageState = historyPage(c, q);
+  const order = pageState.ascending ? 'ASC' : 'DESC';
   const { rows } = await pool.query(
-    `SELECT m.id, m.from_me, m.kind, m.body, m.sent_at, m.author_jid, m.author_name, m.transcript, m.media_info, w.name AS who_name, w.pn AS who_pn
-       FROM wa_messages m LEFT JOIN LATERAL ${whoSql('m.account_id', 'm.author_jid')} w ON NOT m.from_me
-      WHERE m.account_id = $1 AND m.chat_jid = $2 AND wa_chat_visible(m.account_id, m.chat_jid)
-        AND ($3::timestamptz IS NULL OR m.sent_at > $3) AND ($4::timestamptz IS NULL OR m.sent_at < $4) AND ($5::text[] IS NULL OR m.kind = ANY($5))
-      ORDER BY CASE WHEN $3::timestamptz IS NULL THEN NULL ELSE m.sent_at END ASC, m.sent_at DESC LIMIT $6`,
-    [c.account_id, c.jid, q.since ?? null, q.before ?? null, q.kinds?.length ? q.kinds : null, q.limit + 1],
+    `WITH ${logicalChatsCte('AND c.account_id = $3::uuid AND (CASE WHEN c.is_group THEN c.jid ELSE COALESCE(ct.pn, c.jid) END) = $4')}, unique_messages AS (
+       SELECT DISTINCT ON (m.id) m.* FROM wa_messages m JOIN allowed_chats ac ON ac.account_id = m.account_id AND ac.jid = m.chat_jid
+       WHERE m.account_id = $3::uuid AND ac.logical_jid = $4 AND wa_chat_visible(m.account_id, m.chat_jid)
+       ORDER BY m.id, m.sent_at DESC, m.chat_jid
+     )
+     SELECT m.*, w.name AS who_name, w.pn AS who_pn,
+       to_char(m.sent_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS cursor_at
+     FROM unique_messages m LEFT JOIN LATERAL ${whoSql('m.account_id', 'm.author_jid')} w ON NOT m.from_me
+     WHERE ($5::timestamptz IS NULL OR CASE WHEN $6::text IS NULL THEN m.sent_at > $5 ELSE (m.sent_at, m.id) > ($5::timestamptz, $6) END)
+       AND ($7::timestamptz IS NULL OR CASE WHEN $8::text IS NULL THEN m.sent_at < $7 ELSE (m.sent_at, m.id) < ($7::timestamptz, $8) END)
+       AND ($9::text[] IS NULL OR m.kind = ANY($9))
+     ORDER BY m.sent_at ${order}, m.id ${order} LIMIT $10`,
+    [ctx.userId, ctx.waAccountIds, c.account_id, c.logical_jid, pageState.sinceAt, pageState.sinceId,
+      pageState.beforeAt, pageState.beforeId, pageState.kinds.length ? pageState.kinds : null, q.limit + 1],
   );
   const more = rows.length > q.limit;
   const page = rows.slice(0, q.limit);
-  // since: orden ascendente (lo nuevo en orden); sin since: los últimos, mostrados del más viejo al más nuevo.
-  const ordered = q.since ? page : page.reverse();
-  // Notas de voz aún sin transcribir de este chat: se encolan (el token ya tiene permiso sobre él).
-  const pendingVoice = ordered.filter((m) => m.kind === 'audio' && m.media_info?.kind === 'voice' && !m.transcript).map((m) => m.id);
-  if (pendingVoice.length) await queueTranscriptions(c.account_id, c.jid, pendingVoice);
+  const ordered = pageState.ascending ? page : page.reverse();
+  const pending = new Map<string, string[]>();
+  for (const m of ordered) if (m.kind === 'audio' && m.media_info?.kind === 'voice' && !m.transcript) {
+    const ids = pending.get(m.chat_jid) ?? []; ids.push(m.id); pending.set(m.chat_jid, ids);
+  }
+  for (const [jid, ids] of pending) await queueTranscriptions(c.account_id, jid, ids);
   const messages = ordered.map((m) => {
     const t = m.transcript as { status?: string; text?: string; summary?: string } | null;
     const transcribed = t?.status === 'done' && t.text;
@@ -133,24 +217,20 @@ export async function readChat(ctx: McpCtx, ref: string, q: { limit: number; sin
       ...(m.kind === 'audio' && (m.media_info?.kind === 'voice' || t) ? { transcript: transcribed ? t!.text : null, transcriptStatus: t?.status ?? (m.media_info ? 'pending' : 'unavailable'), ...(t?.summary ? { summary: t.summary } : {}) } : {}),
     };
   });
-  const edge = q.since ? ordered.at(-1) : ordered[0];
-  return {
-    chat: mapChat(c, false), messages, hasMore: more,
-    ...(more && edge ? (q.since ? { nextSince: new Date(edge.sent_at).toISOString() } : { nextBefore: new Date(edge.sent_at).toISOString() }) : {}),
-  };
+  const edge = pageState.ascending ? ordered.at(-1) : ordered[0];
+  const next = edge ? encodeHistoryCursor({ v: 1, account: c.account_id, contact: c.logical_jid, direction: pageState.ascending ? 'since' : 'before',
+    at: edge.cursor_at, id: edge.id, kinds: pageState.kinds as HistoryCursorValue['kinds'], opposite: pageState.opposite }) : null;
+  const cursors: { nextSince?: string; nextBefore?: string } = more && next ? (pageState.ascending ? { nextSince: next } : { nextBefore: next }) : {};
+  return { chat: mapChat(c, false), messages, hasMore: more, ...cursors };
 }
 
-/** 8. Chat por teléfono, aunque el contacto no esté guardado o WhatsApp lo muestre como @lid. */
+/** One authorized logical contact per account, even if WhatsApp uses several LIDs. */
 export async function findByPhone(ctx: McpCtx, raw: string) {
-  const d = normPhone(raw);
-  const pn = `${d}@s.whatsapp.net`;
-  const { rows } = await pool.query(
-    `SELECT x.*, (SELECT k.push_name FROM wa_contacts k WHERE k.account_id = x.account_id AND k.jid = $3) AS push_name FROM (${CHAT_SELECT}
-      WHERE ${ALLOWED} AND NOT c.is_group
-        AND (c.jid = $3 OR c.jid IN (SELECT al.lid FROM wa_jid_alias al WHERE al.account_id = c.account_id AND al.pn = $3))) x
-      ORDER BY x.last_message_at DESC NULLS LAST`,
-    [ctx.userId, ctx.waAccountIds, pn],
-  );
+  const d = normPhone(raw), pn = `${d}@s.whatsapp.net`;
+  const { rows } = await pool.query(`WITH ${logicalChatsCte()}
+    SELECT c.*, (SELECT k.push_name FROM wa_contacts k WHERE k.account_id = c.account_id AND k.jid = $3) AS push_name
+    FROM logical_chats c WHERE NOT c.is_group AND c.logical_jid = $3
+    ORDER BY c.last_message_at DESC NULLS LAST, c.account_id`, [ctx.userId, ctx.waAccountIds, pn]);
   return { phone: `+${d}`, chats: rows.map((r) => ({ ...mapChat(r, false), pushName: r.push_name ?? null })) };
 }
 
@@ -187,12 +267,18 @@ export async function groupInfo(ctx: McpCtx, ref: string) {
 /** 11. Buscar en el texto (y las transcripciones) de los chats permitidos. */
 export async function search(ctx: McpCtx, q: { query: string; since?: string; limit: number }) {
   const { rows } = await pool.query(
-    `SELECT m.account_id, m.chat_jid, m.id, m.from_me, m.kind, m.body, m.sent_at, m.transcript->>'text' AS transcript, COALESCE(c.name, ct.name) AS name, ct.pn
-       FROM wa_messages m JOIN wa_chats c ON c.account_id = m.account_id AND c.jid = m.chat_jid JOIN wa_accounts a ON a.id = c.account_id
-       LEFT JOIN LATERAL ${whoSql('c.account_id', 'c.jid')} ct ON true
-      WHERE ${ALLOWED} AND ($4::timestamptz IS NULL OR m.sent_at >= $4)
-        AND (tiecoms_fold(m.body) LIKE '%' || tiecoms_fold($3) || '%' OR tiecoms_fold(COALESCE(m.transcript->>'text', '')) LIKE '%' || tiecoms_fold($3) || '%')
-      ORDER BY m.sent_at DESC LIMIT $5`,
+    `WITH ${logicalChatsCte()}, unique_messages AS (
+       SELECT DISTINCT ON (m.account_id, ac.logical_jid, m.id) m.*, ac.logical_jid
+       FROM wa_messages m JOIN allowed_chats ac ON ac.account_id = m.account_id AND ac.jid = m.chat_jid
+       WHERE wa_chat_visible(m.account_id, m.chat_jid)
+       ORDER BY m.account_id, ac.logical_jid, m.id, m.sent_at DESC, m.chat_jid
+     )
+     SELECT m.account_id, c.jid AS chat_jid, m.id, m.from_me, m.kind, m.body, m.sent_at,
+       m.transcript->>'text' AS transcript, c.name, c.pn
+     FROM unique_messages m JOIN logical_chats c ON c.account_id = m.account_id AND c.logical_jid = m.logical_jid
+     WHERE ($4::timestamptz IS NULL OR m.sent_at >= $4)
+       AND (tiecoms_fold(m.body) LIKE '%' || tiecoms_fold($3) || '%' OR tiecoms_fold(COALESCE(m.transcript->>'text', '')) LIKE '%' || tiecoms_fold($3) || '%')
+     ORDER BY m.sent_at DESC, m.id DESC, m.account_id, c.jid LIMIT $5`,
     [ctx.userId, ctx.waAccountIds, q.query, q.since ?? null, q.limit],
   );
   return {
@@ -477,4 +563,3 @@ export async function transcribeWaVoice(p: { accountId: string; jid: string; id:
     await save({ status: 'failed', error: String(e?.message ?? e).slice(0, 200) });
   }
 }
-

@@ -272,18 +272,6 @@
     "<span class=\"download-mine\" data-ios-mine>Your iPhone or iPad</span>"
   ],
   [
-    "EL CHAT DONDE EL TRABAJO AVANZA",
-    "THE CHAT THAT MOVES WORK FORWARD"
-  ],
-  [
-    "De hablarlo<br>a <em>hacerlo.</em>",
-    "From talking<br>to <em>doing.</em>"
-  ],
-  [
-    "Esa idea del chat ahora tiene quién la haga.<br class=\"hf-desktop-break\"> Conversa, asigna tareas y sigue cada resultado, con todo el contexto en un mismo lugar.",
-    "That idea in your chat now has someone to make it happen.<br class=\"hf-desktop-break\"> Talk, assign tasks and follow every outcome, with all the context in one place."
-  ],
-  [
     "Empezar gratis <span",
     "Get started free <span"
   ],
@@ -292,95 +280,119 @@
     "Explore chaggu <span"
   ],
   [
-    "Tu equipo. Otras empresas. Tus bots.<br><strong>La misma conversación.</strong>",
-    "Your team. Other companies. Your bots.<br><strong>The same conversation.</strong>"
-  ],
-  [
-    "Demo ilustrativa: de conversación a resultado",
-    "Illustrative demo: from conversation to outcome"
-  ],
-  [
-    "ASÍ SE MUEVE EL TRABAJO",
-    "THIS IS HOW WORK MOVES"
-  ],
-  [
-    "Ejemplo interactivo",
-    "Interactive example"
-  ],
-  [
     "Lanzamiento · Equipo Norte",
     "Launch · Team North"
   ],
   [
-    "Ana, Lorena y tú",
-    "Ana, Lorena and you"
-  ],
-  [
-    "Lorena, ¿dejamos lista la propuesta para el viernes?",
-    "Lorena, can we have the proposal ready by Friday?"
-  ],
-  [
-    "DESDE ESTA CONVERSACIÓN",
-    "FROM THIS CONVERSATION"
-  ],
-  [
-    "Preparar propuesta",
-    "Prepare proposal"
-  ],
-  [
-    "> Viernes</span>",
-    "> Friday</span>"
-  ],
-  [
-    ">En curso</span>",
-    ">In progress</span>"
-  ],
-  [
-    ">Resuelta <b",
-    ">Done <b"
-  ],
-  [
-    "Un «¿lo hacemos?» puede ser<br><strong>el principio de algo resuelto.</strong>",
-    "A “shall we?” can be<br><strong>the start of getting it done.</strong>"
-  ],
-  [
-    "Sabes quién lo tiene.<br><strong>Y qué sigue.</strong>",
-    "See who owns it.<br><strong>And what comes next.</strong>"
-  ],
-  [
-    "¡Lista! Aquí está la propuesta.",
-    "Done! Here’s the proposal."
-  ],
-  [
-    "Propuesta.pdf",
-    "Proposal.pdf"
-  ],
-  [
-    "El contexto siempre viaja contigo.",
-    "The context always travels with you."
-  ],
-  [
-    "Recorrer la demo",
-    "Explore the demo"
-  ],
-  [
-    "</span> Conversa</button>",
-    "</span> Talk</button>"
-  ],
-  [
-    "</span> Asigna</button>",
-    "</span> Assign</button>"
-  ],
-  [
-    "</span> Resuelve</button>",
-    "</span> Resolve</button>"
-  ],
-  [
-    "Un mensaje pone todo en marcha.",
-    "One message sets it all in motion."
-  ],
-  [
     "Reproducir demo",
     "Play demo"
+  ],
+  [
+    "HUMANOS + AGENTES. UN MISMO HILO.",
+    "PEOPLE + AGENTS. ONE SHARED THREAD."
+  ],
+  [
+    "Muchas apps.<br>Una misma<br><em>conversación.</em>",
+    "Many apps.<br>One shared<br><em>conversation.</em>"
+  ],
+  [
+    "Trae mensajes de WhatsApp, Teams y Slack a Chaggu. Reúne a las personas y agentes de IA que pueden ayudar, con todo el contexto en un mismo lugar.",
+    "Bring messages from WhatsApp, Teams and Slack into Chaggu. Gather the people and AI agents who can help, with all the context in one place."
+  ],
+  [
+    "El cliente, tu equipo y tus agentes.<br><strong>Cada aporte conserva su origen.</strong>",
+    "Your customer, your team and your agents.<br><strong>Every contribution keeps its source.</strong>"
+  ],
+  [
+    "Demo ilustrativa de conversación multicanal con personas y agentes",
+    "Illustrative multichannel conversation with people and agents"
+  ],
+  [
+    "Explorar los canales de la conversación",
+    "Explore the conversation channels"
+  ],
+  [
+    "Leer y responder",
+    "Read and reply"
+  ],
+  [
+    "Traer y compartir",
+    "Bring and share"
+  ],
+  [
+    "Humanos + agentes",
+    "People + agents"
+  ],
+  [
+    "UN CONTEXTO COMPARTIDO",
+    "ONE SHARED CONTEXT"
+  ],
+  [
+    "4 personas + 1 agente de IA",
+    "4 people + 1 AI agent"
+  ],
+  [
+    "Ejemplo ilustrativo",
+    "Illustrative example"
+  ],
+  [
+    ">· Cliente</span>",
+    ">· Customer</span>"
+  ],
+  [
+    ">· Comercial</span>",
+    ">· Sales</span>"
+  ],
+  [
+    ">· Diseño</span>",
+    ">· Design</span>"
+  ],
+  [
+    "¿Podemos tener la propuesta para hoy?",
+    "Can we have the proposal today?"
+  ],
+  [
+    "Mensaje traído de WhatsApp",
+    "Message brought in from WhatsApp"
+  ],
+  [
+    "Precios aprobados. Podemos avanzar.",
+    "Pricing approved. We can move ahead."
+  ],
+  [
+    "Compartido desde Teams",
+    "Shared from Teams"
+  ],
+  [
+    "Diseño listo. Aquí está la versión final.",
+    "Design ready. Here’s the final version."
+  ],
+  [
+    "Compartido desde Slack",
+    "Shared from Slack"
+  ],
+  [
+    ">Agente de IA</span>",
+    ">AI agent</span>"
+  ],
+  [
+    "Con lo que compartieron: precios aprobados y diseño listo. <strong>La propuesta puede salir hoy.</strong>",
+    "From what you shared: pricing approved and design ready. <strong>The proposal can go out today.</strong>"
+  ],
+  [
+    "Con el contexto de Ana, Lorena y Nico",
+    "With context from Ana, Lorena and Nico"
+  ],
+  [
+    "Un mensaje de WhatsApp abre la conversación.",
+    "A WhatsApp message starts the conversation."
+  ],
+  [
+    ">Persona</span>",
+    ">Person</span>"
+  ],
+  [
+    "gg, ¿tenemos todo para responderle a Ana?",
+    "gg, do we have everything to get back to Ana?"
   ]
 ]

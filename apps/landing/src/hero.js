@@ -10,18 +10,20 @@
   const motionPreference = window.matchMedia?.('(prefers-reduced-motion: reduce)');
   const es = document.documentElement.lang !== 'en';
   const captions = es ? [
-    'Un mensaje pone todo en marcha.',
-    'Una tarea, una responsable, una fecha.',
-    'La respuesta vuelve al mismo hilo.',
+    'Un mensaje de WhatsApp abre la conversación.',
+    'El aporte de Teams conserva su origen.',
+    'Lo compartido desde Slack suma contexto.',
+    'Humanos y agentes de IA continúan en Chaggu.',
   ] : [
-    'One message sets everything in motion.',
-    'One task, one owner, one due date.',
-    'The answer returns to the same thread.',
+    'A WhatsApp message starts the conversation.',
+    'The Teams contribution keeps its source.',
+    'What you share from Slack adds context.',
+    'People and AI agents continue in Chaggu.',
   ];
   const duration = 5200;
   let reducedMotion = motionPreference?.matches ?? false;
   let wantsPlayback = !reducedMotion;
-  let step = reducedMotion ? 2 : 0;
+  let step = reducedMotion ? captions.length - 1 : 0;
   let inViewport = false;
   let pageSuspended = false;
   let timer = null;
@@ -40,7 +42,7 @@
     demo.dataset.step = String(step);
     for (const button of steps) {
       button.setAttribute('aria-pressed', String(Number(button.dataset.heroStep) === step));
-      // These are ordinary buttons: all three remain in the normal tab order.
+      // These are ordinary buttons: every channel remains in the normal tab order.
       button.tabIndex = 0;
     }
     if (status) {
@@ -104,7 +106,7 @@
     if (reducedMotion) {
       wantsPlayback = false;
       stopTimer();
-      showStep(2);
+      showStep(captions.length - 1);
     }
     // When reduced motion is disabled, remain paused until the person presses Play.
     syncPlayback();

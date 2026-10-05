@@ -11,8 +11,10 @@
   <link rel="alternate" hreflang="x-default" href="https://www.chaggu.com/">
   <link rel="stylesheet" href="/landing.css">
   <link rel="stylesheet" href="/relay.css">
+  <link rel="stylesheet" href="/hero.css">
   <script src="/landing.js" defer></script>
   <script src="/relay.js" defer></script>
+  <script src="/hero.js" defer></script>
   <title>chaggu · La conversación que conecta todo</title>
 </head>
 <body>
@@ -37,16 +39,49 @@
   </header>
 
   <main id="inicio">
-    <section class="hero" aria-labelledby="hero-title">
-      <div class="hero-bg-word" aria-hidden="true">CONVERSA</div>
-      <div class="hero-copy">
-        <p class="eyebrow"><span class="eyebrow-dot"></span> El trabajo se mueve conversando</p>
-        <h1 id="hero-title">Conecta humanos,<br>empresas <em>y bots.</em></h1>
-        <p class="hero-lede">chaggu reúne a las personas correctas, la empresa indicada y los bots que resuelven. El hilo sigue vivo aunque cambie de manos.</p>
-        <div class="hero-cta-row">
-          <a class="button button-orange" href="#recorrido">Sigue la conversación <span aria-hidden="true">↓</span></a>
-          <a class="play-link" href="https://app.chaggu.com/signup"><span class="play-icon" aria-hidden="true">↗</span> Crear cuenta gratis</a>
+    <section class="hero hero-flow" aria-labelledby="hero-title">
+      <div class="hf-copy">
+        <p class="eyebrow"><span class="eyebrow-dot eyebrow-dot-orange"></span> EL CHAT DONDE EL TRABAJO AVANZA</p>
+        <h1 id="hero-title">De hablarlo<br>a <em>hacerlo.</em><svg class="hf-title-stroke" viewBox="0 0 370 22" aria-hidden="true"><path d="M4 15C87 2 242 3 348 12M336 3l20 9-20 7"/></svg></h1>
+        <p class="hf-lede">Esa idea del chat ahora tiene quién la haga.<br class="hf-desktop-break"> Conversa, asigna tareas y sigue cada resultado, con todo el contexto en un mismo lugar.</p>
+        <div class="hf-cta-row">
+          <a class="button button-orange" href="https://app.chaggu.com/signup">Empezar gratis <span aria-hidden="true">↗</span></a>
+          <a class="hf-text-link" href="#recorrido">Explorar chaggu <span aria-hidden="true">↓</span></a>
         </div>
+        <div class="hf-network"><div class="hf-avatar-stack" aria-hidden="true"><span>AN</span><span>LO</span><span>✦</span></div><p>Tu equipo. Otras empresas. Tus bots.<br><strong>La misma conversación.</strong></p></div>
+      </div>
+
+      <div class="hf-demo" data-hero-demo data-step="0" data-playing="false" role="region" aria-label="Demo ilustrativa: de conversación a resultado">
+        <div class="hf-demo-top"><span class="hf-demo-label"><i aria-hidden="true"></i> ASÍ SE MUEVE EL TRABAJO</span><span class="hf-example">Ejemplo interactivo</span></div>
+        <div class="hf-scene">
+          <div class="hf-scene-grid" aria-hidden="true"></div>
+          <div class="hf-room"><span class="hf-room-icon" aria-hidden="true">↗</span><div><strong>Lanzamiento · Equipo Norte</strong><span>Ana, Lorena y tú</span></div><span class="hf-room-menu" aria-hidden="true">•••</span></div>
+          <div class="hf-chat-message">
+            <span class="hf-person" aria-hidden="true">AN</span>
+            <div class="hf-bubble"><div class="hf-message-meta"><strong>Ana</strong><span>09:41</span></div><p>Lorena, ¿dejamos lista la propuesta para el viernes?</p><span class="hf-message-check" aria-hidden="true">✓✓</span></div>
+          </div>
+          <div class="hf-thread-line" aria-hidden="true"><svg viewBox="0 0 36 95"><path class="hf-thread-base" d="M18 0V95"/><path class="hf-thread-ink" d="M18 0V95"/></svg><span>↗</span></div>
+          <div class="hf-task">
+            <div class="hf-task-eyebrow"><span class="hf-task-origin">DESDE ESTA CONVERSACIÓN</span><span class="hf-task-id">#024</span></div>
+            <div class="hf-task-title"><span class="hf-task-checkbox" aria-hidden="true"><svg viewBox="0 0 20 20"><path d="m4 10 4 4 8-8"/></svg></span><h3>Preparar propuesta</h3></div>
+            <div class="hf-task-meta"><span><i aria-hidden="true">LO</i> Lorena</span><span><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="3" y="4" width="14" height="13" rx="3"/><path d="M6 2v4m8-4v4M3 9h14"/></svg> Viernes</span><span class="hf-task-state hf-pending">En curso</span><span class="hf-task-state hf-done">Resuelta <b aria-hidden="true">✓</b></span></div>
+          </div>
+          <div class="hf-step-hint"><span aria-hidden="true">↳</span><p>Un «¿lo hacemos?» puede ser<br><strong>el principio de algo resuelto.</strong></p></div>
+          <div class="hf-task-note"><span aria-hidden="true">↳</span><p>Sabes quién lo tiene.<br><strong>Y qué sigue.</strong></p></div>
+          <div class="hf-result"><span class="hf-person hf-person-lorena" aria-hidden="true">LO</span><div class="hf-result-bubble"><div class="hf-message-meta"><strong>Lorena</strong><span>10:18</span></div><p>¡Lista! Aquí está la propuesta.</p><div class="hf-file"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9Z M14 3v6h6 M8 13h8 M8 17h5"/></svg><span>Propuesta.pdf<small>PDF · 240 KB</small></span><span class="hf-file-check" aria-hidden="true">✓</span></div></div></div>
+          <div class="hf-context"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M7 6H5a4 4 0 0 0 0 8h2m6-8h2a4 4 0 0 1 0 8h-2M6 10h8"/></svg><span>El contexto siempre viaja contigo.</span></div>
+        </div>
+        <div class="hf-demo-controls">
+          <div class="hf-demo-steps" role="group" aria-label="Recorrer la demo">
+            <button type="button" data-hero-step="0" aria-pressed="true"><span>01</span> Conversa</button>
+            <button type="button" data-hero-step="1" aria-pressed="false"><span>02</span> Asigna</button>
+            <button type="button" data-hero-step="2" aria-pressed="false"><span>03</span> Resuelve</button>
+          </div>
+          <div class="hf-demo-footer"><p data-hero-status>Un mensaje pone todo en marcha.</p><button type="button" data-hero-play aria-label="Reproducir demo"><span class="hf-play-symbol" aria-hidden="true"></span><span class="hf-sr-only" data-hero-play-label>Reproducir demo</span></button></div>
+          <div class="hf-progress" aria-hidden="true"><i data-hero-progress></i></div>
+        </div>
+      </div>
+
         <aside class="device-recommendation" aria-labelledby="device-recommendation-title" data-device-recommendation>
           <span class="device-recommendation-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path data-recommendation-icon d="M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0ZM3 12h18M12 3c5 5 5 13 0 18-5-5-5-13 0-18Z"/></svg></span>
           <div class="device-recommendation-copy">
@@ -59,31 +94,6 @@
             </div>
           </div>
         </aside>
-        <div class="hero-note"><span class="note-line"></span><span>Diseñado para equipos que trabajan entre equipos.</span></div>
-      </div>
-      <div class="hero-visual" aria-label="Ejemplo ilustrativo de una conversación chaggu">
-        <div class="orbit orbit-one" aria-hidden="true"></div>
-        <div class="orbit orbit-two" aria-hidden="true"></div>
-        <div class="hero-card">
-          <div class="card-topline"><span class="live-dot"></span><span>UN HILO. MUCHAS CONEXIONES.</span><span class="card-time">09:42</span></div>
-          <div class="hero-thread-head">
-            <div class="avatar avatar-amber">A</div>
-            <div><strong>Lanzamiento · Estudio Norte</strong><span>Aura × Estudio Norte</span></div>
-            <span class="status-pill">OPERATIVO</span>
-          </div>
-          <div class="message-stack" data-message-stack>
-            <div class="message message-person"><div class="message-avatar avatar-lilac">LT</div><div><span class="message-meta">Ana · persona</span><p>¿Podemos tener todo listo para el viernes?</p></div><time>09:41</time></div>
-            <div class="branch-line" aria-hidden="true"><span></span><i></i><span></span></div>
-            <div class="message message-bot"><div class="message-avatar avatar-ink">✦</div><div><span class="message-meta">Coms · bot</span><p>Reviso el plan. Conecto al equipo con <b>Nexo · Logística</b>.</p><div class="bot-chip">↗ conversación derivada</div></div><time>09:42</time></div>
-            <div class="message message-company"><div class="message-avatar avatar-sky">X</div><div><span class="message-meta">Nexo · empresa</span><p>Entrega confirmada. Devuelvo la respuesta al equipo.</p></div><time>09:43</time></div>
-          </div>
-          <a class="card-compose" href="#recorrido"><span>Sigue este hilo al bajar</span><span class="compose-arrow" aria-hidden="true">↓</span></a>
-        </div>
-        <div class="float-tag tag-human"><span class="tag-icon">●</span> persona</div>
-        <div class="float-tag tag-bot"><span class="tag-icon">✦</span> bot</div>
-        <div class="float-tag tag-company"><span class="tag-icon">↗</span> empresa</div>
-      </div>
-      <div class="scroll-cue" aria-hidden="true"><span class="scroll-wheel"></span><span>Desplázate para seguir el hilo</span></div>
     </section>
 
     <section class="signal-strip" aria-label="Qué conecta chaggu">

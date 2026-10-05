@@ -15,12 +15,12 @@ dist = root / 'dist'
 shutil.rmtree(dist, ignore_errors=True)
 (dist / 'en').mkdir(parents=True)
 shutil.copytree(src / 'assets', dist / 'assets')
-for name in ['landing.css', 'landing.js', 'relay.css', 'relay.js', 'legal.css']:
+for name in ['landing.css', 'landing.js', 'relay.css', 'relay.js', 'hero.css', 'hero.js', 'legal.css']:
     shutil.copy2(src / name, dist / name)
 
 landing = (src / 'landing.html').read_text()
 # Versiona CSS/JS por contenido: Cloudflare los guarda horas en caché.
-for name in ['landing.css', 'landing.js', 'relay.css', 'relay.js']:
+for name in ['landing.css', 'landing.js', 'relay.css', 'relay.js', 'hero.css', 'hero.js']:
     v = hashlib.sha256((src / name).read_bytes()).hexdigest()[:10]
     landing = landing.replace(f'"/{name}"', f'"/{name}?v={v}"')
 (dist / 'index.html').write_text(landing)

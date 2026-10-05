@@ -99,33 +99,39 @@ export const useGridLayout = () => useSyncExternalStore(subscribe, () => layout)
 export const useLayoutOrder = () => useSyncExternalStore(subscribe, () => layoutOrder);
 export const useTallPanes = () => useSyncExternalStore(subscribe, () => tallPanes);
 export const useWidePanes = () => useSyncExternalStore(subscribe, () => widePanes);
+/**
+ * Lo que está en la cuadrícula: los paneles guardados y, además, el chat abierto por URL que no entró en ellos
+ * (con los 4 fijados, /c/:id se dibuja encima sin ocupar un lugar). Sin esto, cambiarle el tamaño no hacía nada.
+ */
+const gridKeys = () => activeKey && !panes.includes(activeKey) ? [...panes, activeKey] : panes;
+const onGrid = (k: string) => panes.includes(k) || k === activeKey;
 export function setPaneSize(key: string, rows: 1 | 2, columns: 1 | 2, currentTall: readonly string[], currentWide: readonly string[], currentOrder: readonly string[]) {
   const tall = new Set(currentTall), wide = new Set(currentWide);
   if (rows === 2) tall.add(key); else tall.delete(key);
   if (columns === 2) wide.add(key); else wide.delete(key);
-  tallPanes = [...tall].filter((k) => panes.includes(k));
-  widePanes = [...wide].filter((k) => panes.includes(k));
-  layoutOrder = currentOrder.filter((k) => panes.includes(k));
-  panePositions = sanitizePanePositions(panePositions, panes);
+  tallPanes = [...tall].filter(onGrid);
+  widePanes = [...wide].filter(onGrid);
+  layoutOrder = currentOrder.filter(onGrid);
+  panePositions = sanitizePanePositions(panePositions, gridKeys());
   if (panePositions[key]) layoutOrder = [key, ...layoutOrder.filter((k) => k !== key)];
   layout = 'custom'; saveLayout(); emit();
 }
 /** A free-cell drop preserves the visible destination, including an intentionally empty row. */
 export function placeGridPane(key: string, position: PanePosition, currentPositions: Readonly<Record<string, PanePosition>>, currentTall: readonly string[], currentWide: readonly string[], currentOrder: readonly string[], widths: readonly number[]) {
-  if (!panes.includes(key)) return;
-  panePositions = sanitizePanePositions({ ...currentPositions, [key]: position }, panes);
+  if (!onGrid(key)) return;
+  panePositions = sanitizePanePositions({ ...currentPositions, [key]: position }, gridKeys());
   const total = widths.reduce((a, b) => a + b, 0);
   if (total > 0 && widths.length <= 10 && widths.every((w) => Number.isFinite(w) && w > 0)) columnSizes = widths.map((w) => w / total);
-  layoutOrder = [key, ...currentOrder.filter((k) => k !== key)].filter((k) => panes.includes(k));
-  tallPanes = currentTall.filter((k) => panes.includes(k));
-  widePanes = currentWide.filter((k) => panes.includes(k));
+  layoutOrder = [key, ...currentOrder.filter((k) => k !== key)].filter(onGrid);
+  tallPanes = currentTall.filter(onGrid);
+  widePanes = currentWide.filter(onGrid);
   layout = 'custom'; saveLayout(); emit();
 }
 /** Continuous track sizing and initial preset conversion are one layout transaction. */
 export function setGridGeometry(positions: Record<string, PanePosition>, tall: string[], wide: string[], order: string[], widths: number[], row: number) {
-  panePositions = sanitizePanePositions(positions, panes);
-  tallPanes = tall.filter((k) => panes.includes(k)); widePanes = wide.filter((k) => panes.includes(k));
-  layoutOrder = order.filter((k) => panes.includes(k));
+  panePositions = sanitizePanePositions(positions, gridKeys());
+  tallPanes = tall.filter(onGrid); widePanes = wide.filter(onGrid);
+  layoutOrder = order.filter(onGrid);
   const total = widths.reduce((a, b) => a + b, 0);
   if (total > 0 && widths.length <= 10 && widths.every((w) => Number.isFinite(w) && w > 0)) columnSizes = widths.map((w) => w / total);
   // Shared row persistence stays compatible with the existing row slider.
@@ -137,7 +143,7 @@ export function setGridGeometry(positions: Record<string, PanePosition>, tall: s
 export function setPaneRows(key: string, rows: 1 | 2, currentTall: readonly string[]) {
   const next = new Set(layout === 'custom' ? tallPanes : currentTall);
   if (rows === 2) next.add(key); else next.delete(key);
-  tallPanes = [...next].filter((k) => panes.includes(k));
+  tallPanes = [...next].filter(onGrid);
   layout = 'custom'; saveLayout(); emit();
 }
 export function setGridLayout(next: GridLayout) {

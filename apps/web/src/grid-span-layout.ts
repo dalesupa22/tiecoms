@@ -1,7 +1,7 @@
 export interface PanePosition { column: number; row: number }
 export function sanitizePanePositions(value: unknown, keys: readonly string[]): Record<string, PanePosition> {
   if (!value || typeof value !== 'object') return {};
-  return Object.fromEntries(keys.slice(0, 5).flatMap((key) => {
+  return Object.fromEntries(keys.slice(0, 6).flatMap((key) => {
     const at = (value as Record<string, PanePosition>)[key];
     return at && Number.isInteger(at.column) && at.column >= 1 && at.column <= 10 && (at.row === 1 || at.row === 2) ? [[key, { column: at.column, row: at.row }]] : [];
   }));

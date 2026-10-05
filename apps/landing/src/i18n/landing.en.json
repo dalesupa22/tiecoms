@@ -290,5 +290,49 @@
   [
     "<span class=\"download-mine\">Tu Android</span>",
     "<span class=\"download-mine\">Your Android</span>"
+  ],
+  [
+    "<p class=\"device-recommendation-label\" data-recommendation-label>Para tu navegador</p>",
+    "<p class=\"device-recommendation-label\" data-recommendation-label>For your browser</p>"
+  ],
+  [
+    "<h2 id=\"device-recommendation-title\" data-recommendation-title>chaggu, sin instalar nada.</h2>",
+    "<h2 id=\"device-recommendation-title\" data-recommendation-title>chaggu, with nothing to install.</h2>"
+  ],
+  [
+    "<p class=\"device-recommendation-description\" data-recommendation-description>Tus conversaciones y tareas, también en la web.</p>",
+    "<p class=\"device-recommendation-description\" data-recommendation-description>Your conversations and tasks are on the web too.</p>"
+  ],
+  [
+    "<span data-recommendation-action-label>Usar versión web</span>",
+    "<span data-recommendation-action-label>Use the web app</span>"
+  ],
+  [
+    "Ver todas las versiones <span aria-hidden=\"true\">↓</span>",
+    "See all versions <span aria-hidden=\"true\">↓</span>"
+  ],
+  [
+    "<h3>iPhone y iPad</h3>",
+    "<h3>iPhone and iPad</h3>"
+  ],
+  [
+    "<span class=\"download-soon\">Próximamente</span>",
+    "<span class=\"download-soon\">Coming soon</span>"
+  ],
+  [
+    "La app para iPhone y iPad llegará pronto. Mientras tanto, entra desde tu navegador.",
+    "The iPhone and iPad app is coming soon. Until then, use chaggu in your browser."
+  ],
+  [
+    "Usar versión web <span aria-hidden=\"true\">↗</span>",
+    "Use the web app <span aria-hidden=\"true\">↗</span>"
+  ],
+  [
+    "Tus conversaciones siguen contigo.",
+    "Your conversations stay with you."
+  ],
+  [
+    "<span class=\"download-mine\" data-ios-mine>Tu iPhone o iPad</span>",
+    "<span class=\"download-mine\" data-ios-mine>Your iPhone or iPad</span>"
   ]
 ]

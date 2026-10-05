@@ -68,3 +68,25 @@
 
 /* Conector MCP: el comando se puede copiar entero. */
 .mcp-code { display: block; margin: 8px 0 12px; padding: 10px 12px; border-radius: 10px; background: rgba(0,0,0,.06); font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-all; user-select: all; }
+
+/* Una recomendación por dispositivo; todas las versiones siguen a un toque. */
+.device-recommendation{display:grid;grid-template-columns:40px minmax(0,1fr);gap:14px;max-width:560px;margin-top:28px;padding:20px;border:1px solid #decbb9;border-radius:20px;background:linear-gradient(120deg,#fffaf3,#f2e6d8);box-shadow:0 7px 22px #55473508}
+.device-recommendation-icon{display:grid;place-items:center;width:40px;height:40px;border-radius:13px;background:var(--ink);color:var(--paper);margin-top:2px}
+.device-recommendation-icon svg{width:23px;height:23px}
+.device-recommendation-copy{min-width:0}
+.device-recommendation-label{margin:0 0 5px;font-family:var(--mono);font-size:10px;line-height:1.4;letter-spacing:.07em;text-transform:uppercase;color:#79634d}
+.device-recommendation h2{margin:0;font-size:20px;line-height:1.25;letter-spacing:-.025em;font-weight:600;text-wrap:balance}
+.device-recommendation-description{margin:7px 0 0;font-size:13px;line-height:1.5;color:#6c6257}
+.device-recommendation-actions{display:flex;align-items:center;gap:8px 16px;flex-wrap:wrap;margin-top:15px}
+.device-recommendation-action{min-height:42px;padding:10px 15px;font-size:12px;line-height:1.4;text-align:center;max-width:100%}
+.device-recommendation-action [data-recommendation-action-label]{margin:0;font-size:inherit;line-height:inherit}
+.device-recommendation-all{display:inline-flex;align-items:center;gap:7px;min-height:44px;font-size:12px;line-height:1.4;text-decoration:underline;text-underline-offset:4px}
+.device-recommendation a:focus-visible,.download-card a:focus-visible{outline:2px solid var(--orange-dark);outline-offset:4px}
+.device-recommendation+.hero-note{margin-top:28px}
+.device-recommendation[data-device="iphone"],.device-recommendation[data-device="ipad"]{background:linear-gradient(120deg,#fffaf5,#ece6f6);border-color:#d4c8e3}
+.device-recommendation[data-device="iphone"] .device-recommendation-icon,.device-recommendation[data-device="ipad"] .device-recommendation-icon,.download-card-ios .download-icon{background:#ded4ee;color:#4b3b62}
+.download-card-ios{background:#faf7ff}
+.download-soon{display:inline-flex;border-radius:999px;padding:4px 10px;background:#e7def3;color:#54416e;font-family:var(--mono);font-size:10px;letter-spacing:.04em}
+.download-grid[data-downloads] .download-card-web{grid-column:1/-1}
+@media(max-width:520px){.device-recommendation{gap:11px;padding:17px 15px;grid-template-columns:32px minmax(0,1fr)}.device-recommendation-icon{width:32px;height:32px;border-radius:10px}.device-recommendation-icon svg{width:20px;height:20px}.device-recommendation h2{font-size:18px}.device-recommendation-actions{align-items:flex-start;flex-direction:column;gap:4px}.device-recommendation-all{font-size:12px}}
+@media(prefers-reduced-motion:reduce){.device-recommendation a:hover,.download-card:hover{transform:none}.download-card{transition:none}}

@@ -63,34 +63,90 @@
   setPhase(0);
 })();
 
-// Descargas: resalta el sistema de quien visita (y lo pone primero) y muestra versión y peso reales.
+// Recomienda una versión sin navegar ni descargar automáticamente; las demás siguen visibles.
 (() => {
   const grid = document.querySelector('[data-downloads]');
-  if (!grid && !document.querySelector('[data-download-top]')) return;
-  const ua = navigator.userAgent;
-  const os = /Android/.test(ua) ? 'android' : /Windows/.test(ua) ? 'windows' : /Macintosh|Mac OS X/.test(ua) && !/iPhone|iPad/.test(ua) && navigator.maxTouchPoints < 2 ? 'mac' : null;
-  const mine = os && grid?.querySelector(`[data-os="${os}"]`);
-  if (mine && grid) { mine.classList.add('is-mine'); grid.prepend(mine); }
-  const mb = (n) => `${(n / 1048576).toFixed(1).replace('.', document.documentElement.lang === 'es' ? ',' : '.')} MB`;
-  // Botón de arriba: descarga directa de la última versión para este sistema (o lleva a la sección).
+  const recommendation = document.querySelector('[data-device-recommendation]');
   const top = document.querySelector('[data-download-top]');
-  const topLabel = top?.querySelector('[data-download-label]');
-  const esTop = document.documentElement.lang === 'es';
+  if (!grid && !top && !recommendation) return;
+  const ua = navigator.userAgent;
+  // iPadOS puede anunciarse como Macintosh; iOS y Android se resuelven antes del escritorio.
+  const os = /iPhone|iPod/i.test(ua) ? 'iphone'
+    : /iPad/i.test(ua) || (/Macintosh/i.test(ua) && (navigator.maxTouchPoints || 0) >= 2) ? 'ipad'
+    : /Android/i.test(ua) ? 'android'
+    : /Windows/i.test(ua) ? 'windows'
+    : /Macintosh|Mac OS X/i.test(ua) ? 'mac'
+    : /Linux/i.test(ua) ? 'linux' : 'web';
+  const es = document.documentElement.lang === 'es';
+  const isIOS = os === 'iphone' || os === 'ipad';
+  const mine = grid?.querySelector(`[data-os="${isIOS ? 'ios' : os === 'linux' ? 'web' : os}"]`);
+  if (mine && grid) { mine.classList.add('is-mine'); grid.prepend(mine); }
+  const iosBadge = grid?.querySelector('[data-ios-mine]');
+  if (isIOS && iosBadge) iosBadge.textContent = `${es ? 'Tu' : 'Your'} ${os === 'ipad' ? 'iPad' : 'iPhone'}`;
+  const webHref = 'https://app.chaggu.com/';
   const downloadHref = { android: 'https://play.google.com/store/apps/details?id=com.chaggu.app', mac: '/descargas/chaggu-mac.dmg', windows: '/descargas/chaggu-windows.exe' };
-  if (top && os) top.setAttribute('href', downloadHref[os]);
-  if (topLabel && os) topLabel.textContent = esTop ? `Descargar para ${os === 'android' ? 'Android' : os === 'mac' ? 'Mac' : 'Windows'}` : `Download for ${os === 'android' ? 'Android' : os === 'mac' ? 'Mac' : 'Windows'}`;
+  const copy = es ? {
+    android: ['Para tu Android', 'chaggu en tu Android.', 'Descarga la app oficial desde Google Play.', 'Descargar para Android'],
+    mac: ['Para tu Mac', 'chaggu en tu Mac.', 'App de escritorio para Apple Silicon e Intel.', 'Descargar para Mac'],
+    windows: ['Para tu PC', 'chaggu en tu Windows.', 'App de escritorio para Windows 10 y 11.', 'Descargar para Windows'],
+    iphone: ['Para tu iPhone', 'chaggu para iPhone, muy pronto.', 'Mientras tanto, tus conversaciones y tareas siguen en la web.', 'Usar versión web'],
+    ipad: ['Para tu iPad', 'chaggu para iPad, muy pronto.', 'Mientras tanto, tus conversaciones y tareas siguen en la web.', 'Usar versión web'],
+    linux: ['Para tu equipo Linux', 'chaggu, también en tu navegador.', 'Abre tus conversaciones y tareas sin instalar nada.', 'Usar versión web'],
+    web: ['Para tu navegador', 'chaggu, sin instalar nada.', 'Tus conversaciones y tareas, también en la web.', 'Usar versión web'],
+  } : {
+    android: ['For your Android', 'chaggu on your Android.', 'Get the official app from Google Play.', 'Download for Android'],
+    mac: ['For your Mac', 'chaggu on your Mac.', 'Desktop app for Apple Silicon and Intel.', 'Download for Mac'],
+    windows: ['For your PC', 'chaggu on your Windows PC.', 'Desktop app for Windows 10 and 11.', 'Download for Windows'],
+    iphone: ['For your iPhone', 'chaggu for iPhone, coming soon.', 'Until then, your conversations and tasks are on the web.', 'Use the web app'],
+    ipad: ['For your iPad', 'chaggu for iPad, coming soon.', 'Until then, your conversations and tasks are on the web.', 'Use the web app'],
+    linux: ['For your Linux computer', 'chaggu, in your browser too.', 'Open your conversations and tasks with nothing to install.', 'Use the web app'],
+    web: ['For your browser', 'chaggu, with nothing to install.', 'Your conversations and tasks are on the web too.', 'Use the web app'],
+  };
+  const [label, title, description, actionLabel] = copy[os];
+  const recommendationAction = recommendation?.querySelector('[data-recommendation-action]');
+  const recommendationDescription = recommendation?.querySelector('[data-recommendation-description]');
+  if (recommendation) {
+    recommendation.setAttribute('data-device', os);
+    for (const [selector, value] of [
+      ['[data-recommendation-label]', label], ['[data-recommendation-title]', title],
+      ['[data-recommendation-description]', description], ['[data-recommendation-action-label]', actionLabel],
+    ]) {
+      const element = recommendation.querySelector(selector);
+      if (element) element.textContent = value;
+    }
+    recommendationAction?.setAttribute('href', downloadHref[os] || webHref);
+    const iconPath = isIOS ? 'M8 2h8a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2ZM10 5h4M11 19h2'
+      : os === 'android' ? 'm7 5-2-3m12 3 2-3M4 13a8 8 0 0 1 16 0v5H4ZM8 10h.01M16 10h.01'
+      : os === 'mac' || os === 'windows' ? 'M3 4h18v13H3ZM12 17v4M8 21h8'
+      : 'M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0ZM3 12h18M12 3c5 5 5 13 0 18-5-5-5-13 0-18Z';
+    recommendation.querySelector('[data-recommendation-icon]')?.setAttribute('d', iconPath);
+  }
+
+  // iOS anuncia disponibilidad futura y dirige a las opciones; nunca ofrece una descarga de Mac.
+  const topLabel = top?.querySelector('[data-download-label]');
+  top?.setAttribute('href', downloadHref[os] || '#descargar');
+  if (topLabel && isIOS) topLabel.textContent = `${os === 'ipad' ? 'iPad' : 'iPhone'} · ${es ? 'Próximamente' : 'Coming soon'}`;
+  else if (topLabel && downloadHref[os]) topLabel.textContent = actionLabel;
+  const topIcon = top?.querySelector('[data-download-icon]');
+  if (topIcon && isIOS) topIcon.textContent = '◷';
+  const mb = (n) => `${(n / 1048576).toFixed(1).replace('.', es ? ',' : '.')} MB`;
   fetch('/descargas/latest.json?schema=2', { cache: 'no-cache' }).then((r) => (r.ok ? r.json() : null)).then((v) => {
     if (!v) return;
-    const es = document.documentElement.lang === 'es';
+    let matchedDesktop = false;
     // Usa el nombre versionado del manifiesto para evitar descargas anteriores en caché.
     for (const platform of ['mac', 'windows']) {
       const file = v[platform]?.file;
       if (typeof file !== 'string' || !/^[a-zA-Z0-9._-]+$/.test(file)) continue;
       const href = `/descargas/${file}`;
       grid?.querySelector(`[data-os="${platform}"] a.button`)?.setAttribute('href', href);
-      if (os === platform) top?.setAttribute('href', href);
+      if (os === platform) {
+        matchedDesktop = true;
+        top?.setAttribute('href', href);
+        recommendationAction?.setAttribute('href', href);
+        if (recommendationDescription && v.version) recommendationDescription.textContent = `${description} ${es ? 'Versión' : 'Version'} ${v.version}.`;
+      }
     }
-    if (topLabel && (os === 'mac' || os === 'windows') && v.version) { const sm = document.createElement('small'); sm.textContent = ` v${v.version}`; topLabel.after(sm); }
+    if (topLabel && matchedDesktop && v.version) { const sm = document.createElement('small'); sm.textContent = ` v${v.version}`; topLabel.after(sm); }
     const mac = grid?.querySelector('[data-meta="mac"]');
     if (mac && v.mac) mac.textContent = `${es ? 'Versión' : 'Version'} ${v.version} · .dmg · ${mb(v.mac.size)}`;
     const win = grid?.querySelector('[data-meta="windows"]');

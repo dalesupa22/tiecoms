@@ -31,6 +31,7 @@ import * as ws from './modules/workspaces.ts';
 import * as groups from './modules/groups.ts';
 import * as invitations from './modules/invitations.ts';
 import * as issues from './modules/issues.ts';
+import { IssuePageQuery } from './modules/issue-pagination.ts';
 import * as cal from './modules/calendar.ts';
 import * as prefs from './modules/prefs.ts';
 import * as notes from './modules/notes.ts';
@@ -789,11 +790,14 @@ export async function buildHttp() {
       ws.suggestSideReturn(req.userId, z.uuid().parse(req.params.id), /^\s*en\b/i.test(String(req.headers['accept-language'] ?? '')) ? 'en' : 'es', z.object({ aiConsent: z.boolean().optional() }).parse(req.body ?? {}).aiConsent === true));
     priv.post<{ Params: { id: string } }>('/api/v1/conversations/:id/return', async (req) => ws.returnResult(req.userId, req.params.id, ReturnResultInput.parse(req.body).summary));
     // Asuntos
-    priv.get<{ Querystring: { workspaceId?: string; conversationId?: string; mine?: string; open?: string } }>('/api/v1/issues', async (req) => ({
+    priv.get<{ Querystring: { workspaceId?: string; conversationId?: string; mine?: string; open?: string; limit?: string; offset?: string } }>('/api/v1/issues', async (req) => {
+      const page = IssuePageQuery.parse(req.query);
       // Los asuntos personales (conversationId null) solo van a clientes que los entienden.
-      issues: await issues.listIssues(req.userId, { workspaceId: req.query.workspaceId, conversationId: req.query.conversationId, mine: req.query.mine === '1', open: req.query.open === '1',
-        personal: String(req.headers['x-tiecoms-contract'] ?? '') >= '2026-09-28' }),
-    }));
+      const filter = { workspaceId: req.query.workspaceId, conversationId: req.query.conversationId, mine: req.query.mine === '1', open: req.query.open === '1',
+        personal: String(req.headers['x-tiecoms-contract'] ?? '') >= '2026-09-28' };
+      if (page.limit !== undefined) return issues.listIssuesPage(req.userId, filter, { limit: page.limit, offset: page.offset });
+      return { issues: await issues.listIssues(req.userId, filter) };
+    });
     priv.post('/api/v1/issues', async (req) => issues.createPersonalIssue(req.userId, CreatePersonalIssueInput.parse(req.body)));
     priv.post<{ Params: { id: string } }>('/api/v1/conversations/:id/issues', async (req) => issues.createIssue(req.userId, req.params.id, CreateIssueInput.parse(req.body)));
     priv.post<{ Params: { id: string } }>('/api/v1/issues/:id/attachments', { bodyLimit: attachments.MAX_UPLOAD_BYTES, config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (req) => {

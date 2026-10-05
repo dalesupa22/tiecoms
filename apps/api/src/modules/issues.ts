@@ -8,6 +8,7 @@ import { queueIntegrationEvent } from './integration-events.ts';
 import { bumpCommentNotice } from './chat-notices.ts';
 import { viewOnceConflict } from '../errors.ts';
 import { normalizeAssignees } from './issue-assignees.ts';
+import { issuePage } from './issue-pagination.ts';
 
 /** Mensaje de sistema estructurado: cada cliente lo muestra en su idioma. */
 const sys = (k: string, p: Record<string, unknown> = {}) => JSON.stringify({ k, ...p });
@@ -534,17 +535,29 @@ export async function getIssue(userId: string, issueId: string, db: Db = pool) {
  * Asuntos visibles para la persona: los de conversaciones que puede leer ahora mismo (membresía activa y,
  * si es tercero, dentro de su fecha) según su visibilidad, y los restringidos donde la agregaron.
  */
-export async function listIssues(userId: string, filter: { workspaceId?: string; conversationId?: string; mine?: boolean; open?: boolean; personal?: boolean }) {
-  const { rows } = await pool.query(
+type IssueFilter = { workspaceId?: string; conversationId?: string; mine?: boolean; open?: boolean; personal?: boolean };
+
+async function queryIssues(userId: string, filter: IssueFilter, limit: number, offset: number, db: Db) {
+  const { rows } = await db.query(
     `${SELECT} ${VISIBLE}
         AND ($2::uuid IS NULL OR i.workspace_id = $2) AND ($3::uuid IS NULL OR i.conversation_id = $3)
         AND (NOT $4 OR i.owner_id = $1 OR $1 = ANY(i.assignee_ids)) AND (NOT $5 OR i.status NOT IN ('done','cancelled'))
         AND ($6 OR i.conversation_id IS NOT NULL)
-      ORDER BY (i.status IN ('done','cancelled')), i.due_date NULLS LAST, i.created_at DESC
-      LIMIT 500`,
-    [userId, filter.workspaceId ?? null, filter.conversationId ?? null, !!filter.mine, !!filter.open, filter.personal !== false],
+      ORDER BY (i.status IN ('done','cancelled')), i.due_date NULLS LAST, i.created_at DESC, i.id
+      LIMIT $7 OFFSET $8`,
+    [userId, filter.workspaceId ?? null, filter.conversationId ?? null, !!filter.mine, !!filter.open, filter.personal !== false, limit, offset],
   );
   return rows.map(toDTO);
+}
+
+export async function listIssues(userId: string, filter: IssueFilter, db: Db = pool) {
+  return queryIssues(userId, filter, 500, 0, db);
+}
+
+/** Applies the same visibility predicate before every page, including personal tasks. */
+export async function listIssuesPage(userId: string, filter: IssueFilter, page: { limit: number; offset?: number }, db: Db = pool) {
+  const offset = page.offset ?? 0;
+  return issuePage(await queryIssues(userId, filter, page.limit + 1, offset, db), page.limit, offset);
 }
 
 /** Reporte completo de tareas asignadas que puedo ver; independiente del límite de la vista interactiva. */

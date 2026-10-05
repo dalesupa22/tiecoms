@@ -50,7 +50,7 @@ const g = [
   msg('general', 'mateo', 'Fotos de la visita de hoy', 60 * 60_000, { attachments: [1, 2, 3, 4, 5, 6].map((i) => att(`f${i}`, `visita-${i}.jpg`, 'image/jpeg', 820_000)) }),
   msg('general', 'mateo', '@Danny Suárez ¿puedes revisar con @Laura Gómez la plantilla?', 50 * 60_000, { mentions: [{ userId: 'danny', start: 0, length: 13 }, { userId: 'laura', start: 34, length: 12 }] }),
   msg('general', 'ana', '', 45 * 60_000, { attachments: [{ ...att('v1', 'nota-de-voz.m4a', 'audio/mp4', 31_000), kind: 'voice', durationMs: 52_000, waveform: Array.from({ length: 48 }, (_, i) => 0.2 + 0.8 * Math.abs(Math.sin(i / 3))), transcript: { status: 'done', text: 'Hola Danny, el jueves te mando el contrato revisado con los cambios de la cláusula cuatro.', language: 'es-CO', summary: 'Ana confirma a Danny que el jueves le envía el contrato revisado.', suggestedIssue: 'Enviar el contrato revisado el jueves' } }] }),
-  msg('general', 'laura', '', 40 * 60_000, { attachments: [att('p1', 'Contrato marco v3.pdf', 'application/pdf', 1_240_000), att('x1', 'Cronograma.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 48_000)] }),
+  msg('general', 'laura', '', 40 * 60_000, { attachments: [att('p1', 'Contrato marco v3.pdf', 'application/pdf', 1_240_000), att('x1', 'Cronograma.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 48_000), att('c1', 'sync-entidades.ts', 'application/octet-stream', 1_200), att('c2', 'notas-levantamiento.md', 'text/markdown', 640)] }),
   // Reacciones y enlaces (docs/REACCIONES_ENLACES.md)
   msg('general', 'ana', 'Miren esta charla sobre firma digital https://www.youtube.com/watch?v=abc123', 30 * 60_000, {
     linkPreviews: [{ url: 'https://www.youtube.com/watch?v=abc123', title: 'Firma electrónica en Colombia: lo que cambia en 2026', description: 'Una charla de 20 minutos sobre validez jurídica, OTP y certificados.', siteName: 'YouTube', imageUrl: '/chaggu-logo.svg', kind: 'video', provider: 'youtube', author: 'Legal Tech Bogotá', durationSec: 1234, linkId: 'l1' }],
@@ -205,7 +205,11 @@ const waMsgs = [
   { id: 'd', fromMe: false, author: 'Laura Gómez', kind: 'text', body: 'El despliegue quedó listo ✅', sentAt: iso(20 * 60_000) },
 ];
 (client as any).listMentions = async () => ({ hasMore: false, mentions: g.filter((m) => m.mentions?.some((x) => x.userId === 'danny')).map((m) => ({ message: m, conversationId: 'general', all: false, read: false, createdAt: m.createdAt })) });
-(client as any).fetchBlob = async () => (await fetch('/chaggu-logo.svg')).blob();
+const SAMPLE_CODE: Record<string, string> = {
+  c1: `// Sincroniza las entidades de la cuenta con cada flujo\nimport { db } from './db';\n\ninterface Entidad { id: string; nombre: string; flujo?: string }\n\nexport async function sincronizar(cuenta: string): Promise<number> {\n  const entidades: Entidad[] = await db.entidades(cuenta);\n  let cambios = 0;\n  for (const e of entidades) {\n    if (!e.flujo) continue; // sin flujo, no se toca\n    cambios += await db.actualizar(e.id, { nombre: e.nombre.trim() });\n  }\n  return cambios;\n}\n`,
+  c2: `# Levantamiento homologaciones\n\n- **Responsable:** Santiago\n- Entidades en la cuenta de Alonso\n\n## Pendientes\n\n1. Cargar en PROD\n2. Revisar \`id: asignaturas\`\n\n> Se actualiza de acuerdo a cada flujo.\n`,
+};
+(client as any).fetchBlob = async (path: string) => { const id = path.split('/').pop()!; return SAMPLE_CODE[id] ? new Blob([SAMPLE_CODE[id]!], { type: 'text/plain' }) : (await fetch('/chaggu-logo.svg')).blob(); };
 // Subidas simuladas: devuelven un AttachmentDTO y el envío queda en cola (sin backend).
 (client as any).uploadAttachment = async (_c: string, f: File, name: string) => { await new Promise((r) => setTimeout(r, 300)); return att(`up-${Date.now()}`, name, f.type || 'application/octet-stream', f.size); };
 (client as any).uploadAttachmentThumb = async (id: string) => att(id, 'thumb', 'image/jpeg', 1);

@@ -11,6 +11,8 @@ import { VoiceNote } from './Voice.tsx';
 import { formatBytes, formatDuration } from '../video.ts';
 import { ImageViewer } from './ImageViewer.tsx';
 import { setFileDrag } from '../file-links.ts';
+import { MAX_TEXT_BYTES, isTextFile } from '../text-files.ts';
+import { openCodeViewer } from '../code-viewer.tsx';
 
 /** Un adjunto de chaggu se puede arrastrar a un chat de WhatsApp (se manda un enlace para verlo). Los de WhatsApp no. */
 const fileDragProps = (a: AttachmentDTO) => waPathScope(a.url) ? {} : { draggable: true, onDragStart: (e: React.DragEvent) => { e.stopPropagation(); setFileDrag(e, { attachmentId: a.id, name: a.name }); } };
@@ -88,6 +90,7 @@ function fileIcon(a: { contentType: string; name: string }) {
   if (['xls', 'xlsx', 'csv', 'numbers'].includes(ext)) return '📊';
   if (['doc', 'docx', 'pages', 'txt', 'rtf', 'md'].includes(ext)) return '📄';
   if (['zip', 'rar', '7z', 'gz'].includes(ext)) return '🗜';
+  if (isTextFile(a)) return '🧾';
   return '📎';
 }
 
@@ -175,7 +178,7 @@ export function FileChip({ a, onRemove, status }: { a: { name: string; contentTy
 }
 
 /** Fotos y videos en cuadrícula (1–4 visibles + «+N») y archivos como fichas con descarga. */
-export function AttachmentsView({ list, onCreateIssue }: { list: AttachmentDTO[]; onCreateIssue?: (title: string) => void }) {
+export function AttachmentsView({ list, onCreateIssue, conversationId }: { list: AttachmentDTO[]; onCreateIssue?: (title: string) => void; conversationId?: string }) {
   const [viewing, setViewing] = useState<number | null>(null);
   const [pdf, setPdf] = useState<{ a: AttachmentDTO; sign: boolean } | null>(null);
   useClient((state) => state.waRevision);
@@ -205,6 +208,14 @@ export function AttachmentsView({ list, onCreateIssue }: { list: AttachmentDTO[]
             <FileChip a={a} />
           </button>
           <button type="button" className="att-sign" onClick={() => setPdf({ a, sign: true })}>✍️ {t('att.signBtn')}</button>
+          <button type="button" className="icon-btn" aria-label={t('att.download')} onClick={() => void downloadAttachment(a)}>⤓</button>
+        </div>
+      ) : isTextFile(a) && a.sizeBytes <= MAX_TEXT_BYTES ? (
+        <div key={a.id} className="att-file-btn is-code" {...fileDragProps(a)}>
+          <button type="button" className="grow" style={{ border: 0, background: 'transparent', padding: 0, textAlign: 'left', minWidth: 0 }} title={getLang() === 'en' ? 'Open' : 'Abrir'} onClick={() => openCodeViewer(a, conversationId)}>
+            <FileChip a={a} />
+          </button>
+          <button type="button" className="att-sign" onClick={() => openCodeViewer(a, conversationId)}>{'</>'} {getLang() === 'en' ? 'Open' : 'Abrir'}</button>
           <button type="button" className="icon-btn" aria-label={t('att.download')} onClick={() => void downloadAttachment(a)}>⤓</button>
         </div>
       ) : (

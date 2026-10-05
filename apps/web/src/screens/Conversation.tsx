@@ -953,7 +953,7 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
                   ) : m.viewOnce && !m.deletedAt ? <ViewOnceBubble m={m} /> : (
                     ((m.displayBody ?? m.body) || m.deletedAt || !m.attachments?.length) && <div className={`msg-body ${!m.deletedAt && isJumbo(m.body) ? 'is-jumbo' : ''}`}>{m.deletedAt ? <i className="muted">{t('chat.deleted')}</i> : m.kind === 'text' ? <MessageText d={d} body={m.displayBody ?? m.body} mentions={m.mentions} refs={m.refs} /> : m.body}{m.editedAt && !m.deletedAt && <span className="msg-edited"> {t('msg.edited')}</span>}</div>
                   )}
-                  {!m.deletedAt && !m.viewOnce && !!m.attachments?.length && <AttachmentsView list={m.attachments} onCreateIssue={canOpenIssues ? (title) => setNewIssue({ origin: m, title }) : undefined} />}
+                  {!m.deletedAt && !m.viewOnce && !!m.attachments?.length && <AttachmentsView list={m.attachments} conversationId={conv.canPost ? id : undefined} onCreateIssue={canOpenIssues ? (title) => setNewIssue({ origin: m, title }) : undefined} />}
                   {!m.deletedAt && !isEditing && !m.viewOnce && <MessageLinks m={m} mode={conv.linkPreviews ?? 'large'} onIssue={canOpenIssues ? (title) => setNewIssue({ origin: m, title }) : undefined} />}
                   {!m.deletedAt && <ReactionBar d={d} m={m} canReact={conv.canPost} actions={reactionActions} onIssue={setOpenIssue} />}
                   {!embedded && <ThreadChip d={d} threads={threadsOf(d, id, m.id).filter((c) => c.deriveKind !== 'side')} onOpen={setSideId} />}

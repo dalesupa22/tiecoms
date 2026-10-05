@@ -44,7 +44,7 @@ class MotionFiltersUiTest {
                 val path = r.requestUrl!!.encodedPath
                 val body = when {
                     path == "$AUTH_BASE_PATH/login" -> """{"accessToken":"local","accessExpiresAt":"2099-01-01T00:00:00Z","sessionId":"local","user":{"id":"me","name":"QA"}}"""
-                    path == "/api/v1/bootstrap" -> """{"me":{"id":"me","name":"QA"},"features":{"calls":true,"mail":true},"people":[{"id":"me","name":"QA"},{"id":"lorena","name":"Lorena"},{"id":"other","name":"Ana"}],"conversations":[{"id":"motion-qa","kind":"group","name":"Fluidez QA local","memberIds":["me","lorena","other"],"lastMessageSeq":1,"lastReadSeq":1,"canPost":true},{"id":"dm-qa","kind":"dm","name":"Ana local","memberIds":["me","other"]}]}"""
+                    path == "/api/v1/bootstrap" -> """{"me":{"id":"me","name":"QA","primaryOrgId":"qa-org"},"organizations":[{"id":"qa-org","name":"QA local"}],"workspaces":[{"id":"qa-workspace","name":"Equipo local","owningOrgId":"qa-org","organizationIds":["qa-org"],"myRole":"admin"}],"features":{"calls":true,"mail":true},"people":[{"id":"me","name":"QA"},{"id":"lorena","name":"Lorena"},{"id":"other","name":"Ana"}],"conversations":[{"id":"motion-qa","workspaceId":"qa-workspace","kind":"group","name":"Fluidez QA local","memberIds":["me","lorena","other"],"lastMessageSeq":1,"lastReadSeq":1,"canPost":true},{"id":"dm-qa","kind":"direct","name":"Ana local","memberIds":["me","other"]}]}"""
                     path == "/api/v1/conversations/motion-qa/messages" -> """{"messages":[{"id":"m1","conversationId":"motion-qa","seq":1,"authorId":"other","body":"Probemos el menú y los filtros sin enviar nada.","createdAt":"2026-10-05T01:00:00Z"}],"hasMore":false}"""
                     path == "/api/v1/blocks" -> """{"userIds":[]}"""
                     path == "/api/v1/gg/side/pending" -> """{"c:motion-qa":3}"""
@@ -72,15 +72,20 @@ class MotionFiltersUiTest {
         compose.setContent { CompositionLocalProvider(LocalClient provides client, LocalContainer provides compose.activity.container) { TieComsTheme { TaskDialogsHost { MainNav() } } } }
         waitTag("tab-home")
     }
-    private fun waitTag(tag: String) = compose.waitUntil(15_000) { compose.onAllNodesWithTag(tag).fetchSemanticsNodes().isNotEmpty() }
+    private fun waitTag(tag: String) = compose.waitUntil(15_000) { compose.onAllNodesWithTag(tag, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
     private fun shot(name: String) {
         compose.waitForIdle()
         val bmp = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot()!!
         File(compose.activity.getExternalFilesDir(null), "motion-$name.png").outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
     }
-    private fun click(tag: String) { waitTag(tag); compose.onNodeWithTag(tag).performClick() }
+    private fun click(tag: String) {
+        waitTag(tag)
+        // The row contains a separate tasks chip near its centre; tap the chat title area.
+        if (tag.startsWith("conv-")) compose.onNodeWithTag(tag).performTouchInput { click(androidx.compose.ui.geometry.Offset(width / 3f, height / 4f)) }
+        else compose.onNodeWithTag(tag).performClick()
+    }
     private fun back() { androidx.test.uiautomator.UiDevice.getInstance(androidx.test.platform.app.InstrumentationRegistry.getInstrumentation()).pressBack(); compose.waitForIdle() }
-    @After fun finish() { if (::client.isInitialized) client.close(); server.shutdown() }
+    @After fun finish() { if (::client.isInitialized) { runCatching { shot("last-state") }; client.close() }; server.shutdown() }
     @Test fun fullShellChatBackDraftGridAndLazyGgRemainWorking() {
         start()
         for (tab in listOf("home", "dms", "issues", "agenda", "calls", "settings")) compose.onNodeWithTag("tab-$tab").assertExists()
@@ -104,7 +109,7 @@ class MotionFiltersUiTest {
         compose.onNodeWithTag("composer").performTextInput(" · editado")
         back(); click("back"); waitTag("conv-motion-qa")
         click("conv-motion-qa"); waitTag("composer")
-        compose.onNodeWithTag("composer").assertTextContains("editado")
+        compose.onNodeWithTag("composer").assertTextContains("editado", substring = true)
         compose.onNodeWithTag("creativeButton").assertExists(); compose.onNodeWithTag("viewOnce").assertExists()
         assertFalse(requests.any { it.method == "POST" && (it.requestUrl!!.encodedPath.endsWith("/messages") || it.requestUrl!!.encodedPath.endsWith("/join")) })
     }

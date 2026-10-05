@@ -4,6 +4,7 @@ import { conversationAccess } from '../access.ts';
 import { enqueueOutbox, pool, type Db } from '../db.ts';
 import { badRequest, conflict, notFound } from '../errors.ts';
 import { sendMessage } from './messages.ts';
+import { deliverMcpChaggu } from './mcp-scheduled.ts';
 
 const MAX_AHEAD_MS = 366 * 86_400_000;
 /** Si el worker se cae con un envío tomado, otro lo retoma pasado este tiempo (el clientMessageId evita duplicados). */
@@ -101,6 +102,7 @@ async function missing(userId: string, id: string) {
 /** Envía uno ya tomado ('sending'). Revalida el acceso en ese momento: si ya no puede escribir, queda «fallido». */
 async function deliver(r: any): Promise<ScheduledMessageDTO> {
   try {
+    if (r.mcp_token_id) return toDTO(await deliverMcpChaggu(r.id));
     const { message } = await sendMessage(r.user_id, r.conversation_id, {
       clientMessageId: scheduledClientId(r.id), body: r.body, mentions: r.mentions ?? undefined, replyTo: r.reply_to ?? null,
     });

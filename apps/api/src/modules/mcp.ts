@@ -25,6 +25,7 @@ import { MAX_BASE64_LENGTH } from './mcp-file-input.ts';
 import { idempotent, requestHash } from './mcp-idempotency.ts';
 import * as cal from './calendar.ts';
 import * as mwa from './mcp-wa.ts';
+import * as scheduled from './mcp-scheduled.ts';
 import * as reading from './reading.ts';
 import { WA_KINDS, WA_WEBHOOK_EVENTS } from './mcp-consts.ts';
 import type { McpCtx } from './mcp-wa.ts';
@@ -225,6 +226,11 @@ function taskView(b: BootstrapDTO, i: IssueDTO) {
 type Tool = { name: string; description: string; scope?: Scope; schema: z.ZodObject<any>; readOnly?: boolean; run: (userId: string, a: any, ctx: McpCtx) => Promise<unknown> };
 
 const idempotencyKey = z.string().min(8).max(120).describe('Llave única por operación: reutiliza exactamente la misma llave y contenido al reintentar');
+const scheduledAt = z.string().datetime({ offset: true }).describe('Instante ISO 8601 futuro con offset explícito o Z. Resuelve fechas relativas con la fecha y zona horaria actuales de la persona');
+const scheduledTimezone = z.string().min(1).max(100).describe('Zona horaria IANA de la persona, p. ej. America/Bogota. Un offset numérico debe corresponder a esa zona; Z expresa un instante UTC que se convierte a esa zona');
+const scheduledStatus = z.enum(['pending', 'sending', 'queued', 'sent', 'failed', 'cancelled', 'all']);
+const scheduleFields = { send_at: scheduledAt, timezone: scheduledTimezone, idempotency_key: idempotencyKey };
+const scheduleListFields = { status: scheduledStatus.optional().describe('Por defecto pending; all incluye el historial'), limit: z.number().int().min(1).max(100).optional() };
 const fileFields = {
   name: z.string().trim().min(1).max(200).describe('Nombre del archivo con extensión'),
   content_type: z.string().trim().min(3).max(100).describe('MIME real: imagen, application/pdf, text/plain, text/csv, text/markdown, application/json, application/zip u application/octet-stream'),
@@ -245,7 +251,7 @@ const tools: Tool[] = [
     schema: z.object({}),
     run: async (userId) => {
       const b = await bootstrap(userId);
-      return { id: b.me.id, name: b.me.name, email: (b.me as any).email ?? null, organizations: b.organizations.map((o) => o.name), groups: b.workspaces.map((w) => w.name) };
+      return { id: b.me.id, name: b.me.name, email: (b.me as any).email ?? null, organizations: b.organizations.map((o) => o.name), groups: b.workspaces.map((w) => w.name), server_time: new Date().toISOString() };
     },
   },
   {
@@ -330,6 +336,50 @@ const tools: Tool[] = [
       const out = await sendMessage(userId, convId, { clientMessageId: `mcp-${randomUUID()}`, body: a.text });
       return { sent: true, to: p.name, chatId: convId, message: messageView(b, out.message) };
     },
+  },
+  {
+    name: 'schedule_message', scope: 'chats:write',
+    description: 'Programa un texto de chaggu para una fecha futura; no lo envía ahora. Usa exactamente uno: chat (id/nombre de un chat existente) o to (id/nombre de una persona, abre el DM). Confirma destinatario, texto y fecha/hora/zona exactas. Devuelve recibo con id y estado pending para consultar, editar o cancelar. Reutiliza la misma idempotency_key al reintentar.',
+    schema: z.object({
+      chat: z.string().trim().min(1).max(200).optional().describe('Chat existente; excluyente con to'),
+      to: z.string().trim().min(1).max(200).optional().describe('Persona para mensaje directo; excluyente con chat'),
+      text: z.string().trim().min(1).max(8000), ...scheduleFields,
+      reply_to: z.string().uuid().optional(),
+    }),
+    run: async (userId, a, ctx) => {
+      if (!!a.chat === !!a.to) throw badRequest('Indica exactamente uno: chat o to');
+      const b = await bootstrap(userId);
+      let conversationId: string;
+      if (a.chat) conversationId = findChat(b, a.chat).id;
+      else {
+        const person = findPerson(b, a.to);
+        const conv: any = await getOrCreateDirect(userId, person.id);
+        conversationId = conv?.id ?? conv?.conversation?.id ?? conv?.conversationId;
+        if (!conversationId) throw new ApiError(500, 'internal', 'No pude abrir el chat directo');
+      }
+      return scheduled.createChaggu(ctx, { conversationId, text: a.text, sendAt: a.send_at, timezone: a.timezone, idempotencyKey: a.idempotency_key, replyTo: a.reply_to });
+    },
+  },
+  {
+    name: 'list_scheduled_messages', readOnly: true, scope: 'chats:read',
+    description: 'Consulta los textos de chaggu programados por este token, su fecha/zona y estado real; por defecto pendientes. status=all incluye enviados, fallidos y cancelados. Un recibo pending o sending no prueba que el mensaje se haya enviado.',
+    schema: z.object(scheduleListFields),
+    run: async (_u, a, ctx) => scheduled.list(ctx, { channel: 'chaggu', status: a.status ?? 'pending', limit: a.limit }),
+  },
+  {
+    name: 'update_scheduled_message', scope: 'chats:write',
+    description: 'Edita texto o fecha de un mensaje de chaggu pendiente de este token. Para cambiar la fecha, indica send_at y timezone juntos; timezone sola cambia la zona de presentación del mismo instante. Confirma el texto y horario resultantes; no envía el mensaje ahora.',
+    schema: z.object({ id: z.string().uuid(), text: z.string().trim().min(1).max(8000).optional(), send_at: scheduledAt.optional(), timezone: scheduledTimezone.optional() }),
+    run: async (_u, a, ctx) => {
+      if (a.send_at && !a.timezone) throw badRequest('Al cambiar send_at indica también timezone');
+      return scheduled.update(ctx, { channel: 'chaggu', id: a.id, text: a.text, sendAt: a.send_at, timezone: a.timezone });
+    },
+  },
+  {
+    name: 'cancel_scheduled_message', scope: 'chats:write',
+    description: 'Cancela por id un mensaje de chaggu pendiente de este token; conserva el recibo cancelled. Un envío ya iniciado o enviado no puede cancelarse.',
+    schema: z.object({ id: z.string().uuid() }),
+    run: async (_u, a, ctx) => scheduled.cancel(ctx, { channel: 'chaggu', id: a.id }),
   },
   {
     name: 'search_messages', readOnly: true, scope: 'chats:read',
@@ -455,6 +505,41 @@ const tools: Tool[] = [
       text: z.string().trim().min(1).max(4000), idempotency_key: z.string().min(8).max(120).optional(),
     }),
     run: async (_u, a, ctx) => mwa.send(ctx, { chat: a.chat, phone: a.phone, account: a.account, text: a.text, idempotencyKey: a.idempotency_key }),
+  },
+  {
+    name: 'schedule_whatsapp', scope: 'whatsapp:send',
+    description: 'Programa un WhatsApp de texto para una fecha futura; no lo envía ahora. Usa exactamente chat o phone (con indicativo), y account si hay varios números. Confirma destinatario, número emisor, texto y fecha/hora/zona exactas. Conserva los permisos del token y del chat al ejecutar. Devuelve recibo pending; queued significa en cola, solo sent confirma el envío.',
+    schema: z.object({
+      chat: z.string().trim().min(1).max(300).optional().describe('Chat de WhatsApp; excluyente con phone'),
+      phone: z.string().trim().min(6).max(30).optional().describe('Teléfono con indicativo; excluyente con chat'),
+      account: z.string().max(100).optional().describe('Id o nombre del número emisor autorizado'),
+      text: z.string().trim().min(1).max(4000), ...scheduleFields,
+    }),
+    run: async (_u, a, ctx) => {
+      if (!!a.chat === !!a.phone) throw badRequest('Indica exactamente uno: chat o phone');
+      return scheduled.createWhatsapp(ctx, { chat: a.chat, phone: a.phone, account: a.account, text: a.text, sendAt: a.send_at, timezone: a.timezone, idempotencyKey: a.idempotency_key });
+    },
+  },
+  {
+    name: 'list_scheduled_whatsapp', readOnly: true, scope: 'whatsapp:send',
+    description: 'Consulta los WhatsApps programados por este token y todavía autorizados, con fecha/zona y estado real. Por defecto pending; status=all incluye historial. pending, sending y queued no son sent. Requiere whatsapp:send para no exponer textos programados con un permiso de solo lectura.',
+    schema: z.object(scheduleListFields),
+    run: async (_u, a, ctx) => scheduled.list(ctx, { channel: 'whatsapp', status: a.status ?? 'pending', limit: a.limit }),
+  },
+  {
+    name: 'update_scheduled_whatsapp', scope: 'whatsapp:send',
+    description: 'Edita texto o fecha de un WhatsApp pendiente de este token. Para cambiar fecha indica send_at y timezone juntos; timezone sola cambia la zona de presentación del mismo instante. Confirma texto y horario resultantes. No cambia destinatario/cuenta ni permite editar un envío ya en cola.',
+    schema: z.object({ id: z.string().uuid(), text: z.string().trim().min(1).max(4000).optional(), send_at: scheduledAt.optional(), timezone: scheduledTimezone.optional() }),
+    run: async (_u, a, ctx) => {
+      if (a.send_at && !a.timezone) throw badRequest('Al cambiar send_at indica también timezone');
+      return scheduled.update(ctx, { channel: 'whatsapp', id: a.id, text: a.text, sendAt: a.send_at, timezone: a.timezone });
+    },
+  },
+  {
+    name: 'cancel_scheduled_whatsapp', scope: 'whatsapp:send',
+    description: 'Cancela por id un WhatsApp pendiente, fallido o en cola de este token y devuelve cancelled. Si el puente ya empezó a enviarlo (sending) o salió (sent), no puede cancelarse.',
+    schema: z.object({ id: z.string().uuid() }),
+    run: async (_u, a, ctx) => scheduled.cancel(ctx, { channel: 'whatsapp', id: a.id }),
   },
   {
     name: 'create_whatsapp_draft', scope: 'whatsapp:draft',
@@ -780,6 +865,7 @@ const INSTRUCTIONS = [
   'chaggu es el chat entre equipos de distintas empresas, con WhatsApp, correo y tareas/tickets en un solo lugar. Todo se hace como la persona dueña del token: solo ves y escribes lo que ella puede, y solo los números o chats de WhatsApp que compartió con esta integración.',
   'Nunca envíes nada (chaggu, WhatsApp, correo, comentario de ticket) sin mostrar antes destinatario, canal, número y texto exacto y recibir un sí explícito. Si son varios mensajes, muéstralos todos juntos y pide un solo sí, o usa create_whatsapp_draft para que la persona los apruebe en chaggu.',
   'En WhatsApp lee solo lo necesario para la tarea; no resumas ni repitas chats personales que no te pidieron.',
+  'PROGRAMADOS: para «mañana a las 10 am» usa la fecha actual y la zona horaria IANA de la persona; whoami.server_time da el instante actual UTC, pero no indica su zona. No supongas la zona del servidor. Si faltan destinatario, texto o zona horaria, pide esos datos. Antes de schedule_message o schedule_whatsapp confirma canal, destinatario, cuenta/número emisor, texto y fecha/hora local exacta con su zona. send_at debe llevar offset o Z y timezone es obligatoria. Conserva el id del recibo para consultar con list_scheduled_messages/list_scheduled_whatsapp, editar con update_scheduled_message/update_scheduled_whatsapp o cancelar con cancel_scheduled_message/cancel_scheduled_whatsapp. Di «programado», nunca «enviado», mientras el estado no sea sent. Los permisos se revisan otra vez antes del envío; una revocación puede dejarlo fallido. Una solicitud de ejemplo sin destinatario o texto no autoriza crear un mensaje real.',
   'Encargos personales (p. ej. «escríbele a 3 ferreterías y pídeles cotización»): consigue los números (de la persona, de find_whatsapp_chat o buscando en la web), propón un mensaje corto y cordial que diga quién escribe y qué necesita, muestra la lista de números con el texto, y tras el sí usa send_whatsapp con phone e idempotency_key. Después revisa las respuestas con read_whatsapp (since) y resúmelas.',
   'REGLA DE TICKETS: cuando termines de resolver o arreglar un ticket, caso, error o pedido de un cliente (aunque lo hayas resuelto en código, fuera de chaggu), pregúntale a la persona si quiere responderle al cliente desde aquí.',
   'Para eso usa find_client_channels (y get_task si hay ticket) y ofrécele los canales encontrados: WhatsApp, correo, chat de chaggu o comentario en el ticket. Propón un borrador breve y claro en el idioma del cliente, sin detalles internos ni secretos, y espera su confirmación antes de enviarlo.',
@@ -814,7 +900,7 @@ async function handleOne(ctx: McpCtx, msg: any) {
         result: {
           protocolVersion: VERSIONS.includes(asked) ? asked : VERSIONS[0],
           capabilities: { tools: { listChanged: false }, prompts: { listChanged: false } },
-          serverInfo: { name: 'chaggu', title: 'Chaggu', version: '1.0.0' },
+          serverInfo: { name: 'chaggu', title: 'Chaggu', version: '1.1.0' },
           instructions: INSTRUCTIONS,
         },
       };
@@ -866,7 +952,7 @@ export async function handleRpc(ctx: McpCtx, body: unknown): Promise<unknown | n
 
 /** Bitácora sin contenido: herramienta, a qué (chat, número, id) y cuántos elementos devolvió. */
 async function audit(ctx: McpCtx, tool: string, args: any, out: any, error: string | null) {
-  const target = args && typeof args === 'object' ? String(args.chat ?? args.phone ?? args.person ?? args.email ?? args.id ?? '').slice(0, 300) || null : null;
+  const target = args && typeof args === 'object' ? String(args.chat ?? args.phone ?? args.to ?? args.person ?? args.email ?? args.id ?? '').slice(0, 300) || null : null;
   const items = out && typeof out === 'object' ? Object.values(out).reduce<number>((n, v) => n + (Array.isArray(v) ? v.length : 0), 0) : 0;
   await pool.query('INSERT INTO mcp_audit (token_id, user_id, tool, target, items, ok, error) VALUES ($1,$2,$3,$4,$5,$6,$7)',
     [ctx.tokenId, ctx.userId, tool, target, items, !error, error]).catch(() => {});

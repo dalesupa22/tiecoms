@@ -8,6 +8,7 @@ Claude, Codex, ChatGPT y otras IAs leen y escriben en chaggu como la persona, co
   se muestra una vez, se guarda solo el hash (tabla `mcp_tokens`, migración 080) y se revoca en la misma pantalla.
 - **Herramientas:**
   - Chats de chaggu: `whoami`, `list_chats`, `read_messages`, `upload_chat_attachment`, `send_message`, `send_direct_message`, `search_messages`, `unread_summary`, `mark_read`, `list_people`.
+  - Programados de texto: `schedule_message`, `list_scheduled_messages`, `update_scheduled_message`, `cancel_scheduled_message`; WhatsApp: `schedule_whatsapp`, `list_scheduled_whatsapp`, `update_scheduled_whatsapp`, `cancel_scheduled_whatsapp`. Persisten en el servidor; no requieren dejar la IA ni la app abiertas. Ver [Programados](PROGRAMADOS.md) para fechas, recibos, permisos y límites.
   - WhatsApp (ver «Privacidad de WhatsApp» abajo): `list_whatsapp_numbers`, `list_whatsapp_chats` (cursor, since, teléfono, quién habló de último; vista previa solo con `include_preview`), `read_whatsapp` (`fromMe`, `kind`, teléfono, transcripción de notas de voz; `since`/`before`/`kinds`), `find_whatsapp_chat` (por teléfono, también `@lid`), `get_whatsapp_group` (participantes), `search_whatsapp` (texto y transcripciones), `send_whatsapp` (a `chat` o a `phone` nuevo, con `idempotency_key`; devuelve `outboxId` y, si ya salió, `messageId` = id de WhatsApp de `read_whatsapp`), `create_whatsapp_draft` / `list_whatsapp_drafts` / `delete_whatsapp_draft` (por aprobar en WhatsApp › Por enviar), `set_whatsapp_webhook` / `get_whatsapp_webhook` / `delete_whatsapp_webhook`.
   - Correo (Gmail/Outlook propio): `list_emails`, `read_email`, `reply_email`.
   - Tickets y tareas: `list_tasks`, `get_task`, `create_task`, `upload_task_attachment`, `update_task` (estado, responsables, fecha, título), `comment_task`.
@@ -21,6 +22,16 @@ Claude, Codex, ChatGPT y otras IAs leen y escriben en chaggu como la persona, co
 - Vencimiento (`expires_at`, 401 al vencer) y nombre de la app (`client_name`). Se eligen al crear el token en Tú › Conector para IAs o al aprobar en `/autorizar-ia` (la IA puede pedir scopes con `scope=`).
 - Bitácora `mcp_audit` (herramienta, objetivo, cantidad, error; sin contenido): `GET /api/v1/me/mcp-activity` y el resumen «Hoy: leyó 3 · envió 1» en cada token. Se guarda 90 días.
 - Errores de herramienta con código estable en `structuredContent.error.code`: `forbidden_scope`, `not_found`, `send_disabled`, `not_connected`, `integrations_disabled`, `invalid_phone`, `idempotency_mismatch`, `bad_request`.
+
+## Mensajes programados (MCP 1.1.0)
+
+Una solicitud como «mañana a las 10 am envíale a Ana por chaggu: Nos vemos en la reunión» se resuelve usando **la fecha actual y la zona horaria de la persona**. `whoami.server_time` aporta el instante actual UTC; no permite inferir su zona horaria. Antes de crear el programado, el asistente confirma destinatario, canal, texto y fecha/hora local exacta con su zona. Para WhatsApp también confirma el número emisor. Si faltan destinatario, texto o zona, los solicita; una frase de ejemplo no crea mensajes.
+
+Creación: `schedule_message {chat | to, text, send_at, timezone, idempotency_key, reply_to?}` o `schedule_whatsapp {chat | phone, account?, text, send_at, timezone, idempotency_key}`. `chat`/`to` y `chat`/`phone` son excluyentes. `send_at` es ISO con offset explícito o `Z`; `timezone` es IANA (por ejemplo `America/Bogota`). El recibo conserva `id`, `channel`, `status`, `sendAt` UTC, `localSendAt` y `timezone`. Un mensaje **programado o en cola todavía no está enviado**.
+
+Las listas muestran pendientes por defecto y permiten `status: "all"` para consultar el historial. La edición admite `text`, `send_at` + `timezone`, o solamente `timezone` para presentar el mismo instante en otra zona. La cancelación recibe el `id`. Crear/editar/cancelar en chaggu requiere `chats:write`; listar requiere `chats:read`. Todas las operaciones de WhatsApp programado, incluida la consulta de sus textos, requieren `whatsapp:send`. Cada token gestiona solo sus propias programaciones. La pérdida de acceso al destino oculta texto/destinatario y permite conservar un recibo mínimo para cancelarlo.
+
+El endpoint y el mecanismo de acceso siguen iguales. `initialize.serverInfo.version` es `1.1.0`. El transporte sin estado sigue anunciando `listChanged: false`: los clientes deben volver a consultar `tools/list` o refrescar/reconectar su catálogo para descubrir las herramientas nuevas; no existe una notificación espontánea de cambio de catálogo.
 
 ## Imágenes y archivos en chats y tareas
 

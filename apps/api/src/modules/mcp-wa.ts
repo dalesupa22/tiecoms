@@ -9,7 +9,7 @@
  */
 import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { enqueueOutbox, pool, tx } from '../db.ts';
+import { enqueueOutbox, pool, tx, type Db } from '../db.ts';
 import { ApiError, badRequest, notFound } from '../errors.ts';
 import { visibleWaChatSql } from './wa-privacy.ts';
 import { WA_KINDS, WA_WEBHOOK_EVENTS } from './mcp-consts.ts';
@@ -22,8 +22,8 @@ export interface McpCtx { userId: string; tokenId: string; scopes: string[] | nu
 export const waError = (code: string, message: string, status = 400) => new ApiError(status, code, message);
 
 /** Números que este token puede usar (ya filtrados por dueño y cuenta activa). */
-export async function allowedAccounts(ctx: McpCtx) {
-  const { rows } = await pool.query(
+export async function allowedAccounts(ctx: McpCtx, db: Db = pool) {
+  const { rows } = await db.query(
     `SELECT a.id, a.label, a.kind, a.status, a.send_enabled, a.integrations_enabled, a.phone FROM wa_accounts a
       WHERE a.user_id = $1 AND a.removed_at IS NULL AND (CASE WHEN $2::uuid[] IS NULL THEN a.integrations_enabled ELSE a.id = ANY($2) END)
       ORDER BY a.created_at`,
@@ -117,17 +117,17 @@ export async function listChats(ctx: McpCtx, q: { query?: string; unreadOnly?: b
 }
 
 /** Explicit references must themselves be allowed; names collapse authorized aliases first. */
-export async function findChat(ctx: McpCtx, ref: string) {
+export async function findChat(ctx: McpCtx, ref: string, db: Db = pool) {
   const bar = ref.indexOf('|');
   if (bar > 0) {
-    const { rows } = await pool.query(`WITH ${logicalChatsCte()}
+    const { rows } = await db.query(`WITH ${logicalChatsCte()}
       SELECT l.*, $4::text AS jid FROM logical_chats l WHERE l.account_id::text = $3 AND l.logical_jid IN
         (SELECT logical_jid FROM allowed_chats WHERE account_id::text = $3 AND jid = $4)`,
     [ctx.userId, ctx.waAccountIds, ref.slice(0, bar), ref.slice(bar + 1)]);
     if (!rows[0]) throw waError('not_found', 'Ese chat no existe o no está compartido con esta integración', 404);
     return rows[0];
   }
-  const { rows } = await pool.query(`WITH ${logicalChatsCte()}
+  const { rows } = await db.query(`WITH ${logicalChatsCte()}
     SELECT * FROM logical_chats WHERE EXISTS (SELECT 1 FROM unnest(names) n WHERE n ILIKE '%' || $3 || '%')
     ORDER BY last_message_at DESC NULLS LAST, account_id, jid LIMIT 20`, [ctx.userId, ctx.waAccountIds, ref.trim()]);
   const exact = rows.filter((r) => (r.names ?? []).some((name: string) => name.toLowerCase() === ref.trim().toLowerCase()));
@@ -234,9 +234,9 @@ export async function readChat(ctx: McpCtx, ref: string, q: { limit: number; sin
 }
 
 /** One authorized logical contact per account, even if WhatsApp uses several LIDs. */
-export async function findByPhone(ctx: McpCtx, raw: string) {
+export async function findByPhone(ctx: McpCtx, raw: string, db: Db = pool) {
   const d = normPhone(raw), pn = `${d}@s.whatsapp.net`;
-  const { rows } = await pool.query(`WITH ${logicalChatsCte()}
+  const { rows } = await db.query(`WITH ${logicalChatsCte()}
     SELECT c.*, (SELECT k.push_name FROM wa_contacts k WHERE k.account_id = c.account_id AND k.jid = $3) AS push_name
     FROM logical_chats c WHERE NOT c.is_group AND c.logical_jid = $3
     ORDER BY c.last_message_at DESC NULLS LAST, c.account_id`, [ctx.userId, ctx.waAccountIds, pn]);
@@ -301,16 +301,19 @@ export async function search(ctx: McpCtx, q: { query: string; since?: string; li
 }
 
 /** Destino de un envío: chat permitido o número nuevo en una cuenta permitida (se crea el chat). */
-async function target(ctx: McpCtx, a: { chat?: string; phone?: string; account?: string }) {
-  const accounts = await allowedAccounts(ctx);
+export async function target(ctx: McpCtx, a: { chat?: string; phone?: string; account?: string }, db: Db = pool) {
+  const accounts = await allowedAccounts(ctx, db);
   if (a.chat) {
-    const c = await findChat(ctx, a.chat);
-    return { accountId: c.account_id as string, jid: c.jid as string, label: (c.name ?? phoneLabel(c.pn) ?? c.jid) as string, account: accounts.find((x) => x.id === c.account_id) ?? (await accountRow(ctx.userId, c.account_id)) };
+    const c = await findChat(ctx, a.chat, db);
+    if (a.account && a.account !== c.account_id && a.account.toLowerCase() !== String(c.account_label).toLowerCase()) throw badRequest('account no corresponde al chat indicado');
+    return { accountId: c.account_id as string, jid: c.jid as string, label: (c.name ?? phoneLabel(c.pn) ?? c.jid) as string, account: accounts.find((x) => x.id === c.account_id) ?? (await accountRow(ctx.userId, c.account_id, db)) };
   }
   if (!a.phone) throw badRequest('Indica chat o phone');
-  const found = await findByPhone(ctx, a.phone);
+  const found = await findByPhone(ctx, a.phone, db);
   const usable = accounts.filter((x) => !a.account || x.id === a.account || x.label.toLowerCase() === a.account.toLowerCase());
-  const existing = found.chats.find((c) => usable.some((x) => c.chat.startsWith(`${x.id}|`)));
+  const matches = found.chats.filter((c) => usable.some((x) => c.chat.startsWith(`${x.id}|`)));
+  if (matches.length > 1) throw badRequest('Ese teléfono aparece en varias cuentas; indica el account exacto');
+  const existing = matches[0];
   if (existing) { const [accountId, jid] = existing.chat.split('|') as [string, string]; return { accountId, jid, label: existing.name, account: usable.find((x) => x.id === accountId)! }; }
   if (!usable.length) throw waError('integrations_disabled', 'Ningún número de WhatsApp está compartido con esta integración. Actívalo en chaggu › WhatsApp o en Tú › Conector para IAs.', 403);
   const sendable = usable.filter((x) => x.send_enabled && x.status === 'connected');
@@ -318,12 +321,12 @@ async function target(ctx: McpCtx, a: { chat?: string; phone?: string; account?:
   if (!acc) throw badRequest(`Tienes varios números; indica account: ${usable.map((x) => x.label).join(', ')}`);
   const jid = `${normPhone(a.phone)}@s.whatsapp.net`;
   // Chat nuevo, sin nombre: el puente lo completa cuando WhatsApp responda. No pisa uno existente.
-  await pool.query(`INSERT INTO wa_chats (account_id, jid, is_group, category) VALUES ($1, $2, false, 'clientes') ON CONFLICT (account_id, jid) DO NOTHING`, [acc.id, jid]);
+  await db.query(`INSERT INTO wa_chats (account_id, jid, is_group, category) VALUES ($1, $2, false, 'clientes') ON CONFLICT (account_id, jid) DO NOTHING`, [acc.id, jid]);
   return { accountId: acc.id, jid, label: `+${normPhone(a.phone)}`, account: acc };
 }
 
-async function accountRow(userId: string, id: string) {
-  return (await pool.query('SELECT id, label, kind, status, send_enabled, integrations_enabled, phone FROM wa_accounts WHERE id = $1 AND user_id = $2', [id, userId])).rows[0];
+async function accountRow(userId: string, id: string, db: Db = pool) {
+  return (await db.query('SELECT id, label, kind, status, send_enabled, integrations_enabled, phone FROM wa_accounts WHERE id = $1 AND user_id = $2', [id, userId])).rows[0];
 }
 
 /** 13. Enviar con llave de idempotencia (24 h por token), a un chat o a un número nuevo, con errores con código. */

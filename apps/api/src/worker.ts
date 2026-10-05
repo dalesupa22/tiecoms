@@ -10,6 +10,7 @@ import { migrate } from './migrate.ts';
 import { enqueueOutbox, pool, tx } from './db.ts';
 import { fireDueReminders } from './modules/reminders.ts';
 import { sendDueScheduled } from './modules/scheduled.ts';
+import { sendDueWhatsappSchedules } from './modules/mcp-scheduled.ts';
 import { cleanupExpired as cleanupSso } from './modules/sso.ts';
 import { previewMessage } from './modules/link-preview.ts';
 import { deleteObject,objectKey,deletePersonalObject } from './storage.ts';
@@ -201,6 +202,7 @@ async function loop() {
         const mr = await fireDueMailReplies(); if (mr) console.log(`[worker] respuestas de correo programadas: ${mr}`);
         // Mensajes programados, en el mismo ciclo de 15 s (índice parcial: sin pendientes no cuesta nada).
         const p = await sendDueScheduled(); if (p) console.log(`[worker] programados enviados: ${p}`);
+        const wp = await sendDueWhatsappSchedules(); if (wp) console.log(`[worker] WhatsApp programados en cola: ${wp}`);
         // Llamadas: quien dejó de latir sale; la llamada vacía se cierra (y se borra la reunión en Chime).
         const k = await reapCalls(); if (k) console.log(`[worker] llamadas actualizadas: ${k}`); }
       if (Date.now() - lastOverdue > overdueEvery) { lastOverdue = Date.now(); const o = await fireOverdueIssues(); if (o) console.log(`[worker] tareas vencidas: ${o}`); }

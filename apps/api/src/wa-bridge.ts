@@ -1,3 +1,4 @@
+import { deliverScheduledWaOutbox } from './modules/mcp-scheduled-wa-guard.ts';
 import { queueWaWebhooks } from './modules/mcp-wa.ts';
 import { startWaLeaseHeartbeat,waLeaseQuery } from './modules/wa-lease.ts';
 import { applyWaLocks, requireWaVisible, finishWaPrivacy, shutdownWaPrivacy,quarantineWaSession } from './modules/wa-privacy.ts';
@@ -351,11 +352,11 @@ async function processOutbox() {
   const live = [...sessions.values()].filter((s) => s.sock && s.registered && !s.stopping);
   if (live.length) {
     const { rows } = await pool.query(
-      `UPDATE wa_outbox SET status = 'sending', attempts = attempts + 1
+      `UPDATE wa_outbox SET status = 'sending', attempts = attempts + 1, claimed_at = now()
         WHERE id IN (SELECT o.id FROM wa_outbox o JOIN wa_accounts a ON a.id = o.account_id
                       WHERE o.status = 'queued' AND o.account_id = ANY($1) AND a.lease_owner=$2 AND a.lease_until>now() AND a.send_enabled AND wa_chat_visible(o.account_id,o.jid)
                       ORDER BY o.created_at LIMIT 20 FOR UPDATE OF o SKIP LOCKED)
-        RETURNING id, account_id, jid, body`,
+        RETURNING id, account_id, jid, body, mcp_schedule_id`,
       [live.map((s) => s.id),BRIDGE_ID],
     );
     for (const r of rows) {
@@ -364,17 +365,26 @@ async function processOutbox() {
         if (!s?.sock || s.stopping) throw new Error('La sesión de WhatsApp no está lista');
         await waLeaseQuery(s.id,BRIDGE_ID,'SELECT 1',[ ]);
         await requireWaVisible(pool,r.account_id,r.jid);
-        const sent=await s.sock.sendMessage(r.jid,{text:r.body});
-        if(sent) { const row=msgRow(s,sent); if(row) { await storeMessages(s,[row],false); await queueWaWebhooks(s.id,[row]).catch(()=>{}); } }
-        await pool.query("UPDATE wa_outbox SET status = 'sent', sent_at = now(), body = '', wa_message_id = $2 WHERE id = $1", [r.id, sent?.key?.id ?? null]);
+        if (r.mcp_schedule_id) {
+          await deliverScheduledWaOutbox(r.id, async () => {
+            if (!s.sock || s.stopping) throw new Error('La sesión de WhatsApp no está lista');
+            return s.sock.sendMessage(r.jid,{text:r.body});
+          }, async sent => {
+            if(sent) { const row=msgRow(s,sent); if(row) { await storeMessages(s,[row],false); await queueWaWebhooks(s.id,[row]).catch(()=>{}); } }
+          });
+        } else {
+          const sent=await s.sock.sendMessage(r.jid,{text:r.body});
+          if(sent) { const row=msgRow(s,sent); if(row) { await storeMessages(s,[row],false); await queueWaWebhooks(s.id,[row]).catch(()=>{}); } }
+          await pool.query("UPDATE wa_outbox SET status = 'sent', sent_at = now(), body = '', wa_message_id = $2 WHERE id = $1", [r.id, sent?.key?.id ?? null]);
+        }
         notifyOwner(s);
       } catch (e: any) {
         console.error(`[wa] ${r.account_id} no pude enviar`, e?.message);
-        await pool.query("UPDATE wa_outbox SET status = 'failed', error = $2, body = '' WHERE id = $1", [r.id, String(e?.message ?? e).slice(0, 300)]);
+        await pool.query("UPDATE wa_outbox SET status = 'failed', error = $2, body = '' WHERE id = $1 AND status <> 'sent'", [r.id, String(e?.message ?? e).slice(0, 300)]);
       }
     }
   }
-  await pool.query("UPDATE wa_outbox SET status = 'failed', error = 'Se interrumpió el envío. Revisa en WhatsApp antes de reintentar.', body = '' WHERE status = 'sending' AND created_at < now() - interval '2 minutes'");
+  await pool.query("UPDATE wa_outbox SET status = 'failed', error = 'Se interrumpió el envío. Revisa en WhatsApp antes de reintentar.', body = '' WHERE status = 'sending' AND COALESCE(claimed_at,created_at) < now() - interval '2 minutes'");
   await pool.query("DELETE FROM wa_outbox WHERE status IN ('sent', 'failed') AND created_at < now() - interval '7 days'");
 }
 

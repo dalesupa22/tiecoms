@@ -6,7 +6,7 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { pool } from '../src/db.ts';
-import { storeGroupMembers, storeMessages, upsertChats, type MsgRow, type Session } from '../src/modules/wa-sync.ts';
+import { storeAliases, storeGroupMembers, storeMessages, upsertChats, type MsgRow, type Session } from '../src/modules/wa-sync.ts';
 import { queueWaWebhooks } from '../src/modules/mcp-wa.ts';
 
 const API = process.env.API_URL ?? 'http://localhost:3020';
@@ -61,7 +61,8 @@ beforeAll(async () => {
   personal = await waAccount(danny, 'Personal', 'personal');
   evaBiz = await waAccount(eva, 'Eva biz', 'business');
   await upsertChats(biz.s, [{ jid: BIZ_CLIENT, name: 'Coopcentral', isGroup: false }, { jid: LID_CLIENT, name: null, isGroup: false }, { jid: GROUP, name: 'Sember Xertify', isGroup: true, participants: 3 }]);
-  await pool.query('INSERT INTO wa_jid_alias (account_id, lid, pn) VALUES ($1,$2,$3)', [biz.id, LID_CLIENT, `${LID_PHONE}@s.whatsapp.net`]);
+  // Como en el puente: al llegar el número, el chat que existía por LID se une al del número (103_wa_lid_merge.sql).
+  await storeAliases(biz.s, [{ lid: LID_CLIENT, pn: `${LID_PHONE}@s.whatsapp.net` }]);
   await pool.query('INSERT INTO wa_contacts (account_id, jid, push_name) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING', [biz.id, `${LID_PHONE}@s.whatsapp.net`, 'César Lead']);
   await storeMessages(biz.s, [
     msg(BIZ_CLIENT, 'Hola, sobre el convenio secretaría del trabajo', { sentAt: new Date(Date.now() - 3600_000) }),
@@ -180,7 +181,11 @@ describe('datos completos', () => {
     expect(coop.phone).toBe('+573001110001');
     expect(coop.lastMessageKind).toBe('audio');
     expect(coop.lastMessageFromMe).toBe(false);
-    expect(all.find((c: any) => c.chat.endsWith(LID_CLIENT)).phone).toBe(`+${LID_PHONE}`);
+    expect(all.find((c: any) => c.chat.endsWith(`${LID_PHONE}@s.whatsapp.net`)).phone).toBe(`+${LID_PHONE}`);
+    expect(all.some((c: any) => c.chat.endsWith(LID_CLIENT))).toBe(false);
+    // Una referencia vieja por LID (guardada por una integración) sigue leyendo el mismo chat.
+    const old = (await tool(t, 'read_whatsapp', { chat: `${biz.id}|${LID_CLIENT}` })).structuredContent;
+    expect(old.messages.map((m: any) => m.text)).toContain('Buenas, me interesa');
   });
 
   it('find_whatsapp_chat encuentra un @lid por su teléfono con el nombre con que se presenta', async () => {

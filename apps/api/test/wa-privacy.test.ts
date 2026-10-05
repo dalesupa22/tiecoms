@@ -154,8 +154,11 @@ describe.skipIf(!dbUrl)('Chat Lock SQL and API policy (isolated PostgreSQL)',()=
     expect((await wa.listChats(user,{limit:100})).chats.filter((c:any)=>[pn,lid].includes(c.jid)).map((c:any)=>c.jid)).toEqual([pn]);
     await sync.upsertChats(session,[sync.chatFromWa({id:lid,archived:false})],false);
     await expect(wa.ownChat(user,account,lid)).rejects.toMatchObject({status:404});
+    // With the mapping known, real history for the LID lands in the PN chat; no separate LID chat appears.
     await sync.upsertChats(session,[{jid:lid,name:'real history fixture',isGroup:false}]);
-    expect((await wa.ownChat(user,account,lid)).jid).toBe(lid);
+    await expect(wa.ownChat(user,account,lid)).rejects.toMatchObject({status:404});
+    expect((await wa.ownChat(user,account,pn)).jid).toBe(pn);
+    expect((await wa.listChats(user,{limit:100})).chats.filter((c:any)=>[pn,lid].includes(c.jid)).map((c:any)=>[c.jid,c.name])).toEqual([[pn,'real history fixture']]);
   });
   it.each(['snapshot','delta'])('latest explicit PN/LID action wins after a late mapping (%s)',async mode=>{
     const p=`late-${mode}@s.whatsapp.net`,l=`late-${mode}@lid`;

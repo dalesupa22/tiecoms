@@ -182,8 +182,24 @@ export async function storeAliases(s: Session, pairs: { lid?: string | null; pn?
     );
     changed.push(...result.rows);
   }
+  // Un chat 1:1 que llegó por LID antes de saber el número se une al chat del número (103_wa_lid_merge.sql).
+  if(changed.length) await waLeaseQuery(s.id,s.leaseOwner,
+    `SELECT wa_merge_lid_chat($1,t.l,t.p) FROM unnest($2::text[],$3::text[]) AS t(l,p)
+      WHERE EXISTS (SELECT 1 FROM wa_chats c WHERE c.account_id=$1 AND c.jid=t.l)`,
+    [s.id,changed.map(r=>r.lid),changed.map(r=>r.pn)]);
   await reconcileWaLockAliases(s.id,s.userId,changed.flatMap(({lid,pn})=>[lid,pn]),s.leaseOwner);
   if(changed.length) notifyOwner(s);
+}
+
+/**
+ * Los chats 1:1 se guardan por número: WhatsApp a veces entrega un directo con LID y, sin esto, el mensaje
+ * caía en un chat nuevo sin nombre en vez del chat de siempre. Devuelve LID → número de los que ya se conocen.
+ */
+export async function pnForLids(s: Session, jids: string[]) {
+  const lids = [...new Set(jids.filter((j) => j.endsWith('@lid')))];
+  if (!lids.length) return new Map<string, string>();
+  const r = await waLeaseQuery(s.id,s.leaseOwner,'SELECT lid, pn FROM wa_jid_alias WHERE account_id = $1 AND lid = ANY($2)', [s.id, lids]);
+  return new Map<string, string>(r.rows.map((x) => [x.lid, x.pn]));
 }
 
 /** Pares LID ↔ número que trae un contacto o participante de grupo. */
@@ -222,8 +238,20 @@ export async function rememberSenders(s: Session, messages: WAMessage[]) {
 export interface ChatRow { jid: string; name: string | null; isGroup: boolean; participants?: number | null; description?: string | null; lastAt?: Date | null; unread?: number | null; archived?: boolean | null; locked?: boolean | null }
 
 export async function upsertChats(s: Session, chats: ChatRow[], materialize = true) {
-  const list = chats.filter((c) => !skipJid(c.jid));
-  await applyWaLocks(s.id,s.userId,list.filter(c=>typeof c.locked==='boolean').map(c=>({jid:c.jid,locked:c.locked!})),true,s.leaseOwner);
+  const raw = chats.filter((c) => !skipJid(c.jid));
+  // La privacidad ya trata LID y número como la misma persona: los bloqueos van con la dirección original.
+  await applyWaLocks(s.id,s.userId,raw.filter(c=>typeof c.locked==='boolean').map(c=>({jid:c.jid,locked:c.locked!})),true,s.leaseOwner);
+  const pn = await pnForLids(s, raw.map((c) => c.jid));
+  const byJid = new Map<string, ChatRow>();
+  for (const c of raw) {
+    const jid = pn.get(c.jid) ?? c.jid, prev = byJid.get(jid);
+    byJid.set(jid, !prev ? { ...c, jid } : {
+      ...prev, name: prev.name ?? c.name, participants: prev.participants ?? c.participants, description: prev.description ?? c.description,
+      lastAt: prev.lastAt && c.lastAt ? (prev.lastAt > c.lastAt ? prev.lastAt : c.lastAt) : prev.lastAt ?? c.lastAt,
+      unread: prev.unread == null && c.unread == null ? null : (prev.unread ?? 0) + (c.unread ?? 0), archived: prev.archived ?? c.archived,
+    });
+  }
+  const list = [...byJid.values()];
   for (let i = 0; i < list.length; i += 300) {
     const part = list.slice(i, i + 300);
     const params = [s.id, part.map((c) => c.jid), part.map((c) => c.name), part.map((c) => c.isGroup), part.map((c) => c.participants ?? null),
@@ -305,8 +333,10 @@ export function msgRow(s: Session, m: WAMessage): MsgRow | null {
   };
 }
 
-export async function storeMessages(s: Session, rows: MsgRow[], live: boolean) {
-  if (!rows.length) return [] as MsgRow[];
+export async function storeMessages(s: Session, given: MsgRow[], live: boolean) {
+  if (!given.length) return [] as MsgRow[];
+  const pn = await pnForLids(s, given.map((m) => m.chat));
+  const rows = pn.size ? given.map((m) => (pn.has(m.chat) ? { ...m, chat: pn.get(m.chat)! } : m)) : given;
   const inserted: MsgRow[] = [];
   for (let i = 0; i < rows.length; i += 500) {
     const part = rows.slice(i, i + 500);
@@ -420,8 +450,9 @@ export async function storeReaction(s: Session, m: WAMessage) {
   const r = m.message?.reactionMessage;
   const target = r?.key;
   const rawChat = target?.remoteJid ?? m.key.remoteJid;
-  const chat = rawChat ? jidNormalizedUser(rawChat) || rawChat : null;
-  if (!r || !target?.id || !chat || skipJid(chat)) return;
+  const given = rawChat ? jidNormalizedUser(rawChat) || rawChat : null;
+  if (!r || !target?.id || !given || skipJid(given)) return;
+  const chat = (await pnForLids(s, [given])).get(given) ?? given;
   try { await requireWaVisible(pool,s.id,chat); } catch { return; }
   const reactorRaw = m.key.fromMe ? s.me : (isJidGroup(chat) ? (m.key.participant ?? (m.key as any).participantAlt ?? null) : chat);
   if (!reactorRaw) return;

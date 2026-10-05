@@ -140,7 +140,9 @@ describe('nombres de quienes escriben', () => {
     expect(r.status).toBe(200);
     expect(r.json.messages.map((m: any) => m.author)).toEqual(['Laura Libreta', 'Mateo', '+57 300 5550003', null]);
     const dm = await call(`/whatsapp/chats?accountId=${personal.id}&groups=0&limit=100`, { token: ana.token });
-    expect(dm.json.chats.find((c: any) => c.jid === '111@lid')?.name).toBe('Laura Libreta');
+    // El directo que existía por LID se une al chat del número (103_wa_lid_merge.sql): uno solo, con nombre.
+    expect(dm.json.chats.find((c: any) => c.jid === '111@lid')).toBeUndefined();
+    expect(dm.json.chats.find((c: any) => c.jid === '573005550001@s.whatsapp.net')?.name).toBe('Laura Libreta');
   });
 });
 

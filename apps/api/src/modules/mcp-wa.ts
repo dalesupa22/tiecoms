@@ -120,9 +120,13 @@ export async function listChats(ctx: McpCtx, q: { query?: string; unreadOnly?: b
 export async function findChat(ctx: McpCtx, ref: string, db: Db = pool) {
   const bar = ref.indexOf('|');
   if (bar > 0) {
-    const { rows } = await db.query(`WITH ${logicalChatsCte()}
-      SELECT l.*, $4::text AS jid FROM logical_chats l WHERE l.account_id::text = $3 AND l.logical_jid IN
-        (SELECT logical_jid FROM allowed_chats WHERE account_id::text = $3 AND jid = $4)`,
+    // Una referencia vieja por LID sigue sirviendo después de unir el chat con el del número (103_wa_lid_merge.sql).
+    const { rows } = await db.query(`WITH ${logicalChatsCte()},
+      wanted AS (SELECT $4::text AS jid UNION SELECT al.pn FROM wa_jid_alias al WHERE al.account_id::text = $3 AND al.lid = $4)
+      SELECT l.*, CASE WHEN EXISTS (SELECT 1 FROM allowed_chats WHERE account_id::text = $3 AND jid = $4) THEN $4::text ELSE l.jid END AS jid
+        FROM logical_chats l WHERE l.account_id::text = $3 AND l.logical_jid IN
+        (SELECT logical_jid FROM allowed_chats WHERE account_id::text = $3 AND jid IN (SELECT jid FROM wanted))
+      LIMIT 1`,
     [ctx.userId, ctx.waAccountIds, ref.slice(0, bar), ref.slice(bar + 1)]);
     if (!rows[0]) throw waError('not_found', 'Ese chat no existe o no está compartido con esta integración', 404);
     return rows[0];

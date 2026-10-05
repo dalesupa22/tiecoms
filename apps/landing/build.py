@@ -15,6 +15,8 @@ dist = root / 'dist'
 shutil.rmtree(dist, ignore_errors=True)
 (dist / 'en').mkdir(parents=True)
 shutil.copytree(src / 'assets', dist / 'assets')
+# Los archivos de verificación de dominio deben permanecer en la raíz pública.
+shutil.copytree(src / 'public', dist, dirs_exist_ok=True)
 for name in ['landing.css', 'landing.js', 'relay.css', 'relay.js', 'hero.css', 'hero.js', 'legal.css']:
     shutil.copy2(src / name, dist / name)
 

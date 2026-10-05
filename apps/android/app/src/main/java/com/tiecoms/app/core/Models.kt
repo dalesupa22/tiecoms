@@ -696,7 +696,7 @@ data class IssueEventDTO(
 )
 
 @Serializable data class IssueDetail(val issue: IssueDTO = IssueDTO(), val events: List<IssueEventDTO> = emptyList(), val children: List<IssueDTO> = emptyList())
-@Serializable data class IssuesPage(val issues: List<IssueDTO> = emptyList())
+@Serializable data class IssuesPage(val issues: List<IssueDTO> = emptyList(), val nextOffset: Int? = null)
 @Serializable data class RemindersPage(val reminders: List<ReminderDTO> = emptyList())
 @Serializable data class CalendarPage(val events: List<CalendarEventDTO> = emptyList())
 @Serializable data class PinsResult(val messageIds: List<String> = emptyList())

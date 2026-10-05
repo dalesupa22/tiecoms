@@ -1,5 +1,9 @@
 package com.tiecoms.app.ui
 
+import androidx.compose.animation.*
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
@@ -312,7 +316,7 @@ private fun Modifier.androidx_selectable(selected: Boolean, label: String, onCli
         .semantics { contentDescription = label }
 
 @Composable
-private fun MainNav() {
+internal fun MainNav() {
     val nav = rememberNavController()
     val container = LocalContainer.current
     val client = LocalClient.current
@@ -467,7 +471,13 @@ private fun MainNav() {
             )
         }
         CompositionLocalProvider(LocalMailNav provides mailNav, LocalOpenGeneralGg provides { gg.openPanel(false) }) {
-        NavHost(nav, startDestination = "home?ws={ws}", modifier = Modifier.fillMaxSize()) {
+        NavHost(nav, startDestination = "home?ws={ws}", modifier = Modifier.fillMaxSize(),
+            // Compose's duration scale follows the system motion setting; Navigation owns predictive back.
+            enterTransition = { slideInHorizontally(tween(220, easing = FastOutSlowInEasing)) { it / 6 } + fadeIn(tween(160)) },
+            exitTransition = { slideOutHorizontally(tween(220, easing = FastOutSlowInEasing)) { -it / 12 } + fadeOut(tween(120)) },
+            popEnterTransition = { slideInHorizontally(tween(180, easing = FastOutSlowInEasing)) { -it / 12 } + fadeIn(tween(140)) },
+            popExitTransition = { slideOutHorizontally(tween(180, easing = FastOutSlowInEasing)) { it / 6 } + fadeOut(tween(140)) },
+        ) {
             composable("home?ws={ws}", arguments = listOf(navArgument("ws") { type = NavType.StringType; nullable = true; defaultValue = null })) {
                 GroupsScreen(
                     workspaceFilter = it.arguments?.getString("ws"),

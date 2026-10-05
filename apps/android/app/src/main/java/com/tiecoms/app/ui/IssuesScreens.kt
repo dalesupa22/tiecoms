@@ -531,18 +531,27 @@ fun IssuesScreen(onOpen: (String) -> Unit, conversationFilter: String? = null, o
             }
             return@Scaffold
         }
-        // 1.7.13: un solo filtro (Mías · Abiertas · Hechas) y, por defecto, agrupadas por fecha.
-        var filter by rememberSaveable(data.me.id) { mutableStateOf("mine") }
+        // People and status are independent; date/group/person grouping remains a separate preference.
+        var selectedPeople by rememberSaveable(data.me.id) { mutableStateOf(listOf(data.me.id)) }
+        var selectedStatuses by rememberSaveable(data.me.id) { mutableStateOf(listOf("pending")) }
+        val filters = com.tiecoms.app.core.TaskFilters(selectedPeople.toSet(), selectedStatuses.toSet())
         val taskPrefs = remember(data.me.id) { ctx.getSharedPreferences("task_preferences_" + data.me.id, android.content.Context.MODE_PRIVATE) }
         var groupBy by rememberSaveable(data.me.id) { mutableStateOf(taskPrefs.getString("grouping_1713", "date") ?: "date") }
         var adding by rememberSaveable { mutableStateOf(false) }
         var error by remember { mutableStateOf<String?>(null) }
-        LaunchedEffect(Unit) { runCatching { client.loadIssues() }.onFailure { error = errorText(ctx, it) } }
+        LaunchedEffect(client, data.me.id) {
+            try { client.loadIssues(); error = null }
+            catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e; error = errorText(ctx, e) }
+        }
         val mine = data.me.id
         // Los restringidos pueden ser de un chat que no leo (me asignaron una tarea): el servidor ya filtró.
         val inView = st.issues.values.filter { it.personal || it.conversationId in visible || it.restricted }
-        val doneView = filter == "closed"
-        val list = inView.filter { IssueTasks.matches(filter, it, mine) }
+        val doneView = filters.closedOnly
+        val closedTitle = listOfNotNull(
+            stringResource(R.string.task_filter_completed).takeIf { "done" in filters.statuses },
+            stringResource(R.string.task_filter_cancelled).takeIf { "cancelled" in filters.statuses },
+        ).joinToString(" + ")
+        val list = inView.filter(filters::matches)
             .sortedWith(if (doneView) IssueTasks.byClosedDesc else IssueTasks.byUrgency())
         val byPerson = groupBy == "person"
         val noOwner = stringResource(R.string.issue_no_owner)
@@ -556,7 +565,8 @@ fun IssuesScreen(onOpen: (String) -> Unit, conversationFilter: String? = null, o
             else visible[k]?.let { c -> listOfNotNull(data.workspaces.firstOrNull { it.id == c.workspaceId }?.name, titleOf(ctx, c, data)).distinct().joinToString(" · ") } ?: shared
         }
         // Por fecha y por grupo, las tareas van debajo de su asunto; por responsable, sueltas con «↳ asunto».
-        val shown = if (byPerson) list else IssueTasks.tops(list, st.issues)
+        val matchingIds = list.map { it.id }.toSet()
+        val shown = if (byPerson) list else filters.roots(list, inView.associateBy { it.id })
         val dateSections: List<Pair<IssueTasks.DueBucket?, List<IssueDTO>>> = when {
             groupBy != "date" -> emptyList()
             doneView -> if (shown.isEmpty()) emptyList() else listOf(null to shown)
@@ -564,7 +574,6 @@ fun IssuesScreen(onOpen: (String) -> Unit, conversationFilter: String? = null, o
         }
         val sections = if (groupBy == "date") emptyList() else IssueTasks.sections(shown.map { if (byPerson) it else it.copy(conversationId = IssueTasks.groupConversation(it, st.issues)) }, byPerson, mine, sectionTitle)
             .map { (k, items) -> k to items.map { x -> st.issues[x.id] ?: x } }
-        fun count(f: String) = inView.count { IssueTasks.matches(f, it, mine) }
         Box(Modifier.padding(pad).fillMaxSize()) {
         LazyColumn(Modifier.fillMaxSize().imePadding().padding(horizontal = 16.dp).testTag("issues"), contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = AssistantListInset + 16.dp)) {
             item(key = "head") {
@@ -581,18 +590,17 @@ fun IssuesScreen(onOpen: (String) -> Unit, conversationFilter: String? = null, o
                             if (g != "date") scope.launch { runCatching { client.saveIssueGrouping(if (g == "person") "assignee" else "group") }.onFailure { error = errorText(ctx, it) } }
                         }
                     }
-                    TaskFilterBar(listOf(
-                        Triple("mine", stringResource(R.string.tasks_f_mine), count("mine")),
-                        Triple("open", stringResource(R.string.tasks_f_open), count("open")),
-                        Triple("closed", stringResource(R.string.tasks_f_done), count("closed")),
-                    ), filter, { filter = it })
+                    TaskDimensionFilters(data, inView, filters) { next ->
+                        selectedPeople = next.assignees.toList(); selectedStatuses = next.statuses.toList()
+                    }
                     ErrorText(error)
-                    if (list.isEmpty()) TasksEmpty(filter)
+                    if (list.isEmpty()) Text(stringResource(R.string.task_filter_empty), Modifier.fillMaxWidth().padding(vertical = 32.dp).testTag("tasksEmpty"),
+                        style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
             dateSections.forEach { (b, items) ->
-                item(key = "b${b?.name ?: "done"}") { TaskBucketHeader(b, items.size) }
-                items(items, key = { "${b?.name}/${it.id}" }) { x -> Box(Modifier.animateItem()) { TaskWithKids(st.issues[x.id] ?: x, data, onOpen = onOpen) } }
+                item(key = "b${b?.name ?: "done"}") { TaskBucketHeader(b, items.size, titleOverride = if (b == null) closedTitle else null) }
+                items(items, key = { "${b?.name}/${it.id}" }) { x -> Box(Modifier.animateItem()) { TaskWithKids(st.issues[x.id] ?: x, data, matchingIds = matchingIds, onOpen = onOpen) } }
             }
             sections.forEach { (k, items) ->
                 item(key = "s$k") {
@@ -605,7 +613,7 @@ fun IssuesScreen(onOpen: (String) -> Unit, conversationFilter: String? = null, o
                     }
                 }
                 items(items, key = { "$k/${it.id}" }) { Box(Modifier.animateItem()) {
-                    if (byPerson) TaskRow(it, data, showOwner = false, onOpen = onOpen) else TaskWithKids(it, data, showGroup = false, onOpen = onOpen)
+                    if (byPerson) TaskRow(it, data, showOwner = false, onOpen = onOpen) else TaskWithKids(it, data, showGroup = false, matchingIds = matchingIds, onOpen = onOpen)
                 } }
             }
         }

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="motion_restoring_draft">Restoring draft…</string>
+    <string name="task_filter_me">Me</string>
+    <string name="task_filter_everyone">Everyone</string>
+    <string name="task_filter_people_count">%1$d people</string>
+    <string name="task_filter_pending">Pending</string>
+    <string name="task_filter_completed">Completed</string>
+    <string name="task_filter_cancelled">Cancelled</string>
+    <string name="task_filter_all_statuses">All statuses</string>
+    <string name="task_filter_assignees">Assigned to</string>
+    <string name="task_filter_status">Status</string>
+    <string name="task_filter_search">Search people</string>
+    <string name="task_filter_apply">Show tasks</string>
+    <string name="task_filter_result_count">%1$d matching tasks</string>
+    <string name="task_filter_empty">No tasks match these people and statuses.</string>
+    <string name="task_filter_parent_context">Context for matching subtasks</string>
+    <string name="motion_whatsapp_import">Import from WhatsApp</string>
+    <string name="motion_whatsapp_share">Share to WhatsApp</string>
+    <string name="motion_share_unavailable">No app is available to share this text</string>
+</resources>

@@ -104,11 +104,41 @@ object GgDrafts {
     fun take(conversationId: String): String? = pending.value[conversationId]?.also { pending.value = pending.value - conversationId }
 }
 
+/** Only a small UI summary is retained. Private WhatsApp sources never enter this cache. */
+private object GgKnownSummary {
+    private var owner: String? = null
+    private val values = linkedMapOf<String, Pair<Int, Boolean>>()
+    fun get(account: String, source: String): Pair<Int, Boolean>? {
+        if (owner != account) { values.clear(); owner = account }
+        return if (GgSide.isWhatsApp(source)) null else values[source]
+    }
+    fun put(account: String, source: String, pending: Int, history: Boolean) {
+        get(account, source)
+        if (GgSide.isWhatsApp(source)) return
+        values[source] = pending to history
+        if (values.size > 128) values.remove(values.keys.first())
+    }
+}
+
 /** Estado de «gg de este chat» para una fuente (`c:<id>` o `wa:<cuenta>:<jid>`). */
 @Stable
 class GgSideModel(private val client: TieComsClient, val source: String, private val scope: CoroutineScope) {
+    private var purged = false
+    private val generation = client.sessionGeneration
+    private val owner = client.myId
+    private val summaryOwner = "${client.baseUrl}|$owner|$generation"
+    private val known = GgKnownSummary.get(summaryOwner, source)
+    private fun requireOwner() {
+        if (purged || client.sessionGeneration != generation || client.myId != owner) throw kotlinx.coroutines.CancellationException("Session changed")
+    }
     val messages = mutableStateListOf<GgSideMessageDTO>()
-    var pending by mutableStateOf(0)
+    var pending by mutableStateOf(known?.first ?: 0)
+    var hasConversation by mutableStateOf(known?.second ?: false)
+    private fun saveSummary() {
+        requireOwner()
+        hasConversation = messages.any { it.role == "user" }
+        GgKnownSummary.put(summaryOwner, source, pending, hasConversation)
+    }
     /** null = no se sabe; false = el servidor no lo tiene (404) o no hay acceso: se oculta el botón. */
     var available by mutableStateOf<Boolean?>(null)
     var open by mutableStateOf(false)
@@ -125,28 +155,48 @@ class GgSideModel(private val client: TieComsClient, val source: String, private
     private var opened = false
 
     fun purgePrivacy() {
+        purged = true
         messages.clear(); quoted.clear(); quick = null; pending = 0; open = false; opened = false
-        closedWithHistory = false; consentFor = null; available = false
+        closedWithHistory = false; hasConversation = false; consentFor = null; available = false
+    }
+
+    suspend fun loadSummary() {
+        try {
+            requireOwner()
+            val counts = client.ggPending(listOf(source))
+            requireOwner()
+            pending = counts[source] ?: 0
+            GgKnownSummary.put(summaryOwner, source, pending, hasConversation)
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            // A summary failure must not prevent a direct open or load the complete history.
+            if (client.ggSideMissing) available = false
+        }
     }
 
     suspend fun load() {
         if (client.ggSideMissing) { available = false; return }
         try {
+            requireOwner()
             val t = client.ggSide(source)
+            requireOwner()
             messages.clear(); messages.addAll(t.messages); pending = t.pending; available = true
+            saveSummary()
 
         } catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) throw e
             // 404/403 de acceso: sin botón para esta fuente. Red caída: se deja visible (null) y se reintenta al abrir.
-            if (e is ApiException && (e.status == 404 || (e.status == 403 && e.code != "ai_consent_required"))) available = false
+            if (e is ApiException && (e.status == 404 || (e.status == 403 && e.code != "ai_consent_required"))) { available = false; open = false }
+            else throw e
         }
     }
 
     private fun run(block: suspend () -> Unit) {
         scope.launch {
             busy = true; error = false
-            try { block() } catch (e: Exception) {
+            try { requireOwner(); block(); requireOwner(); saveSummary() } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
+                opened = false
                 if (e is ApiException && e.status == 403 && e.code == "ai_consent_required") consentFor = block else error = true
             } finally { busy = false }
         }
@@ -157,7 +207,7 @@ class GgSideModel(private val client: TieComsClient, val source: String, private
         consentFor = null
         scope.launch {
             busy = true
-            try { client.setAiConsent(true); again() } catch (e: Exception) {
+            try { requireOwner(); client.setAiConsent(true); requireOwner(); again(); saveSummary() } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 error = true
             } finally { busy = false }
@@ -172,7 +222,8 @@ class GgSideModel(private val client: TieComsClient, val source: String, private
         if (messages.isNotEmpty() && available == true) return
         run {
             if (messages.isEmpty() && available != true) load()
-            if (messages.isEmpty()) { val m = client.ggSideOpen(source); messages.add(m); pending = m.extra?.pending?.size ?: pending }
+            if (available == false) return@run
+            if (messages.isEmpty()) { val m = client.ggSideOpen(source); requireOwner(); messages.add(m); pending = m.extra?.pending?.size ?: pending }
         }
     }
 
@@ -189,6 +240,7 @@ class GgSideModel(private val client: TieComsClient, val source: String, private
         quoted.clear()
         run {
             val r = client.ggSideAsk(source, t, quotedIds)
+            requireOwner()
             r.question?.takeIf { it.id.isNotEmpty() }?.let { saved -> val i = messages.indexOfFirst { it.id == local.id }; if (i >= 0) messages[i] = saved }
             messages.add(r.message)
         }
@@ -199,7 +251,8 @@ class GgSideModel(private val client: TieComsClient, val source: String, private
         run {
             val drafts = client.ggReplyForMe(source, tone, quotedIds)
             // El servidor lo guarda como mensaje de gg: se vuelve a pedir el hilo; si falla, se muestra igual.
-            val t = runCatching { client.ggSide(source) }.getOrNull()
+            val t = try { client.ggSide(source) } catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e; null }
+            requireOwner()
             if (t != null && t.messages.lastOrNull()?.extra?.drafts?.isNotEmpty() == true) { messages.clear(); messages.addAll(t.messages) }
             else if (runCatching { client.requireWaSource(source) }.isSuccess) messages.add(GgSideMessageDTO(id = "local-" + System.nanoTime(), role = "gg", body = "", extra = com.tiecoms.app.core.GgExtraDTO(drafts = drafts)))
         }
@@ -210,15 +263,15 @@ class GgSideModel(private val client: TieComsClient, val source: String, private
         if (quickBusy) return
         scope.launch {
             quickBusy = true
-            try { quick = client.ggReplyForMe(source, null, emptyList()).take(3) } catch (e: Exception) {
+            try { requireOwner(); val result = client.ggReplyForMe(source, null, emptyList()).take(3); requireOwner(); quick = result } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
-                if (e is ApiException && e.status == 403 && e.code == "ai_consent_required") consentFor = { quick = client.ggReplyForMe(source, null, emptyList()).take(3) }
+                if (e is ApiException && e.status == 403 && e.code == "ai_consent_required") consentFor = { val result = client.ggReplyForMe(source, null, emptyList()).take(3); requireOwner(); quick = result }
                 else error = true
             } finally { quickBusy = false }
         }
     }
 
-    fun newSession() { run { client.ggSideNew(source); messages.clear(); quoted.clear(); messages.add(client.ggSideOpen(source)) } }
+    fun newSession() { run { client.ggSideNew(source); requireOwner(); val greeting = client.ggSideOpen(source); requireOwner(); messages.clear(); quoted.clear(); messages.add(greeting) } }
 
     suspend fun suggest(ids: List<String>): List<GgSuggestion> = GgSide.dedupe(client.ggSuggest(source, ids))
 }
@@ -229,10 +282,11 @@ fun rememberGgSide(source: String, enabled: Boolean): GgSideModel? {
     val scope = rememberCoroutineScope()
     if (!enabled) return null
     val privacy = client.state.collectAsStateWithLifecycle().value.waPrivacy
-    val model = remember(source, client) { GgSideModel(client, source, scope) }
-    val epoch = remember(source, client) { privacy.token(source) }
+    val model = remember(source, client, client.sessionGeneration) { GgSideModel(client, source, scope) }
+    val epoch = remember(source, client, client.sessionGeneration) { privacy.token(source) }
     val permitted = privacy.allows(source) && privacy.token(source) == epoch
-    LaunchedEffect(model, permitted) { if (permitted) model.load() else model.purgePrivacy() }
+    // Opening a chat (including one with a hidden pill) never downloads the assistant history.
+    LaunchedEffect(model, permitted) { if (!permitted) model.purgePrivacy() else model.loadSummary() }
     androidx.compose.runtime.DisposableEffect(model) { onDispose { if (com.tiecoms.app.core.WaInbox.isWa(source)) model.purgePrivacy() } }
     if (!permitted) return null
     return model
@@ -461,7 +515,7 @@ fun ggPillHidden(source: String): Boolean {
  */
 @Composable
 fun GgAskPill(model: GgSideModel?, modifier: Modifier = Modifier, trailing: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit = {}) {
-    if (model == null || model.available == false || model.open) return
+    if (model == null || model.available == false) return
     val ctx = LocalContext.current
     val hidden = ggPillHidden(model.source)
     if (hidden) {
@@ -469,18 +523,22 @@ fun GgAskPill(model: GgSideModel?, modifier: Modifier = Modifier, trailing: @Com
         Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, content = trailing)
         return
     }
-    val label = stringResource(if (model.messages.any { it.role == "user" }) R.string.ggp_continue else R.string.ggp_ask)
+    val label = stringResource(if (model.hasConversation || model.messages.any { it.role == "user" }) R.string.ggp_continue else R.string.ggp_ask)
     val pending = model.pending
     val pendingCd = if (pending > 0) stringResource(R.string.ggp_pending_cd, pending) else null
     Row(modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp, top = 2.dp, bottom = 2.dp).testTag("ggPill"), verticalAlignment = Alignment.CenterVertically) {
         Surface(
-            onClick = { model.show() }, shape = RoundedCornerShape(50),
+            onClick = { model.show() }, shape = RoundedCornerShape(50), enabled = !model.open,
             color = MaterialTheme.colorScheme.surfaceContainerHigh, contentColor = MaterialTheme.colorScheme.onSurface,
             border = androidx.compose.foundation.BorderStroke(1.dp, GgSpark.copy(alpha = 0.35f)),
-            modifier = Modifier.heightIn(min = 32.dp).semantics { contentDescription = listOfNotNull(label.removePrefix("✨ "), pendingCd).joinToString(", ") }.testTag("ggPillOpen"),
+            modifier = Modifier.heightIn(min = 40.dp).semantics { contentDescription = listOfNotNull(label.removePrefix("✨ "), pendingCd).joinToString(", ") }.testTag("ggPillOpen"),
         ) {
             Row(Modifier.padding(start = 12.dp, end = if (pending > 0) 6.dp else 12.dp, top = 5.dp, bottom = 5.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(label, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                Box(Modifier.size(22.dp).background(GgSpark.copy(alpha = 0.12f), CircleShape), contentAlignment = Alignment.Center) {
+                    Text("gg", color = GgSpark, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+                Spacer(Modifier.width(7.dp))
+                Text(label.removePrefix("✨ "), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, maxLines = 1)
                 if (pending > 0) {
                     Spacer(Modifier.width(6.dp))
                     Box(Modifier.widthIn(min = 20.dp).background(GgSpark, CircleShape).padding(horizontal = 6.dp, vertical = 1.dp).testTag("ggPillCount"), contentAlignment = Alignment.Center) {

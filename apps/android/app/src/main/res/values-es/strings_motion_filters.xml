@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="motion_restoring_draft">Recuperando borrador…</string>
+    <string name="task_filter_me">Yo</string>
+    <string name="task_filter_everyone">Todos</string>
+    <string name="task_filter_people_count">%1$d personas</string>
+    <string name="task_filter_pending">Pendientes</string>
+    <string name="task_filter_completed">Completadas</string>
+    <string name="task_filter_cancelled">Canceladas</string>
+    <string name="task_filter_all_statuses">Todos los estados</string>
+    <string name="task_filter_assignees">Responsables</string>
+    <string name="task_filter_status">Estado</string>
+    <string name="task_filter_search">Buscar personas</string>
+    <string name="task_filter_apply">Ver tareas</string>
+    <string name="task_filter_result_count">%1$d tareas coinciden</string>
+    <string name="task_filter_empty">No hay tareas para estos responsables y estados.</string>
+    <string name="task_filter_parent_context">Contexto de las subtareas que coinciden</string>
+    <string name="motion_whatsapp_import">Traer de WhatsApp</string>
+    <string name="motion_whatsapp_share">Compartir en WhatsApp</string>
+    <string name="motion_share_unavailable">No hay una app disponible para compartir este texto</string>
+</resources>

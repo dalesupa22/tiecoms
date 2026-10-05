@@ -336,6 +336,7 @@ fun AttachPicker(open: Boolean, onDismiss: () -> Unit, onPicked: (List<android.n
                  onMeetNow: (() -> Unit)? = null, onMeetSchedule: (() -> Unit)? = null,
                  /** Correo en el chat (docs/CORREO.md): «Correo» y «Mensaje de WhatsApp». */
                  onMail: (() -> Unit)? = null, onWhatsApp: (() -> Unit)? = null,
+                 onWhatsAppShare: (() -> Unit)? = null,
                  /** 1.7.13: «✨ Responder por mí» de gg (antes una ✨ suelta en la barra de escribir). */
                  onGgReply: (() -> Unit)? = null) {
     val ctx = LocalContext.current
@@ -355,7 +356,7 @@ fun AttachPicker(open: Boolean, onDismiss: () -> Unit, onPicked: (List<android.n
     val cameraGate = rememberCameraGate()
     val docs = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenMultipleDocuments()) { onPicked(it.take(Attachments.MAX_PER_MESSAGE)) }
     // El «＋» del compositor (docs/GRUPOS.md): fotos, cámara y archivos; luego Evento y Asunto, creados a mano.
-    if (open) ActionSheet(stringResource(R.string.bar_plus), listOfNotNull<SheetItem>(
+    if (open) ComposerActionSheet(stringResource(R.string.bar_plus), listOfNotNull<SheetItem>(
         onGgReply?.let { SheetItem(ctx.getString(R.string.ggs_reply_for_me), "✨", tag = "plusGgReply", onClick = it) },
     ) + (if (onGgReply != null) listOf(null) else emptyList()) + listOf<SheetItem?>(
         SheetItem(ctx.getString(R.string.att_photos_pick), "🖼", tag = "attPhotos") {
@@ -373,7 +374,8 @@ fun AttachPicker(open: Boolean, onDismiss: () -> Unit, onPicked: (List<android.n
         onMeetSchedule?.let { SheetItem(ctx.getString(R.string.meet_schedule), "", tag = "plusMeetSchedule", onClick = it) },
     ) + (if (onMail != null || onWhatsApp != null) listOf(null) else emptyList()) + listOfNotNull(
         onMail?.let { SheetItem(ctx.getString(R.string.web_mail_fromChat), "✉", tag = "plusMail", onClick = it) },
-        onWhatsApp?.let { SheetItem(ctx.getString(R.string.web_wa_fromChat), "✆", tag = "plusWhatsApp", onClick = it) },
+        onWhatsApp?.let { SheetItem(ctx.getString(R.string.motion_whatsapp_import), "✆", tag = "plusWhatsApp", onClick = it) },
+        onWhatsAppShare?.let { SheetItem(ctx.getString(R.string.motion_whatsapp_share), "✆", tag = "plusWhatsAppShare", onClick = it) },
     ) + (if (onEvent != null || onIssue != null || onTask != null) listOf(null) else emptyList()) + listOfNotNull(
         onTask?.let { SheetItem(ctx.getString(R.string.task_add_here), "☑", tag = "plusTask", onClick = it) },
         onEvent?.let { SheetItem(ctx.getString(R.string.bar_new_event), "📅", tag = "plusEvent", onClick = it) },

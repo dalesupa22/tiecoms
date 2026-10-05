@@ -179,6 +179,7 @@ class TieComsClient(
     private var accessExp = 0L
     private var authSessionId: String? = null
     @Volatile var sessionGeneration: Long = 0; private set
+    @Volatile private var issuesAccessRevision: Long = 0
     /** Unlike request generation, first cold refresh preserves decisions already made by FCM. */
     @Volatile var noticeGeneration: Long = 0; private set
     /** Shared runtime policy context for socket and FCM, with the same clock and safety preferences. */
@@ -601,6 +602,7 @@ class TieComsClient(
         val sorted = data.copy(conversations = data.conversations.sortedByDescending { it.lastMessageAt ?: "" })
         // Conversaciones que ya no están en mi alcance: se purgan de la caché local.
         val allowed = sorted.conversations.map { it.id }.toSet()
+        if (s.data?.conversations.orEmpty().any { it.id !in allowed }) issuesAccessRevision++
         // «No molestar»: si el servidor manda me.dndUntil (aunque sea null), manda él; si no lo conoce, queda el del dispositivo.
         val serverKnowsDnd = ((raw as? JsonObject)?.get("me") as? JsonObject)?.containsKey("dndUntil") == true
         val dnd = if (serverKnowsDnd) data.me.dndUntil else storage.get(DND_KEY)
@@ -762,7 +764,7 @@ class TieComsClient(
             is AccountEvent.IssueUpdated -> { putIssues(listOf(e.issue)); recountIssues(e.issue.conversationId) }
             // Asunto personal (solo mío): no cuenta en ninguna conversación.
             is AccountEvent.IssuePersonal -> putIssues(listOf(e.issue))
-            is AccountEvent.IssueHidden -> { setState { copy(issues = issues - e.issueId) }; if (e.conversationId.isNotEmpty()) recountIssues(e.conversationId) }
+            is AccountEvent.IssueHidden -> { issuesAccessRevision++; setState { copy(issues = issues - e.issueId) }; if (e.conversationId.isNotEmpty()) recountIssues(e.conversationId) }
             is AccountEvent.ScheduledUpdated -> setState { copy(scheduled = Scheduling.apply(scheduled, e.scheduled)) }
             is AccountEvent.CallUpdated -> putCall(e.call)
             is AccountEvent.CallCaption -> _signals.tryEmit(ClientSignal.CallCaption(e.event))
@@ -1128,8 +1130,24 @@ class TieComsClient(
         req("PATCH", "/me/personal-preferences", buildJsonObject { put("issues", buildJsonObject { put("grouping", JsonPrimitive(grouping)) }) }, PersonalPreferencesDTO.serializer()).issues
     }
     suspend fun loadIssues(workspaceId: String? = null, conversationId: String? = null, mine: Boolean = false, open: Boolean = false): List<IssueDTO> = withContext(dispatcher) {
-        val r = req("GET", "/issues" + q("workspaceId" to workspaceId, "conversationId" to conversationId, "mine" to if (mine) "1" else null, "open" to if (open) "1" else null), null, IssuesPage.serializer())
-        putIssues(r.issues); r.issues
+        val generation = sessionGeneration
+        val owner = myId
+        val accessRevision = issuesAccessRevision
+        fun requireOwner() {
+            if (generation != sessionGeneration || owner != myId || accessRevision != issuesAccessRevision) throw kotlinx.coroutines.CancellationException("Session changed")
+        }
+        val paged = conversationId == null && workspaceId == null
+        val loaded = IssuesPagination.collect(paged) { offset ->
+            requireOwner()
+            req("GET", "/issues" + q("workspaceId" to workspaceId, "conversationId" to conversationId,
+                "mine" to if (mine) "1" else null, "open" to if (open) "1" else null,
+                "limit" to if (paged) "200" else null, "offset" to if (paged) offset.toString() else null), null, IssuesPage.serializer()).also { requireOwner() }
+        }
+        requireOwner()
+        // Commit only a complete load, and do not roll back a more recent socket update.
+        val current = s.issues
+        putIssues(loaded.map { incoming -> current[incoming.id]?.takeIf { it.updatedAt >= incoming.updatedAt } ?: incoming })
+        loaded
     }
     suspend fun createIssue(conversationId: String, title: String, ownerId: String?, dueDate: String?, originMessageId: String?, assigneeIds: List<String> = emptyList()): IssueDTO = withContext(dispatcher) {
         val body = buildJsonObject {

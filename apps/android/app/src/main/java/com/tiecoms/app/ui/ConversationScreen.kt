@@ -1299,7 +1299,25 @@ private fun Composer(
     val container = LocalContainer.current
     val scope = rememberCoroutineScope()
     val draftOwner = client.baseUrl + ":" + client.myId.orEmpty()
-    val restored = remember(id, draftOwner) { com.tiecoms.app.platform.ComposerDrafts.load(ctx, draftOwner, id) }
+    // Hydrate before enabling edits/saves: an empty first frame must never overwrite a saved draft.
+    val draftKey = draftOwner + "|" + id
+    val loadedDraft by androidx.compose.runtime.produceState<Pair<String, com.tiecoms.app.platform.ComposerDrafts.Draft>?>(null, id, draftOwner) {
+        val snapshot = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            com.tiecoms.app.platform.ComposerDrafts.load(ctx, draftOwner, id)
+        }
+        value = draftKey to snapshot
+    }
+    val restored = loadedDraft?.takeIf { it.first == draftKey }?.second
+    if (restored == null) {
+        Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
+            Row(Modifier.fillMaxWidth().padding(8.dp).heightIn(min = 64.dp).testTag("composerRestoring"), verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Filled.Add, null, Modifier.padding(12.dp), tint = MaterialTheme.colorScheme.outline)
+                OutlinedTextField(value = "", onValueChange = {}, enabled = false,
+                    placeholder = { Text(stringResource(R.string.motion_restoring_draft)) }, shape = RoundedCornerShape(24.dp), modifier = Modifier.weight(1f))
+            }
+        }
+        return
+    }
     var text by remember(id, draftOwner) { mutableStateOf(restored.body) }
     // Menciones con @ (SPEC-v4 §H): tokens sobre el texto (UTF-16) y el cursor para el buscador.
     var ments by remember(id, draftOwner) { mutableStateOf(restored.mentions) }
@@ -1319,7 +1337,7 @@ private fun Composer(
     LaunchedEffect(id, draftOwner, files, gif, text, memeSources, viewOnce, ments) {
         val draftRevision = com.tiecoms.app.platform.ComposerDrafts.nextRevision()
         val snapshot = com.tiecoms.app.platform.ComposerDrafts.Draft(text, files, gif, memeSources, viewOnce, ments)
-        if (draftOwner.isNotEmpty()) try { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        if (draftOwner.isNotEmpty()) try { kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable + kotlinx.coroutines.Dispatchers.IO) {
             com.tiecoms.app.platform.ComposerDrafts.save(ctx, draftOwner, id, snapshot, draftRevision)
         } } catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) throw e
@@ -1447,6 +1465,11 @@ private fun Composer(
         onTask = sideIssue?.let { sid -> { picker = false; taskDialogs.openTasks(sid, id) } },
         onMeetNow = onMeeting?.let { f -> { picker = false; f(true) } }, onMeetSchedule = onMeeting?.let { f -> { picker = false; f(false) } },
         onMail = onMail?.let { f -> { picker = false; f() } }, onWhatsApp = onWhatsApp?.let { f -> { picker = false; f() } },
+        onWhatsAppShare = if (editing == null && text.isNotBlank() && !viewOnce && files.isEmpty() && gif == null) ({
+            val uri = android.net.Uri.parse("https://wa.me/?text=" + android.net.Uri.encode(text.trim()))
+            runCatching { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, uri)) }
+                .onFailure { container.toast(ctx.getString(R.string.motion_share_unavailable)) }
+        }) else null,
         // 1.7.13: la ✨ ya no va suelta en la barra (la entrada a gg abajo es la píldora); «Responder por mí» vive en el «＋».
         onGgReply = onGgSpark?.let { f -> { picker = false; f() } })
     // Un hilo o sidechat abierto al lado recibe el cursor.

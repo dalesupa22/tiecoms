@@ -127,8 +127,8 @@ fun TaskGroupingMenu(grouping: String, onPick: (String) -> Unit) {
 
 /** Encabezado de una franja: «Vencidas · 3» (en rojo), «Hoy · 2»… */
 @Composable
-fun TaskBucketHeader(b: IssueTasks.DueBucket?, count: Int) {
-    val text = stringResource(when (b) {
+fun TaskBucketHeader(b: IssueTasks.DueBucket?, count: Int, titleOverride: String? = null) {
+    val text = titleOverride ?: stringResource(when (b) {
         IssueTasks.DueBucket.OVERDUE -> R.string.tasks_b_overdue
         IssueTasks.DueBucket.TODAY -> R.string.tasks_b_today
         IssueTasks.DueBucket.WEEK -> R.string.tasks_b_week
@@ -247,12 +247,18 @@ fun TaskRow(i: IssueDTO, data: BootstrapDTO, showGroup: Boolean = true, showOwne
 
 /** Un asunto con sus tareas debajo, plegables con la flecha (las tareas no se repiten como filas sueltas). */
 @Composable
-fun TaskWithKids(i: IssueDTO, data: BootstrapDTO, showGroup: Boolean = true, onOpen: (String) -> Unit) {
+fun TaskWithKids(i: IssueDTO, data: BootstrapDTO, showGroup: Boolean = true, matchingIds: Set<String>? = null, onOpen: (String) -> Unit) {
     val all = LocalClient.current.state.collectAsStateWithLifecycle().value.issues
-    val kids = IssueTasks.childrenOf(all.values, i.id)
-    var open by rememberSaveable(i.id) { mutableStateOf(false) }
+    val kids = IssueTasks.childrenOf(all.values, i.id).filter { matchingIds == null || it.id in matchingIds }
+    val contextOnly = matchingIds != null && i.id !in matchingIds
+    var open by rememberSaveable(i.id, matchingIds) { mutableStateOf(contextOnly) }
     Column(Modifier.fillMaxWidth()) {
-        TaskRow(i, data, showGroup = showGroup, onOpen = onOpen, trailing = if (kids.isEmpty()) null else ({
+        if (contextOnly) {
+            Column(Modifier.fillMaxWidth().clickable { onOpen(i.id) }.padding(vertical = 8.dp).testTag("taskContext-${i.id}")) {
+                Text(i.title, style = MaterialTheme.typography.titleSmall)
+                Text(stringResource(R.string.task_filter_parent_context), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        } else TaskRow(i, data, showGroup = showGroup, onOpen = onOpen, trailing = if (kids.isEmpty()) null else ({
             IconButton(onClick = { open = !open }, modifier = Modifier.size(36.dp).testTag("kidsToggle-${i.id}")) {
                 Icon(if (open) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown, stringResource(if (open) R.string.task_hide else R.string.task_show))
             }

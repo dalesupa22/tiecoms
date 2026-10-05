@@ -8,16 +8,16 @@
     "      <a href=\"#descargar\">Download</a>\n"
   ],
   [
-    "<span class=\"eyebrow-dot eyebrow-dot-orange\"></span> Escritorio</p>",
-    "<span class=\"eyebrow-dot eyebrow-dot-orange\"></span> Desktop</p>"
+    "<span class=\"eyebrow-dot eyebrow-dot-orange\"></span> Descargas</p>",
+    "<span class=\"eyebrow-dot eyebrow-dot-orange\"></span> Downloads</p>"
   ],
   [
-    "<h2 id=\"download-title\">chaggu en tu computador.<br><em>Rápido y liviano.</em></h2>",
-    "<h2 id=\"download-title\">chaggu on your computer.<br><em>Fast and light.</em></h2>"
+    "<h2 id=\"download-title\">chaggu va contigo.<br><em>En cada pantalla.</em></h2>",
+    "<h2 id=\"download-title\">chaggu goes with you.<br><em>On every screen.</em></h2>"
   ],
   [
-    "Avisos del sistema, llamadas con pantalla compartida, GIFs y memes en tus chats y hasta cuatro chats abiertos a la vez. Pesa menos de 20 MB y arranca en un segundo.",
-    "System notifications, calls with screen sharing, GIFs and memes in your chats, and up to four chats open at once. Under 20 MB and it starts in a second."
+    "Tus conversaciones, tareas y archivos en Android, Mac, Windows o el navegador. En escritorio, también tienes avisos del sistema, pantalla compartida y hasta cuatro chats abiertos a la vez.",
+    "Your conversations, tasks and files on Android, Mac, Windows or your browser. On desktop, you also get system notifications, screen sharing and up to four chats open at once."
   ],
   [
     "<p>macOS 12 o posterior. Apple Silicon e Intel. Firmada y notarizada.</p>",
@@ -274,5 +274,21 @@
   [
     "    <section class=\"download-section mcp-section\" id=\"mcp\" aria-labelledby=\"mcp-title\">\n      <div class=\"download-intro\"><p class=\"eyebrow\"><span class=\"eyebrow-dot eyebrow-dot-lilac\"></span> Conector MCP</p><h2 id=\"mcp-title\">Tu IA también<br><em>trabaja en chaggu.</em></h2><p class=\"section-lede\">chaggu tiene servidor MCP. Conecta Claude, Codex, ChatGPT o tu propio agente para leer tus chats, resumir lo pendiente, buscar y enviar mensajes en tu nombre, con tus mismos permisos.</p></div>\n      <div class=\"download-grid\">\n        <article class=\"download-card\"><h3>1. Crea tu token</h3><p>En la app, entra a <b>Tú › Conector para IAs</b> y toca «Crear token». Se muestra una sola vez y lo revocas cuando quieras.</p><a class=\"button button-dark\" href=\"https://app.chaggu.com/\">Abrir chaggu <span aria-hidden=\"true\">↗</span></a></article>\n        <article class=\"download-card\"><h3>2. Conéctalo</h3><p>Claude Code:</p><code class=\"mcp-code\">claude mcp add --transport http chaggu https://app.chaggu.com/api/mcp --header \"Authorization: Bearer TU_TOKEN\"</code><small class=\"download-meta\">Codex, Cursor y otras IAs: URL <b>https://app.chaggu.com/api/mcp</b> con el encabezado Authorization: Bearer.</small></article>\n        <article class=\"download-card\"><h3>3. Pídeselo</h3><p>«¿Qué tengo sin leer en chaggu?», «Respóndele a Laura que mañana entregamos», «Busca lo que dijimos del contrato».</p><small class=\"download-meta\">Herramientas: list_chats, read_messages, send_message, send_direct_message, search_messages, unread_summary, mark_read, list_people, whoami.</small></article>\n      </div>\n    </section>\n\n",
     "    <section class=\"download-section mcp-section\" id=\"mcp\" aria-labelledby=\"mcp-title\">\n      <div class=\"download-intro\"><p class=\"eyebrow\"><span class=\"eyebrow-dot eyebrow-dot-lilac\"></span> MCP connector</p><h2 id=\"mcp-title\">Your AI works<br><em>in chaggu too.</em></h2><p class=\"section-lede\">chaggu has an MCP server. Connect Claude, Codex, ChatGPT or your own agent to read your chats, summarize what is pending, search and send messages on your behalf, with your same permissions.</p></div>\n      <div class=\"download-grid\">\n        <article class=\"download-card\"><h3>1. Create your token</h3><p>In the app, go to <b>You › AI connector</b> and tap “Create token”. It is shown only once and you can revoke it anytime.</p><a class=\"button button-dark\" href=\"https://app.chaggu.com/\">Open chaggu <span aria-hidden=\"true\">↗</span></a></article>\n        <article class=\"download-card\"><h3>2. Connect it</h3><p>Claude Code:</p><code class=\"mcp-code\">claude mcp add --transport http chaggu https://app.chaggu.com/api/mcp --header \"Authorization: Bearer YOUR_TOKEN\"</code><small class=\"download-meta\">Codex, Cursor and other AIs: URL <b>https://app.chaggu.com/api/mcp</b> with the Authorization: Bearer header.</small></article>\n        <article class=\"download-card\"><h3>3. Just ask</h3><p>“What’s unread in chaggu?”, “Tell Laura we deliver tomorrow”, “Find what we said about the contract”.</p><small class=\"download-meta\">Tools: list_chats, read_messages, send_message, send_direct_message, search_messages, unread_summary, mark_read, list_people, whoami.</small></article>\n      </div>\n    </section>\n\n"
+  ],
+  [
+    "Android 8 o posterior. Descarga oficial desde Google Play.",
+    "Android 8 or later. Official download from Google Play."
+  ],
+  [
+    "Descargar para Android <span aria-hidden=\"true\">↗</span>",
+    "Download for Android <span aria-hidden=\"true\">↗</span>"
+  ],
+  [
+    "Disponible en Google Play",
+    "Available on Google Play"
+  ],
+  [
+    "<span class=\"download-mine\">Tu Android</span>",
+    "<span class=\"download-mine\">Your Android</span>"
   ]
 ]

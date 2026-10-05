@@ -68,7 +68,7 @@
   const grid = document.querySelector('[data-downloads]');
   if (!grid && !document.querySelector('[data-download-top]')) return;
   const ua = navigator.userAgent;
-  const os = /Windows/.test(ua) ? 'windows' : /Macintosh|Mac OS X/.test(ua) && !/iPhone|iPad/.test(ua) && navigator.maxTouchPoints < 2 ? 'mac' : null;
+  const os = /Android/.test(ua) ? 'android' : /Windows/.test(ua) ? 'windows' : /Macintosh|Mac OS X/.test(ua) && !/iPhone|iPad/.test(ua) && navigator.maxTouchPoints < 2 ? 'mac' : null;
   const mine = os && grid?.querySelector(`[data-os="${os}"]`);
   if (mine && grid) { mine.classList.add('is-mine'); grid.prepend(mine); }
   const mb = (n) => `${(n / 1048576).toFixed(1).replace('.', document.documentElement.lang === 'es' ? ',' : '.')} MB`;
@@ -76,8 +76,9 @@
   const top = document.querySelector('[data-download-top]');
   const topLabel = top?.querySelector('[data-download-label]');
   const esTop = document.documentElement.lang === 'es';
-  if (top && os) top.setAttribute('href', os === 'mac' ? '/descargas/chaggu-mac.dmg' : '/descargas/chaggu-windows.exe');
-  if (topLabel && os) topLabel.textContent = esTop ? `Descargar para ${os === 'mac' ? 'Mac' : 'Windows'}` : `Download for ${os === 'mac' ? 'Mac' : 'Windows'}`;
+  const downloadHref = { android: 'https://play.google.com/store/apps/details?id=com.chaggu.app', mac: '/descargas/chaggu-mac.dmg', windows: '/descargas/chaggu-windows.exe' };
+  if (top && os) top.setAttribute('href', downloadHref[os]);
+  if (topLabel && os) topLabel.textContent = esTop ? `Descargar para ${os === 'android' ? 'Android' : os === 'mac' ? 'Mac' : 'Windows'}` : `Download for ${os === 'android' ? 'Android' : os === 'mac' ? 'Mac' : 'Windows'}`;
   fetch('/descargas/latest.json?schema=2', { cache: 'no-cache' }).then((r) => (r.ok ? r.json() : null)).then((v) => {
     if (!v) return;
     const es = document.documentElement.lang === 'es';
@@ -89,7 +90,7 @@
       grid?.querySelector(`[data-os="${platform}"] a.button`)?.setAttribute('href', href);
       if (os === platform) top?.setAttribute('href', href);
     }
-    if (topLabel && v.version) { const sm = document.createElement('small'); sm.textContent = ` v${v.version}`; topLabel.after(sm); }
+    if (topLabel && (os === 'mac' || os === 'windows') && v.version) { const sm = document.createElement('small'); sm.textContent = ` v${v.version}`; topLabel.after(sm); }
     const mac = grid?.querySelector('[data-meta="mac"]');
     if (mac && v.mac) mac.textContent = `${es ? 'Versión' : 'Version'} ${v.version} · .dmg · ${mb(v.mac.size)}`;
     const win = grid?.querySelector('[data-meta="windows"]');

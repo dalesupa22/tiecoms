@@ -349,6 +349,13 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
   useEffect(() => { try { if (text) localStorage.setItem(draftKey(id), text); else localStorage.removeItem(draftKey(id)); } catch {} }, [id, text]);
   // El rótulo «Borrador de gg» se va cuando la caja queda vacía (se envió o se borró).
   useEffect(() => { if (!text.trim()) setGgDraft(false); }, [text]);
+  // Esc quita la selección (sin gg abierto; con gg abierto ya lo hace su propio Esc).
+  useEffect(() => {
+    if (!selected.size || ggOpen) return;
+    const esc = (e: globalThis.KeyboardEvent) => { if (e.key === 'Escape' && !document.querySelector('.modal, .ctx-menu')) setSelected(new Set()); };
+    window.addEventListener('keydown', esc);
+    return () => window.removeEventListener('keydown', esc);
+  }, [selected.size > 0, ggOpen]);
   useEffect(() => { setSelected(new Set()); setGgQuotes([]); setGgRequest(null); setSuggestFor(null); setGgOpen(false); }, [id]);
   useEffect(() => { if (!ggOpen) return; const escape = (event: globalThis.KeyboardEvent) => { if (event.key !== 'Escape' || document.querySelector('.modal, .ctx-menu')) return; if (document.activeElement instanceof HTMLElement) document.activeElement.blur(); setGgOpen(false); setSelected(new Set()); setGgQuotes([]); setGgRequest(null); setSuggestFor(null); }; window.addEventListener('keydown', escape); return () => window.removeEventListener('keydown', escape); }, [ggOpen]);
 
@@ -765,7 +772,16 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
       { label: t('menu.markUnread'), icon: '●', onSelect: () => client.markUnread(id, m.seq).then(() => toast(t('toast.markedUnread'))).catch((e) => toast(errorText(e))) },
       ...(mine ? [{ divider: true }, { label: t('menu.delete'), icon: '🗑', danger: true, onSelect: () => { if (confirm(t('menu.deleteConfirm'))) void client.deleteMessage(m.id).catch((e) => toast(errorText(e))); } }] : []),
     ];
+    // Clic derecho sobre uno de varios elegidos: primero lo que se hace con todos.
+    const many = selected.size > 1 && selected.has(m.id) ? [
+      ...(forwardableCount ? [{ label: t('sel.menuForward', { n: forwardableCount }), icon: '↪', onSelect: forwardSelected },
+        { label: t('sel.menuCopy', { n: forwardableCount }), icon: '⧉', onSelect: () => void copySelected() }] : []),
+      ...(deletableCount ? [{ label: t('sel.menuDelete', { n: deletableCount }), icon: '🗑', danger: true, onSelect: () => void deleteSelected() }] : []),
+      { label: t('ggs.clearSel'), icon: '◯', onSelect: () => setSelected(new Set()) },
+      { divider: true },
+    ] as MenuItem[] : [];
     return [
+      ...many,
       ...(conv.canPost ? [{
         label: t('react.menu'), icon: '☺',
         items: [
@@ -817,6 +833,32 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
   const openGg = () => { setGgOpen(true); setGgUsed(true); };
   const askGg = (m: MessageDTO) => { setGgQuotes((q) => (q.some((x) => x.id === m.id) ? q : [...q, quoteOf(m)])); openGg(); };
   const toggleSel = (m: MessageDTO) => setSelected((x) => { const n = new Set(x); if (n.has(m.id)) n.delete(m.id); else n.add(m.id); return n; });
+  // ---------- Varios mensajes elegidos (6-oct-2026): reenviar, copiar y eliminar los míos de una vez ----------
+  const selectedMsgs = () => (local?.messages ?? []).filter((m) => selected.has(m.id) && !m.deletedAt).sort((a, b) => a.seq - b.seq);
+  const forwardSelected = () => { const list = selectedMsgs().filter((m) => !m.viewOnce); if (list.length) openDialog((close) => <ForwardToChatsDialog sources={list} onClose={() => { close(); setSelected(new Set()); }} />); };
+  const copySelected = async () => {
+    const list = selectedMsgs().filter((m) => !m.viewOnce);
+    const time = (iso: string) => new Date(iso).toLocaleString(locale(), { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+    const textOut = list.map((m) => `${m.authorId === d.me.id ? (d.me.name ?? t('common.youShort')) : personById(d, m.authorId)?.name ?? ''} · ${time(m.createdAt)}\n${m.displayBody ?? m.body}${m.attachments?.length ? '\n' + m.attachments.map((a) => `📎 ${a.name}`).join('\n') : ''}`).join('\n\n');
+    const ok = await copyText(textOut);
+    toast(ok ? t('sel.copied', { n: list.length }) : (locale().startsWith('en') ? 'Could not copy' : 'No se pudo copiar'));
+  };
+  const deleteSelected = async () => {
+    const list = selectedMsgs();
+    const mine = list.filter((m) => m.authorId === d.me.id);
+    if (!mine.length) return;
+    const others = list.length - mine.length;
+    if (!confirm((mine.length === 1 ? t('menu.deleteConfirm') : t('sel.deleteConfirm', { n: mine.length })) + (others ? `\n\n${t('sel.deleteSkip', { n: mine.length, k: others })}` : ''))) return;
+    let done = 0;
+    for (const m of mine) {
+      try { await client.deleteMessage(m.id); done++; }
+      catch (e) { toast(t('sel.deleteFailed', { n: done, total: mine.length, error: errorText(e) })); setSelected(new Set()); return; }
+    }
+    setSelected(new Set());
+    toast(t('sel.deleted', { n: done }));
+  };
+  const deletableCount = (local?.messages ?? []).filter((m) => selected.has(m.id) && !m.deletedAt && m.authorId === d.me.id).length;
+  const forwardableCount = (local?.messages ?? []).filter((m) => selected.has(m.id) && !m.deletedAt && !m.viewOnce).length;
   const ggHost: GgHost = {
     // Elegir no es enviar: el texto cae en la caja como «Borrador de gg».
     useDraft: (x) => { setText(x); setGgDraft(true); requestAnimationFrame(() => input.current?.focus()); },
@@ -1028,7 +1070,9 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
             )}
           </div>
         )}
-        <SelectionBar n={selected.size} onAsk={() => setSuggestFor([...selected])} onClear={() => setSelected(new Set())} />
+        <SelectionBar n={selected.size} onClear={() => setSelected(new Set())} deletable={deletableCount} onDelete={() => void deleteSelected()}
+          onForward={forwardableCount ? forwardSelected : undefined} onCopy={forwardableCount ? () => void copySelected() : undefined}
+          onAsk={!embedded && !ggDm ? () => setSuggestFor([...selected]) : undefined} />
         </div>
         {isSide && local?.loaded && !(local.messages ?? []).some((m) => m.kind === 'text') && <div className="side-empty">💬 {t('side.emptyChat')}</div>}
         {isSide && conv.canPost && !text.trim() && lastText && lastText.authorId !== d.me.id && (

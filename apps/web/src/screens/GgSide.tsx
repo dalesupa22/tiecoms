@@ -354,11 +354,18 @@ export function ReplyForMe({ source, host }: { source: string; host: GgHost }) {
 }
 
 // ---------- Selección múltiple: «✨ Pedir a gg (N)» ----------
-export function SelectionBar({ n, onAsk, onClear }: { n: number; onAsk: () => void; onClear: () => void }) {
+/** Barra de los mensajes elegidos (Shift+clic o «Seleccionar»): reenviar, copiar, eliminar los míos y pedir a gg. */
+export function SelectionBar({ n, onAsk, onClear, onForward, onCopy, onDelete, deletable = 0 }: {
+  n: number; onAsk?: () => void; onClear: () => void; onForward?: () => void; onCopy?: () => void; onDelete?: () => void; deletable?: number;
+}) {
   if (!n) return null;
   return (
-    <div className="gg-sel-bar" role="toolbar">
-      <button className="btn primary small" onClick={onAsk}>{t('ggs.askN', { n })}</button>
+    <div className="gg-sel-bar" role="toolbar" aria-label={t('sel.count', { n })}>
+      <span className="gg-sel-count">{t('sel.count', { n })}</span>
+      {onForward && <button className="btn small" onClick={onForward}>{t('sel.forward')}</button>}
+      {onCopy && <button className="btn small" onClick={onCopy}>{t('sel.copy')}</button>}
+      {onDelete && deletable > 0 && <button className="btn small danger" onClick={onDelete}>{t('sel.delete', { n: deletable })}</button>}
+      {onAsk && <button className="btn primary small" onClick={onAsk}>{t('ggs.askN', { n })}</button>}
       <button className="icon-btn" aria-label={t('ggs.clearSel')} title={t('ggs.clearSel')} onClick={onClear}>×</button>
     </div>
   );

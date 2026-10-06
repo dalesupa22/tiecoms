@@ -551,6 +551,11 @@ const es = {
   'chat.scopeMulti': 'Solo las personas de este chat pueden leerlo. Quien entra después ve desde ese momento.',
   'sys.chat.created': 'Chat creado con {names}.', 'menu.forwardChat': 'Reenviar a otro chat',
   'fwd.sentMany': 'Reenviado a {n} chats', 'fwd.sendMany': 'Reenviar a {n}',
+  'fwd.titleMany': 'Reenviar {n} mensajes', 'fwd.andMore': 'y {n} más',
+  'sel.forward': '↪ Reenviar', 'sel.copy': '⧉ Copiar', 'sel.delete': '🗑 Eliminar ({n})', 'sel.count': '{n} seleccionados',
+  'sel.deleteConfirm': '¿Eliminar {n} mensajes? Se verán como «Mensaje eliminado».', 'sel.deleteSkip': 'Solo puedes eliminar los tuyos: se eliminan {n} y quedan {k} de otras personas.',
+  'sel.deleted': 'Eliminados: {n}', 'sel.deleteFailed': 'Se eliminaron {n} de {total}. {error}', 'sel.copied': 'Copiados: {n}',
+  'sel.menuForward': 'Reenviar los {n} seleccionados', 'sel.menuCopy': 'Copiar los {n} seleccionados', 'sel.menuDelete': 'Eliminar los míos ({n})',
   // ---------- Ronda de feedback de TestFlight (web, iOS y Android comparten estos textos) ----------
   'common.saving': 'Guardando…', 'common.saved': 'Guardado', 'common.search': 'Buscar', 'common.all': 'Todos',
   'common.unsaved': 'Tienes cambios sin guardar', 'common.discardChanges': '¿Descartar los cambios?',
@@ -1586,6 +1591,11 @@ const en: Record<Key, string> = {
   'chat.scopeMulti': 'Only the people in this chat can read it. Anyone added later sees from that moment on.',
   'sys.chat.created': 'Chat created with {names}.', 'menu.forwardChat': 'Forward to another chat',
   'fwd.sentMany': 'Forwarded to {n} chats', 'fwd.sendMany': 'Forward to {n}',
+  'fwd.titleMany': 'Forward {n} messages', 'fwd.andMore': 'and {n} more',
+  'sel.forward': '↪ Forward', 'sel.copy': '⧉ Copy', 'sel.delete': '🗑 Delete ({n})', 'sel.count': '{n} selected',
+  'sel.deleteConfirm': 'Delete {n} messages? They will show as “Message deleted”.', 'sel.deleteSkip': 'You can only delete your own: {n} will be deleted and {k} from others stay.',
+  'sel.deleted': 'Deleted: {n}', 'sel.deleteFailed': 'Deleted {n} of {total}. {error}', 'sel.copied': 'Copied: {n}',
+  'sel.menuForward': 'Forward the {n} selected', 'sel.menuCopy': 'Copy the {n} selected', 'sel.menuDelete': 'Delete mine ({n})',
   // ---------- TestFlight feedback round (web, iOS and Android share these strings) ----------
   'common.saving': 'Saving…', 'common.saved': 'Saved', 'common.search': 'Search', 'common.all': 'All',
   'common.unsaved': 'You have unsaved changes', 'common.discardChanges': 'Discard changes?',

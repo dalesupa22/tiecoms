@@ -309,16 +309,21 @@ export function StackedAvatars({ c, size = 22 }: { c: ConversationDTO; size?: nu
 }
 
 // ---------- Reenviar a otros chats ----------
-export function ForwardToChatsDialog({ source, onClose }: { source: MessageDTO; onClose: () => void }) {
+/** Reenvía uno o varios mensajes (selección múltiple, 6-oct-2026) a hasta 10 chats; los varios salen en su orden. */
+export function ForwardToChatsDialog({ source, sources, onClose }: { source?: MessageDTO; sources?: MessageDTO[]; onClose: () => void }) {
   const d = useClient((s) => s.data)!;
   const [q, setQ] = useState('');
   const [picked, setPicked] = useState<string[]>([]);
   const [comment, setComment] = useState('');
   const [busy, setBusy] = useState(false);
-  const author = personById(d, source.authorId)?.name ?? null;
+  // Una sola vista no se reenvía (el servidor responde 409); lo eliminado no tiene contenido.
+  const msgs = (sources ?? (source ? [source] : [])).filter((m) => !m.viewOnce && !m.deletedAt).sort((a, b) => a.seq - b.seq);
+  const first = msgs[0];
+  const authorOf = (m: MessageDTO) => personById(d, m.authorId)?.name ?? null;
   const needle = q.trim().toLowerCase();
+  const fromIds = new Set(msgs.map((m) => m.conversationId));
   const list = d.conversations
-    .filter((c) => c.canPost && c.id !== source.conversationId && (!needle || conversationTitle(d, c).toLowerCase().includes(needle)))
+    .filter((c) => c.canPost && !fromIds.has(c.id) && (!needle || conversationTitle(d, c).toLowerCase().includes(needle)))
     .sort((a, b) => (b.lastMessageAt ?? '').localeCompare(a.lastMessageAt ?? ''));
   const toggle = (id: string) => setPicked((x) => (x.includes(id) ? x.filter((y) => y !== id) : x.length >= 10 ? x : [...x, id]));
   async function send() {
@@ -327,17 +332,22 @@ export function ForwardToChatsDialog({ source, onClose }: { source: MessageDTO; 
       for (const target of picked) {
         if (comment.trim()) await client.send(target, comment.trim());
         // Los adjuntos se reenvían como copias del mismo archivo (forwardAttachmentIds).
-        await client.send(target, source.body, null, { source: 'tiecoms', author, sentAt: source.createdAt, fromConversationId: source.conversationId },
-          { forwardAttachmentIds: (source.attachments ?? []).map((a) => a.id) });
+        for (const m of msgs) {
+          await client.send(target, m.displayBody ?? m.body, null, { source: 'tiecoms', author: authorOf(m), sentAt: m.createdAt, fromConversationId: m.conversationId },
+            { forwardAttachmentIds: (m.attachments ?? []).map((a) => a.id) });
+        }
       }
       const one = picked.length === 1 ? picked[0]! : null;
       toast(picked.length === 1 ? t('toast.sent') : t('fwd.sentMany', { n: picked.length }), one ? { label: t('lin.open'), run: () => navigate(`/c/${one}`) } : undefined);
       onClose();
     } catch (e) { toast(errorText(e)); } finally { setBusy(false); }
   }
+  if (!first) return null;
   return (
-    <Modal title={t('fwd.title')} onClose={onClose}>
-      <blockquote className="derive-quote">{source.body ? `“${source.body.slice(0, 240)}”` : null}{source.attachments?.length ? ` ${attachmentSummaryText({ count: source.attachments.length, images: source.attachments.filter((a) => a.contentType.startsWith('image/')).length, videos: source.attachments.filter((a) => a.contentType.startsWith('video/')).length, files: 0, firstName: source.attachments[0]!.name })}` : null}{author ? <span className="small muted"> — {author}</span> : null}</blockquote>
+    <Modal title={msgs.length > 1 ? t('fwd.titleMany', { n: msgs.length }) : t('fwd.title')} onClose={onClose}>
+      {msgs.length > 1
+        ? <div className="derive-quote fwd-many">{msgs.slice(0, 4).map((m) => <div key={m.id} className="ellipsis"><b>{authorOf(m) ?? ''}</b> · {(m.displayBody ?? m.body).slice(0, 120) || (m.attachments?.length ? `📎 ${m.attachments[0]!.name}` : '')}</div>)}{msgs.length > 4 && <div className="small muted">{t('fwd.andMore', { n: msgs.length - 4 })}</div>}</div>
+        : <blockquote className="derive-quote">{first.body ? `“${first.body.slice(0, 240)}”` : null}{first.attachments?.length ? ` ${attachmentSummaryText({ count: first.attachments.length, images: first.attachments.filter((a) => a.contentType.startsWith('image/')).length, videos: first.attachments.filter((a) => a.contentType.startsWith('video/')).length, files: 0, firstName: first.attachments[0]!.name })}` : null}{authorOf(first) ? <span className="small muted"> — {authorOf(first)}</span> : null}</blockquote>}
       <input className="input" placeholder={t('fwd.search')} value={q} onChange={(e) => setQ(e.target.value)} autoFocus />
       <div className="list" style={{ maxHeight: 280, overflow: 'auto', gap: 4 }}>
         {list.map((c) => <ChatOption key={c.id} d={d} c={c} on={picked.includes(c.id)} onToggle={() => toggle(c.id)} />)}

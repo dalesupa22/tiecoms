@@ -1028,12 +1028,17 @@ export class TieComsClient {
     const seq = Math.min(visibleThrough, c?.lastMessageSeq ?? 0);
     if (!c || seq <= c.lastReadSeq) return;
     const generation = this.sessionGeneration;
+    // Optimista: los contadores (lista, pestañas, temas, dock) bajan ya, no 400 ms + red después; al cambiar de chat
+    // no se quedan con el número viejo. Sin tocar readRevision: la confirmación del servidor (o un bootstrap si falla) manda.
+    this.patchConversationMeta(id, { lastReadSeq: seq, unread: Math.max(0, c.lastMessageSeq - Math.max(seq, c.historyFromSeq)), ...(seq >= c.lastMessageSeq ? { unreadMentions: 0 } : {}) });
     clearTimeout(this.readTimers.get(id));
     this.readTimers.set(id, setTimeout(() => {
       this.readTimers.delete(id);
       if (generation !== this.sessionGeneration) return;
       void this.request<{ lastReadSeq: number; readRevision?: number }>(`/conversations/${id}/read`, { method: 'POST', json: { seq } })
-        .then((result) => { if (generation===this.sessionGeneration) this.applyConfirmedRead(id,result.lastReadSeq,result.readRevision); }).catch(() => {});
+        .then((result) => { if (generation===this.sessionGeneration) this.applyConfirmedRead(id,result.lastReadSeq,result.readRevision); })
+        // Si el servidor no lo guardó, el snapshot devuelve el cursor real (y los no leídos vuelven a contar).
+        .catch(() => { if (generation===this.sessionGeneration) this.scheduleBootstrap(); });
     }, 400));
   }
 

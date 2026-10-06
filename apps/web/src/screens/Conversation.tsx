@@ -72,6 +72,14 @@ type Row =
 
 const draftKey = (id: string) => `tiecoms:draft:${id}`;
 const excerpt = (s: string, n = 90) => s.replace(/\s+/g, ' ').trim().slice(0, n);
+/** Mensajes vistos por delante del cursor de lectura, por persona y chat (solo en memoria, se podan al avanzar el cursor). */
+const seenAhead = new Map<string, Set<number>>();
+function seenAheadFor(id: string): Set<number> {
+  const key = `${client.getState().data?.me.id ?? ''}:${id}`;
+  let s = seenAhead.get(key);
+  if (!s) seenAhead.set(key, (s = new Set()));
+  return s;
+}
 
 /** Panel dentro de la vista en paralelo (Split.tsx): activo = el del URL; count = cuántos hay abiertos. */
 export interface PaneProps { size?: PaneSizing; active: boolean; count: number; onClose: () => void; onOnly: () => void; pinned?: boolean; onPin?: () => void; onTint?: (anchor: HTMLElement) => void; onCollapse?: () => void }
@@ -167,7 +175,10 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
   const [placementFailed, setPlacementFailed] = useState(false);
   const [placementStep, setPlacementStep] = useState(0);
   const observedRead = useRef(baseRead);
-  const visibleRead = useRef(new Set<number>());
+  // Vistos por delante del cursor (p. ej. leyendo un tema con pendientes de otro antes). Vive fuera del componente:
+  // al cambiar de chat y volver no se pierden, y las banderitas de temas los descuentan.
+  const visibleRead = useRef(seenAheadFor(id));
+  const [seenTick, setSeenTick] = useState(0);
   const justPlaced = useRef(false);
   // Posición respecto al final: lejos (más de una pantalla), abajo, y si la línea de nuevos quedó arriba.
   const [nav, setNav] = useState({ far: false, bottom: !entry, lineAbove: false });
@@ -385,7 +396,11 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
   }, [local?.messages]);
   // Sin leer por tema (y sin tema, clave ''), con lo leído en vivo: el número junto a cada banderita.
   const readNow = Math.max(conv?.lastReadSeq ?? 0, conv?.historyFromSeq ?? 0);
-  const topicUnread = useMemo(() => topicUnreadCounts(local?.messages ?? [], readNow, d?.me.id, activeTopicIds), [local?.messages, readNow, activeTopicIds]);
+  const topicUnread = useMemo(() => {
+    const seen = visibleRead.current;
+    const msgs = local?.messages ?? [];
+    return topicUnreadCounts(seen.size ? msgs.filter((m) => !seen.has(m.seq)) : msgs, readNow, d?.me.id, activeTopicIds);
+  }, [local?.messages, readNow, activeTopicIds, seenTick]);
 
   // Mantiene la vista abajo al llegar mensajes, y la posición al cargar historial antiguo.
   useLayoutEffect(() => {
@@ -412,6 +427,16 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
   useEffect(() => {
     if (conv && conv.unread > 0 && local?.loaded && !placing.current && document.visibilityState === 'visible') updateNav();
   }, [conv?.lastMessageSeq, conv?.unread, local?.loaded, id]);
+  // Escritorio (Tauri): cerrar la ventana la esconde y la página queda «hidden»; lo que llegó entretanto no se marcaba
+  // al volver hasta mover el scroll. Al volver la ventana al frente se recalcula lo que está a la vista.
+  const navRef = useRef(updateNav);
+  navRef.current = updateNav;
+  useEffect(() => {
+    const back = () => { if (document.visibilityState === 'visible' && !placing.current) requestAnimationFrame(() => navRef.current()); };
+    document.addEventListener('visibilitychange', back);
+    window.addEventListener('focus', back);
+    return () => { document.removeEventListener('visibilitychange', back); window.removeEventListener('focus', back); };
+  }, [id]);
 
   // Locate every pending page; a failed page never turns into a successful jump to the end.
   useEffect(() => {
@@ -487,7 +512,16 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
         const rect = document.getElementById(`msg-${id}-${m.seq}`)?.getBoundingClientRect();
         return !!rect && rect.top < box.bottom && rect.bottom > box.top;
       }).map((m) => m.seq);
+      const seenBefore = visibleRead.current.size;
       observedRead.current = readThroughVisible(Math.max(observedRead.current, meta?.lastReadSeq ?? 0, meta?.historyFromSeq ?? 0), visibleRead.current, visible);
+      // Al final del chat con la vista completa («Todo», o sin temas) se marca leído hasta el último mensaje
+      // (docs/GRUPOS.md › «Navegar un chat largo»). Con un tema o «General» elegido no: lo de otros temas sigue pendiente.
+      const lastLoaded = current.conversations[id]?.messages.at(-1)?.seq ?? 0;
+      if (bottom && !activeFilter && !generalOnly && lastLoaded > observedRead.current) {
+        observedRead.current = lastLoaded;
+        visibleRead.current.clear();
+      }
+      if (visibleRead.current.size !== seenBefore) setSeenTick((n) => n + 1);
       client.markRead(id, observedRead.current);
     }
   }
@@ -889,8 +923,9 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
 
         {placementFailed && <div className="error" role="alert">{t('chat.unreadLoadFailed')} <button className="link-btn" disabled={local?.loading} onClick={() => void retryUnreadHistory()}>{t('chat.retryUnread')}</button></div>}
         <div className="msgs-wrap">
-        {nav.lineAbove && entry && newLine != null && (
-          <button className="jump-new" onClick={jumpToNewLine} aria-label={t('chat.jumpNew')} title={t('chat.jumpNew')}>{t('chat.newAbove', { n: entry.unread })}</button>
+        {/* El número es el de ahora (no el de al abrir): baja al leer y la píldora se va cuando no queda nada. */}
+        {nav.lineAbove && entry && newLine != null && conv.unread > 0 && (
+          <button className="jump-new" onClick={jumpToNewLine} aria-label={t('chat.jumpNew')} title={t('chat.jumpNew')}>{t('chat.newAbove', { n: conv.unread })}</button>
         )}
         <div className="msgs" style={chatAppearanceStyle(personalChat)} data-background={personalChat.background ?? 'default'} data-conv-id={id} ref={scroller} onScroll={onScroll} role="log" aria-live="polite">
           {local?.loading && !local.loaded && <div className="msg-sys">{t('common.loading')}</div>}

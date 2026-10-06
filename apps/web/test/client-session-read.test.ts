@@ -75,3 +75,32 @@ describe('own-message read cursor', () => {
     expect(c.getState().data!.conversations[0]!.unread).toBe(incoming-expected);
   });
 });
+
+describe('optimistic markRead', () => {
+  it('drops the badge at once and keeps it after the server confirms', async () => {
+    vi.useFakeTimers();
+    try {
+      const fetcher = vi.fn(async () => json({ lastReadSeq: 10, readRevision: 3 }));
+      vi.stubGlobal('fetch', fetcher);
+      const client = clientWith();
+      client.markRead('root', 10);
+      expect(client.getState().data!.conversations[0]).toMatchObject({ lastReadSeq: 10, unread: 0, unreadMentions: 0 });
+      expect(fetcher).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(400);
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      expect(client.getState().data!.conversations[0]).toMatchObject({ lastReadSeq: 10, unread: 0, readRevision: 3 });
+    } finally { vi.useRealTimers(); }
+  });
+  it('partial read keeps mentions and asks for a snapshot when the server fails', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.stubGlobal('fetch', vi.fn(async () => json({ error: { code: 'unavailable', message: 'retry' } }, 503)));
+      const client = clientWith();
+      const boot = vi.spyOn(client as any, 'loadBootstrap').mockResolvedValue(undefined);
+      client.markRead('root', 6);
+      expect(client.getState().data!.conversations[0]).toMatchObject({ lastReadSeq: 6, unread: 4, unreadMentions: 1 });
+      await vi.advanceTimersByTimeAsync(400 + 250 + 50);
+      expect(boot).toHaveBeenCalled();
+    } finally { vi.useRealTimers(); }
+  });
+});

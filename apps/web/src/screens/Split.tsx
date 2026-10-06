@@ -116,19 +116,38 @@ export function GridArea({ id, search = '', side }: { id: string | null; search?
     : !customLayout && grid.length >= 4 ? [grid[0]!, grid[2]!, grid[1]!, grid[3]!, ...grid.slice(4), ...(withTasks ? [TASKS_KEY] : [])] : arranged;
   const resizePane = (key: string, rows: 1 | 2, columns: 1 | 2) => setPaneSize(key, rows, columns, currentTall, currentWide, [...new Set(sizingOrder)]);
   const gestureRoot = useRef<HTMLDivElement>(null);
+  // El panel activo siempre queda a la vista (6-oct-2026: un chat nuevo de 3 entró en la columna 6, fuera de la pantalla,
+  // y «no abría»). Se revisa al cambiar los paneles, el activo o el brillo (abrir desde la lista, crear un chat, un aviso),
+  // no solo los paneles: un chat ya abierto pero escondido a la derecha no volvía a aparecer al tocarlo.
+  const listKey = list.join('|');
+  const lastList = useRef<string | null>(null);
+  // Solo cuando el brillo se enciende (no cuando se apaga): si moviste la vista a mano en ese 1,6 s, no se te devuelve.
+  const lastFlash = useRef<string | null>(null);
+  const flashOn = useRef(0);
+  if (flash && flash !== lastFlash.current) flashOn.current += 1;
+  lastFlash.current = flash;
   useLayoutEffect(() => {
     const split = gestureRoot.current?.querySelector<HTMLElement>('.split'); if (!split) return;
-    // Wait for membership and active-key updates from the same operation to settle.
-    const frame = requestAnimationFrame(() => {
-      split.scrollLeft = 0;
+    const reset = lastList.current !== listKey;
+    lastList.current = listKey;
+    const reveal = () => {
       const selected = split.querySelector<HTMLElement>(':scope > .split-cell.is-active:not([hidden])');
-      if (selected) {
-        const box = selected.getBoundingClientRect(), viewport = split.getBoundingClientRect();
-        if (box.right > viewport.right) split.scrollLeft += box.right - viewport.right;
-      }
+      if (!selected) return;
+      const box = selected.getBoundingClientRect(), viewport = split.getBoundingClientRect();
+      if (box.left < viewport.left) split.scrollLeft -= viewport.left - box.left;
+      else if (box.right > viewport.right) split.scrollLeft += Math.min(box.right - viewport.right, box.left - viewport.left);
+    };
+    // Wait for membership and active-key updates from the same operation to settle; the second frame and the late check
+    // catch column widths applied after the first paint (saved positions, track sizing).
+    let second = 0;
+    const frame = requestAnimationFrame(() => {
+      if (reset) split.scrollLeft = 0;
+      reveal();
+      second = requestAnimationFrame(reveal);
     });
-    return () => cancelAnimationFrame(frame);
-  }, [list.join('|')]);
+    const late = setTimeout(reveal, 250);
+    return () => { cancelAnimationFrame(frame); cancelAnimationFrame(second); clearTimeout(late); };
+  }, [listKey, active, flashOn.current]);
   const gesturesEnabled = wide && !side && !expanded && list.length > 1;
   usePaneGestures(gestureRoot, { enabled: gesturesEnabled, order: list, tall: currentTall, wide: currentWide, en: locale().startsWith('en'),
     onResize: resizePane, onMove: (source, target, position) => {

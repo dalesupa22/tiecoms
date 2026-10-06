@@ -9,7 +9,7 @@ import { CreateGroupDialog } from './Groups.tsx';
 import { navigate } from '../router.ts';
 import { directOtherId, Avatar, ConvAvatar, Modal, OrgMark, conversationTitle, orgById, personById } from '../ui.tsx';
 import { companyLine, destinationLabel, peopleByOrg, recentPeopleIds, searchGroups } from '../quick-search.ts';
-import { openDirect } from './Quick.tsx';
+import { openChat, openDirect } from './Quick.tsx';
 import { Formatted } from '../fmt.tsx';
 
 // ---------- Enlaces clicables en el texto ----------
@@ -76,7 +76,7 @@ export function NewChatDialog({ onClose }: { onClose: () => void }) {
     if (picked.length === 1) { await openDirect(picked[0]!); return; }
     const r = await client.request<{ id: string; kind: string }>('/chats', { method: 'POST', json: { userIds: picked, ...(name.trim() ? { name: name.trim() } : {}) } });
     await client.loadBootstrap();
-    navigate(`/c/${r.id}`);
+    openChat(r.id);
   });
   const choose = (it: (typeof items)[number] | undefined) => {
     if (!it || busy) return;

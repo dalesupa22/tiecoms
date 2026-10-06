@@ -6,6 +6,7 @@ import { openDialog } from '../actions.tsx';
 import { errorText, t } from '../i18n.ts';
 import { openMenuAt, toast, type MenuItem } from '../menu.tsx';
 import { navigate } from '../router.ts';
+import { flashPane } from '../split.ts';
 import { Avatar, conversationSubtitle, conversationTitle, orgById, personById } from '../ui.tsx';
 import { directWith, issueDestinations, quickSearch, type Namer, type QuickResults } from '../quick-search.ts';
 import { NewChatDialog } from './Chats.tsx';
@@ -61,10 +62,15 @@ export function QuickActions() {
 export async function openDirect(personId: string) {
   const d = client.getState().data!;
   const existing = directWith(d, personId);
-  if (existing) { navigate(`/c/${existing.id}`); return; }
+  if (existing) { openChat(existing.id); return; }
   const r = await client.request<{ id: string }>('/chats', { method: 'POST', json: { userIds: [personId] } });
   await client.loadBootstrap();
-  navigate(`/c/${r.id}`);
+  openChat(r.id);
+}
+/** Abre un chat y lo hace brillar: si ya era el abierto (misma URL) o estaba fuera de la vista en la cuadrícula, igual se ve. */
+export function openChat(id: string) {
+  navigate(`/c/${id}`);
+  flashPane(id);
 }
 
 export const namerFor = (d: BootstrapDTO): Namer => ({ title: (c) => conversationTitle(d, c), subtitle: (c) => conversationSubtitle(d, c) });

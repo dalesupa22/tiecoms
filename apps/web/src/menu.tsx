@@ -83,6 +83,8 @@ function MenuList({ items, x, y, depth, onDone }: { items: MenuItem[]; x: number
     if (depth === 0) el.focus();
   }, [x, y, depth]);
 
+  // Con flechas, la opción activa queda a la vista dentro del menú (cuando se desplaza por dentro).
+  useEffect(() => { if (active >= 0) ref.current?.querySelector<HTMLElement>(`[data-mi="${active}"]`)?.scrollIntoView({ block: 'nearest' }); }, [active]);
   const openSub = (i: number) => {
     const row = ref.current?.querySelector<HTMLElement>(`[data-mi="${i}"]`);
     if (!row) return;

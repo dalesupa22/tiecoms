@@ -7,7 +7,7 @@ import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, 
 import http from 'node:http';
 import https from 'node:https';
 import net from 'node:net';
-import type { IntegrationEventDTO, IssueStatus } from '@tiecoms/contracts';
+import type { IntegrationEventDTO, IssueReview, IssueStatus } from '@tiecoms/contracts';
 import { config } from '../config.ts';
 import { conversationAccess } from '../access.ts';
 import { ApiError, badRequest } from '../errors.ts';
@@ -40,7 +40,8 @@ export async function botCanRead(db: Tx | typeof pool, userId: string, conversat
   }
 }
 
-type Extra = { type: 'issue.status_changed'; from: IssueStatus; to: IssueStatus } | { type: 'issue.commented'; body: string } | { type: 'issue.updated' };
+type Extra = { type: 'issue.status_changed'; from: IssueStatus; to: IssueStatus } | { type: 'issue.commented'; body: string } | { type: 'issue.updated' }
+  | { type: 'issue.review_changed'; from: IssueReview | null; to: IssueReview | null; note?: string };
 
 export async function queueIntegrationEvent(c: Tx, issueId: string, actorId: string, extra: Extra) {
   const { rows } = await c.query(
@@ -59,6 +60,7 @@ export async function queueIntegrationEvent(c: Tx, issueId: string, actorId: str
     actor: { id: actorId, name: r.actor_name },
     ...(extra.type === 'issue.status_changed' ? { from: extra.from, to: extra.to } : {}),
     ...(extra.type === 'issue.commented' ? { comment: { body: extra.body } } : {}),
+    ...(extra.type === 'issue.review_changed' ? { review: { from: extra.from, to: extra.to, ...(extra.note ? { note: extra.note } : {}) } } : {}),
   };
   const d = await c.query(
     'INSERT INTO integration_deliveries (id, integration_id, event_type, payload) VALUES ($1,$2,$3,$4) RETURNING id',

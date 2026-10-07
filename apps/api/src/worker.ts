@@ -52,7 +52,7 @@ const handlers: Record<string, Handler> = {
   /** Notificaciones push (APNs / FCM). Los fallos por token se registran sin reintentar el job (evita duplicados). */
   async 'push.message'(p) { await pushMessage(p.messageId); },
   async 'push.reminder'(p) { await pushReminder(p.reminderId); },
-  async 'push.issue'(p) { await pushIssueAssigned(p.issueId, p.ownerId, p.actorId); },
+  async 'push.issue'(p) { await pushIssueAssigned(p.issueId, p.ownerId, p.actorId, p.reason ?? 'assigned'); },
   /** «No cumplimos»: la tarea venció (al responsable, categoría de tarea). */
   async 'push.issue_overdue'(p) { await pushIssueOverdue(p.issueId, p.ownerId, p.dueDate); },
   async 'push.event'(p) { await pushEvent(p.eventId); },

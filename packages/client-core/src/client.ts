@@ -8,7 +8,7 @@ import {
   type SoundChoice, type Ringtone, type CallDTO, type CallHistoryItemDTO, type CallJoinDTO, type CallLinkDTO, type SignupConfirmPreviewDTO, type CallKind, type CallTranscriptDTO, type CallTranscriptSegmentDTO, type CallTranscriptSegmentInput,
   type ActiveCallDTO, type MessageRefDTO, type ChatSearchPageDTO, type ViewOnceOpenDTO, type EventCommentDTO, type ViewOnceState,
   type SignatureDTO, type SignInfoDTO, type SignPdfInput, type SignPdfResult, type SigningHistoryPageDTO, type IntegrationDTO, type IntegrationSecretDTO,
-  type StorageUsageDTO, type VideoPlayDTO, type RoomDTO, type BookingPageDTO, type BookingHostBookingDTO,
+  type StorageUsageDTO, type TaskInboxItemDTO, type IssueReview, type VideoPlayDTO, type RoomDTO, type BookingPageDTO, type BookingHostBookingDTO,
 } from '@tiecoms/contracts';
 import { ApiRequestError, parseError } from './api.ts';
 import type { KeyValueStorage, SecretStore } from './storage.ts';
@@ -71,6 +71,8 @@ export interface ClientState {
   typing: Record<string, { userId: string; until: number }[]>;
   /** Asuntos conocidos por id (se cargan por espacio, conversación o «míos» y se actualizan en vivo). */
   issues: Record<string, IssueDTO>;
+  /** Bandeja «Nuevas» de tareas: lo que me asignaron o me piden revisar y no he visto (más nuevo primero). */
+  taskInbox: TaskInboxItemDTO[];
   /** Mensajes fijados por conversación. */
   pins: Record<string, string[]>;
   /** Temas por conversación (activos y archivados), en el orden de la fila. */
@@ -126,6 +128,8 @@ export type ClientNotice =
    */
   | { kind: 'message'; conversationId: string; message: MessageDTO; mentioned: boolean; muted: boolean }
   | { kind: 'reminder'; reminder: ReminderDTO }
+  /** Llegó una tarea a mi bandeja (me asignaron, me piden revisarla o revisaron la que pedí). */
+  | { kind: 'taskInbox'; item: TaskInboxItemDTO; issue: IssueDTO | null }
   /** Una reunión a la que voy empieza en `minutes` minutos. */
   | { kind: 'eventSoon'; event: CalendarEventDTO; minutes: number }
   /** El servidor descartó menciones de un mensaje propio (ids o 'all'). */
@@ -174,7 +178,7 @@ export function humanPreviewOf(m: MessageDTO): NonNullable<ConversationDTO['last
 }
 
 export class TieComsClient {
-  private state: ClientState = { status: 'loading', connection: 'offline', data: null, conversations: {}, pending: [], typing: {}, issues: {}, pins: {}, topics: {}, reminders: [], scheduled: [], events: {}, mails: {}, waRevision: 0, driveRevision: 0, calls: {} };
+  private state: ClientState = { status: 'loading', connection: 'offline', data: null, conversations: {}, pending: [], typing: {}, issues: {}, taskInbox: [], pins: {}, topics: {}, reminders: [], scheduled: [], events: {}, mails: {}, waRevision: 0, driveRevision: 0, calls: {} };
   private listeners = new Set<() => void>();
   private accessToken: string | null = null;
   private accessExp = 0;
@@ -574,7 +578,7 @@ export class TieComsClient {
     this.readTimers.clear();
     if (this.persistTimer) clearTimeout(this.persistTimer);
     this.persistTimer = null; this.bootDirty = false; this.dirtyConvs.clear(); this.sharedGets.clear(); this.needsLogin = false; this.lastBootstrapAt = 0;
-    this.state = { status: 'anonymous', connection: 'offline', data: null, conversations: {}, pending: [], typing: {}, issues: {}, pins: {}, topics: {}, reminders: [], scheduled: [], events: {}, mails: {}, waRevision: 0, driveRevision: 0, calls: {} };
+    this.state = { status: 'anonymous', connection: 'offline', data: null, conversations: {}, pending: [], typing: {}, issues: {}, taskInbox: [], pins: {}, topics: {}, reminders: [], scheduled: [], events: {}, mails: {}, waRevision: 0, driveRevision: 0, calls: {} };
     this.listeners.forEach((l) => l());
     await this.opts.secrets?.set(null);
     if (userId) {
@@ -601,6 +605,7 @@ export class TieComsClient {
       void this.loadReminders().catch(() => {});
       void this.loadScheduled().catch(() => {});
       void this.loadIssues({ open: true }).catch(() => {});
+      void this.loadTaskInbox().catch(() => {});
       // Punto verde 📞 en la lista: qué conversaciones tienen una llamada en curso.
       if (this.state.data?.features?.calls) void this.loadActiveCalls().catch(() => {});
     });
@@ -723,6 +728,15 @@ export class TieComsClient {
     // Asuntos restringidos ('org' o 'private') llegan por la cuenta, no por la conversación.
     if (e.type === 'issue.updated') { this.putIssues([e.issue]); this.recountIssues(e.issue.conversationId); }
     if (e.type === 'issue.personal') this.putIssues([e.issue]);
+    if (e.type === 'issue.inbox') {
+      if (e.issue) this.putIssues([e.issue]);
+      this.set({ taskInbox: [e.item, ...this.state.taskInbox.filter((x) => x.issueId !== e.item.issueId)] });
+      if (!dndActive(this.state)) this.opts.onNotice?.({ kind: 'taskInbox', item: e.item, issue: e.issue });
+    }
+    if (e.type === 'issue.inbox_seen') {
+      const ids = e.issueIds ? new Set(e.issueIds) : null;
+      this.set({ taskInbox: ids ? this.state.taskInbox.filter((x) => !ids.has(x.issueId)) : [] });
+    }
     if (e.type === 'issue.hidden') {
       this.issueHiddenAt.set(e.issueId, ++this.issueHiddenRevision);
       const next = { ...this.state.issues }; delete next[e.issueId];
@@ -1187,6 +1201,29 @@ export class TieComsClient {
     const r = await this.sharedGet<{ issues: IssueDTO[] }>(`/issues?${q}`);
     this.putIssues(r.issues);
     return r.issues;
+  }
+  /** Bandeja «Nuevas» de tareas (servidor ≥ 2026-10-07; uno anterior responde 404 y queda vacía). */
+  async loadTaskInbox() {
+    try {
+      const r = await this.request<{ items: TaskInboxItemDTO[] }>('/issues/inbox');
+      this.set({ taskInbox: r.items });
+      return r.items;
+    } catch { this.set({ taskInbox: [] }); return []; }
+  }
+  /** Marca vistas unas tareas de la bandeja (o todas sin ids). Optimista: el contador baja ya. */
+  async markTaskInboxSeen(issueIds?: string[]) {
+    const ids = issueIds?.filter((id) => this.state.taskInbox.some((x) => x.issueId === id));
+    if (issueIds && !ids?.length) return;
+    if (!issueIds && !this.state.taskInbox.length) return;
+    const set = ids ? new Set(ids) : null;
+    this.set({ taskInbox: set ? this.state.taskInbox.filter((x) => !set.has(x.issueId)) : [] });
+    await this.request('/issues/inbox/seen', { method: 'POST', json: ids ? { issueIds: ids } : {} }).catch(() => {});
+  }
+  /** Revisión humana de una tarea (aprobar, pedir corrección, intervención humana o dejarla por revisar). */
+  async reviewIssue(id: string, review: IssueReview | null, note?: string) {
+    const i = await this.request<IssueDTO>(`/issues/${id}`, { method: 'PATCH', json: { review, ...(note ? { reviewNote: note } : {}) } });
+    this.putIssues([i]);
+    return i;
   }
   /** Asunto personal: sin conversación, solo lo veo yo. */
   async createPersonalIssue(input: { title: string; dueDate?: string | null }) {

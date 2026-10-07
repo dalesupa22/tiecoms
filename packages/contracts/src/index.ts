@@ -940,6 +940,16 @@ export const ShareWaInput = z.object({
 /** side = conversación lateral: consulta privada desde un mensaje (chat multi que cuelga de su origen). */
 export type DeriveKind = 'same' | 'internal' | 'directive' | 'side';
 export type IssueStatus = 'open' | 'in_progress' | 'waiting' | 'done' | 'cancelled';
+/**
+ * Revisión humana (2026-10-07, llamada con Lorena): la IA resuelve un ticket y lo deja «pending» para que una
+ * persona lo apruebe antes de entregarlo; «changes» pide corrección y «human» marca que necesita intervención
+ * humana (p. ej. radicar una factura). null = sin revisión. Es independiente del estado.
+ */
+export type IssueReview = 'pending' | 'approved' | 'changes' | 'human';
+export const ISSUE_REVIEWS = ['pending', 'approved', 'changes', 'human'] as const;
+/** Por qué una tarea está en mi bandeja de «Nuevas»: me la asignaron, me piden revisarla o revisaron la que pedí. */
+export type TaskInboxReason = 'assigned' | 'review' | 'reviewed';
+export interface TaskInboxItemDTO { issueId: string; reason: TaskInboxReason; actorId: string | null; at: string }
 
 export interface IssueDTO {
   id: string;
@@ -982,6 +992,10 @@ export interface IssueDTO {
   externalMeta?: Record<string, string> | null;
   /** Campos dinámicos (columnas propias de la tarea): nombre → texto, número o sí/no. Ausente = sin campos o servidor anterior. */
   fields?: Record<string, IssueFieldValue> | null;
+  /** Revisión humana (ausente = sin revisión o servidor anterior). */
+  review?: IssueReview | null;
+  reviewBy?: string | null;
+  reviewAt?: string | null;
 }
 export type IssueFieldValue = string | number | boolean;
 export type IssueVisibility = 'all' | 'org' | 'private';
@@ -990,7 +1004,7 @@ export interface IssueEventDTO {
   id: number;
   issueId: string;
   actorId: string;
-  kind: 'created' | 'status' | 'owner' | 'due' | 'title' | 'comment' | 'waiting' | 'visibility' | 'assignees' | 'attachments' | 'moved' | 'fields';
+  kind: 'created' | 'status' | 'owner' | 'due' | 'title' | 'comment' | 'waiting' | 'visibility' | 'assignees' | 'attachments' | 'moved' | 'fields' | 'review';
   payload: Record<string, unknown>;
   createdAt: string;
 }
@@ -1281,6 +1295,8 @@ export const IntegrationUpdateIssueInput = z.object({
   externalMeta: ExternalMeta.optional(),
   /** Se mezclan con los que ya tiene; `null` borra un campo. */
   fields: IssueFieldsInput.optional(),
+  /** Revisión humana: «pending» deja el ticket listo para que una persona lo apruebe. */
+  review: z.enum(ISSUE_REVIEWS).nullable().optional(),
 });
 export const IntegrationCommentInput = z.object({
   body: z.string().trim().min(1).max(20_000),
@@ -1291,7 +1307,7 @@ export const IntegrationCommentInput = z.object({
 /** Lo que recibe el webhook de salida (firmado: X-Chaggu-Signature: t=<unix>,v1=<hex hmac-sha256 de "t.body">). */
 export interface IntegrationEventDTO {
   id: string;
-  type: 'issue.status_changed' | 'issue.commented' | 'issue.updated';
+  type: 'issue.status_changed' | 'issue.commented' | 'issue.updated' | 'issue.review_changed';
   createdAt: string;
   integrationId: string;
   issue: { id: string; externalId: string | null; title: string; status: IssueStatus; url: string };
@@ -1301,6 +1317,8 @@ export interface IntegrationEventDTO {
   to?: IssueStatus;
   /** issue.commented */
   comment?: { body: string };
+  /** issue.review_changed: «approved» = la persona aprobó y ya se puede entregar al cliente. */
+  review?: { from: IssueReview | null; to: IssueReview | null; note?: string };
 }
 
 export const AddMembersInput = z.object({
@@ -1409,7 +1427,12 @@ export const UpdateIssueInput = z.object({
   topicId: z.uuid().nullable().optional(),
   /** Se mezclan con los que ya tiene; `null` borra un campo. */
   fields: IssueFieldsInput.optional(),
+  /** Revisión humana; null la quita. */
+  review: z.enum(ISSUE_REVIEWS).nullable().optional(),
+  /** Comentario que acompaña la revisión (p. ej. qué corregir); queda como comentario de la tarea. */
+  reviewNote: z.string().trim().min(1).max(4000).optional(),
 });
+export const TaskInboxSeenInput = z.object({ issueIds: z.array(z.uuid()).max(500).optional() });
 export const IssueCommentInput = z.object({ body: z.string().trim().min(1).max(4000) });
 
 export const DeriveInput = z.object({
@@ -1834,6 +1857,9 @@ export type AccountEvent =
   | { type: 'issue.personal'; issue: IssueDTO }
   /** Perdí acceso a un asunto (cambió su visibilidad o me quitaron): sacarlo de la lista. */
   | { type: 'issue.hidden'; issueId: string; conversationId: string }
+  /** Llegó algo a mi bandeja de tareas (me asignaron, me piden revisar o revisaron la mía); seen = se vieron (ids o todas). */
+  | { type: 'issue.inbox'; item: TaskInboxItemDTO; issue: IssueDTO | null }
+  | { type: 'issue.inbox_seen'; issueIds: string[] | null }
   /** Cambió mi modo sueño (desde este u otro dispositivo). */
   | { type: 'me.sleep'; sleep: SleepDTO }
   | { type: 'person.availability'; userId: string; availability: AvailabilityDTO }

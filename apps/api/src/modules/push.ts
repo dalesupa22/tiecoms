@@ -402,15 +402,18 @@ export async function pushReaction(messageId: string) {
 }
 
 /** «Te asignaron una tarea»: al responsable nuevo (no a quien asignó), respetando No molestar y las noches. */
-export async function pushIssueAssigned(issueId: string, ownerId: string, actorId: string) {
+/** reason (llamada con Lorena 7-oct): «assigned» te asignaron, «review» te piden revisarla, «reviewed» revisaron la que pediste. */
+export async function pushIssueAssigned(issueId: string, ownerId: string, actorId: string, reason: 'assigned' | 'review' | 'reviewed' = 'assigned') {
   const { rows } = await pool.query(
-    `SELECT i.id, i.title, i.conversation_id, i.owner_id, i.assignee_ids, i.status, u.name AS actor_name,
+    `SELECT i.id, i.title, i.conversation_id, i.owner_id, i.assignee_ids, i.status, i.review, u.name AS actor_name,
             EXISTS (SELECT 1 FROM conversation_memberships cm WHERE cm.conversation_id = i.conversation_id AND cm.user_id = $2 AND cm.removed_at IS NULL) AS in_chat
        FROM issues i JOIN users u ON u.id = $3 WHERE i.id = $1`,
     [issueId, ownerId, actorId],
   );
   const r = rows[0];
-  if (!r || (r.owner_id !== ownerId && !(r.assignee_ids ?? []).includes(ownerId)) || r.status === 'done' || r.status === 'cancelled') return 0;
+  if (!r) return 0;
+  const assigned = r.owner_id === ownerId || (r.assignee_ids ?? []).includes(ownerId);
+  if (reason !== 'reviewed' && (!assigned || r.status === 'done' || r.status === 'cancelled')) return 0;
   const { rows: targets } = await pool.query<Target>(
     `SELECT u.id AS user_id, ps.id AS sub_id, ps.provider, ps.token, ps.environment, ps.lang
        FROM users u ${ACTIVE_SESSION} WHERE u.id = $1 AND u.disabled_at IS NULL`,
@@ -419,7 +422,11 @@ export async function pushIssueAssigned(issueId: string, ownerId: string, actorI
   // El nombre del grupo solo si la persona está en él (un tercero asignado no lo ve).
   const labels = r.in_chat ? await groupLabels(r.conversation_id, [ownerId]) : new Map<string, string>();
   await deliver(targets, (t) => ({
-    title: t.lang === 'en' ? `${r.actor_name} assigned you a task` : `${r.actor_name} te asignó una tarea`,
+    title: reason === 'review'
+      ? (t.lang === 'en' ? `${r.actor_name} asks you to review a task` : `${r.actor_name} te pide revisar una tarea`)
+      : reason === 'reviewed'
+        ? reviewedTitle(t.lang === 'en', r.actor_name, r.review)
+        : t.lang === 'en' ? `${r.actor_name} assigned you a task` : `${r.actor_name} te asignó una tarea`,
     subtitle: labels.get(t.user_id) ?? null,
     body: clip(r.title, 180),
     threadId: r.in_chat ? r.conversation_id : `issue-${r.id}`, category: 'TC_ISSUE', collapseId: `issue-${r.id}`,
@@ -525,4 +532,11 @@ export async function pushWaDrafts(userId: string) {
     data: { type: 'wa.drafts', conversationId: '', count: n },
   }));
   return targets.length;
+}
+
+function reviewedTitle(en: boolean, who: string, review: string | null) {
+  if (review === 'approved') return en ? `${who} approved a task` : `${who} aprobó una tarea`;
+  if (review === 'changes') return en ? `${who} asks for changes` : `${who} pidió corregir una tarea`;
+  if (review === 'human') return en ? `${who} marked a task for a person` : `${who} marcó una tarea para intervención humana`;
+  return en ? `${who} reviewed a task` : `${who} revisó una tarea`;
 }

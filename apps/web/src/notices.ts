@@ -1,6 +1,6 @@
 import type { ClientNotice } from '@tiecoms/client-core';
 import { client } from './app-client.ts';
-import { t } from './i18n.ts';
+import { getLang, t } from './i18n.ts';
 import { toast } from './menu.tsx';
 import { BASE, navigate } from './router.ts';
 import { isOpenInPanes } from './split.ts';
@@ -133,6 +133,23 @@ export function handleNotice(n: ClientNotice) {
       const note = new Notification(`${n.call.kind === 'video' ? '🎥' : '📞'} ${t('call.incomingFrom', { name: n.callerName })}`, { body: n.conversationTitle ?? '', tag: `call-${n.call.id}`, requireInteraction: true, icon: `${BASE}/icon-192.png` });
       note.onclick = () => { window.focus(); navigate(`/c/${n.call.conversationId}`); note.close(); };
       callNotes.set(n.call.id, note);
+    }
+    return;
+  }
+  if (n.kind === 'taskInbox') {
+    // Llamada con Lorena (7-oct): que se note cuando llega una tarea, no solo cuando se cierra.
+    const who = n.item.actorId ? personById(d, n.item.actorId)?.name ?? t('common.participant') : 'chaggu';
+    const en = getLang() === 'en';
+    const verb = n.item.reason === 'review' ? (en ? 'asks you to review' : 'te pide revisar')
+      : n.item.reason === 'reviewed' ? (en ? 'reviewed' : 'revisó')
+      : (en ? 'assigned you' : 'te asignó');
+    const title = n.issue?.title ?? '';
+    const go = () => navigate(`/asuntos?issue=${n.item.issueId}`);
+    toast(`📋 ${who} ${verb}: ${title}`, { label: t('rem.open'), run: go }, 12_000);
+    if (!dnd) playMessageSound(null);
+    if (canNotify && document.visibilityState !== 'visible') {
+      const note = new Notification(`📋 ${who} ${verb}`, { body: title, tag: `task-${n.item.issueId}`, icon: `${BASE}/icon-192.png` });
+      note.onclick = () => { window.focus(); go(); note.close(); };
     }
     return;
   }

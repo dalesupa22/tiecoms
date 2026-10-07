@@ -20,3 +20,15 @@
 .task-attachment-actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:10px }
 .task-move-form { display:flex; gap:8px; flex-wrap:wrap } .task-move-form select { max-width:100%; flex:1 }
 @media(max-width:540px){.task-stat-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.task-today{gap:16px;padding:16px}.task-cards{grid-template-columns:1fr}.task-board{grid-template-columns:repeat(5,230px)}}
+
+/* Llamada con Lorena (7-oct): tareas que llegan y revisión humana. */
+.issue-row.is-new { box-shadow: inset 3px 0 0 var(--brand, #2f7cf6); }
+.new-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--brand, #2f7cf6); margin-right: 6px; vertical-align: middle; }
+.task-inbox { margin: 4px 0 18px; padding: 10px 12px; border-radius: 12px; background: color-mix(in srgb, var(--brand, #2f7cf6) 7%, transparent); }
+.task-inbox-item { display: flex; flex-direction: column; gap: 3px; }
+.review-pill { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border-radius: 999px; font-size: 12px; white-space: nowrap; background: var(--soft, rgba(127,127,127,.12)); }
+.review-pill.review-pending { background: color-mix(in srgb, #f5a623 22%, transparent); }
+.review-pill.review-approved { background: color-mix(in srgb, #2fb67c 22%, transparent); }
+.review-pill.review-changes { background: color-mix(in srgb, #e5534b 20%, transparent); }
+.review-pill.review-human { background: color-mix(in srgb, #8a63d2 22%, transparent); }
+.review-bar textarea { margin-top: 6px; width: 100%; resize: vertical; }

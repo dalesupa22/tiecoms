@@ -218,7 +218,7 @@ function taskView(b: BootstrapDTO, i: IssueDTO) {
   return {
     id: i.id, title: i.title, status: i.status, due: i.dueDate, attachments: i.attachments ?? [],
     assignees: (i.assigneeIds ?? (i.ownerId ? [i.ownerId] : [])).map(name), requestedBy: name(i.requestedBy), chat: c ? chatName(b, c) : null, chatId: i.conversationId,
-    ...(i.externalId ? { ticket: i.externalId } : {}), ...(i.externalMeta ? { meta: i.externalMeta } : {}), ...(i.fields ? { fields: i.fields } : {}), comments: i.commentCount, updatedAt: i.updatedAt,
+    ...(i.externalId ? { ticket: i.externalId } : {}), ...(i.externalMeta ? { meta: i.externalMeta } : {}), ...(i.fields ? { fields: i.fields } : {}), ...(i.review ? { review: i.review, reviewBy: name(i.reviewBy), reviewAt: i.reviewAt } : {}), comments: i.commentCount, updatedAt: i.updatedAt,
   };
 }
 
@@ -721,18 +721,19 @@ const tools: Tool[] = [
   // ---------- Tareas y tickets (asuntos; los de la mesa de ayuda llegan por integración) ----------
   {
     name: 'list_tasks', readOnly: true, scope: 'tasks:read',
-    description: 'Tareas y tickets que puedo ver. mine=true: solo los asignados a mí. chat: solo las de ese chat o grupo. Incluye los tickets de la mesa de ayuda (con cliente y correo en meta) y los campos dinámicos de cada tarea (fields, que en la app son columnas). field + field_value filtran por un campo.',
+    description: 'Tareas y tickets que puedo ver. review filtra por revisión humana (pending = por revisar, changes = piden corrección, human = necesita intervención humana, approved). mine=true: solo los asignados a mí. chat: solo las de ese chat o grupo. Incluye los tickets de la mesa de ayuda (con cliente y correo en meta) y los campos dinámicos de cada tarea (fields, que en la app son columnas). field + field_value filtran por un campo.',
     schema: z.object({
       mine: z.boolean().optional(), include_closed: z.boolean().optional(), query: z.string().max(120).optional(), limit: z.number().int().min(1).max(100).optional(),
       chat: z.string().max(200).optional().describe('Id o nombre del chat o grupo'),
       field: z.string().max(60).optional().describe('Nombre de un campo dinámico (p. ej. «Resultado»)'),
       field_value: z.string().max(200).optional().describe('Valor que debe contener ese campo'),
+      review: z.enum(['pending', 'approved', 'changes', 'human']).optional().describe('Solo las que están en esa revisión humana'),
     }),
     run: async (userId, a) => {
       const b = await bootstrap(userId);
       const conversationId = a.chat ? findChat(b, a.chat).id : undefined;
       const list = await issues.listIssues(userId, { mine: a.mine ?? false, open: !a.include_closed, ...(conversationId ? { conversationId } : {}) });
-      let out = list.map((i) => taskView(b, i));
+      let out = list.filter((i) => !a.review || i.review === a.review).map((i) => taskView(b, i));
       if (a.query) { const q = fold(a.query); out = out.filter((t) => fold(`${t.title} ${JSON.stringify(t.meta ?? {})} ${JSON.stringify(t.fields ?? {})} ${t.ticket ?? ''}`).includes(q)); }
       if (a.field) {
         const k = fold(a.field); const v = a.field_value ? fold(a.field_value) : null;
@@ -741,6 +742,21 @@ const tools: Tool[] = [
       const defined = conversationId ? (await issues.getTaskColumns(userId, conversationId)).columns : [];
       const columns = [...new Set([...defined.map((c) => c.name), ...out.flatMap((t) => Object.keys(t.fields ?? {}))])];
       return { tasks: out.slice(0, a.limit ?? 30), total: out.length, ...(columns.length ? { columns } : {}), ...(defined.length ? { columnTypes: defined } : {}) };
+    },
+  },
+  {
+    name: 'list_task_inbox', readOnly: true, scope: 'tasks:read',
+    description: 'Mi bandeja «Nuevas» de tareas: lo que me asignaron, me piden revisar (review) o ya revisaron (reviewed) y todavía no he visto. mark_seen=true las marca vistas.',
+    schema: z.object({ mark_seen: z.boolean().optional() }),
+    run: async (userId, a) => {
+      const [b, inbox] = await Promise.all([bootstrap(userId), issues.listInbox(userId)]);
+      const who = (id: string | null) => (id ? (id === b.me.id ? `${b.me.name} (tú)` : (b.people.find((p) => p.id === id)?.name ?? 'Alguien')) : null);
+      const items = [];
+      for (const it of inbox.items) {
+        try { items.push({ reason: it.reason, by: who(it.actorId), at: it.at, task: taskView(b, await issues.loadVisible(pool, userId, it.issueId)) }); } catch { /* ya no la veo */ }
+      }
+      if (a.mark_seen && inbox.items.length) await issues.markInboxSeen(userId, inbox.items.map((i) => i.issueId));
+      return { items };
     },
   },
   {
@@ -772,7 +788,7 @@ const tools: Tool[] = [
   },
   {
     name: 'update_task', scope: 'tasks:write',
-    description: 'Cambia un ticket o tarea (idempotency_key evita repetir el cambio): estado (open, in_progress, waiting, done, cancelled), responsables (por nombre o id; reemplaza la lista), fecha límite, título o campos dinámicos (fields: se mezclan con los que ya tiene; null borra un campo). Confirma antes con la persona.',
+    description: 'Cambia un ticket o tarea (idempotency_key evita repetir el cambio): revisión humana (review), estado (open, in_progress, waiting, done, cancelled), responsables (por nombre o id; reemplaza la lista), fecha límite, título o campos dinámicos (fields: se mezclan con los que ya tiene; null borra un campo). Confirma antes con la persona.',
     schema: z.object({
       id: z.string().uuid(), idempotency_key: idempotencyKey.optional(),
       status: z.enum(['open', 'in_progress', 'waiting', 'done', 'cancelled']).optional(),
@@ -780,10 +796,14 @@ const tools: Tool[] = [
       due_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional().describe('AAAA-MM-DD o null para quitarla'),
       title: z.string().trim().min(2).max(200).optional(),
       fields: IssueFieldsInput.optional().describe('Campos dinámicos { "Servicios": "…", "Prioridad": 2, "Bloqueado": true }; null borra'),
+      review: z.enum(['pending', 'approved', 'changes', 'human']).nullable().optional().describe('Revisión humana: pending = la IA lo resolvió y queda para que el responsable lo apruebe (sube antes la evidencia con upload_task_attachment y comment_task); changes/human/approved las marca la persona; null la quita'),
+      review_note: z.string().trim().min(1).max(4000).optional().describe('Comentario que acompaña el cambio de revisión'),
     }),
     run: async (userId, a, ctx) => {
       const b = await bootstrap(userId);
       const input: Record<string, unknown> = {};
+      if (a.review !== undefined) input.review = a.review;
+      if (a.review_note) input.reviewNote = a.review_note;
       if (a.status) input.status = a.status;
       if (a.title) input.title = a.title;
       if (a.fields) input.fields = a.fields;

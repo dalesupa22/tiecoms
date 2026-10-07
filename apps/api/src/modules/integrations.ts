@@ -354,6 +354,7 @@ export async function updateIssue(integ: IntegrationAuth, issueId: string, input
     if (input.title) patch.title = input.title;
     if (input.topicId !== undefined) patch.topicId = input.topicId;
     if (input.fields) patch.fields = input.fields;
+    if (input.review !== undefined) patch.review = input.review;
     // Permission check and metadata update belong to the same transaction as the status/title.
     await issues.updateIssue(integ.botUserId, issueId, patch as any, c);
     if (input.externalMeta) await c.query('UPDATE issues SET external_meta = $2 WHERE id = $1', [issueId, JSON.stringify(input.externalMeta)]);

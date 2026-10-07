@@ -141,6 +141,8 @@ export function Rail({ route }: { route: Route }) {
     return a - now < 2 * 3600_000 && b > now && (e.organizerId === d.me.id || e.invitees.some((i) => i.userId === d.me.id && i.rsvp !== 'no'));
   }));
   // Tareas: una tarea mía abierta que vence hoy o ya se venció.
+  // Tareas que llegaron y no he visto (me asignaron o me piden revisar): número en Tareas.
+  const taskInbox = useClient((s) => s.taskInbox.length);
   const due = useClient((s) => {
     const today = ymd(new Date());
     return Object.values(s.issues).some((i) => i.ownerId === d.me.id && !i.closedAt && !!i.dueDate && i.dueDate.slice(0, 10) <= today);
@@ -192,7 +194,7 @@ export function Rail({ route }: { route: Route }) {
       {mailOn && <RailItem icon="mail" label={t('nav.mail')} on={mode === 'mail'} count={mail} tone="mail" drag="inbox" onClick={() => setSideMode('mail')} />}
       <span className="rail-sep" aria-hidden />
       <RailItem icon="agenda" label={t('nav.agenda')} on={route.name === 'agenda'} dot={soon} drag="agenda" onClick={() => navigate('/agenda')} />
-      <RailItem icon="tasks" label={t('nav.issues')} on={route.name === 'issues'} dot={due} drag="tasks" onClick={() => navigate('/asuntos')} />
+      <RailItem icon="tasks" label={t('nav.issues')} on={route.name === 'issues'} count={taskInbox} dot={due} drag="tasks" onClick={() => navigate('/asuntos')} />
       <RailItem icon="trazo" label={t('nav.trazo')} on={route.name === 'trazo'} drag="trazo" onClick={() => navigate('/trazo')} />
       {callsOn && <RailItem icon="calls" label={missed > 0 ? t('calls.missedN', { n: missed }) : t('nav.calls')} on={route.name === 'calls'} count={missed} tone={missed > 0 ? 'missed' : 'call'} dot={anyCall || inCall} drag="calls" onClick={() => navigate('/llamadas')} />}
       {PAGES_MORE.slice(0, extraCount).map((p) => <RailItem key={p.name} icon={p.icon} label={t(p.label as never)} on={route.name === p.name} onClick={() => navigate(p.to)} />)}

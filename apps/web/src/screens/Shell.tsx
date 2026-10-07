@@ -183,12 +183,13 @@ function TabIcon({ name }: { name: string }) {
 /** Barra inferior móvil: 5 pestañas fijas (docs/GRUPOS.md), 6 con las llamadas prendidas. Solo íconos, sin texto. */
 function MobileTabs({ route }: { route: Route }) {
   const d = useClient((s) => s.data);
+  const taskInbox = useClient((s) => s.taskInbox.length);
   const unreadOf = (f: (c: ConversationDTO) => boolean) => d?.conversations.filter(f).reduce((n, c) => n + (isMuted(c) ? 0 : c.unread), 0) ?? 0;
   const me = d ? personById(d, d.me.id) : null;
   const tabs = [
     { name: 'groups', label: t('nav.groups'), ico: 'groups', to: '/grupos', badge: unreadOf((c) => !!c.workspaceId) },
     { name: 'dms', label: t('nav.dms'), ico: 'dms', to: '/dms', badge: unreadOf((c) => c.kind === 'direct' || c.kind === 'multi') },
-    { name: 'issues', label: t('nav.issues'), ico: 'tasks', to: '/asuntos', badge: 0 },
+    { name: 'issues', label: t('nav.issues'), ico: 'tasks', to: '/asuntos', badge: taskInbox },
     { name: 'agenda', label: t('nav.calendar'), ico: 'agenda', to: '/agenda', badge: 0 },
     ...(d?.features?.calls ? [{ name: 'calls', label: t('nav.calls'), ico: 'calls', to: '/llamadas', badge: d.missedCalls ?? 0 }] : []),
     { name: 'settings', label: t('nav.you'), ico: null, to: '/ajustes', badge: 0 },

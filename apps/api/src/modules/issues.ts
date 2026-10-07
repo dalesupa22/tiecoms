@@ -1,5 +1,5 @@
 import type { z } from 'zod';
-import { ISSUE_FIELDS_MAX, type TaskColumnDTO, type TaskColumnsInput, type CreateIssueInput, type IssueDTO, type IssueFieldValue, type IssueEventDTO, type IssueVisibility, type UpdateIssueInput } from '@tiecoms/contracts';
+import { ISSUE_FIELDS_MAX, type IssueReview, type TaskInboxItemDTO, type TaskInboxReason, type TaskColumnDTO, type TaskColumnsInput, type CreateIssueInput, type IssueDTO, type IssueFieldValue, type IssueEventDTO, type IssueVisibility, type UpdateIssueInput } from '@tiecoms/contracts';
 import { conversationAccess } from '../access.ts';
 import { audit, enqueueOutbox, pool, tx, type Db, type Tx } from '../db.ts';
 import { badRequest, forbidden, notFound, taskNotFound } from '../errors.ts';
@@ -75,6 +75,7 @@ function toDTO(r: any): IssueDTO {
     ...(r.visibility && r.visibility !== 'all' ? { viewerIds: r.viewer_ids ?? [] } : {}),
     ...(r.integration_id ? { integrationId: r.integration_id, externalId: r.external_id ?? null, externalMeta: r.external_meta ?? null } : {}),
     ...(r.fields && Object.keys(r.fields).length ? { fields: r.fields } : {}),
+    ...(r.review ? { review: r.review, reviewBy: r.review_by ?? null, reviewAt: iso(r.review_at) } : {}),
   };
 }
 
@@ -163,8 +164,48 @@ async function publish(c: Tx, issue: IssueDTO, before: { visibility: IssueVisibi
 }
 
 async function queueAssignedPush(c: Tx, issueId: string, ownerId: string | null, actorId: string) {
-  if (!ownerId || ownerId === actorId) return;
-  await c.query("INSERT INTO jobs (kind, payload, max_attempts) VALUES ('push.issue', $1, 2)", [JSON.stringify({ issueId, ownerId, actorId })]);
+  await notifyInbox(c, issueId, ownerId, actorId, 'assigned');
+}
+
+/**
+ * Bandeja «Nuevas» (llamada con Lorena, 7-oct): las tareas que llegan quedan marcadas hasta que la persona las ve,
+ * con push y aviso en vivo. Solo si la persona ve la tarea; nunca a quien hizo el cambio.
+ */
+async function notifyInbox(c: Tx, issueId: string, userId: string | null, actorId: string, reason: TaskInboxReason) {
+  if (!userId || userId === actorId) return;
+  let issue: IssueDTO;
+  try { issue = await loadVisible(c, userId, issueId); } catch { return; }
+  const { rows } = await c.query(
+    `INSERT INTO issue_inbox (user_id, issue_id, reason, actor_id) VALUES ($1,$2,$3,$4)
+     ON CONFLICT (user_id, issue_id) DO UPDATE SET reason = EXCLUDED.reason, actor_id = EXCLUDED.actor_id, created_at = now(), seen_at = NULL
+     RETURNING created_at`,
+    [userId, issueId, reason, actorId],
+  );
+  const item: TaskInboxItemDTO = { issueId, reason, actorId, at: iso(rows[0].created_at)! };
+  await enqueueOutbox(c, 'account.event', { userIds: [userId], event: { type: 'issue.inbox', item, issue } });
+  await c.query("INSERT INTO jobs (kind, payload, max_attempts) VALUES ('push.issue', $1, 2)", [JSON.stringify({ issueId, ownerId: userId, actorId, reason })]);
+}
+
+/** Lo que llegó y no he visto, de tareas que sigo viendo (más nuevas primero). */
+export async function listInbox(userId: string): Promise<{ items: TaskInboxItemDTO[] }> {
+  const { rows } = await pool.query(
+    `SELECT b.issue_id, b.reason, b.actor_id, b.created_at FROM issue_inbox b
+      WHERE b.user_id = $1 AND b.seen_at IS NULL AND b.issue_id IN (SELECT i.id FROM issues i ${VISIBLE})
+      ORDER BY b.created_at DESC LIMIT 200`,
+    [userId],
+  );
+  return { items: rows.map((r) => ({ issueId: r.issue_id, reason: r.reason, actorId: r.actor_id, at: iso(r.created_at)! })) };
+}
+
+/** Marcar vistas (unas o todas); los demás dispositivos de la persona se enteran. */
+export async function markInboxSeen(userId: string, issueIds?: string[]) {
+  await tx(async (c) => {
+    const r = issueIds
+      ? await c.query('UPDATE issue_inbox SET seen_at = now() WHERE user_id = $1 AND seen_at IS NULL AND issue_id = ANY($2)', [userId, issueIds])
+      : await c.query('UPDATE issue_inbox SET seen_at = now() WHERE user_id = $1 AND seen_at IS NULL', [userId]);
+    if (r.rowCount) await enqueueOutbox(c, 'account.event', { userIds: [userId], event: { type: 'issue.inbox_seen', issueIds: issueIds ?? null } });
+  });
+  return { ok: true };
 }
 
 /** Solo adjuntos propios pendientes o ya vinculados a esta tarea; nunca archivos de otro asunto. */
@@ -370,6 +411,16 @@ export async function updateIssue(userId: string, issueId: string, input: z.infe
         events.push(['fields', { changed, removed }]);
       }
     }
+    // Revisión humana: quien la deja «por revisar» recibe la decisión; los responsables, el pedido de revisión.
+    const prevReview: IssueReview | null = cur.review ?? null;
+    const reviewChanged = input.review !== undefined && input.review !== prevReview;
+    if (reviewChanged) {
+      add('review', input.review); add('review_by', input.review ? userId : null);
+      sets.push(input.review ? 'review_at = now()' : 'review_at = NULL');
+      if (input.review === 'pending') add('review_requested_by', userId);
+      events.push(['review', { from: prevReview, to: input.review, ...(input.reviewNote ? { note: input.reviewNote } : {}) }]);
+    }
+    if (input.reviewNote && !reviewChanged) throw badRequest('reviewNote va con un cambio de revisión');
     let topicChanged = false;
     const currentTopicId = moving ? null : cur.topic_id;
     if (input.topicId !== undefined) {
@@ -404,11 +455,20 @@ export async function updateIssue(userId: string, issueId: string, input: z.infe
       await publish(c, dto);
     } else await publish(c, dto, before);
     // Cambiar solo el tema es interno de Chaggu: no dispara el webhook de la integración.
-    if (cur.integration_id && events.length) {
+    if (cur.integration_id && events.some(([k]) => k !== 'review')) {
       if (input.status !== undefined && input.status !== cur.status) await queueIntegrationEvent(c, issueId, userId, { type: 'issue.status_changed', from: cur.status, to: input.status });
       else await queueIntegrationEvent(c, issueId, userId, { type: 'issue.updated' });
     }
     for (const uid of assignees.filter((uid) => !previousAssignees.includes(uid))) await queueAssignedPush(c, issueId, uid, userId);
+    if (reviewChanged) {
+      if (input.reviewNote) await c.query("INSERT INTO issue_events (issue_id, actor_id, kind, payload) VALUES ($1,$2,'comment',$3)", [issueId, userId, JSON.stringify({ body: input.reviewNote })]);
+      if (input.review === 'pending') {
+        for (const uid of assignees) await notifyInbox(c, issueId, uid, userId, 'review');
+      } else if (input.review) {
+        for (const uid of new Set([cur.review_requested_by, cur.created_by].filter(Boolean) as string[])) await notifyInbox(c, issueId, uid, userId, 'reviewed');
+      }
+      if (cur.integration_id) await queueIntegrationEvent(c, issueId, userId, { type: 'issue.review_changed', from: prevReview, to: input.review ?? null, ...(input.reviewNote ? { note: input.reviewNote } : {}) });
+    }
     await audit(c, userId, 'issue.updated', { type: 'issue', id: issueId, workspaceId: cur.workspace_id }, { changes: events.map(([k]) => k) });
     return dto;
   });

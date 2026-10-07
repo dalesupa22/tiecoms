@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import type { BootstrapDTO, IssueDTO, IssueEventDTO, IssueFieldValue, IssueStatus, IssueVisibility } from '@tiecoms/contracts';
+import type { BootstrapDTO, IssueDTO, IssueEventDTO, IssueFieldValue, IssueReview, IssueStatus, IssueVisibility, TaskInboxReason } from '@tiecoms/contracts';
 import { client, useClient } from '../app-client.ts';
 import { updateIssuePreferences, usePersonalPreferences } from '../personal-prefs.ts';
 import { PinToGrid } from './Tray.tsx';
@@ -41,6 +41,47 @@ export function issueFlags(i: IssueDTO) {
 export function dueLabel(i: IssueDTO) {
   if (!i.dueDate) return t('issue.noDue');
   return new Date(`${i.dueDate}T12:00:00`).toLocaleDateString(locale(), { day: 'numeric', month: 'short' });
+}
+
+/** Revisión humana (llamada con Lorena 7-oct): la IA resuelve, una persona aprueba, pide corrección o la toma. */
+export const REVIEWS: IssueReview[] = ['pending', 'changes', 'human', 'approved'];
+export function reviewLabel(r: IssueReview) {
+  return ({ pending: taskText('Por revisar', 'To review'), approved: taskText('Aprobada', 'Approved'), changes: taskText('Corregir', 'Changes requested'), human: taskText('Intervención humana', 'Needs a person') })[r];
+}
+const REVIEW_ICON: Record<IssueReview, string> = { pending: '👀', approved: '✅', changes: '✎', human: '🙋' };
+export function ReviewPill({ review }: { review: IssueReview }) {
+  return <span className={`review-pill review-${review}`}>{REVIEW_ICON[review]} {reviewLabel(review)}</span>;
+}
+export function inboxReasonLabel(r: TaskInboxReason) {
+  return ({ assigned: taskText('Te la asignaron', 'Assigned to you'), review: taskText('Te piden revisarla', 'Review requested'), reviewed: taskText('Ya la revisaron', 'Reviewed') })[r];
+}
+
+/** Revisar: aprobar, pedir corrección (con comentario para quien la resolvió) o marcar que necesita a una persona. */
+function ReviewBar({ i, onError }: { i: IssueDTO; onError: (e: string) => void }) {
+  const d = useClient((s) => s.data)!;
+  const [note, setNote] = useState('');
+  const [busy, setBusy] = useState(false);
+  const set = async (r: IssueReview | null) => {
+    if (busy) return;
+    if (r === 'changes' && !note.trim()) { onError(taskText('Escribe qué hay que corregir.', 'Write what needs to change.')); return; }
+    setBusy(true);
+    try { await client.reviewIssue(i.id, r, note.trim() || undefined); setNote(''); } catch (e) { onError(errorText(e)); } finally { setBusy(false); }
+  };
+  const by = i.reviewBy ? personById(d, i.reviewBy)?.name : null;
+  return (
+    <div className={`issue-q review-bar ${i.review ? `is-${i.review}` : ''}`}>
+      <div className="issue-q-label">{taskText('Revisión', 'Review')}{i.review ? <> · <ReviewPill review={i.review} />{by ? <span className="small muted"> {by}</span> : null}</> : null}</div>
+      <div className="chips">
+        {i.review !== 'approved' && <button className="chip" disabled={busy} onClick={() => void set('approved')}>✅ {taskText('Aprobar', 'Approve')}</button>}
+        <button className="chip" disabled={busy} onClick={() => void set('changes')}>✎ {taskText('Pedir corrección', 'Request changes')}</button>
+        {i.review !== 'human' && <button className="chip" disabled={busy} onClick={() => void set('human')}>🙋 {taskText('Necesita intervención humana', 'Needs a person')}</button>}
+        {!i.review && <button className="chip ghost" disabled={busy} onClick={() => void set('pending')}>👀 {taskText('Dejar por revisar', 'Mark for review')}</button>}
+        {i.review && <button className="chip ghost" disabled={busy} onClick={() => void set(null)}>{taskText('Quitar revisión', 'Clear review')}</button>}
+      </div>
+      <textarea className="input" rows={2} maxLength={4000} value={note} onChange={(e) => setNote(e.target.value)}
+        placeholder={taskText('Comentario para quien la resolvió (obligatorio para pedir corrección)', 'Note for whoever solved it (required to request changes)')} />
+    </div>
+  );
 }
 
 export function StatusPill({ status }: { status: IssueStatus }) {
@@ -140,6 +181,7 @@ export function IssueRow({ i, showWhere = true, showOwner = true, child = false,
   const parent = i.parentIssueId ? all[i.parentIssueId] : null;
   // Una tarea en un sidechat se marca para que se sepa dónde se habla de ella.
   const inSide = !!parent && parent.conversationId !== i.conversationId;
+  const isNew = useClient((s) => s.taskInbox.some((x) => x.issueId === i.id));
   const meta = [
     isPersonal(i) ? t('issue.personalShort') : showOwner ? responsible || t('issue.noOwner') : null,
     !child && parent ? `↳ ${parent.title}` : null,
@@ -149,12 +191,13 @@ export function IssueRow({ i, showWhere = true, showOwner = true, child = false,
     i.commentCount > 0 ? `💬 ${i.commentCount}` : null,
   ].filter(Boolean);
   return (
-    <div role="button" tabIndex={0} draggable title={t('grid.dragTask')} onDragStart={(e) => { setDrag(e, 'task', { id: i.id, title: i.title }, i.title); e.dataTransfer.setData('application/x-chaggu-issue-id', i.id); }} className={`card issue-row ${child ? 'is-child' : ''} ${f.stalledDays || f.overdue ? 'is-jam' : ''} ${done ? 'is-done' : ''}`}
+    <div role="button" tabIndex={0} draggable title={t('grid.dragTask')} onDragStart={(e) => { setDrag(e, 'task', { id: i.id, title: i.title }, i.title); e.dataTransfer.setData('application/x-chaggu-issue-id', i.id); }} className={`card issue-row ${child ? 'is-child' : ''} ${f.stalledDays || f.overdue ? 'is-jam' : ''} ${done ? 'is-done' : ''} ${isNew ? 'is-new' : ''}`}
       onClick={() => onOpen(i.id)} onKeyDown={(e) => { if (e.key === 'Enter') onOpen(i.id); }} {...menuProps(() => issueQuickMenu(i))}>
       {child && <span className="child-elbow" aria-hidden>↳</span>}
       <IssueCheck i={i} size={child ? 18 : 20} />
       <span className="grow" style={{ minWidth: 0 }}>
         <b className="ellipsis issue-title" style={{ display: 'block' }}>
+          {isNew && <span className="new-dot" title={taskText('Nueva', 'New')} aria-label={taskText('Nueva', 'New')} />}
           {(isRestricted(i) || isPersonal(i)) && <span className="lock" title={isPersonal(i) ? t('issue.personalOption') : visibilityLabel(d, i)} aria-label={isPersonal(i) ? t('issue.personalOption') : visibilityLabel(d, i)}>🔒 </span>}{i.title}
         </b>
         {(meta.length > 0 || i.topicId) && <span className="small muted ellipsis issue-meta" style={{ display: 'block' }}>
@@ -165,6 +208,7 @@ export function IssueRow({ i, showWhere = true, showOwner = true, child = false,
       {kids.length > 0 && <span className={`kids-badge ${kidsDone === kids.length ? 'all-done' : ''}`} title={t('task.progress', { done: kidsDone, n: kids.length })}>☑ {kidsDone}/{kids.length}</span>}
       {f.stalledDays > 0 && <span className="jam-badge" title={t('issue.bottleneck')}>⏱ {f.stalledDays === 1 ? t('issue.stalledOne') : t('issue.stalled', { n: f.stalledDays })}</span>}
       {i.dueDate && <span className={`small ${f.overdue ? 'error' : 'muted'}`} style={{ whiteSpace: 'nowrap' }}>{f.overdue ? t('issue.overdue') : f.dueToday ? t('issue.today') : dueLabel(i)}</span>}
+      {i.review && <ReviewPill review={i.review} />}
       {(i.status === 'in_progress' || i.status === 'waiting' || i.status === 'cancelled') && <StatusPill status={i.status} />}
       {!i.parentIssueId && !done && !isPersonal(i) && (
         <button className="row-add" title={t('task.add')} aria-label={t('task.add')}
@@ -352,6 +396,7 @@ function eventText(d: BootstrapDTO, e: IssueEventDTO) {
     case 'due': return t('issue.ev.due', { to: p.to ? new Date(`${p.to}T12:00:00`).toLocaleDateString(locale(), { day: 'numeric', month: 'short' }) : t('issue.noDue') });
     case 'title': return `${t('issue.ev.title')} → «${p.to}»`;
     case 'waiting': return `${t('issue.ev.waiting')}${p.to ? `: ${orgById(d, p.to)?.name ?? ''}` : ''}`;
+    case 'review': return `${taskText('Revisión', 'Review')} → ${p.to ? reviewLabel(p.to) : taskText('sin revisión', 'none')}`;
     case 'fields': return `${taskText('Campos', 'Fields')}: ${[...(p.changed ?? []), ...(p.removed ?? []).map((k: string) => `−${k}`)].join(', ')}`;
     case 'visibility': return `${t('task.evVis')} → ${p.to === 'all' ? t('task.visAll') : p.to === 'org' ? t('task.visOrgShort') : t('task.visPrivate')}`;
     default: return '';
@@ -378,6 +423,8 @@ export function IssueDrawer({ id: startId, onClose }: { id: string; onClose: () 
   const saveLock = useRef(false);
   const load = () => client.issueDetail(id).then((r) => setEvents(r.events)).catch((e) => setError(errorText(e)));
   useEffect(() => { void load(); }, [id, live?.updatedAt]);
+  // Abrirla la saca de «Nuevas».
+  useEffect(() => { void client.markTaskInboxSeen([id]); }, [id]);
   if (!live) return <Modal title={t('nav.issues')} onClose={onClose}><div className="muted">{error ?? t('common.loading')}</div></Modal>;
   const i = live;
   const done = isClosed(i);
@@ -426,6 +473,7 @@ export function IssueDrawer({ id: startId, onClose }: { id: string; onClose: () 
         ? <button className="link-btn parent-link" onClick={() => setId(parent.id)}>↑ {t('task.partOf', { title: parent.title })}</button>
         : <div className="small muted">{t('task.ofHidden')}</div>)}
       <div className="small muted">{requester ? t('issue.requestedBy', { name: requester.name }) : t('issue.manual')}{isRestricted(i) ? <> · <b>🔒 {visibilityLabel(d, i)}</b></> : null}</div>
+      {!isPersonal(i) && <ReviewBar i={i} onError={setError} />}
 
       {done ? (
         <div className={`issue-done-banner ${i.status === 'cancelled' ? 'is-dropped' : ''}`}>
@@ -669,6 +717,9 @@ export function IssuesBody() {
   const groupBy = preferences.issues?.grouping === 'assignee' ? 'person' : 'group';
   const [pendingMoves, setPendingMoves] = useState<Set<string>>(() => new Set());
   const [query, setQuery] = useState('');
+  const [reviewFilter, setReviewFilter] = useState<'all' | IssueReview>('all');
+  const [groupFilter, setGroupFilter] = useState<string>('all');
+  const inbox = useClient((s) => s.taskInbox);
   // ?issue=<id>: abre el asunto (enlaces de gg, del push o de un asunto personal).
   const [open, setOpen] = useState<string | null>(() => queryParam('issue'));
   const [error, setError] = useState<string | null>(null);
@@ -679,6 +730,8 @@ export function IssuesBody() {
     .filter((i) => !i.conversationId || visibleConvs.has(i.conversationId) || isRestricted(i))
     .filter((i) => scope === 'all' || assignedTo(i, d.me.id))
     .filter((i) => stateFilter === 'all' || (stateFilter === 'closed' ? isClosed(i) : !isClosed(i)))
+    .filter((i) => reviewFilter === 'all' || i.review === reviewFilter)
+    .filter((i) => groupFilter === 'all' || (i.parentIssueId && all[i.parentIssueId] ? all[i.parentIssueId]!.conversationId : i.conversationId) === groupFilter)
     .filter((i) => !query.trim() || `${i.title} ${Object.entries(i.fields ?? {}).map(([k, v]) => `${k} ${fieldText(v)}`).join(' ')}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()))
     .sort(stateFilter === 'closed' ? (a, b) => (b.closedAt ?? '').localeCompare(a.closedAt ?? '') : byUrgency);
   // Por grupo: la conversación con su espacio. Por persona: el responsable, yo primero y «Sin responsable» al final.
@@ -700,6 +753,16 @@ export function IssuesBody() {
     ? (Number(b === d.me.id) - Number(a === d.me.id)) || (Number(a === NONE) - Number(b === NONE)) || sectionTitle(a).localeCompare(sectionTitle(b))
     : bi.length - ai.length || sectionTitle(a).localeCompare(sectionTitle(b)));
   const eligible = Object.values(all).filter((i) => !i.conversationId || visibleConvs.has(i.conversationId) || isRestricted(i));
+  // Grupos y chats que tienen tareas (para ver solo los tickets de un grupo).
+  const convTitle = (k: string) => {
+    const c = d.conversations.find((x) => x.id === k);
+    const ws = c?.workspaceId ? d.workspaces.find((w) => w.id === c.workspaceId) : null;
+    return c ? [ws?.name, conversationTitle(d, c)].filter(Boolean).join(' · ') : t('task.sharedWithMe');
+  };
+  const groupCounts = new Map<string, number>();
+  for (const i of eligible) { const k = i.parentIssueId && all[i.parentIssueId] ? all[i.parentIssueId]!.conversationId : i.conversationId; if (k) groupCounts.set(k, (groupCounts.get(k) ?? 0) + 1); }
+  const groupOptions = [...groupCounts.entries()].map(([k, n]) => [k, convTitle(k), n] as [string, string, number]).sort((a, b) => a[1].localeCompare(b[1]));
+  const fresh = inbox.map((x) => ({ x, i: all[x.issueId] })).filter((r): r is { x: typeof r.x; i: IssueDTO } => !!r.i);
   const move = async (taskId: string, status: IssueStatus) => {
     if (!all[taskId] || pendingMoves.has(taskId) || all[taskId]!.status === status) return;
     setPendingMoves((ids) => new Set([...ids, taskId])); setError(null);
@@ -717,6 +780,14 @@ export function IssuesBody() {
         <select className="input" aria-label={taskText('Estado', 'Status')} value={stateFilter} onChange={(e) => setStateFilter(e.target.value as typeof stateFilter)}>
           <option value="all">{taskText('Todos los estados', 'All statuses')}</option><option value="open">{t('issue.allOpen')}</option><option value="closed">{t('issue.closed')}</option>
         </select>
+        <select className="input" aria-label={taskText('Revisión', 'Review')} value={reviewFilter} onChange={(e) => setReviewFilter(e.target.value as typeof reviewFilter)}>
+          <option value="all">{taskText('Toda revisión', 'Any review')}</option>
+          {REVIEWS.map((r) => <option key={r} value={r}>{reviewLabel(r)} · {eligible.filter((i) => i.review === r).length}</option>)}
+        </select>
+        <select className="input" aria-label={taskText('Grupo', 'Group')} value={groupFilter} onChange={(e) => setGroupFilter(e.target.value)}>
+          <option value="all">{taskText('Todos los grupos y chats', 'All groups and chats')}</option>
+          {groupOptions.map(([k, label, n]) => <option key={k} value={k}>{label} · {n}</option>)}
+        </select>
         <input className="input" type="search" aria-label={taskText('Buscar tareas', 'Search tasks')} placeholder={taskText('Buscar tareas', 'Search tasks')} value={query} onChange={(e) => setQuery(e.target.value)} />
         <div className="seg" role="radiogroup" aria-label={t('issue.groupBy')}>
           {(['group', 'person'] as const).map((g) => <button key={g} role="radio" aria-checked={groupBy === g} className={groupBy === g ? 'on' : ''} onClick={() => { void updateIssuePreferences({ grouping: g === 'person' ? 'assignee' : 'group' }).catch(() => {}); }}>{g === 'group' ? t('issue.byGroup') : t('issue.byPerson')}</button>)}
@@ -725,6 +796,20 @@ export function IssuesBody() {
         {view === 'table' && d.conversations.some((c) => c.canManage && c.kind !== 'direct') && <button className="btn small" onClick={() => openDialog((close) => <TaskColumnsDialog onClose={close} />)}>⚙ {taskText('Columnas', 'Columns')}</button>}
         <TaskReportButton />
       </div>
+      {fresh.length > 0 && (
+        <section className="task-inbox" aria-label={taskText('Nuevas', 'New')}>
+          <div className="row" style={{ marginBottom: 8 }}>
+            <span className="eyebrow grow">🔔 {taskText('Nuevas', 'New')} · {fresh.length}</span>
+            <button className="btn ghost small" onClick={() => void client.markTaskInboxSeen()}>{taskText('Marcar todas como vistas', 'Mark all as seen')}</button>
+          </div>
+          <div className="list" style={{ gap: 6 }}>{fresh.map(({ x, i }) => (
+            <div key={x.issueId} className="task-inbox-item">
+              <span className="small muted">{inboxReasonLabel(x.reason)}{x.actorId ? ` · ${personById(d, x.actorId)?.name ?? t('common.participant')}` : ''}</span>
+              <IssueRow i={i} showWhere onOpen={setOpen} />
+            </div>
+          ))}</div>
+        </section>
+      )}
       {stateFilter !== 'closed' && <QuickAddIssue />}
       {error && <div className="error">{error}</div>}
       {list.length === 0 && <div className="empty">{t('issue.empty')}</div>}

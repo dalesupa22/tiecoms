@@ -32,3 +32,12 @@
 .review-pill.review-changes { background: color-mix(in srgb, #e5534b 20%, transparent); }
 .review-pill.review-human { background: color-mix(in srgb, #8a63d2 22%, transparent); }
 .review-bar textarea { margin-top: 6px; width: 100%; resize: vertical; }
+.task-reply { display: flex; flex-direction: column; gap: 6px; width: 100%; }
+.task-reply textarea { width: 100%; resize: vertical; min-height: 38px; }
+.task-reply.is-compact textarea { min-height: 34px; }
+.task-reply-files { display: flex; flex-wrap: wrap; gap: 6px; }
+.task-reply-actions { gap: 6px; align-items: center; }
+.comment-files { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.comment-files img { max-width: 220px; max-height: 160px; border-radius: 8px; display: block; }
+.board-title { margin: 0 0 8px; font-weight: 600; }
+.ticket-id { font-variant-numeric: tabular-nums; }

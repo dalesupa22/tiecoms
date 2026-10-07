@@ -77,6 +77,13 @@ describe('bandeja de tareas y revisión humana', () => {
     expect((await call(`/api/v1/issues/${taskId}`, { method: 'PATCH', token: lorena.token, body: { reviewNote: 'hola' } })).status).toBe(400);
   });
 
+  it('una respuesta larga (hasta 20.000) se guarda; más no, y vacía sin archivos tampoco', async () => {
+    expect((await call(`/api/v1/issues/${taskId}/comments`, { token: lorena.token, body: { body: 'x'.repeat(15000) } })).status).toBe(200);
+    expect((await call(`/api/v1/issues/${taskId}/comments`, { token: lorena.token, body: { body: 'x'.repeat(20001) } })).status).toBe(400);
+    expect((await call(`/api/v1/issues/${taskId}/comments`, { token: lorena.token, body: { body: '' } })).status).toBe(400);
+    expect((await call(`/api/v1/issues/${taskId}/comments`, { token: lorena.token, body: { body: '', attachmentIds: [randomUUID()] } })).status).toBe(400);
+  });
+
   it('aprobar o marcar intervención humana; quitar la revisión la deja como antes', async () => {
     expect((await call(`/api/v1/issues/${taskId}`, { method: 'PATCH', token: lorena.token, body: { review: 'human' } })).json.review).toBe('human');
     expect((await call(`/api/v1/issues/${taskId}`, { method: 'PATCH', token: lorena.token, body: { review: 'approved' } })).json.review).toBe('approved');

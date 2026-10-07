@@ -781,7 +781,7 @@ const tools: Tool[] = [
   {
     name: 'comment_task', scope: 'tasks:write',
     description: 'Comenta una tarea o ticket. En los tickets de la mesa de ayuda el comentario también vuelve al sistema del cliente. Usa idempotency_key para reintentar sin duplicar el comentario.',
-    schema: z.object({ id: z.string().uuid(), text: z.string().trim().min(1).max(4000), idempotency_key: idempotencyKey.optional() }),
+    schema: z.object({ id: z.string().uuid(), text: z.string().trim().min(1).max(20_000), idempotency_key: idempotencyKey.optional() }),
     run: async (userId, a, ctx) => idempotent(ctx, a.idempotency_key, 'comment_task', { id: a.id, text: a.text },
       (c) => mcpAttachments.taskWriteAccess(c, userId, a.id),
       async (c) => { const task = await issues.commentIssue(userId, a.id, a.text, {}, c); return { ok: true, taskId: task.id, status: task.status, comments: task.commentCount }; }),

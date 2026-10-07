@@ -561,15 +561,27 @@ async function syncIssueMessageTopics(c: Tx, conversationId: string, issueId: st
   return updated.length;
 }
 
-export async function commentIssue(userId: string, issueId: string, body: string, extra: { author?: string; at?: string } = {}, existing?: Tx) {
+export async function commentIssue(userId: string, issueId: string, body: string, extra: { author?: string; at?: string } = {}, existing?: Tx, attachmentIds?: string[]) {
   return inTransaction(existing, async (c) => {
     const { rows } = await c.query('SELECT conversation_id, topic_id, visibility, integration_id, title FROM issues WHERE id = $1 FOR UPDATE', [issueId]);
     if (!rows[0]) throw taskNotFound();
     await loadVisible(c, userId, issueId);
     if (rows[0].visibility === 'all') await conversationAccess(c, userId, rows[0].conversation_id, 'post', true);
     // `author`: quién lo escribió fuera de Chaggu (comentarios que trae una integración). Los clientes muestran el cuerpo.
-    await c.query("INSERT INTO issue_events (issue_id, actor_id, kind, payload) VALUES ($1,$2,'comment',$3)", [issueId, userId, JSON.stringify({ body, ...extra })]);
+    // Capturas o archivos del comentario: quedan como archivos de la tarea (mismo acceso) y el comentario los nombra.
+    const files = attachmentIds?.length ? [...new Set(attachmentIds)] : [];
+    if (files.length) {
+      const { rows: att } = await c.query('SELECT * FROM attachments WHERE id = ANY($1::uuid[]) AND deleted_at IS NULL FOR UPDATE', [files]);
+      if (att.length !== files.length || att.some((a) => a.message_id || (a.issue_id ? a.issue_id !== issueId : a.owner_id !== userId || a.conversation_id !== rows[0].conversation_id))) {
+        throw badRequest('Algún archivo no es tuyo, ya se usó o pertenece a otra tarea');
+      }
+      const count = (await c.query('SELECT count(*)::int AS n FROM attachments WHERE issue_id = $1 AND deleted_at IS NULL AND NOT (id = ANY($2::uuid[]))', [issueId, files])).rows[0].n;
+      if (count + files.length > 50) throw badRequest('Máximo 50 archivos por tarea');
+      for (let n = 0; n < files.length; n++) await c.query('UPDATE attachments SET issue_id = $2, position = $3 WHERE id = $1 AND issue_id IS DISTINCT FROM $2', [files[n], issueId, count + n]);
+    }
+    await c.query("INSERT INTO issue_events (issue_id, actor_id, kind, payload) VALUES ($1,$2,'comment',$3)", [issueId, userId, JSON.stringify({ body, ...extra, ...(files.length ? { attachmentIds: files } : {}) })]);
     await c.query('UPDATE issues SET updated_at = now() WHERE id = $1', [issueId]);
+    if (!body && files.length) body = `📎 ${files.length === 1 ? 'Archivo adjunto' : `${files.length} archivos adjuntos`}`;
     if (rows[0].integration_id) await queueIntegrationEvent(c, issueId, userId, { type: 'issue.commented', body });
     // Aviso agrupado en el chat (tanda 1.7): solo lo que ve todo el chat.
     if (rows[0].visibility === 'all' && rows[0].conversation_id) {

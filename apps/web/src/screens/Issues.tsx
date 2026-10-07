@@ -84,6 +84,62 @@ function ReviewBar({ i, onError }: { i: IssueDTO; onError: (e: string) => void }
   );
 }
 
+/**
+ * Responder una tarea o ticket (pedido de Lorena 7-oct): texto largo (hasta 20.000) y capturas pegadas (Ctrl+V),
+ * arrastradas o elegidas con 📎. Las capturas quedan como archivos de la tarea y el comentario las muestra.
+ */
+export function TaskReply({ issue, compact = false, onSent }: { issue: IssueDTO; compact?: boolean; onSent?: () => void }) {
+  const [text, setText] = useState('');
+  const [files, setFiles] = useState<{ id: string; name: string }[]>([]);
+  const [busy, setBusy] = useState(false);
+  const pick = useRef<HTMLInputElement>(null);
+  const add = async (list: File[]) => {
+    if (!list.length) return;
+    setBusy(true);
+    try {
+      for (const f of list.slice(0, 10 - files.length)) {
+        const name = f.name && f.name !== 'image.png' ? f.name : `captura-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '')}.png`;
+        const a = await client.uploadIssueAttachment(issue.id, f, name);
+        setFiles((cur) => [...cur, { id: a.id, name }]);
+      }
+    } catch (e) { toast(errorText(e)); } finally { setBusy(false); }
+  };
+  const send = async () => {
+    const body = text.trim();
+    if ((!body && !files.length) || busy) return;
+    setBusy(true);
+    try { await client.commentIssue(issue.id, body, files.map((f) => f.id)); setText(''); setFiles([]); onSent?.(); }
+    catch (e) { toast(errorText(e)); } finally { setBusy(false); }
+  };
+  return (
+    <div className={`task-reply ${compact ? 'is-compact' : ''}`}
+      onDragOver={(e) => { if (e.dataTransfer.types.includes('Files')) e.preventDefault(); }}
+      onDrop={(e) => { if (e.dataTransfer.files.length) { e.preventDefault(); void add(Array.from(e.dataTransfer.files)); } }}>
+      <textarea className="input" rows={compact ? 1 : 3} maxLength={20000} value={text} placeholder={compact ? t('task.cardComment') : t('issue.commentPh')}
+        onChange={(e) => setText(e.target.value)}
+        onPaste={(e) => { const imgs = Array.from(e.clipboardData.files); if (imgs.length) { e.preventDefault(); void add(imgs); } }}
+        onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey || (compact && !e.shiftKey)) && !e.nativeEvent.isComposing) { e.preventDefault(); void send(); } }} />
+      {files.length > 0 && <div className="task-reply-files">{files.map((f) => <span key={f.id} className="issue-field-chip">📎 {f.name} <button className="link-btn" aria-label={taskText('Quitar', 'Remove')} onClick={() => setFiles((cur) => cur.filter((x) => x.id !== f.id))}>×</button></span>)}</div>}
+      <div className="row task-reply-actions">
+        <button type="button" className="btn ghost small" disabled={busy || files.length >= 10} title={taskText('Adjuntar captura o archivo (también puedes pegar con Ctrl+V)', 'Attach a screenshot or file (or paste with Ctrl+V)')} onClick={() => pick.current?.click()}>📎</button>
+        <input ref={pick} type="file" multiple hidden onChange={(e) => { void add(Array.from(e.target.files ?? [])); e.target.value = ''; }} />
+        <span className="grow small muted">{text.length > 15000 ? `${text.length}/20000` : busy ? t('common.loading') : ''}</span>
+        <button type="button" className="btn primary small" disabled={busy || (!text.trim() && !files.length)} onClick={() => void send()}>{t('issue.comment')}</button>
+      </div>
+    </div>
+  );
+}
+
+/** Archivos que acompañan un comentario (los busca entre los de la tarea). */
+function CommentFiles({ issue, ids }: { issue: IssueDTO; ids: unknown }) {
+  if (!Array.isArray(ids) || !ids.length) return null;
+  const list = (issue.attachments ?? []).filter((a) => ids.includes(a.id));
+  if (!list.length) return null;
+  return <div className="comment-files">{list.map((a) => a.contentType?.startsWith('image/')
+    ? <a key={a.id} href={a.url} target="_blank" rel="noreferrer"><img src={a.thumbUrl ?? a.url} alt={a.name ?? ''} loading="lazy" /></a>
+    : <a key={a.id} className="issue-field-chip" href={a.url} target="_blank" rel="noreferrer">📎 {a.name}</a>)}</div>;
+}
+
 export function StatusPill({ status }: { status: IssueStatus }) {
   return <span className={`ist ist-${status}`}>{t(`issue.st.${status}`)}</span>;
 }
@@ -206,6 +262,7 @@ export function IssueRow({ i, showWhere = true, showOwner = true, child = false,
       <IssueCheck i={i} size={child ? 18 : 20} />
       <span className="grow" style={{ minWidth: 0 }}>
         <b className="ellipsis issue-title" style={{ display: 'block' }}>
+          {i.externalId && <span className="ticket-id small muted">#{i.externalId} </span>}
           {isNew && <span className="new-dot" title={taskText('Nueva', 'New')} aria-label={taskText('Nueva', 'New')} />}
           {(isRestricted(i) || isPersonal(i)) && <span className="lock" title={isPersonal(i) ? t('issue.personalOption') : visibilityLabel(d, i)} aria-label={isPersonal(i) ? t('issue.personalOption') : visibilityLabel(d, i)}>🔒 </span>}{i.title}
         </b>
@@ -421,7 +478,6 @@ export function IssueDrawer({ id: startId, onClose }: { id: string; onClose: () 
   const live = useClient((s) => s.issues[id]);
   const parent = useClient((s) => (live?.parentIssueId ? s.issues[live.parentIssueId] : undefined));
   const [events, setEvents] = useState<IssueEventDTO[]>([]);
-  const [comment, setComment] = useState('');
   const [showHistory, setShowHistory] = useState(false);
   const [pickDate, setPickDate] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -459,11 +515,6 @@ export function IssueDrawer({ id: startId, onClose }: { id: string; onClose: () 
     } catch (e) { setError(errorText(e)); } finally { setUploading(false); if (uploadInput.current) uploadInput.current.value = ''; }
   };
 
-  const send = async (e: FormEvent) => {
-    e.preventDefault();
-    if (!comment.trim()) return;
-    try { await client.commentIssue(i.id, comment.trim()); setComment(''); await load(); } catch (err) { setError(errorText(err)); }
-  };
   const comments = events.filter((e) => e.kind === 'comment');
   const changes = events.filter((e) => e.kind !== 'comment');
   const dates = dateShortcuts();
@@ -564,15 +615,13 @@ export function IssueDrawer({ id: startId, onClose }: { id: string; onClose: () 
               <Avatar person={who} org={orgById(d, who?.orgId)} size={24} />
               <div className="grow" style={{ minWidth: 0 }}>
                 <div className="small"><b>{who?.name ?? t('common.participant')}</b> <span className="muted">· {when(e.createdAt)}</span></div>
-                <div className="issue-comment">{String((e.payload as any).body)}</div>
+                {String((e.payload as any).body ?? '') && <div className="issue-comment">{String((e.payload as any).body)}</div>}
+                <CommentFiles issue={i} ids={(e.payload as any).attachmentIds} />
               </div>
             </div>
           );
         })}
-        <form onSubmit={send} className="linkbox">
-          <input className="input" placeholder={t('issue.commentPh')} value={comment} onChange={(e) => setComment(e.target.value)} />
-          <button className="btn primary" disabled={!comment.trim()}>{t('issue.comment')}</button>
-        </form>
+        <TaskReply issue={i} onSent={() => void load()} />
       </div>
 
       {error && <div className="error">{error}</div>}
@@ -718,7 +767,7 @@ export function IssuesBody() {
   const d = useClient((s) => s.data)!;
   const all = useClient((s) => s.issues);
   const preferences = usePersonalPreferences();
-  const [scope, setScope] = useState<'mine' | 'byMe' | 'all'>('mine');
+  const [scope, setScope] = useState<'mine' | 'byMe' | 'none' | 'all'>('mine');
   const [stateFilter, setStateFilter] = useState<'all' | 'open' | 'closed'>('all');
   const [table, setTableState] = useState(readTablePref);
   const setTable = (on: boolean) => { setTableState(on); try { localStorage.setItem(TABLE_KEY, on ? '1' : '0'); } catch { /* sin almacenamiento */ } };
@@ -728,6 +777,8 @@ export function IssuesBody() {
   const [query, setQuery] = useState('');
   // «Asignadas por mí»: las que creé o pedí para otras personas.
   const byMe = (i: IssueDTO) => (i.createdBy === d.me.id || i.requestedBy === d.me.id) && taskAssignees(i).some((u) => u !== d.me.id);
+  // «Sin responsable»: tickets y tareas de los grupos que nadie ha tomado (p. ej. los que llegan a tickets-xertify).
+  const unassigned = (i: IssueDTO) => !isPersonal(i) && taskAssignees(i).length === 0;
   const [reviewFilter, setReviewFilter] = useState<'all' | IssueReview>('all');
   const [groupFilter, setGroupFilter] = useState<string>('all');
   const inbox = useClient((s) => s.taskInbox);
@@ -739,7 +790,7 @@ export function IssuesBody() {
   // Los restringidos pueden ser de un chat que no leo (me asignaron una tarea): el servidor ya filtró.
   const list = Object.values(all)
     .filter((i) => !i.conversationId || visibleConvs.has(i.conversationId) || isRestricted(i))
-    .filter((i) => scope === 'all' || (scope === 'byMe' ? byMe(i) : assignedTo(i, d.me.id)))
+    .filter((i) => scope === 'all' || (scope === 'byMe' ? byMe(i) : scope === 'none' ? unassigned(i) : assignedTo(i, d.me.id)))
     .filter((i) => stateFilter === 'all' || (stateFilter === 'closed' ? isClosed(i) : !isClosed(i)))
     .filter((i) => reviewFilter === 'all' || i.review === reviewFilter)
     .filter((i) => groupFilter === 'all' || (i.parentIssueId && all[i.parentIssueId] ? all[i.parentIssueId]!.conversationId : i.conversationId) === groupFilter)
@@ -787,6 +838,7 @@ export function IssuesBody() {
         <div className="seg" role="radiogroup" aria-label={taskText('Responsables', 'Assignees')}>
           <button role="radio" aria-checked={scope === 'mine'} className={scope === 'mine' ? 'on' : ''} onClick={() => setScope('mine')}>{taskText('Mis tareas', 'My tasks')} <span className="muted">{eligible.filter((i) => assignedTo(i, d.me.id)).length}</span></button>
           <button role="radio" aria-checked={scope === 'byMe'} className={scope === 'byMe' ? 'on' : ''} title={taskText('Las que creé o pedí, asignadas a otras personas', 'Tasks I created or requested')} onClick={() => setScope('byMe')}>{taskText('Asignadas por mí', 'Assigned by me')} <span className="muted">{eligible.filter(byMe).length}</span></button>
+          <button role="radio" aria-checked={scope === 'none'} className={scope === 'none' ? 'on' : ''} title={taskText('Tickets y tareas que nadie ha tomado', 'Tickets and tasks nobody has taken')} onClick={() => setScope('none')}>{taskText('Sin responsable', 'Unassigned')} <span className="muted">{eligible.filter((i) => unassigned(i) && !isClosed(i)).length}</span></button>
           <button role="radio" aria-checked={scope === 'all'} className={scope === 'all' ? 'on' : ''} onClick={() => setScope('all')}>{taskText('Todas', 'All')} <span className="muted">{eligible.length}</span></button>
         </div>
         <select className="input" aria-label={taskText('Estado', 'Status')} value={stateFilter} onChange={(e) => setStateFilter(e.target.value as typeof stateFilter)}>
@@ -825,6 +877,11 @@ export function IssuesBody() {
       {stateFilter !== 'closed' && <QuickAddIssue />}
       {error && <div className="error">{error}</div>}
       {list.length === 0 && <div className="empty">{t('issue.empty')}</div>}
+      {view === 'board' && <div className="board-title">{taskText('Tablero', 'Board')}: {[
+        ({ mine: taskText('Mis tareas', 'My tasks'), byMe: taskText('Asignadas por mí', 'Assigned by me'), none: taskText('Sin responsable', 'Unassigned'), all: taskText('Todas', 'All') })[scope],
+        groupFilter === 'all' ? taskText('Todos los grupos y chats', 'All groups and chats') : convTitle(groupFilter),
+        reviewFilter === 'all' ? null : reviewLabel(reviewFilter),
+      ].filter(Boolean).join(' · ')}</div>}
       {view === 'board' && <div className="task-board">{ISSUE_STATUSES.map((status) => <section key={status} className="task-board-column" aria-busy={pendingMoves.size > 0} onDragOver={(e) => { if (e.dataTransfer.types.includes('application/x-chaggu-issue-id')) { e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'move'; } }} onDrop={(e) => { e.preventDefault(); e.stopPropagation(); const taskId = e.dataTransfer.getData('application/x-chaggu-issue-id'); void move(taskId, status); }}><h3>{t(`issue.st.${status}`)} · {list.filter((i) => i.status === status).length}</h3>{list.filter((i) => i.status === status).map((i) => <IssueRow key={i.id} i={i} showWhere onOpen={setOpen} />)}</section>)}</div>}
       {view === 'table' && list.length > 0 && <IssueTable list={list} onOpen={setOpen} />}
       {view !== 'board' && view !== 'table' && sections.map(([k, items]) => (
@@ -1042,8 +1099,6 @@ export function IssueChatCard({ issueId, creatorId, canPost, onOpen, banner, ton
   const d = useClient((s) => s.data)!;
   const i = useClient((s) => s.issues[issueId]);
   const [comments, setComments] = useState<IssueEventDTO[]>([]);
-  const [text, setText] = useState('');
-  const [busy, setBusy] = useState(false);
   const [missing, setMissing] = useState(false);
   // Detalle solo si hace falta: la tarea no está en memoria o tiene comentarios que mostrar.
   useEffect(() => {
@@ -1059,12 +1114,6 @@ export function IssueChatCard({ issueId, creatorId, canPost, onOpen, banner, ton
   const creator = personById(d, creatorId);
   const f = issueFlags(i);
   const done = isClosed(i);
-  const send = async () => {
-    const body = text.trim();
-    if (!body || busy) return;
-    setBusy(true);
-    try { await client.commentIssue(i.id, body); setText(''); } catch (e) { toast(errorText(e)); } finally { setBusy(false); }
-  };
   return (
     <div className={`card task-card ${done ? 'is-done' : ''} ${f.overdue ? 'is-overdue' : ''} ${tone ? `tone-${tone}` : ''}`} {...menuProps(() => issueQuickMenu(i))}>
       {banner && <div className={`task-card-banner ${tone ? `is-${tone}` : ''}`}>{banner}</div>}
@@ -1087,6 +1136,7 @@ export function IssueChatCard({ issueId, creatorId, canPost, onOpen, banner, ton
           {comments.map((c) => (
             <div key={c.id} className="task-card-comment">
               <b>{c.actorId === d.me.id ? t('common.youShort') : personById(d, c.actorId)?.name.split(' ')[0]}</b> {String((c.payload as any)?.body ?? '')}
+              <CommentFiles issue={i} ids={(c.payload as any)?.attachmentIds} />
             </div>
           ))}
           {i.commentCount > comments.length && <button className="link-btn small" onClick={() => onOpen(i.id)}>{t('task.cardAll', { n: i.commentCount })}</button>}
@@ -1094,11 +1144,7 @@ export function IssueChatCard({ issueId, creatorId, canPost, onOpen, banner, ton
       )}
       {footer}
       {canPost && !done && !hideReply && (
-        <div className="task-card-reply">
-          <input className="input" value={text} placeholder={t('task.cardComment')} onChange={(e) => setText(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); void send(); } }} />
-          <button className="btn small" disabled={!text.trim() || busy} onClick={() => void send()}>{t('issue.comment')}</button>
-        </div>
+        <div className="task-card-reply"><TaskReply issue={i} compact /></div>
       )}
     </div>
   );

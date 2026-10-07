@@ -1433,7 +1433,11 @@ export const UpdateIssueInput = z.object({
   reviewNote: z.string().trim().min(1).max(4000).optional(),
 });
 export const TaskInboxSeenInput = z.object({ issueIds: z.array(z.uuid()).max(500).optional() });
-export const IssueCommentInput = z.object({ body: z.string().trim().min(1).max(4000) });
+/** Comentario de una tarea: hasta 20.000 caracteres y capturas/archivos subidos a la tarea (POST /issues/:id/attachments). */
+export const IssueCommentInput = z.object({
+  body: z.string().trim().max(20_000).default(''),
+  attachmentIds: z.array(z.uuid()).max(10).optional(),
+}).refine((v) => v.body.length > 0 || (v.attachmentIds?.length ?? 0) > 0, { message: 'Escribe algo o adjunta un archivo' });
 
 export const DeriveInput = z.object({
   messageId: z.uuid(),

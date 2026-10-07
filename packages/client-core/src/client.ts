@@ -1311,8 +1311,8 @@ export class TieComsClient {
     this.putIssues([r.issue, ...(r.children ?? [])]);
     return r;
   }
-  async commentIssue(id: string, body: string) {
-    const i = await this.request<IssueDTO>(`/issues/${id}/comments`, { method: 'POST', json: { body } });
+  async commentIssue(id: string, body: string, attachmentIds?: string[]) {
+    const i = await this.request<IssueDTO>(`/issues/${id}/comments`, { method: 'POST', json: { body, ...(attachmentIds?.length ? { attachmentIds } : {}) } });
     this.putIssues([i]);
     return i;
   }

@@ -813,7 +813,7 @@ export async function buildHttp() {
     priv.get<{ Params: { id: string } }>('/api/v1/conversations/:id/task-columns', async (req) => issues.getTaskColumns(req.userId, req.params.id));
     priv.put<{ Params: { id: string } }>('/api/v1/conversations/:id/task-columns', async (req) => issues.setTaskColumns(req.userId, req.params.id, TaskColumnsInput.parse(req.body)));
     priv.post<{ Params: { id: string } }>('/api/v1/issues/:id/children', async (req) => issues.createChildIssue(req.userId, req.params.id, CreateChildIssueInput.parse(req.body)));
-    priv.post<{ Params: { id: string } }>('/api/v1/issues/:id/comments', async (req) => issues.commentIssue(req.userId, req.params.id, IssueCommentInput.parse(req.body).body));
+    priv.post<{ Params: { id: string } }>('/api/v1/issues/:id/comments', async (req) => { const input = IssueCommentInput.parse(req.body); return issues.commentIssue(req.userId, req.params.id, input.body, {}, undefined, input.attachmentIds); });
 
     // Archivos en árbol de carpetas («Mis archivos» o un espacio)
     priv.get('/api/v1/drive/tree', async (req) => {

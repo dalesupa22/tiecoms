@@ -746,7 +746,7 @@ const tools: Tool[] = [
   },
   {
     name: 'list_task_inbox', readOnly: true, scope: 'tasks:read',
-    description: 'Mi bandeja «Nuevas» de tareas: lo que me asignaron, me piden revisar (review) o ya revisaron (reviewed) y todavía no he visto. mark_seen=true las marca vistas.',
+    description: 'Mi bandeja «Nuevas» de tareas: lo que me asignaron, me piden revisar (review), ya revisaron (reviewed) o tickets nuevos sin responsable de mis grupos (ticket) y todavía no he visto. mark_seen=true las marca vistas.',
     schema: z.object({ mark_seen: z.boolean().optional() }),
     run: async (userId, a) => {
       const [b, inbox] = await Promise.all([bootstrap(userId), issues.listInbox(userId)]);

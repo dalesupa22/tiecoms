@@ -142,6 +142,7 @@ export function handleNotice(n: ClientNotice) {
     const en = getLang() === 'en';
     const verb = n.item.reason === 'review' ? (en ? 'asks you to review' : 'te pide revisar')
       : n.item.reason === 'reviewed' ? (en ? 'reviewed' : 'revisó')
+      : n.item.reason === 'ticket' ? (en ? 'new ticket' : 'nuevo ticket')
       : (en ? 'assigned you' : 'te asignó');
     const title = n.issue?.title ?? '';
     const go = () => navigate(`/asuntos?issue=${n.item.issueId}`);

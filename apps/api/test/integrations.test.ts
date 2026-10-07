@@ -205,6 +205,9 @@ describe('integraciones por grupo', () => {
     const seen = await call(`/issues/${issueId}`, { token: pedro.token });
     expect(seen.status).toBe(200);
     expect(seen.json.issue.externalMeta.Cliente).toBe('Uniandes');
+    // Sin responsable: entra a «Nuevas» de la gente del grupo (una sola vez aunque el ticket se reenvíe).
+    const inbox = (await call('/issues/inbox', { token: pedro.token })).json.items.filter((x: any) => x.issueId === issueId);
+    expect(inbox).toEqual([expect.objectContaining({ reason: 'ticket' })]);
     const c = await raw(`/api/integration/v1/issues/${issueId}/comments`, { token: hook.token, body: { body: '¿Alguna novedad?', author: 'Ana (cliente)' } });
     expect(c.status).toBe(200);
     // Lo que hace el propio bot no se avisa de vuelta.

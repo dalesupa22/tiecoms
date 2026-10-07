@@ -171,7 +171,7 @@ async function queueAssignedPush(c: Tx, issueId: string, ownerId: string | null,
  * Bandeja «Nuevas» (llamada con Lorena, 7-oct): las tareas que llegan quedan marcadas hasta que la persona las ve,
  * con push y aviso en vivo. Solo si la persona ve la tarea; nunca a quien hizo el cambio.
  */
-async function notifyInbox(c: Tx, issueId: string, userId: string | null, actorId: string, reason: TaskInboxReason) {
+export async function notifyInbox(c: Tx, issueId: string, userId: string | null, actorId: string, reason: TaskInboxReason) {
   if (!userId || userId === actorId) return;
   let issue: IssueDTO;
   try { issue = await loadVisible(c, userId, issueId); } catch { return; }

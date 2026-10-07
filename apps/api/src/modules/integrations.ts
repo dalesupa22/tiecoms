@@ -303,6 +303,14 @@ export async function createIssue(integ: IntegrationAuth, input: Omit<z.infer<ty
     // The issue, source binding, comments, announcement and outbox are one atomic import.
     await c.query('UPDATE issues SET integration_id = $2, external_id = $3, external_meta = $4 WHERE id = $1', [dto.id, integ.id, input.externalId ?? null, input.externalMeta ? JSON.stringify(input.externalMeta) : null]);
     if (input.description) await issues.commentIssue(integ.botUserId, dto.id, input.description, {}, c);
+    // Ticket sin responsable: que se note en «Nuevas» de las personas del grupo (llamada con Lorena 7-oct).
+    if (!who.ids.length) {
+      const { rows: people } = await c.query(
+        `SELECT cm.user_id FROM conversation_memberships cm JOIN users u ON u.id = cm.user_id
+          WHERE cm.conversation_id = $1 AND cm.removed_at IS NULL AND u.kind <> 'agent' AND u.disabled_at IS NULL AND cm.user_id <> $2`,
+        [integ.conversationId, integ.botUserId]);
+      for (const p of people) await issues.notifyInbox(c, dto.id, p.user_id, integ.botUserId, 'ticket');
+    }
     for (const h of input.history ?? []) {
       await issues.commentIssue(integ.botUserId, dto.id, `${h.author}${h.at ? ` · ${h.at}` : ''}\n${h.body}`, { author: h.author, ...(h.at ? { at: h.at } : {}) }, c);
     }

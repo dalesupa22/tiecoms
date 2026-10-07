@@ -53,7 +53,7 @@ export function ReviewPill({ review }: { review: IssueReview }) {
   return <span className={`review-pill review-${review}`}>{REVIEW_ICON[review]} {reviewLabel(review)}</span>;
 }
 export function inboxReasonLabel(r: TaskInboxReason) {
-  return ({ assigned: taskText('Te la asignaron', 'Assigned to you'), review: taskText('Te piden revisarla', 'Review requested'), reviewed: taskText('Ya la revisaron', 'Reviewed') })[r];
+  return ({ assigned: taskText('Te la asignaron', 'Assigned to you'), review: taskText('Te piden revisarla', 'Review requested'), reviewed: taskText('Ya la revisaron', 'Reviewed'), ticket: taskText('Llegó un ticket', 'New ticket') })[r];
 }
 
 /** Revisar: aprobar, pedir corrección (con comentario para quien la resolvió) o marcar que necesita a una persona. */

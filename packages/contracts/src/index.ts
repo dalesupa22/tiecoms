@@ -947,8 +947,8 @@ export type IssueStatus = 'open' | 'in_progress' | 'waiting' | 'done' | 'cancell
  */
 export type IssueReview = 'pending' | 'approved' | 'changes' | 'human';
 export const ISSUE_REVIEWS = ['pending', 'approved', 'changes', 'human'] as const;
-/** Por qué una tarea está en mi bandeja de «Nuevas»: me la asignaron, me piden revisarla o revisaron la que pedí. */
-export type TaskInboxReason = 'assigned' | 'review' | 'reviewed';
+/** Por qué una tarea está en mi bandeja de «Nuevas»: me la asignaron, me piden revisarla, revisaron la que pedí o llegó un ticket sin responsable a mi grupo. */
+export type TaskInboxReason = 'assigned' | 'review' | 'reviewed' | 'ticket';
 export interface TaskInboxItemDTO { issueId: string; reason: TaskInboxReason; actorId: string | null; at: string }
 
 export interface IssueDTO {

@@ -817,6 +817,12 @@ const tools: Tool[] = [
     },
   },
   {
+    name: 'delete_task', scope: 'tasks:write',
+    description: 'Elimina una tarea y sus subtareas (solo quien la creó o quien administra el chat; los tickets de la mesa de ayuda no se eliminan, se cancelan con update_task). No se puede deshacer: confirma antes con la persona.',
+    schema: z.object({ id: z.string().uuid() }),
+    run: async (userId, a) => issues.deleteIssue(userId, a.id),
+  },
+  {
     name: 'get_task_columns', readOnly: true, scope: 'tasks:read',
     description: 'Columnas de las tareas de un grupo: nombre, tipo (text, select = lista desplegable, number, checkbox) y las opciones de cada lista (p. ej. Tipo: Bug, Funcionalidad nueva, Mejora). Úsalo antes de crear o cambiar tareas con fields para usar las opciones válidas.',
     schema: z.object({ chat: z.string().min(1).max(200).describe('Id o nombre del grupo') }),

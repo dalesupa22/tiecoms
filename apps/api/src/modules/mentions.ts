@@ -64,6 +64,14 @@ export async function markMentionsRead(c: Tx, userId: string, conversationId: st
   await c.query('UPDATE message_mentions SET read_at = now() WHERE user_id = $1 AND conversation_id = $2 AND seq <= $3 AND read_at IS NULL', [userId, conversationId, seq]);
 }
 
+/** Menciones mías aún sin leer en una conversación (después del cursor; sin mensajes borrados). */
+export async function unreadMentionsCount(c: Tx, userId: string, conversationId: string, seq: number): Promise<number> {
+  const { rows } = await c.query(
+    `SELECT count(*)::int AS n FROM message_mentions mm JOIN messages m ON m.id = mm.message_id AND m.deleted_at IS NULL
+      WHERE mm.user_id = $1 AND mm.conversation_id = $2 AND mm.seq > $3`, [userId, conversationId, seq]);
+  return rows[0]?.n ?? 0;
+}
+
 /** Bandeja «Menciones»: las más recientes primero, solo de conversaciones que puedo leer y dentro de mi historial. */
 export async function listMentions(userId: string, before: string | undefined, limit: number): Promise<{ mentions: MentionItemDTO[]; hasMore: boolean }> {
   const { rows } = await pool.query(

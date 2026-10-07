@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import type { BootstrapDTO, IssueDTO, IssueEventDTO, IssueFieldValue, IssueReview, IssueStatus, IssueVisibility, TaskInboxReason } from '@tiecoms/contracts';
-import { client, useClient } from '../app-client.ts';
+import { apiUrl, client, useClient } from '../app-client.ts';
 import { updateIssuePreferences, usePersonalPreferences } from '../personal-prefs.ts';
 import { PinToGrid } from './Tray.tsx';
 import { setDrag } from '../grid-actions.ts';
 import { errorText, locale, t } from '../i18n.ts';
-import { navigate, queryParam } from '../router.ts';
+import { BASE, navigate, queryParam } from '../router.ts';
 import { Avatar, Modal, conversationTitle, orgById, personById } from '../ui.tsx';
 import { menuProps, toast, type MenuItem } from '../menu.tsx';
 import { destinationLabel, issueDestinations } from '../quick-search.ts';
@@ -196,12 +196,40 @@ export function toggleDone(i: IssueDTO) {
 }
 
 /** Completar o cambiar el estado de un asunto sin abrirlo. */
+/** Enlace para compartir una tarea (abre Tareas con la tarea; quien no la ve recibe «no encontrada»). */
+export function taskLink(id: string) {
+  const origin = apiUrl('') || (/^https?:/.test(location.origin) ? location.origin : 'https://app.chaggu.com');
+  return `${origin}${BASE}/asuntos?issue=${id}`;
+}
+export function copyTaskLink(i: IssueDTO) {
+  void navigator.clipboard.writeText(taskLink(i.id)).then(() => toast(taskText('Enlace de la tarea copiado', 'Task link copied')), () => toast(taskLink(i.id)));
+}
+/** Quien la creó o administra el chat; los tickets de integración se cancelan, no se borran. */
+export function canDeleteTask(d: BootstrapDTO, i: IssueDTO) {
+  if (i.integrationId) return false;
+  const c = d.conversations.find((x) => x.id === i.conversationId);
+  return i.createdBy === d.me.id || (!!c?.canManage && !!c.workspaceId);
+}
+export async function deleteTask(i: IssueDTO, after?: () => void) {
+  const kids = Object.values(client.getState().issues).filter((x) => x.parentIssueId === i.id).length;
+  const msg = taskText(`¿Eliminar «${i.title}»${kids ? ` y sus ${kids} subtareas` : ''}? Se borran sus comentarios y archivos. No se puede deshacer.`,
+    `Delete «${i.title}»${kids ? ` and its ${kids} subtasks` : ''}? Its comments and files are deleted. This can't be undone.`);
+  if (!confirm(msg)) return;
+  try { await client.deleteIssue(i.id); toast(taskText('Tarea eliminada', 'Task deleted')); after?.(); } catch (e) { toast(errorText(e)); }
+}
+
 export function issueQuickMenu(i: IssueDTO): MenuItem[] {
   const set = (status: IssueDTO['status']) => client.updateIssue(i.id, { status }).catch((e) => toast(errorText(e)));
+  const d = client.getState().data;
+  const tail: MenuItem[] = [
+    { label: taskText('Copiar enlace', 'Copy link'), icon: '🔗', onSelect: () => copyTaskLink(i) },
+    ...(d && canDeleteTask(d, i) ? [{ label: taskText('Eliminar tarea', 'Delete task'), icon: '🗑', danger: true, onSelect: () => void deleteTask(i) } as MenuItem] : []),
+  ];
   if (isClosed(i)) return [
     { label: t('issue.reopen'), icon: '↺', onSelect: () => void toggleDone(i) },
     { divider: true },
     { label: t('issue.open'), icon: '◆', onSelect: () => navigate(i.conversationId ? `/c/${i.conversationId}?issue=${i.id}` : `/asuntos?issue=${i.id}`) },
+    ...tail,
   ];
   const top = !i.parentIssueId && !isPersonal(i);
   return [
@@ -217,6 +245,7 @@ export function issueQuickMenu(i: IssueDTO): MenuItem[] {
     ...(i.conversationId ? [issueTopicMenu(i.id, i.topicId, client.getState().topics[i.conversationId] ?? [])].filter((x): x is MenuItem => !!x) : []),
     { divider: true },
     { label: t('issue.open'), icon: '◆', onSelect: () => navigate(i.conversationId ? `/c/${i.conversationId}?issue=${i.id}` : `/asuntos?issue=${i.id}`) },
+    ...tail,
   ];
 }
 
@@ -632,6 +661,8 @@ export function IssueDrawer({ id: startId, onClose }: { id: string; onClose: () 
           : <span className="small muted">{t('issue.originOut')}</span>)}
         {changes.length > 0 && <button className="link-btn" aria-expanded={showHistory} onClick={() => setShowHistory(!showHistory)}>{showHistory ? '⌄' : '›'} {t('issue.historyCount', { n: changes.length })}</button>}
         <span className="grow" />
+        <button className="link-btn" onClick={() => copyTaskLink(i)}>🔗 {taskText('Copiar enlace', 'Copy link')}</button>
+        {canDeleteTask(d, i) && <button className="link-btn error" onClick={() => void deleteTask(i, onClose)}>🗑 {taskText('Eliminar', 'Delete')}</button>}
         {!done && <button className="link-btn muted" onClick={() => void update({ status: 'cancelled' }).then(() => toast(t('issue.droppedToast'), { label: t('issue.undo'), run: () => void client.updateIssue(i.id, { status: i.status }) }))}>{t('issue.drop')}</button>}
       </div>
       {showHistory && (

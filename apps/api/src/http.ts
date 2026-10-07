@@ -809,6 +809,7 @@ export async function buildHttp() {
     priv.get('/api/v1/issues/inbox', async (req) => issues.listInbox(req.userId));
     priv.post('/api/v1/issues/inbox/seen', async (req) => issues.markInboxSeen(req.userId, TaskInboxSeenInput.parse(req.body ?? {}).issueIds));
     priv.get<{ Params: { id: string } }>('/api/v1/issues/:id', async (req) => issues.getIssue(req.userId, req.params.id));
+    priv.delete<{ Params: { id: string } }>('/api/v1/issues/:id', async (req) => issues.deleteIssue(req.userId, z.uuid().parse(req.params.id)));
     priv.patch<{ Params: { id: string } }>('/api/v1/issues/:id', async (req) => issues.updateIssue(req.userId, req.params.id, UpdateIssueInput.parse(req.body)));
     priv.get<{ Params: { id: string } }>('/api/v1/conversations/:id/task-columns', async (req) => issues.getTaskColumns(req.userId, req.params.id));
     priv.put<{ Params: { id: string } }>('/api/v1/conversations/:id/task-columns', async (req) => issues.setTaskColumns(req.userId, req.params.id, TaskColumnsInput.parse(req.body)));

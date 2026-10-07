@@ -594,6 +594,34 @@ export async function commentIssue(userId: string, issueId: string, body: string
   });
 }
 
+/**
+ * Eliminar una tarea (pedido de Lorena 7-oct): quien la creó o quien administra el chat. Se lleva sus subtareas,
+ * comentarios y archivos; quienes la veían reciben issue.hidden. Los tickets de una integración no se borran
+ * (el sistema externo los volvería a crear): se cancelan.
+ */
+export async function deleteIssue(userId: string, issueId: string) {
+  return tx(async (c) => {
+    const cur = (await c.query('SELECT * FROM issues WHERE id = $1 FOR UPDATE', [issueId])).rows[0];
+    if (!cur) throw taskNotFound();
+    await loadVisible(c, userId, issueId);
+    let can = cur.created_by === userId;
+    if (!can && cur.conversation_id) {
+      // En los grupos de un espacio, quien lo administra; en chats grupales todos pueden administrar, así que solo quien la creó.
+      try { const a = await conversationAccess(c, userId, cur.conversation_id, 'read'); can = a.canManage && !!a.workspaceId; } catch { can = false; }
+    }
+    if (!can) throw forbidden('Solo quien creó la tarea o quien administra el chat puede eliminarla');
+    if (cur.integration_id) throw badRequest('Los tickets de la mesa de ayuda no se eliminan: cancélalos');
+    const kids = (await c.query('SELECT id, conversation_id FROM issues WHERE parent_issue_id = $1', [issueId])).rows as { id: string; conversation_id: string | null }[];
+    const all = [{ id: issueId, conversation_id: cur.conversation_id as string | null }, ...kids];
+    const notify: { id: string; conversationId: string; people: string[] }[] = [];
+    for (const x of all) notify.push({ id: x.id, conversationId: x.conversation_id ?? '', people: [...new Set([...(await audience(c, x.id)), cur.created_by])] });
+    await c.query('DELETE FROM issues WHERE id = $1', [issueId]);
+    for (const n of notify) if (n.people.length) await enqueueOutbox(c, 'account.event', { userIds: n.people, event: { type: 'issue.hidden', issueId: n.id, conversationId: n.conversationId } });
+    await audit(c, userId, 'issue.deleted', { type: 'issue', id: issueId, workspaceId: cur.workspace_id }, { title: cur.title, children: kids.length });
+    return { ok: true, deleted: all.map((x) => x.id) };
+  });
+}
+
 export async function getIssue(userId: string, issueId: string, db: Db = pool) {
   const issue = await loadVisible(db, userId, issueId);
   const { rows } = await db.query('SELECT * FROM issue_events WHERE issue_id = $1 ORDER BY id', [issueId]);

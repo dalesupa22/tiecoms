@@ -6,7 +6,7 @@ import { sha256 } from '../security.ts';
 import { claimForMessage, hideForMessage, linkToMessage } from './attachments.ts';
 import { maybeQueue as ggQueue } from './gg.ts';
 import { queueAgentEvents } from './agents.ts';
-import { markMentionsRead, normalizeMentions, saveMentions } from './mentions.ts';
+import { markMentionsRead, normalizeMentions, saveMentions, unreadMentionsCount } from './mentions.ts';
 import { dropLinks, indexLinks } from './links.ts';
 import { normalizeRefs } from './refs.ts';
 
@@ -281,9 +281,11 @@ export async function markRead(userId: string, conversationId: string, seq: numb
     );
     const lastRead: number = rows[0].last_read_seq;
     await markMentionsRead(c, userId, conversationId, lastRead);
+    // La «@» de la lista la decide el servidor: leer hasta la mención la quita aunque haya mensajes después.
+    const unreadMentions = await unreadMentionsCount(c, userId, conversationId, Math.max(lastRead, a.historyFromSeq));
     // Sincroniza los no leídos entre los dispositivos de la misma cuenta.
-    await enqueueOutbox(c, 'account.event', { userIds: [userId], event: { type: 'read.updated', conversationId, seq: lastRead, readRevision: Number(rows[0].revision) } });
-    return { lastReadSeq: lastRead, readRevision: Number(rows[0].revision) };
+    await enqueueOutbox(c, 'account.event', { userIds: [userId], event: { type: 'read.updated', conversationId, seq: lastRead, readRevision: Number(rows[0].revision), unreadMentions } });
+    return { lastReadSeq: lastRead, readRevision: Number(rows[0].revision), unreadMentions };
   });
 }
 

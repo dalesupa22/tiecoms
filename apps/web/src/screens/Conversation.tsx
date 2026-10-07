@@ -14,7 +14,7 @@ import { ForwardToChatsDialog, Linkify, StackedAvatars } from './Chats.tsx';
 import { QUICK_REACTIONS } from '@tiecoms/contracts';
 import { ReactionBar, isJumbo, openEmojiPicker, toggleReaction, useEmojiAutocomplete } from './Reactions.tsx';
 import { LinkGroup, LinksPane, MessageLinks, isLinkOnly } from './Links.tsx';
-import { ReminderDialog, conversationMenu, forwardMenu, messageLink, muteMenu, muteOptions, mutedText, openDialog, remindMenu, soundMenu, soundName, unmute, useExpiry } from '../actions.tsx';
+import { ReminderDialog, conversationMenu, forwardMenu, messageLink, muteMenu, muteOptions, mutedText, openDialog, personMenu, remindMenu, soundMenu, soundName, unmute, useExpiry } from '../actions.tsx';
 import { GgButton, GgSidePanel, ReplyForMe, SelectionBar, SuggestDialog, convSource, type GgHost, type Quote } from './GgSide.tsx';
 import { errorText, locale, systemText, t, tn } from '../i18n.ts';
 import { contextHandler, copyText, menuProps, openMenuAt, toast, type MenuItem } from '../menu.tsx';
@@ -1023,7 +1023,11 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
                 <div style={{ minWidth: 0 }}>
                   {!r.cont && (
                     <div className="msg-meta">
-                      <span className="msg-author" style={conv.kind !== 'direct' && author ? { color: personInk(author.id) } : undefined}>{author?.name ?? t('chat.formerParticipant')}</span>
+                      {conv.kind !== 'direct' && author && author.id !== d.me.id
+                        // En un grupo, clic en el nombre: escribirle directo sin buscarlo (pedido de Lorena 7-oct).
+                        ? <button type="button" className="msg-author msg-author-btn" style={{ color: personInk(author.id) }} title={t('people.sendMessage')}
+                            onClick={(e) => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); openMenuAt(r.left, r.bottom + 4, personMenu(author)); }}>{author.name}</button>
+                        : <span className="msg-author" style={conv.kind !== 'direct' && author ? { color: personInk(author.id) } : undefined}>{author?.name ?? t('chat.formerParticipant')}</span>}
                       <span className="msg-org">{org?.name ?? (author?.guest ? t('common.guest') : '')}</span>
                       <span className="msg-time">{new Date(m.createdAt).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' })}</span>
                       {pinned.has(m.id) && <span className="msg-time">📌</span>}

@@ -1827,7 +1827,7 @@ export type ConversationEvent =
 /** Aviso a una cuenta: algo cambió en su alcance; el cliente vuelve a pedir /bootstrap. */
 export type AccountEvent =
   | { type: 'scope.changed'; reason: string }
-  | { type: 'read.updated'; conversationId: string; seq: number; readRevision?: number }
+  | { type: 'read.updated'; conversationId: string; seq: number; readRevision?: number; unreadMentions?: number }
   | { type: 'reminder.due'; reminder: ReminderDTO }
   /** Mis recordatorios cambiaron desde otro dispositivo (p. ej. una reacción 👀): volver a pedirlos. */
   | { type: 'reminders.changed' }

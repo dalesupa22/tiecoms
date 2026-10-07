@@ -763,7 +763,7 @@ export class TieComsClient {
     if (e.type === 'issue.hidden') {
       this.issueHiddenAt.set(e.issueId, ++this.issueHiddenRevision);
       const next = { ...this.state.issues }; delete next[e.issueId];
-      this.set({ issues: next }); this.recountIssues(e.conversationId);
+      this.set({ issues: next, taskInbox: this.state.taskInbox.filter((x) => x.issueId !== e.issueId) }); this.recountIssues(e.conversationId || null);
     }
     if (e.type === 'me.sleep') this.patchMe({ sleep: e.sleep });
     if (e.type === 'call.updated') this.putCall(e.call);
@@ -793,7 +793,7 @@ export class TieComsClient {
     }
     if (e.type === 'read.updated') {
       if (e.readRevision === undefined) this.scheduleBootstrap();
-      else this.applyConfirmedRead(e.conversationId,e.seq,e.readRevision);
+      else this.applyConfirmedRead(e.conversationId,e.seq,e.readRevision,e.unreadMentions);
     }
   }
 
@@ -1082,8 +1082,8 @@ export class TieComsClient {
     this.readTimers.set(id, setTimeout(() => {
       this.readTimers.delete(id);
       if (generation !== this.sessionGeneration) return;
-      void this.request<{ lastReadSeq: number; readRevision?: number }>(`/conversations/${id}/read`, { method: 'POST', json: { seq } })
-        .then((result) => { if (generation===this.sessionGeneration) this.applyConfirmedRead(id,result.lastReadSeq,result.readRevision); })
+      void this.request<{ lastReadSeq: number; readRevision?: number; unreadMentions?: number }>(`/conversations/${id}/read`, { method: 'POST', json: { seq } })
+        .then((result) => { if (generation===this.sessionGeneration) this.applyConfirmedRead(id,result.lastReadSeq,result.readRevision,result.unreadMentions); })
         // Si el servidor no lo guardó, el snapshot devuelve el cursor real (y los no leídos vuelven a contar).
         .catch(() => { if (generation===this.sessionGeneration) this.scheduleBootstrap(); });
     }, 400));
@@ -1240,6 +1240,15 @@ export class TieComsClient {
     this.putIssues(r.issues);
     return r.issues;
   }
+  /** Elimina una tarea (y sus subtareas); la quita de la lista al instante. */
+  async deleteIssue(id: string) {
+    const r = await this.request<{ deleted: string[] }>(`/issues/${id}`, { method: 'DELETE' });
+    const gone = new Set(r.deleted ?? [id]);
+    const conv = this.state.issues[id]?.conversationId ?? null;
+    const next = { ...this.state.issues }; for (const x of gone) delete next[x];
+    this.set({ issues: next, taskInbox: this.state.taskInbox.filter((x) => !gone.has(x.issueId)) });
+    if (conv) this.recountIssues(conv);
+  }
   /** Bandeja «Nuevas» de tareas (servidor ≥ 2026-10-07; uno anterior responde 404 y queda vacía). */
   async loadTaskInbox() {
     try {
@@ -1360,16 +1369,18 @@ export class TieComsClient {
     const generation=this.sessionGeneration;
     const c = this.state.data?.conversations.find((x) => x.id === conversationId);
     if (!c) return;
-    const result = await this.request<{ lastReadSeq: number; readRevision?: number }>(`/conversations/${conversationId}/read`, { method: 'POST', json: { seq: c.lastMessageSeq } });
+    const result = await this.request<{ lastReadSeq: number; readRevision?: number; unreadMentions?: number }>(`/conversations/${conversationId}/read`, { method: 'POST', json: { seq: c.lastMessageSeq } });
     this.assertSession(generation);
-    this.applyConfirmedRead(conversationId,result.lastReadSeq,result.readRevision);
+    this.applyConfirmedRead(conversationId,result.lastReadSeq,result.readRevision,result.unreadMentions);
   }
-  private applyConfirmedRead(id: string, seq: number, readRevision?: number) {
+  private applyConfirmedRead(id: string, seq: number, readRevision?: number, unreadMentions?: number) {
     const c = this.state.data?.conversations.find((x) => x.id === id);
     if (!c) return;
     if (readRevision!==undefined && readRevision<(c.readRevision ?? 0)) return;
     const lastReadSeq = readRevision!==undefined ? seq : Math.max(c.lastReadSeq,seq);
-    this.patchConversationMeta(id, { ...(readRevision!==undefined ? {readRevision} : {}), lastReadSeq, unread: Math.max(0, c.lastMessageSeq - Math.max(lastReadSeq, c.historyFromSeq)), ...(lastReadSeq >= c.lastMessageSeq ? { unreadMentions: 0 } : {}) });
+    // unreadMentions viene del servidor (≥ 2026-10-07): la «@» se quita al leer la mención aunque haya más mensajes.
+    const mentions = unreadMentions !== undefined ? { unreadMentions } : lastReadSeq >= c.lastMessageSeq ? { unreadMentions: 0 } : {};
+    this.patchConversationMeta(id, { ...(readRevision!==undefined ? {readRevision} : {}), lastReadSeq, unread: Math.max(0, c.lastMessageSeq - Math.max(lastReadSeq, c.historyFromSeq)), ...mentions });
   }
   private patchPreviewIfLast(m: MessageDTO) {
     const c = this.state.data?.conversations.find((x) => x.id === m.conversationId);

@@ -55,3 +55,14 @@ No se midió con datos de producción: `EXPLAIN`, `pg_stat_statements` y la late
 ## Despliegue
 
 `infra/deploy.sh` corre `node migrate.js` antes de cambiar de versión, así que la migración 106 crea los índices con la versión anterior todavía atendiendo. En tablas grandes (`wa_messages`) puede tardar, pero no bloquea escrituras. Si un índice queda INVALID, revisar con `SELECT indexrelid::regclass FROM pg_index WHERE NOT indisvalid`.
+
+## Entrega (7 oct 2026, UTC)
+
+| Plataforma | Canal | Versión | Commit | Resultado |
+|---|---|---|---|---|
+| Web + API + worker | producción (`chaggu-xerticalls-prod`) | release `20261007181244-92e6198` y luego `20261007181545-1090cf7` (con la landing) | `92e6198`, `1090cf7` | En línea. Migración 106 aplicada: 5 índices válidos y 0 inválidos. Worker con `DB_POOL_MAX=5`; los dos carriles procesan push y transcripciones sin pendientes; sin errores en el API. `app.chaggu.com` sirve el bundle nuevo. Lectura real con una cuenta vía MCP correcta. Anterior: `20261007174839-58c87d0`. |
+| Windows | descarga pública (sin firma, igual que la 0.3.17) | 0.3.18 (build 318) | `81573f9` (Actions run 37665394319) | `.exe` sha256 `20f08eac15b58514…` y `.msi` es-ES sha256 `5d926b9dfb07ecdb…` en `/descargas/`. `latest.json` lleva versión por plataforma; respaldo en `latest.before-0.3.18-windows.json`. `app_releases.windows` pasó de 0.3.17/317 a 0.3.18/318. No se probó la instalación en Windows real. |
+| macOS | — | sigue la 0.3.17 | — | **Pendiente.** El Mac mini no tiene la identidad Developer ID Application, Rust ni Node, y los secretos de notarización están en el Mac de Danny. Hay que correr `apps/desktop/scripts/release-mac.sh` en ese Mac desde `principal` y luego `ops.js app-version mac 0.3.18 …`. |
+| iOS / Android | — | sin build nueva | — | Las apps móviles son nativas (`apps/ios` y `apps/android`) y no usan `client-core` ni la web. Reciben las mejoras del API sin publicar nada. `app_releases` de iOS y Android no se tocó. |
+
+`principal` avanzó por fast-forward de `58c87d0` a `1090cf7`; `main` no se tocó.

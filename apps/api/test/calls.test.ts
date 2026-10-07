@@ -121,6 +121,24 @@ describe('llamadas', () => {
     expect((await post(`/calls/${callId}/transcription`, ana.token, { on: true })).status).toBe(409);
   });
 
+  it('MCP: list_calls y read_call_transcript leen la llamada con los permisos de la persona', async () => {
+    const mcp = async (token: string, name: string, args: unknown) => {
+      const res = await fetch(`${API}/api/mcp`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }) });
+      return ((await res.json()) as any).result;
+    };
+    const tBeto = (await post('/me/mcp-tokens', beto.token, {})).json.token;
+    const tExtra = (await post('/me/mcp-tokens', extra.token, {})).json.token;
+    const list = await mcp(tBeto, 'list_calls', { chat: chatId });
+    expect(list.structuredContent.calls[0]).toMatchObject({ call_id: callId, hasTranscript: true });
+    const msgs = await mcp(tBeto, 'read_messages', { chat: chatId });
+    expect(msgs.structuredContent.messages.some((m: any) => m.text.includes(`call_id ${callId}`))).toBe(true);
+    const byId = await mcp(tBeto, 'read_call_transcript', { call_id: callId });
+    expect(byId.structuredContent.transcript).toContain('Beto: Listo, lo firmo hoy');
+    expect((await mcp(tBeto, 'read_call_transcript', { chat: chatId })).structuredContent.call_id).toBe(callId);
+    expect((await mcp(tExtra, 'read_call_transcript', { call_id: callId })).isError).toBe(true);
+    expect((await mcp(tExtra, 'list_calls', {})).structuredContent.calls.some((c: any) => c.call_id === callId)).toBe(false);
+  });
+
   it('una llamada nueva en la misma conversación es otra llamada', async () => {
     const r = await post(`/conversations/${chatId}/call`, beto.token, {});
     expect(r.json.call.id).not.toBe(callId);

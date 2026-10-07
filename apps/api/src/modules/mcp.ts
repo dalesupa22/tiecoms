@@ -27,6 +27,7 @@ import * as cal from './calendar.ts';
 import * as mwa from './mcp-wa.ts';
 import * as scheduled from './mcp-scheduled.ts';
 import * as reading from './reading.ts';
+import * as calls from './calls.ts';
 import { WA_KINDS, WA_WEBHOOK_EVENTS } from './mcp-consts.ts';
 import type { McpCtx } from './mcp-wa.ts';
 
@@ -158,7 +159,7 @@ function messageView(b: BootstrapDTO, m: MessageDTO) {
   const author = m.authorId === b.me.id ? `${b.me.name} (tú)` : (b.people.find((p) => p.id === m.authorId)?.name ?? 'Alguien');
   let text = m.body;
   if (m.kind === 'system') {
-    try { const p = JSON.parse(m.body); text = `[aviso ${p.k ?? 'sistema'}] ${p.subject ?? p.title ?? p.text ?? ''}`.trim(); } catch { text = `[aviso] ${m.body}`; }
+    try { const p = JSON.parse(m.body); text = `[aviso ${p.k ?? 'sistema'}] ${p.subject ?? p.title ?? p.text ?? ''}${p.callId ? ` (call_id ${p.callId}; transcripción con read_call_transcript)` : ''}`.trim(); } catch { text = `[aviso] ${m.body}`; }
   }
   const files = (m.attachments ?? []).map((a: any) => a.name ?? a.kind ?? 'adjunto');
   return {
@@ -393,6 +394,66 @@ const tools: Tool[] = [
           return { chat: c ? chatName(b, c) : null, chatId: x.message.conversationId, snippet: x.snippet, message: messageView(b, x.message) };
         }),
         hasMore: r.hasMore,
+      };
+    },
+  },
+  {
+    name: 'list_calls', readOnly: true, scope: 'chats:read',
+    description: 'Mis llamadas de chaggu (las más recientes primero): chat, quién participó, duración y si tienen transcripción o resumen. Filtra por chat (id o nombre). Para leerla usa read_call_transcript con su call_id.',
+    schema: z.object({
+      chat: z.string().min(1).max(200).optional().describe('Id o nombre del chat (p. ej. la persona)'),
+      limit: z.number().int().min(1).max(50).optional().describe('Cuántas llamadas (20 por defecto)'),
+    }),
+    run: async (userId, a) => {
+      const b = await bootstrap(userId);
+      const chatId = a.chat ? findChat(b, a.chat).id : null;
+      const out: unknown[] = [];
+      let before: string | undefined;
+      // El historial es global: se pagina hasta juntar las del chat pedido (máximo 10 páginas).
+      for (let i = 0; i < 10 && out.length < (a.limit ?? 20); i++) {
+        const page = await calls.history(userId, { before, limit: 50 });
+        for (const h of page.calls) {
+          if (chatId && h.call.conversationId !== chatId) continue;
+          const c = b.conversations.find((x) => x.id === h.call.conversationId);
+          const who = (id: string) => (id === b.me.id ? `${b.me.name} (tú)` : (b.people.find((p) => p.id === id)?.name ?? h.call.names?.[id] ?? 'Alguien'));
+          out.push({
+            call_id: h.call.id, chat: c ? chatName(b, c) : null, chatId: h.call.conversationId, kind: h.call.kind, startedAt: h.call.startedAt, endedAt: h.call.endedAt,
+            durationSec: h.durationSec, participants: h.participantIds.map(who), hasTranscript: h.call.hasTranscript, hasSummary: h.hasSummary, ...(h.missed ? { missed: true } : {}),
+          });
+          if (out.length >= (a.limit ?? 20)) break;
+        }
+        if (!page.hasMore || !page.calls.length) break;
+        before = page.calls.at(-1)!.call.startedAt;
+      }
+      return { calls: out };
+    },
+  },
+  {
+    name: 'read_call_transcript', readOnly: true, scope: 'chats:read',
+    description: 'Lee la transcripción (frases con quién habló y minuto) y el resumen de una llamada de chaggu. Usa call_id (de list_calls o del aviso call.transcript en read_messages) o chat para la última llamada con transcripción de ese chat.',
+    schema: z.object({
+      call_id: z.string().uuid().optional(),
+      chat: z.string().min(1).max(200).optional().describe('Id o nombre del chat: toma su última llamada con transcripción'),
+    }),
+    run: async (userId, a) => {
+      let id = a.call_id as string | undefined;
+      const b = await bootstrap(userId);
+      if (!id) {
+        if (!a.chat) throw badRequest('Indica call_id o chat');
+        const chatId = findChat(b, a.chat).id;
+        const { rows } = await pool.query(
+          `SELECT c.id FROM calls c WHERE c.conversation_id = $1 AND EXISTS (SELECT 1 FROM call_transcript_segments s WHERE s.call_id = c.id)
+            ORDER BY c.started_at DESC LIMIT 1`, [chatId]);
+        if (!rows[0]) throw notFound('Llamada con transcripción');
+        id = rows[0].id as string;
+      }
+      const t = await calls.transcript(userId, id!);
+      const c = b.conversations.find((x) => x.id === t.call.conversationId);
+      const stamp = (ms: number) => { const s = Math.floor(ms / 1000); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+      return {
+        call_id: t.call.id, chat: c ? chatName(b, c) : null, chatId: t.call.conversationId, startedAt: t.call.startedAt, endedAt: t.call.endedAt,
+        summary: t.summary, segments: t.segments.length,
+        transcript: t.segments.map((s) => `[${stamp(s.startMs)}] ${s.speakerName ?? '?'}: ${s.text}`).join('\n'),
       };
     },
   },

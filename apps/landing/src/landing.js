@@ -89,10 +89,12 @@
       grid?.querySelector(`[data-os="${platform}"] a.button`)?.setAttribute('href', href);
       if (os === platform) top?.setAttribute('href', href);
     }
-    if (topLabel && v.version) { const sm = document.createElement('small'); sm.textContent = ` v${v.version}`; topLabel.after(sm); }
+    const topVersion = (os && v[os]?.version) || v.version;
+    if (topLabel && topVersion) { const sm = document.createElement('small'); sm.textContent = ` v${topVersion}`; topLabel.after(sm); }
     const mac = grid?.querySelector('[data-meta="mac"]');
-    if (mac && v.mac) mac.textContent = `${es ? 'Versión' : 'Version'} ${v.version} · .dmg · ${mb(v.mac.size)}`;
+    // Mac y Windows pueden ir en versiones distintas (p. ej. Windows sale antes): cada una lleva la suya.
+    if (mac && v.mac) mac.textContent = `${es ? 'Versión' : 'Version'} ${v.mac.version ?? v.version} · .dmg · ${mb(v.mac.size)}`;
     const win = grid?.querySelector('[data-meta="windows"]');
-    if (win && v.windows) win.firstChild.textContent = `${es ? 'Versión' : 'Version'} ${v.version} · .exe · ${mb(v.windows.size)} · `;
+    if (win && v.windows) win.firstChild.textContent = `${es ? 'Versión' : 'Version'} ${v.windows.version ?? v.version} · .exe · ${mb(v.windows.size)} · `;
   }).catch(() => {});
 })();

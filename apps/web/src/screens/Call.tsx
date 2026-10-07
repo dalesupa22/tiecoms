@@ -2,7 +2,7 @@
  * Llamadas en la web: botones del encabezado, franja «llamada en curso», aviso de llamada entrante,
  * panel flotante de la llamada (con subtítulos y el interruptor de transcripción) y la transcripción guardada.
  */
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { Suspense, lazy, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import { flashTitle } from '../bubbles.tsx';
 import type { ActiveCallDTO, CallDTO, CallDeviceDTO, CallHistoryItemDTO, CallTranscriptDTO, ConversationDTO } from '@tiecoms/contracts';
@@ -13,6 +13,7 @@ import { openMenuAt, toast, type MenuItem } from '../menu.tsx';
 import { navigate } from '../router.ts';
 import { openDialog } from '../actions.tsx';
 import { startRingtone, stopRingtone } from '../sound.ts';
+import { setOverlayHost } from '../overlay-host.tsx';
 import { directOtherId, Avatar, ConvAvatar, Modal, conversationTitle, personById } from '../ui.tsx';
 
 export const useCallView = () => useSyncExternalStore((l) => subscribeCall(() => l()), currentCall);
@@ -23,6 +24,8 @@ const guestName = (c: CallDTO, id: string | null) => (id?.startsWith('guest:') ?
 const firstName = (d: ReturnType<typeof client.getState>['data'], id: string | null, names?: Record<string, string>) =>
   ((id && (personById(d!, id)?.name ?? names?.[id])) || '').split(' ')[0] ?? '';
 const fail = (e: unknown) => toast(errorText(e));
+/** El chat de la conversación dentro de la llamada (se carga al abrirlo; Conversation.tsx también importa este archivo). */
+const ConversationScreen = lazy(() => import('./Conversation.tsx').then((m) => ({ default: m.ConversationScreen })));
 
 /** 📞 y 🎥 del encabezado (solo con las llamadas prendidas en el servidor y si puedo escribir). */
 export function CallButtons({ conv }: { conv: ConversationDTO }) {
@@ -177,6 +180,7 @@ export function CallDock() {
   const d = useClient((s) => s.data);
   const [min, setMin] = useState(false);
   const [full, setFull] = useState(false);
+  const [chat, setChat] = useState(false);
   const [pos, setPos] = useState<{ x: number; y: number } | null>(readDockPos);
   const [dockEl, setDockEl] = useState<HTMLElement | null>(null);
   const dragged = useRef(false);
@@ -192,7 +196,8 @@ export function CallDock() {
   // Esc sale de pantalla completa; si el navegador sale de su pantalla completa, también el panel.
   useEffect(() => {
     if (!full) return;
-    const k = (e: globalThis.KeyboardEvent) => { if (e.key === 'Escape') setFull(false); };
+    // Esc dentro del chat o de un diálogo abierto en la llamada no la saca de pantalla completa.
+    const k = (e: globalThis.KeyboardEvent) => { if (e.key === 'Escape' && !(e.target as HTMLElement | null)?.closest?.('.call-chat, .overlay-in-host')) setFull(false); };
     const fs = () => { if (!document.fullscreenElement) setFull(false); };
     addEventListener('keydown', k);
     document.addEventListener('fullscreenchange', fs);
@@ -204,7 +209,15 @@ export function CallDock() {
     addEventListener('resize', on);
     return () => removeEventListener('resize', on);
   }, [dockEl]);
-  useEffect(() => { if (!v) { setFull(false); setMin(false); } }, [!!v]);
+  useEffect(() => { if (!v) { setFull(false); setMin(false); setChat(false); } }, [!!v]);
+  // Al abrir el chat el panel se ensancha: que no quede por fuera de la ventana.
+  useEffect(() => { setPos((p) => (p ? clampPos(p, dockEl) : p)); }, [chat, dockEl]);
+  // En pantalla completa los diálogos (＋ Agregar, enlace, transcripción), menús y avisos se pintan dentro del panel.
+  useEffect(() => {
+    if (!full || !dockEl) return;
+    setOverlayHost(dockEl);
+    return () => setOverlayHost(null);
+  }, [full, dockEl]);
   if (!v || !d) return null;
 
   const toggleFull = () => {
@@ -250,10 +263,16 @@ export function CallDock() {
   const nameOf = (id: string) => (id === d.me.id ? t('call.you') : guestName(v.call, id) || firstName(d, id, v.call.names));
   const title = (conv ? conv.name ?? others.map(nameOf).join(', ') : others.map(nameOf).join(', ')) || t('call.title');
   const clock = `${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, '0')}`;
+  // Chat de la conversación de la llamada (pedido de Lorena, 7-oct-2026: capturas y documentos sin salir de la
+  // llamada). Las salas viven en el chat «Tú» de su dueño, que los demás no ven: ahí no hay chat compartido.
+  const chatConv = !v.guest && !v.call.roomId ? conv : undefined;
+  const chatOpen = chat && !!chatConv && !min && !pip.mini && !pip.docOpen;
+  const chatToggle = chatConv ? { open: chatOpen, toggle: () => { setChat(!chatOpen); if (!chatOpen) setMin(false); } } : undefined;
+  const panel = <CallPanel v={v} d={d} compact={min && !full && !pip.mini} nameOf={nameOf} pip={pip.mini} chat={pip.mini ? undefined : chatToggle} />;
 
   return (
     <aside ref={setDockEl} style={style}
-      className={`call-dock ${min && !full && !pip.mini ? 'is-min' : ''} ${full || pip.mini ? 'is-full' : ''} ${pip.mini ? 'is-mini' : ''} ${v.screens.length && !min ? 'has-screen' : ''} ${pip.docOpen ? 'is-in-pip' : ''}`} aria-label={t('call.title')}>
+      className={`call-dock ${min && !full && !pip.mini ? 'is-min' : ''} ${full || pip.mini ? 'is-full' : ''} ${pip.mini ? 'is-mini' : ''} ${v.screens.length && !min ? 'has-screen' : ''} ${pip.docOpen ? 'is-in-pip' : ''} ${chatOpen ? 'has-chat' : ''}`} aria-label={t('call.title')}>
       <div className="row call-dock-head" onPointerDown={startDrag} onDoubleClick={full ? undefined : resetPos} title={full ? undefined : t('call.dragHint')}>
         <span className={`call-dot ${v.phase === 'live' ? 'is-live' : ''}`} aria-hidden />
         <button className="grow ellipsis call-dock-title" onClick={() => { if (dragged.current) { dragged.current = false; return; } setFull(false); navigate(`/c/${v.call.conversationId}`); }}>{title}</button>
@@ -264,14 +283,23 @@ export function CallDock() {
       </div>
       {pip.docOpen
         ? <div className="call-in-pip small">⧉ {t('call.inPip')} <button className="btn small" onClick={() => void pip.toggle()}>{t('call.pipBack')}</button></div>
-        : <CallPanel v={v} d={d} compact={min && !full && !pip.mini} nameOf={nameOf} pip={pip.mini} />}
+        : chatOpen && chatConv
+          ? <div className="call-dock-body">
+              <div className="call-dock-main">{panel}</div>
+              <div className="call-chat on-paper" aria-label={t('call.chat')}>
+                <Suspense fallback={<div className="hint">{t('common.loading')}</div>}>
+                  <ConversationScreen key={chatConv.id} id={chatConv.id} embedded={{ onClose: () => setChat(false) }} />
+                </Suspense>
+              </div>
+            </div>
+          : panel}
       {pip.portal}
     </aside>
   );
 }
 
 /** Contenido de la llamada: pantallas, recuadros, subtítulos y botones (en el panel o en la ventana flotante). */
-function CallPanel({ v, d, compact, nameOf, pip }: { v: CallView; d: ClientData; compact: boolean; nameOf: (id: string) => string; pip?: boolean }) {
+function CallPanel({ v, d, compact, nameOf, pip, chat }: { v: CallView; d: ClientData; compact: boolean; nameOf: (id: string) => string; pip?: boolean; chat?: { open: boolean; toggle: () => void } }) {
   const people = callPeople(v.call);
   const others = people.filter((id) => id !== d.me.id);
   // Cuadrícula en cuanto alguien tiene video: quien no tiene cámara sigue ahí como avatar.
@@ -311,7 +339,7 @@ function CallPanel({ v, d, compact, nameOf, pip }: { v: CallView; d: ClientData;
       {!pip && pending.length > 0 && <InvitedList call={v.call} pending={pending} />}
       {v.call.transcribing && v.captions.length > 0 && (
         <div className="call-captions" aria-live="polite">
-          {v.captions.slice(-4).map((c) => <div key={c.resultId} className={c.partial ? 'is-partial' : ''}><b>{c.userId === d.me.id ? t('call.you') : firstName(d, c.userId, v.call.names) || '·'}:</b> {c.processing ? <span className="call-processing">⏳ {t('call.processing')}</span> : c.text}</div>)}
+          {v.captions.slice(-4).map((c) => <div key={c.resultId} className={c.partial ? 'is-partial' : ''}><b>{(c.userId && nameOf(c.userId)) || '·'}:</b> {c.processing ? <span className="call-processing">⏳ {t('call.processing')}</span> : c.text}</div>)}
         </div>
       )}
     </>}
@@ -322,6 +350,7 @@ function CallPanel({ v, d, compact, nameOf, pip }: { v: CallView; d: ClientData;
       <ScreenButton v={v} />
       {!pip && <button className="call-ctl" onClick={(e) => void openAudioMenu(e.currentTarget, v)} title={t('call.audioMenu')} aria-label={t('call.audioMenu')}>🔊</button>}
       {!pip && <button className="call-ctl" onClick={() => openDialog((close) => <GuestLinkDialog call={v.call} onClose={close} />)} title={t('call.guestLink')} aria-label={t('call.guestLink')}>🔗</button>}
+      {!pip && chat && <button className={`call-ctl ${chat.open ? 'is-on' : ''}`} onClick={chat.toggle} aria-pressed={chat.open} title={chat.open ? t('call.chatClose') : t('call.chat')} aria-label={chat.open ? t('call.chatClose') : t('call.chat')}>💬</button>}
       {!pip && <button className="btn small call-add" onClick={() => openAddToCall(v.call)} title={t('call.add')}>{t('call.addShort')}</button>}
       <span className="grow" />
       <button className="btn small call-hang" onClick={() => void hangUp()}>{t('call.hangUp')}</button>

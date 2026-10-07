@@ -741,7 +741,7 @@ const es = {
   'err.has_digital_signature': 'Este PDF ya tiene una firma digital', 'err.encrypted_pdf': 'Este PDF tiene contraseña: no se puede firmar',
   'err.not_pdf': 'Este archivo no es un PDF', 'err.invalid_pdf': 'No pude leer este PDF', 'err.too_many_signatures': 'Ya tienes demasiadas firmas guardadas',
   // ---------- Llamadas 1.7.1 ----------
-  'call.addShort': '＋ Agregar', 'call.inviteRinging': 'Llamando…', 'call.inviteNoAnswer': 'No contestó', 'call.ringAgain': 'Volver a llamar',
+  'call.chat': 'Chat de la llamada', 'call.chatClose': 'Cerrar el chat', 'call.addShort': '＋ Agregar', 'call.inviteRinging': 'Llamando…', 'call.inviteNoAnswer': 'No contestó', 'call.ringAgain': 'Volver a llamar',
   'call.otherDevice': 'En llamada en tu {device} · {chat}', 'call.passHere': 'Pasar aquí', 'call.joinToo': 'Unirme también',
   'call.dev.ios': 'iPhone', 'call.dev.android': 'Android', 'call.dev.macos': 'Mac', 'call.dev.windows': 'PC', 'call.dev.web': 'navegador', 'call.dev.other': 'otro dispositivo',
   'calls.liveNow': 'En curso ahora', 'call.inCallDot': 'Llamada en curso',
@@ -1780,7 +1780,7 @@ const en: Record<Key, string> = {
   'err.has_digital_signature': 'This PDF already has a digital signature', 'err.encrypted_pdf': 'This PDF is password-protected and cannot be signed',
   'err.not_pdf': 'This file is not a PDF', 'err.invalid_pdf': 'Could not read this PDF', 'err.too_many_signatures': 'You already have too many saved signatures',
   // ---------- Calls 1.7.1 ----------
-  'call.addShort': '＋ Add', 'call.inviteRinging': 'Calling…', 'call.inviteNoAnswer': 'No answer', 'call.ringAgain': 'Call again',
+  'call.chat': 'Call chat', 'call.chatClose': 'Close chat', 'call.addShort': '＋ Add', 'call.inviteRinging': 'Calling…', 'call.inviteNoAnswer': 'No answer', 'call.ringAgain': 'Call again',
   'call.otherDevice': 'On a call on your {device} · {chat}', 'call.passHere': 'Move here', 'call.joinToo': 'Join too',
   'call.dev.ios': 'iPhone', 'call.dev.android': 'Android', 'call.dev.macos': 'Mac', 'call.dev.windows': 'PC', 'call.dev.web': 'browser', 'call.dev.other': 'other device',
   'calls.liveNow': 'Happening now', 'call.inCallDot': 'Call in progress',

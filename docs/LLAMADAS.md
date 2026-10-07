@@ -179,7 +179,7 @@ Pedido de Danny. César lo llamó, contestó en el iPhone y el PC siguió sonand
   - Máximo 10 invitados a la vez. El enlace muere cuando la llamada termina.
   - Los invitados no sostienen la llamada: cuando sale el último de chaggu, termina y se les corta.
   - A los 45 s sin latir, el worker los saca.
-  - No transcriben su audio (la transcripción con Groq pide sesión).
+  - Desde el 7-oct-2026 también transcriben su micrófono: `POST /call-guests/:id/audio` (cuerpo `application/octet-stream`, secreto en `x-guest-secret`, mismos encabezados y límites que `/calls/:id/audio`). La frase queda con `speaker_user_id` vacío, `speaker_name` = su nombre y `reported_by` = quien empezó la llamada; en los eventos `call.processing`/`call.transcript` el `userId` es `guest:{id}`. Solo mientras está dentro (60 s de margen para el último pedazo). `GuestCallStateDTO.startedAt` ubica sus pedazos en la llamada.
 - `CallDTO.guests` lleva los invitados que están dentro, para que todos vean su nombre.
 - Pruebas: `test/calls-guests.test.ts`.
 
@@ -192,5 +192,7 @@ Como «Crear una reunión para después» de Google Meet: un enlace **permanente
 - **Enlace:** `https://app.chaggu.com/sala/abc-defg-hij` (10 letras al azar). Cualquiera entra con su nombre, sin cuenta, por voz o video, **aunque el dueño no esté**.
 - **Ciclo:** al entrar el primero a una sala vacía se abre una llamada nueva (en el chat «Tú» del dueño, que solo él ve); cuando sale el último (de chaggu o invitado) se cierra. El enlace sigue sirviendo. A diferencia de las llamadas de chat, **los invitados sostienen una sala**. gg le avisa al dueño cuando alguien entra a su sala vacía.
 - **API:** `POST /rooms {title}`, `GET /rooms`, `DELETE /rooms/:id` (el enlace deja de servir y se cierra la llamada), `POST /rooms/:id/enter` (el dueño entra desde la app); públicos: `GET /rooms/:code`, `POST /rooms/:code/join {name}`. Mismo límite de 10 invitados.
+- **Agenda (7-oct-2026, migración 107):** cuando el dueño entra a su sala (`POST /rooms/:id/enter`), la llamada queda como evento en su agenda (chat «Tú»): empieza ahora, 30 min, con el enlace en lugar y descripción; sin invitar a nadie, sin push ni correo. `calls.calendar_event_id` evita duplicarlo al volver a entrar a la misma llamada; una llamada nueva de la sala es otro evento.
+- **Chat:** el panel de la llamada tiene 💬 con el chat de su conversación (también en pantalla completa). Las salas no lo tienen: su llamada vive en el chat «Tú» del dueño y los invitados no tienen cuenta (`CallDTO.roomId`).
 - **Citas:** cada cita por enlace (`docs/CITAS.md`) crea su propia sala (`source='booking'`), que no aparece en Mis enlaces y se cierra al cancelar la cita.
 - Pruebas: `test/rooms.test.ts`.

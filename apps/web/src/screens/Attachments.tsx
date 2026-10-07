@@ -13,6 +13,7 @@ import { ImageViewer } from './ImageViewer.tsx';
 import { setFileDrag } from '../file-links.ts';
 import { MAX_TEXT_BYTES, isTextFile } from '../text-files.ts';
 import { openCodeViewer } from '../code-viewer.tsx';
+import { InOverlayHost } from '../overlay-host.tsx';
 
 /** Un adjunto de chaggu se puede arrastrar a un chat de WhatsApp (se manda un enlace para verlo). Los de WhatsApp no. */
 const fileDragProps = (a: AttachmentDTO) => waPathScope(a.url) ? {} : { draggable: true, onDragStart: (e: React.DragEvent) => { e.stopPropagation(); setFileDrag(e, { attachmentId: a.id, name: a.name }); } };
@@ -242,8 +243,9 @@ function Viewer({ list, start, onClose }: { list: AttachmentDTO[]; start: number
   useEffect(() => {
     return () => { if (trigger.current?.isConnected) trigger.current.focus({ preventScroll: true }); };
   }, []);
-  return createPortal(<ViewerAttachment key={a.url} a={a} count={list.length > 1 ? t('att.count', { i: i + 1, n: list.length }) : ''}
-    onClose={onClose} onPrevious={i > 0 ? () => setI(i - 1) : undefined} onNext={i < list.length - 1 ? () => setI(i + 1) : undefined} />, document.body);
+  // InOverlayHost: con la llamada en pantalla completa (chat de la llamada) el visor sale dentro de ella.
+  return createPortal(<InOverlayHost><ViewerAttachment key={a.url} a={a} count={list.length > 1 ? t('att.count', { i: i + 1, n: list.length }) : ''}
+    onClose={onClose} onPrevious={i > 0 ? () => setI(i - 1) : undefined} onNext={i < list.length - 1 ? () => setI(i + 1) : undefined} /></InOverlayHost>, document.body);
 }
 
 /** Remount per original so loading/errors/zoom never leak to the next image. */

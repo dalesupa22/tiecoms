@@ -25,6 +25,7 @@ import { pool, tx, type Db, type Tx, enqueueOutbox } from '../db.ts';
 import { ApiError, badRequest, notFound } from '../errors.ts';
 import { appendEvent, appendMessage, sendMessage } from './messages.ts';
 import { getSummarizer } from './voice-providers.ts';
+import { addQuietEvent } from './calendar.ts';
 import { getOrCreateDirect, reachable } from './workspaces.ts';
 import { GG_ID } from './gg.ts';
 import { sttConfigured, transcribeChunk } from './call-stt.ts';
@@ -207,6 +208,7 @@ async function callDTO(db: Db, id: string, viewerId?: string): Promise<CallDTO> 
     ...(r.rings?.length ? { invited: r.rings } : {}),
     ...(viewerId ? { myDevices: r.my_devices ?? [] } : {}),
     ...(r.guests?.length ? { guests: r.guests } : {}),
+    ...(r.room_id ? { roomId: r.room_id } : {}),
   };
 }
 
@@ -675,7 +677,7 @@ async function guestState(db: Db, callId: string): Promise<GuestCallStateDTO> {
   const names: Record<string, string> = {};
   for (const id of call.activeUserIds) if (call.names?.[id]) names[id] = call.names[id]!;
   for (const g of guests) names[guestExternalId(g.id)] = g.name;
-  return { callId, kind: call.kind, active: !call.endedAt, transcribing: call.transcribing, activeUserIds: call.activeUserIds, guests, names };
+  return { callId, kind: call.kind, active: !call.endedAt, transcribing: call.transcribing, activeUserIds: call.activeUserIds, guests, names, startedAt: call.startedAt };
 }
 
 /** POST /call-links/:token/join (público): entra un invitado con su nombre. */
@@ -838,12 +840,38 @@ async function activeParticipantIds(callId: string) {
  * lo transcribe con Groq, guarda las frases (speaker = quien lo mandó) y se las envía a quienes están dentro.
  * segId lo genera el cliente: reintentar el mismo pedazo no duplica frases.
  */
-export async function addAudio(userId: string, callId: string, input: { body: Buffer; type: string; offsetMs: number; durationMs: number; segId: string }) {
+export async function addAudio(userId: string, callId: string, input: AudioPiece) {
   requireEnabled();
   const call = await callFor(pool, userId, callId, 'post');
   const inCall = await pool.query('SELECT 1 FROM call_participants WHERE call_id = $1 AND user_id = $2 AND left_at IS NULL', [callId, userId]);
   const late = call.ended_at ? Date.now() - new Date(call.ended_at).getTime() < 60_000 : false;
   if (!inCall.rowCount && !late) throw new ApiError(409, 'not_in_call', 'No estás en esa llamada');
+  const me = (await pool.query('SELECT name FROM users WHERE id = $1', [userId])).rows[0]?.name ?? '';
+  return transcribePiece(call, { eventUserId: userId, speakerUserId: userId, name: me, reportedBy: userId }, input, late);
+}
+
+/**
+ * POST /call-guests/:id/audio (público, con el secreto del invitado): lo mismo que addAudio para quien entró por
+ * enlace o sala (pedido de Lorena, 7-oct-2026: antes solo quedaba lo que hablaba quien tenía cuenta).
+ * speaker_user_id queda vacío y speaker_name es su nombre; reported_by (NOT NULL) es quien empezó la llamada.
+ * Solo mientras está dentro, con el mismo margen de 60 s que addAudio para el último pedazo al colgar.
+ */
+export async function guestAddAudio(guestId: string, secret: string, input: AudioPiece) {
+  requireEnabled();
+  const g = await guestRow(guestId, secret);
+  const call = (await pool.query('SELECT * FROM calls WHERE id = $1', [g.call_id])).rows[0];
+  const gone = g.left_at ?? g.ended_at;
+  const late = gone ? Date.now() - new Date(gone).getTime() < 60_000 : false;
+  if (gone && !late) throw new ApiError(409, 'not_in_call', 'Ya no estás en esa llamada');
+  return transcribePiece(call, { eventUserId: guestExternalId(guestId), speakerUserId: null, name: g.name, reportedBy: call.started_by }, input, late);
+}
+
+interface AudioPiece { body: Buffer; type: string; offsetMs: number; durationMs: number; segId: string }
+/** Quién habla en el pedazo. eventUserId va en call.processing/call.transcript ("guest:{id}" para un invitado). */
+interface AudioSpeaker { eventUserId: string; speakerUserId: string | null; name: string; reportedBy: string }
+
+async function transcribePiece(call: any, who: AudioSpeaker, input: AudioPiece, late: boolean) {
+  const callId: string = call.id;
   const justStopped = call.transcription_stopped_at && Date.now() - new Date(call.transcription_stopped_at).getTime() < 60_000;
   if (!call.transcribing && !late && !justStopped) throw badRequest('La transcripción está apagada');
   if (!/^[A-Za-z0-9_-]{6,64}$/.test(input.segId)) throw badRequest('segId inválido');
@@ -851,12 +879,13 @@ export async function addAudio(userId: string, callId: string, input: { body: Bu
   if (!input.body.length || input.body.length > MAX_CALL_AUDIO_BYTES) throw badRequest('Pedazo de audio vacío o muy grande');
   const done = await pool.query('SELECT 1 FROM call_transcript_segments WHERE call_id = $1 AND result_id LIKE $2 LIMIT 1', [callId, `${input.segId}:%`]);
   if (done.rowCount) return { saved: 0, segments: [] };
-  const me = (await pool.query('SELECT name FROM users WHERE id = $1', [userId])).rows[0]?.name ?? '';
+  const userId = who.eventUserId;
   const people = await activeParticipantIds(callId);
   await tx((c) => enqueueOutbox(c, 'account.event', { userIds: people, event: { type: 'call.processing', callId, userId, segId: input.segId } }));
-  // Pista de ortografía: nombres de la gente en la llamada y del chat.
+  // Pista de ortografía: nombres de la gente en la llamada (también los invitados) y del chat.
   const names = (await pool.query(
-    `SELECT string_agg(DISTINCT u.name, ', ') AS n FROM call_participants p JOIN users u ON u.id = p.user_id WHERE p.call_id = $1`, [callId],
+    `SELECT string_agg(DISTINCT n, ', ') AS n FROM (SELECT u.name AS n FROM call_participants p JOIN users u ON u.id = p.user_id WHERE p.call_id = $1
+       UNION SELECT q.name FROM call_guests q WHERE q.call_id = $1) x`, [callId],
   )).rows[0]?.n ?? '';
   const title = (await pool.query('SELECT name FROM conversations WHERE id = $1', [call.conversation_id])).rows[0]?.name ?? '';
   let result;
@@ -873,10 +902,10 @@ export async function addAudio(userId: string, callId: string, input: { body: Bu
     const endMs = Math.max(startMs, Math.round(input.offsetMs + Math.min(sg.end * 1000, input.durationMs || sg.end * 1000)));
     const r = await pool.query(
       `INSERT INTO call_transcript_segments (call_id, result_id, speaker_user_id, speaker_name, language, body, start_ms, end_ms, reported_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$3) ON CONFLICT (call_id, result_id) DO NOTHING`,
-      [callId, `${input.segId}:${i}`, userId, me, result.language, sg.text.slice(0, 4000), startMs, endMs],
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (call_id, result_id) DO NOTHING`,
+      [callId, `${input.segId}:${i}`, who.speakerUserId, who.name, result.language, sg.text.slice(0, 4000), startMs, endMs, who.reportedBy],
     );
-    if (r.rowCount) saved.push({ resultId: `${input.segId}:${i}`, speakerUserId: userId, speakerName: me, language: result.language, text: sg.text, startMs, endMs });
+    if (r.rowCount) saved.push({ resultId: `${input.segId}:${i}`, speakerUserId: who.speakerUserId, speakerName: who.name, language: result.language, text: sg.text, startMs, endMs });
   }
   await tx(async (c) => {
     await enqueueOutbox(c, 'account.event', { userIds: people, event: { type: 'call.transcript', callId, segId: input.segId, userId, segments: saved } });
@@ -1023,10 +1052,38 @@ export async function enterRoom(userId: string, id: string, device: CallDevice =
   if (!room) throw notFound('Sala');
   for (let attempt = 0; attempt < 2; attempt++) {
     const callId = await openRoomCall(room);
-    try { return await joinCall(userId, callId, false, device); }
-    catch (e) { if (!(e instanceof MeetingGone)) throw e; await finish(callId); }
+    let out: CallJoinDTO;
+    try { out = await joinCall(userId, callId, false, device); }
+    catch (e) { if (!(e instanceof MeetingGone)) throw e; await finish(callId); continue; }
+    // La reunión queda también en la agenda de su dueño (no solo en Llamadas). Si falla, igual se entra.
+    await roomAgendaEvent(callId, room).catch((e) => console.warn('[calls] no pude agendar la sala', e?.message));
+    return out;
   }
   throw new ApiError(503, 'call_unavailable', 'No se pudo abrir la sala, intenta de nuevo');
+}
+
+/**
+ * Reunión improvisada (sala) en la agenda de su dueño (pedido de Lorena, 7-oct-2026: quedaban solo en Llamadas).
+ * Un evento por llamada de la sala, en su chat «Tú»: empieza ahora, 30 min, con el enlace en lugar y descripción.
+ * Sin invitar a nadie, sin push ni correo. Volver a entrar a la misma llamada no crea otro (calls.calendar_event_id).
+ * Las salas de citas (source = 'booking') ya tienen su evento.
+ */
+async function roomAgendaEvent(callId: string, room: { id: string; owner_id: string; title: string; code: string; source: string }) {
+  if (room.source !== 'manual') return;
+  await tx(async (c) => {
+    const call = (await c.query('SELECT c.conversation_id, c.calendar_event_id, cv.workspace_id FROM calls c JOIN conversations cv ON cv.id = c.conversation_id WHERE c.id = $1 FOR UPDATE OF c', [callId])).rows[0];
+    if (!call || call.calendar_event_id) return;
+    // La zona horaria del dispositivo de su dueño (la que guarda el modo dormir, automática por defecto).
+    let tz: string = (await c.query('SELECT sleep_tz FROM users WHERE id = $1', [room.owner_id])).rows[0]?.sleep_tz || 'America/Bogota';
+    try { new Intl.DateTimeFormat('en-US', { timeZone: tz }); } catch { tz = 'America/Bogota'; }
+    const url = roomUrl(room.code);
+    const starts = new Date(Math.floor(Date.now() / 60_000) * 60_000);
+    const ev = await addQuietEvent(c, room.owner_id, call.conversation_id, call.workspace_id ?? null, {
+      title: room.title.trim().length >= 2 ? room.title.trim() : `Reunión ${room.code}`, location: url, description: `Enlace de la reunión: ${url}`,
+      startsAt: starts.toISOString(), endsAt: new Date(starts.getTime() + 30 * 60_000).toISOString(), timezone: tz,
+    });
+    await c.query('UPDATE calls SET calendar_event_id = $2 WHERE id = $1', [callId, ev.id]);
+  });
 }
 
 /** POST /rooms/:code/join (público): entra con su nombre, sin cuenta; si la sala estaba vacía, la abre. */

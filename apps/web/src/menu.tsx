@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type MouseEvent as RMouseEvent, type TouchEvent as RTouchEvent } from 'react';
 import { t } from './i18n.ts';
 import './screens/Toasts.css';
+import { InOverlayHost } from './overlay-host.tsx';
 
 /**
  * Menú contextual global (clic derecho, tecla de menú o pulsación larga en táctil)
@@ -154,7 +155,7 @@ export function MenuHost() {
     };
   }, [m]);
   if (!m) return null;
-  return <MenuList items={m.items} x={m.x} y={m.y} depth={0} onDone={closeMenu} />;
+  return <InOverlayHost><MenuList items={m.items} x={m.x} y={m.y} depth={0} onDone={closeMenu} /></InOverlayHost>;
 }
 
 // ---------- Avisos breves ----------
@@ -172,7 +173,7 @@ export function dismissToast(id: number) { toasts = toasts.filter((y) => y.id !=
 export function ToastHost() {
   const list = useSyncExternalStore((l) => { toastListeners.add(l); return () => toastListeners.delete(l); }, () => toasts);
   return (
-    <div className="toasts" role="status" aria-live="polite">
+    <InOverlayHost><div className="toasts" role="status" aria-live="polite">
       {list.map((x) => (
         <div key={x.id} className="toast">
           <span>{x.text}</span>
@@ -181,7 +182,7 @@ export function ToastHost() {
           <button className="toast-x" aria-label={t('common.close')} title={t('common.close')} onClick={() => dismissToast(x.id)}>×</button>
         </div>
       ))}
-    </div>
+    </div></InOverlayHost>
   );
 }
 

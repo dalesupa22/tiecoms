@@ -107,7 +107,7 @@ export async function buildHttp() {
   await app.register(cors, {
     origin: [config.publicOrigin, ...config.extraOrigins],
     credentials: true,
-    allowedHeaders: ['authorization', 'content-type', 'x-tiecoms-client', 'x-tiecoms-contract', 'x-file-type', 'x-file-name', 'x-voice-note', 'x-duration-ms', 'x-waveform', 'x-ai-consent', 'x-width', 'x-height'],
+    allowedHeaders: ['authorization', 'content-type', 'x-tiecoms-client', 'x-tiecoms-contract', 'x-file-type', 'x-file-name', 'x-voice-note', 'x-duration-ms', 'x-waveform', 'x-ai-consent', 'x-width', 'x-height', 'x-seg-id', 'x-offset-ms', 'x-guest-secret'],
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
     maxAge: 600,
   });
@@ -947,6 +947,14 @@ export async function buildHttp() {
   });
   app.post<{ Params: { id: string } }>('/api/v1/call-guests/:id/heartbeat', { config: { rateLimit: { max: 240, timeWindow: '1 minute' } } }, async (req) =>
     calls.guestHeartbeat(z.uuid().parse(req.params.id), GuestSecretInput.parse(req.body).secret));
+  // Pedazos del micrófono del invitado para la transcripción (como /calls/:id/audio); el secreto va en x-guest-secret.
+  app.post<{ Params: { id: string } }>('/api/v1/call-guests/:id/audio', { bodyLimit: calls.MAX_CALL_AUDIO_BYTES, config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (req) => {
+    if (!Buffer.isBuffer(req.body)) throw new ApiError(415, 'bad_request', 'Sube el audio como application/octet-stream');
+    return calls.guestAddAudio(z.uuid().parse(req.params.id), GuestSecretInput.parse({ secret: req.headers['x-guest-secret'] }).secret, {
+      body: req.body, type: String(req.headers['x-file-type'] ?? ''), segId: String(req.headers['x-seg-id'] ?? ''),
+      offsetMs: Math.max(0, Number(req.headers['x-offset-ms']) || 0), durationMs: Math.max(0, Number(req.headers['x-duration-ms']) || 0),
+    });
+  });
   app.post<{ Params: { id: string } }>('/api/v1/call-guests/:id/leave', guestLimit, async (req) =>
     calls.guestLeave(z.uuid().parse(req.params.id), GuestSecretInput.parse(req.body).secret));
   // Citas por enlace (docs/CITAS.md): públicas, sin cuenta. Reservar y cambiar llevan límite propio.

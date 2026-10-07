@@ -133,7 +133,7 @@ async function publicPost<T>(path: string, body: unknown): Promise<T> {
 /** Lo que ve un invitado de la llamada, con la forma de CallDTO para reusar el panel. */
 function guestCall(g: GuestCallStateDTO, prev?: CallDTO): CallDTO {
   return {
-    id: g.callId, conversationId: '', kind: g.kind, startedBy: '', startedAt: prev?.startedAt ?? new Date().toISOString(),
+    id: g.callId, conversationId: '', kind: g.kind, startedBy: '', startedAt: g.startedAt ?? prev?.startedAt ?? new Date().toISOString(),
     endedAt: g.active ? null : new Date().toISOString(), activeUserIds: g.activeUserIds, transcribing: g.transcribing,
     hasTranscript: false, names: g.names, guests: g.guests,
   };
@@ -394,8 +394,8 @@ const VOICE_RMS = 0.015;
 let rec: { stop: () => void } | null = null;
 
 function syncRecorder() {
-  // Los invitados no mandan audio a transcribir (el API pide sesión de chaggu).
-  const want = !!view && !view.guest && view.phase === 'live' && view.call.transcribing;
+  // Los invitados por enlace también mandan su micrófono (con su secreto, /call-guests/:id/audio).
+  const want = !!view && view.phase === 'live' && view.call.transcribing;
   if (want && !rec) startRecorder();
   if (!want && rec) { rec.stop(); rec = null; }
 }
@@ -404,6 +404,8 @@ function startRecorder() {
   if (!view || typeof MediaRecorder === 'undefined') return;
   const callId = view.call.id;
   const startedAt = Date.parse(view.call.startedAt);
+  // Invitado: sus credenciales quedan con la grabación (al colgar se borran antes de subir el último pedazo).
+  const g = guest;
   let stopped = false;
   rec = { stop: () => { stopped = true; } };
   void (async () => {
@@ -440,22 +442,38 @@ function startRecorder() {
       const done = new Promise((r) => { mr.onstop = r; });
       mr.stop();
       await done;
-      if (voiced >= MIN_VOICE_MS && chunks.length) void uploadChunk(callId, new Blob(chunks, { type: (mime || 'audio/webm').split(';')[0] }), t0 - startedAt, Date.now() - t0);
+      if (voiced >= MIN_VOICE_MS && chunks.length) void uploadChunk(callId, new Blob(chunks, { type: (mime || 'audio/webm').split(';')[0] }), t0 - startedAt, Date.now() - t0, g);
     }
     stream.getTracks().forEach((x) => x.stop());
     void ac.close().catch(() => {});
   })();
 }
 
-async function uploadChunk(callId: string, blob: Blob, offsetMs: number, durationMs: number) {
+async function uploadChunk(callId: string, blob: Blob, offsetMs: number, durationMs: number, g: { id: string; secret: string } | null = null) {
   const segId = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+  const meta = { segId, offsetMs: Math.max(0, offsetMs), durationMs };
   for (let attempt = 0; attempt < 2; attempt++) {
-    try { await client.sendCallAudio(callId, blob, { segId, offsetMs: Math.max(0, offsetMs), durationMs }); return; }
+    try { await (g ? guestAudio(g, blob, meta) : client.sendCallAudio(callId, blob, meta)); return; }
     catch (e: any) {
       // Sin red o Groq caído: un reintento con el mismo segId (el servidor no duplica). Apagada o fuera: nada.
       if (e?.status && e.status < 500) return;
       await new Promise((r) => setTimeout(r, 2000));
     }
+  }
+}
+
+/** Pedazo del invitado por enlace: sin sesión de chaggu, con su secreto. */
+async function guestAudio(g: { id: string; secret: string }, blob: Blob, meta: { segId: string; offsetMs: number; durationMs: number }) {
+  const res = await fetch(apiUrl(`/api/v1/call-guests/${g.id}/audio`), {
+    method: 'POST', body: blob,
+    headers: {
+      'content-type': 'application/octet-stream', 'x-tiecoms-client': 'web', 'x-guest-secret': g.secret, 'x-file-type': blob.type || 'audio/webm',
+      'x-seg-id': meta.segId, 'x-offset-ms': String(Math.round(meta.offsetMs)), 'x-duration-ms': String(Math.round(meta.durationMs)),
+    },
+  });
+  if (!res.ok) {
+    const json = await res.json().catch(() => ({}));
+    throw Object.assign(new Error(json?.error?.message ?? ''), { code: json?.error?.code ?? 'internal', status: res.status });
   }
 }
 
@@ -465,7 +483,7 @@ export function onCallTranscriptEvent(e: Extract<AccountEvent, { type: 'call.pro
   const key = `p:${e.segId}`;
   let captions = view.captions.filter((c) => c.resultId !== key);
   if (e.type === 'call.processing') captions = [...captions, { resultId: key, userId: e.userId, text: '', partial: true, processing: true }];
-  else for (const sg of e.segments) captions = [...captions.filter((c) => c.resultId !== sg.resultId), { resultId: sg.resultId, userId: sg.speakerUserId, text: sg.text, partial: false }];
+  else for (const sg of e.segments) captions = [...captions.filter((c) => c.resultId !== sg.resultId), { resultId: sg.resultId, userId: sg.speakerUserId ?? e.userId, text: sg.text, partial: false }];
   patch({ captions: captions.slice(-8) });
 }
 

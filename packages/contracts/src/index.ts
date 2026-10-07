@@ -155,6 +155,8 @@ export interface CallDTO {
   invited?: { userId: string; at: string; joined: boolean }[];
   /** Invitados por enlace que están dentro ahora (sin cuenta). En Chime su externalUserId es "guest:{id}". */
   guests?: CallGuestDTO[];
+  /** Llamada de una sala (reunión por enlace, docs/LLAMADAS.md › Salas): vive en el chat «Tú» de su dueño. */
+  roomId?: string;
 }
 export interface CallGuestDTO { id: string; name: string }
 /** externalUserId de Chime de un invitado por enlace. */
@@ -172,6 +174,8 @@ export interface GuestCallStateDTO {
   activeUserIds: string[];
   guests: CallGuestDTO[];
   names: Record<string, string>;
+  /** Cuándo empezó la llamada (los pedazos de audio del invitado se ubican desde ahí). */
+  startedAt?: string;
 }
 /** Sala de reunión abierta: un enlace permanente que cualquiera con el enlace puede usar (docs/LLAMADAS.md › Salas). */
 export interface RoomDTO { id: string; code: string; title: string; url: string; live: boolean; guests: number; createdAt: string }
@@ -1851,7 +1855,7 @@ export type AccountEvent =
   | { type: 'call.answered'; callId: string; conversationId: string; deviceKey: string; platform: string; label: string }
   /** 1.7.1: rechacé en un dispositivo (POST /calls/:id/decline): todos mis dispositivos dejan de sonar. */
   | { type: 'call.declined'; callId: string; conversationId: string }
-  /** Un pedazo de audio de `userId` se está transcribiendo: los clientes muestran «Procesando…». */
+  /** Un pedazo de audio de `userId` se está transcribiendo: los clientes muestran «Procesando…». Un invitado por enlace llega como "guest:{id}". */
   | { type: 'call.processing'; callId: string; userId: string; segId: string }
   /** Frases de ese pedazo ya guardadas (vacío si no tenía voz; failed si Groq falló). */
   | { type: 'call.transcript'; callId: string; userId: string; segId: string; segments: CallTranscriptSegmentDTO[]; failed?: boolean }

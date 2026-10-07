@@ -1872,6 +1872,24 @@ html.call-mini body { background: var(--call-bg); }
 .call-dock.is-mini .call-ctl { width: 40px; height: 40px; font-size: 17px; }
 .call-dock .call-add { background: rgba(255, 255, 255, 0.14); color: var(--call-fg); border-color: transparent; }
 .call-dock .call-add:hover { background: rgba(255, 255, 255, 0.24); }
+/* Diálogos, menús y avisos dentro del panel en pantalla completa (overlay-host.tsx) y chat de la llamada:
+   vuelven a los colores de la app, no los oscuros de la llamada (7-oct-2026). */
+.overlay-in-host { display: contents; }
+.call-dock .on-paper { color: var(--ink); font-size: 14px; }
+.call-dock .on-paper .muted { color: var(--muted); }
+.call-dock .on-paper .icon-btn { color: inherit; }
+.call-ctl.is-on { background: rgba(255, 255, 255, 0.38); }
+.call-dock.has-chat:not(.is-full) { width: min(820px, calc(100vw - 36px)); }
+.call-dock-body { display: flex; gap: 10px; min-height: 0; }
+.call-dock-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.call-dock.is-full .call-dock-body { flex: 1; }
+.call-chat { flex: 0 0 380px; height: min(560px, calc(100vh - 120px)); min-height: 0; display: flex; flex-direction: column; border-radius: 12px; overflow: hidden; background: var(--paper); }
+.call-chat > .conv { height: 100%; }
+.call-dock.is-full .call-chat { flex-basis: min(420px, 38vw); height: auto; }
+@media (max-width: 860px) {
+  .call-dock-body { flex-direction: column; }
+  .call-chat, .call-dock.is-full .call-chat { flex: 1 1 auto; height: 55vh; }
+}
 /* Divisiones de los paneles (Split.tsx): una franja fina que se arrastra. */
 .split-handle { position: absolute; z-index: 6; background: transparent; transition: background 0.15s; }
 .split-handle.is-col { top: 0; bottom: 0; width: 10px; cursor: col-resize; }

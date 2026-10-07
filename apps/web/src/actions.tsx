@@ -10,6 +10,7 @@ import { SleepDialog, sleepSummary } from './screens/Sleep.tsx';
 import { MUTE_FOREVER, activeUntil, isForever, tomorrowAt8, untilText } from './silence.ts';
 import { DEFAULT_SOUND, playMessageSound } from './sound.ts';
 import { MAX_PANES, currentPanes, isOpenInPanes, openBeside, splitAvailable } from './split.ts';
+import { InOverlayHost } from './overlay-host.tsx';
 
 // ---------- Diálogos globales (se pueden abrir desde cualquier menú) ----------
 let dialog: ((close: () => void) => ReactNode) | null = null;
@@ -23,7 +24,8 @@ export function showDialogUntilClosed(render: (close: () => void) => ReactNode):
 }
 export function DialogHost() {
   const d = useSyncExternalStore((l) => { dl.add(l); return () => dl.delete(l); }, () => dialog);
-  return d ? <>{d(closeDialog)}</> : null;
+  // Con la llamada en pantalla completa, el diálogo sale dentro de ella (overlay-host.tsx).
+  return d ? <InOverlayHost>{d(closeDialog)}</InOverlayHost> : null;
 }
 
 // ---------- Tiempos rápidos ----------

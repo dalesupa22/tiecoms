@@ -2,6 +2,7 @@ import { createContext, useEffect, useId, useLayoutEffect, useRef, useState, typ
 import { createPortal } from 'react-dom';
 import { locale } from '../i18n.ts';
 import './ChatHeader.css';
+import { InOverlayHost } from '../overlay-host.tsx';
 
 /** null keeps standalone resource bars unchanged. */
 export const ChatHeaderVisibility = createContext<boolean | null>(null);
@@ -57,9 +58,9 @@ export function ChatHeaderPopover({ children }: { children: ReactNode }) {
   }, [open]);
   return <>
     <button ref={trigger} className="icon-btn chat-header-more" aria-label={english ? 'More chat options' : 'Más opciones del chat'} title={english ? 'More chat options' : 'Más opciones del chat'} aria-haspopup="dialog" aria-expanded={open} aria-controls={id} onClick={() => setOpen((value) => !value)}>⋯</button>
-    {createPortal(<div ref={panel} id={id} className="chat-header-popover" role="dialog" aria-label={english ? 'Chat options and resources' : 'Opciones y recursos del chat'} hidden={!open} style={position} onClick={(event) => { if (event.target instanceof Element && event.target.closest('[data-close-header]')) closeAfterCommand(); }}>
+    {createPortal(<InOverlayHost><div ref={panel} id={id} className="chat-header-popover" role="dialog" aria-label={english ? 'Chat options and resources' : 'Opciones y recursos del chat'} hidden={!open} style={position} onClick={(event) => { if (event.target instanceof Element && event.target.closest('[data-close-header]')) closeAfterCommand(); }}>
       <div className="chat-header-popover-title"><b>{english ? 'Chat options' : 'Opciones del chat'}</b><button className="icon-btn" aria-label={english ? 'Close chat options' : 'Cerrar opciones del chat'} onClick={() => close(true)}>×</button></div>
       <ChatHeaderVisibility.Provider value={open}>{children}</ChatHeaderVisibility.Provider>
-    </div>, document.body)}
+    </div></InOverlayHost>, document.body)}
   </>;
 }

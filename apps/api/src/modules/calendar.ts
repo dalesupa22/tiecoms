@@ -89,19 +89,28 @@ export async function importEvents(userId: string, conversationId: string, items
       if (!validTz(input.timezone)) throw badRequest(`Zona horaria inválida en «${input.title}»`);
       const dup = await c.query('SELECT id FROM calendar_events WHERE conversation_id = $1 AND title = $2 AND starts_at = $3 AND cancelled_at IS NULL', [conversationId, input.title, input.startsAt]);
       if (dup.rows[0]) { out.push(await load(c, dup.rows[0].id)); continue; }
-      const { rows } = await c.query(
-        `INSERT INTO calendar_events (workspace_id, conversation_id, title, description, location, starts_at, ends_at, timezone, organizer_id)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
-        [a.workspaceId, conversationId, input.title, input.description ?? null, input.location ?? null, input.startsAt, input.endsAt, input.timezone, userId],
-      );
-      await c.query("INSERT INTO calendar_event_invitees (event_id, user_id, rsvp, responded_at) VALUES ($1,$2,'yes',now())", [rows[0].id, userId]);
-      const ev = await load(c, rows[0].id);
-      await publish(c, ev);
-      out.push(ev);
+      out.push(await addQuietEvent(c, userId, conversationId, a.workspaceId, input));
     }
     await audit(c, userId, 'event.imported', { type: 'conversation', id: conversationId, workspaceId: a.workspaceId }, { count: out.length });
     return out;
   });
+}
+
+/**
+ * Evento silencioso: sin convocatoria, sin push y sin aviso en el chat; quien organiza es la única invitada.
+ * Lo usan la importación y las salas («Reunión ahora», que queda en la agenda de su dueño).
+ */
+export async function addQuietEvent(c: Tx, userId: string, conversationId: string, workspaceId: string | null,
+  input: { title: string; description?: string | null; location?: string | null; startsAt: string; endsAt: string; timezone: string }): Promise<CalendarEventDTO> {
+  const { rows } = await c.query(
+    `INSERT INTO calendar_events (workspace_id, conversation_id, title, description, location, starts_at, ends_at, timezone, organizer_id)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
+    [workspaceId, conversationId, input.title, input.description ?? null, input.location ?? null, input.startsAt, input.endsAt, input.timezone, userId],
+  );
+  await c.query("INSERT INTO calendar_event_invitees (event_id, user_id, rsvp, responded_at) VALUES ($1,$2,'yes',now())", [rows[0].id, userId]);
+  const ev = await load(c, rows[0].id);
+  await publish(c, ev);
+  return ev;
 }
 
 async function editable(c: Tx, userId: string, id: string) {

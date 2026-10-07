@@ -152,20 +152,30 @@ async function schedule() {
   }
 }
 
-async function claim() {
+/**
+ * Dos carriles: los jobs rápidos (push, vistas previas, limpieza puntual) no esperan detrás de los lentos (IA,
+ * transcripciones, resúmenes, webhooks externos). Antes una respuesta de gg de 30 s retrasaba todas las
+ * notificaciones. Cada carril sigue procesando de a uno; un kind nuevo cae en el lento hasta clasificarlo.
+ */
+const FAST_KINDS = ['link.preview', 'safety.notify', 'wa.delete_original', 'account.delete_file', 'signature.delete',
+  'housekeeping.expire_guests', 'housekeeping.availability'];
+type Lane = 'fast' | 'slow';
+
+async function claim(lane: Lane) {
   const { rows } = await pool.query(
     `UPDATE jobs SET locked_until = now() + make_interval(secs => $2), locked_by = $1, attempts = attempts + 1
       WHERE id = (SELECT id FROM jobs WHERE done_at IS NULL AND failed_at IS NULL AND run_at <= now()
                     AND (locked_until IS NULL OR locked_until < now())
+                    AND ((kind LIKE 'push.%' OR kind = ANY($3)) = $4)
                   ORDER BY run_at LIMIT 1 FOR UPDATE SKIP LOCKED)
       RETURNING id, kind, payload, attempts, max_attempts`,
-    [WORKER_ID, LEASE_SECONDS],
+    [WORKER_ID, LEASE_SECONDS, FAST_KINDS, lane === 'fast'],
   );
   return rows[0];
 }
 
-async function runOne(): Promise<boolean> {
-  const job = await claim();
+async function runOne(lane: Lane): Promise<boolean> {
+  const job = await claim(lane);
   if (!job) return false;
   const h = handlers[job.kind];
   try {
@@ -208,14 +218,25 @@ async function loop() {
       if (Date.now() - lastOverdue > overdueEvery) { lastOverdue = Date.now(); const o = await fireOverdueIssues(); if (o) console.log(`[worker] tareas vencidas: ${o}`); }
       if (Date.now() - lastPurge > 600_000) { lastPurge = Date.now(); await purgeViewOnce(); }
       if (Date.now() - lastSchedule > 30_000) { await schedule(); lastSchedule = Date.now(); }
-      const worked = await runOne();
+      const worked = await runOne('fast');
       if (!worked) await new Promise((r) => setTimeout(r, 1000));
     } catch (e: any) {
       console.error('[worker] error en ciclo', e.message);
       await new Promise((r) => setTimeout(r, 3000));
     }
   }
-  await pool.end();
+}
+
+/** Carril lento: solo toma jobs, sin las tareas periódicas del ciclo principal. */
+async function slowLoop() {
+  while (!stop) {
+    try {
+      if (!(await runOne('slow'))) await new Promise((r) => setTimeout(r, 1000));
+    } catch (e: any) {
+      console.error('[worker] error en carril lento', e.message);
+      await new Promise((r) => setTimeout(r, 3000));
+    }
+  }
 }
 
 process.on('SIGTERM', () => { stop = true; });
@@ -224,5 +245,6 @@ console.log(`[worker] ${WORKER_ID} iniciado`);
 // Igual que el API: aplica migraciones pendientes antes de trabajar (evita consultas a columnas que aún no existen).
 void (async () => {
   if (process.env.MIGRATE_ON_START !== 'false') await migrate().catch((e) => console.error('[worker] migraciones', e?.message));
-  await loop();
+  await Promise.all([loop(), slowLoop()]);
+  await pool.end();
 })();

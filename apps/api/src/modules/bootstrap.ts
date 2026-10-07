@@ -152,12 +152,21 @@ export async function bootstrap(userId: string): Promise<BootstrapDTO> {
   workspaces.forEach((w) => w.organizationIds.forEach((o) => orgIds.add(o)));
   personList.forEach((p) => p.orgId && orgIds.add(p.orgId));
   if (me.primaryOrgId) orgIds.add(me.primaryOrgId);
-  const orgs = await pool.query(
-    `SELECT o.id, o.name, o.mark, o.color_bg, o.color_fg, o.join_policy, o.reaction_actions, om.role AS my_role FROM organizations o
-       LEFT JOIN organization_memberships om ON om.org_id = o.id AND om.user_id = $2 WHERE o.id = ANY($1) ORDER BY o.name`,
-    [[...orgIds], userId],
-  );
-  const verified = await orgVerification(pool, [...orgIds]);
+  // Organizaciones y lo que no depende del resto, en paralelo (antes eran 6 consultas en serie al final). Va después
+  // de las 3 grandes para no ocupar más conexiones del pool a la vez.
+  const extras = Promise.all([
+    myActiveCall(userId).catch(() => null), missedCount(userId).catch(() => 0),
+    inboxChats(userId).catch(() => []), listPins(userId).catch(() => []),
+  ]);
+  const [orgs, verified, [activeCall, missedCalls, waInbox, mailPins]] = await Promise.all([
+    pool.query(
+      `SELECT o.id, o.name, o.mark, o.color_bg, o.color_fg, o.join_policy, o.reaction_actions, om.role AS my_role FROM organizations o
+         LEFT JOIN organization_memberships om ON om.org_id = o.id AND om.user_id = $2 WHERE o.id = ANY($1) ORDER BY o.name`,
+      [[...orgIds], userId],
+    ),
+    orgVerification(pool, [...orgIds]),
+    extras,
+  ]);
   const organizations: OrganizationDTO[] = orgs.rows.map((r) => ({
     id: r.id, name: r.name, mark: r.mark, colorBg: r.color_bg, colorFg: r.color_fg, ...(r.my_role ? { myRole: r.my_role } : {}),
     verification: verified.get(r.id)?.level ?? 'none', verifiedDomain: verified.get(r.id)?.domain ?? null,
@@ -165,7 +174,7 @@ export async function bootstrap(userId: string): Promise<BootstrapDTO> {
     ...(r.my_role ? { reactionActions: r.reaction_actions } : {}),
   }));
 
-  return { contract: CONTRACT_VERSION, serverTime: new Date().toISOString(), me, organizations, workspaces, conversations, people: personList, features: { calls: callsEnabled(), mail: mailEnabled() }, assistantId: '0a9a9a9a-0000-4000-8000-000000000066', myActiveCall: await myActiveCall(userId).catch(() => null), missedCalls: await missedCount(userId).catch(() => 0), waInbox: await inboxChats(userId).catch(() => []), mailPins: await listPins(userId).catch(() => []) };
+  return { contract: CONTRACT_VERSION, serverTime: new Date().toISOString(), me, organizations, workspaces, conversations, people: personList, features: { calls: callsEnabled(), mail: mailEnabled() }, assistantId: '0a9a9a9a-0000-4000-8000-000000000066', myActiveCall: activeCall, missedCalls, waInbox, mailPins };
 }
 
 function legacyAttachmentPreview(list: { contentType: string; name: string }[]) {

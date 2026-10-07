@@ -2,7 +2,7 @@ import { useContext, useEffect, useState } from 'react';
 import type { BootstrapDTO, ConversationDTO, IssueDTO } from '@tiecoms/contracts';
 import { client, useClient } from '../app-client.ts';
 import { getLang, locale, t } from '../i18n.ts';
-import { Avatar, Modal, conversationTitle, personById, timeLabel } from '../ui.tsx';
+import { Avatar, Modal, childrenByParent, conversationTitle, personById, timeLabel } from '../ui.tsx';
 import { EventRow, newEvent } from './Calendar.tsx';
 import { ConversationIssues, isClosed, localIso } from './Issues.tsx';
 import { updatePersonalChat, usePersonalPreferences } from '../personal-prefs.ts';
@@ -15,9 +15,12 @@ import { ChatHeaderVisibility } from './ChatHeaderPopover.tsx';
 export type ChatBarPane = 'issues' | 'threads' | 'agenda';
 
 /** Hilos de la conversación: los abiertos a los del chat (derivadas) y mis sidechats privados. */
+const NO_CHILDREN: ConversationDTO[] = [];
 export function threadsOf(d: BootstrapDTO, conversationId: string, messageId?: string) {
-  return d.conversations
-    .filter((c) => c.parentId === conversationId && (!messageId || c.parentMessageId === messageId))
+  const kids = childrenByParent(d.conversations).get(conversationId);
+  if (!kids) return NO_CHILDREN;
+  return kids
+    .filter((c) => !messageId || c.parentMessageId === messageId)
     .sort((a, b) => Number(!!a.returnedAt) - Number(!!b.returnedAt) || (b.lastMessageAt ?? '').localeCompare(a.lastMessageAt ?? ''));
 }
 export const isPrivateThread = (c: ConversationDTO) => c.deriveKind === 'side';

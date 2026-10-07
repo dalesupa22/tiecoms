@@ -155,6 +155,11 @@ export interface ClientOptions {
   onNotice?: (n: ClientNotice) => void;
 }
 
+/** Tiempo oculto a partir del cual volver a la pestaña pide el snapshot completo aunque el socket siga conectado. */
+const RESYNC_AFTER_HIDDEN_MS = 60_000;
+/** El servidor ya limita «escribiendo» a uno cada 2 s; no tiene sentido emitirlo en cada tecla. */
+const TYPING_EMIT_MS = 1500;
+
 const uid = () => (globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2) + Date.now().toString(36));
 const base64url = (b: Uint8Array) => btoa(String.fromCharCode(...b)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
@@ -200,6 +205,9 @@ export class TieComsClient {
   private bootDirty = false;
   private dirtyConvs = new Set<string>();
   private lastBootstrapAt = 0;
+  /** Cuándo se ocultó la pestaña/app (0 = visible). Volver tras un rato corto no pide el snapshot completo. */
+  private hiddenAt = 0;
+  private lastTypingAt = new Map<string, number>();
   private sharedGets = new Map<string, { generation: number; at: number; promise: Promise<unknown> }>();
   private waPrivacyEpoch = 0;
   private waResetEpoch = new Map<string, number>();
@@ -256,7 +264,14 @@ export class TieComsClient {
   // ---------- Caché local (stale-while-revalidate) ----------
   private schedulePersist() {
     if (this.persistTimer || !this.state.data) return;
-    this.persistTimer = setTimeout(() => { this.persistTimer = null; void this.persist().catch(() => {}); }, 1500);
+    // Guardar el bootstrap clona todas las conversaciones y personas en el hilo principal: con chats activos se
+    // agrupa cada pocos segundos, y al ocultar la pestaña/app se guarda enseguida (flushPersist).
+    this.persistTimer = setTimeout(() => { this.persistTimer = null; void this.persist().catch(() => {}); }, 5000);
+  }
+  private flushPersist() {
+    if (!this.persistTimer) return;
+    clearTimeout(this.persistTimer); this.persistTimer = null;
+    void this.persist().catch(() => {});
   }
   /** Guarda el bootstrap y las conversaciones abiertas que cambiaron (solo las ~30 más recientes). */
   private async persist() {
@@ -450,7 +465,15 @@ export class TieComsClient {
     }
     if (typeof window !== 'undefined') {
       window.addEventListener('online', () => this.resync());
-      document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') this.resync(); });
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState !== 'visible') { this.hiddenAt = Date.now(); this.flushPersist(); return; }
+        const away = this.hiddenAt ? Date.now() - this.hiddenAt : Infinity;
+        this.hiddenAt = 0;
+        // Con el socket conectado los eventos siguieron llegando: un cambio de pestaña corto no necesita el
+        // snapshot completo (era la causa de repintar toda la app y recargar WhatsApp en cada vuelta).
+        if (this.state.connection === 'online' && away < RESYNC_AFTER_HIDDEN_MS) { this.scheduleFlush(0); return; }
+        void this.resync();
+      });
     }
   }
 
@@ -806,7 +829,7 @@ export class TieComsClient {
     if (!c || m.seq <= c.lastMessageSeq) return;
     const mine = m.authorId === this.state.data?.me.id;
     const lastReadSeq = mine && m.seq === c.lastMessageSeq + 1 && Math.max(c.lastReadSeq, c.historyFromSeq) >= c.lastMessageSeq ? m.seq : c.lastReadSeq;
-    this.patchConversationMeta(c.id, {
+    const patch: Partial<ConversationDTO> = {
       lastMessageSeq: m.seq, lastMessageAt: m.createdAt, lastMessagePreview: m.viewOnce ? '①' : m.body.slice(0, 140), lastReadSeq,
       // La lista ordena y previsualiza por el último mensaje de una persona (activityOf): se actualiza aquí, no solo en
       // el bootstrap. Sin esto, escribirle a alguien no lo subía en «Recientes» hasta recargar (igual que Android).
@@ -814,10 +837,13 @@ export class TieComsClient {
       // La pestaña «Enlaces» suma los enlaces nuevos sin esperar otro bootstrap.
       ...(m.kind === 'text' && c.linkCount !== undefined ? { linkCount: c.linkCount + new Set(m.body.match(/\bhttps?:\/\/[^\s<>"'`]+/gi) ?? []).size } : {}),
       unread: Math.max(0, m.seq - Math.max(lastReadSeq, c.historyFromSeq)),
-    });
-    // Reordena para que la conversación con actividad suba.
+    };
+    // Un solo cambio de estado: actualiza la fila y reordena para que la conversación con actividad suba.
     const d = this.state.data!;
-    this.set({ data: { ...d, conversations: [...d.conversations].sort((a, b) => (b.lastMessageAt ?? '').localeCompare(a.lastMessageAt ?? '')) } });
+    const conversations = d.conversations.map((x) => (x.id === c.id ? { ...x, ...patch } : x))
+      .sort((a, b) => (b.lastMessageAt ?? '').localeCompare(a.lastMessageAt ?? ''));
+    this.set({ data: { ...d, conversations } });
+    this.bootDirty = true; this.schedulePersist();
   }
 
   private applyEvent(e: ConversationEvent) {
@@ -825,7 +851,14 @@ export class TieComsClient {
     let messages = local.messages;
     if (e.type === 'message.updated') this.noticeReaction(local.messages.find((m) => m.id === e.message.id), e.message);
     if (e.type === 'message.created' || e.type === 'message.updated') messages = upsertMessage(messages, e.message);
-    if (e.type === 'members.changed') { this.patchConversationMeta(e.conversationId, { memberIds: e.memberIds, ...(e.adminIds ? { adminIds: e.adminIds } : {}) }); this.scheduleBootstrap(); }
+    if (e.type === 'members.changed') {
+      this.patchConversationMeta(e.conversationId, { memberIds: e.memberIds, ...(e.adminIds ? { adminIds: e.adminIds } : {}) });
+      // El snapshot solo hace falta si entró alguien que no está en mi directorio. Antes lo pedían todos los
+      // miembros del grupo a la vez en cada cambio, y en grupos grandes eso saturaba /bootstrap.
+      const known = new Set(this.state.data?.people.map((p) => p.id));
+      const me = this.state.data?.me.id;
+      if (e.memberIds.some((id) => id !== me && !known.has(id))) this.scheduleBootstrap();
+    }
     if (e.type === 'issue.updated') this.putIssues([e.issue]);
     if (e.type === 'message.updated') this.patchPreviewIfLast(e.message);
     this.setConv(e.conversationId, { messages, lastEventSeq: e.eventSeq });
@@ -1056,7 +1089,12 @@ export class TieComsClient {
     }, 400));
   }
 
-  typing(conversationId: string) { this.socket?.emit(SOCKET_EVENTS.typing, { conversationId }); }
+  typing(conversationId: string) {
+    const now = Date.now();
+    if (now - (this.lastTypingAt.get(conversationId) ?? 0) < TYPING_EMIT_MS) return;
+    this.lastTypingAt.set(conversationId, now);
+    this.socket?.emit(SOCKET_EVENTS.typing, { conversationId });
+  }
 
   // ---------- Envío con cola persistente ----------
   async send(conversationId: string, body: string, replyTo: string | null = null, forwarded: ForwardedInfo | null = null,

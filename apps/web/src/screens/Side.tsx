@@ -4,12 +4,12 @@ import { client, useClient } from '../app-client.ts';
 import { attachmentSummaryText, errorText, t } from '../i18n.ts';
 import { openMenuAt, toast } from '../menu.tsx';
 import { navigate } from '../router.ts';
-import { Avatar, Modal, conversationTitle, orgById, personById } from '../ui.tsx';
+import { Avatar, Modal, childrenByParent, conversationTitle, orgById, personById } from '../ui.tsx';
 
 /** Laterales visibles para mí que cuelgan de un mensaje (el chip «💬 Consulta lateral · N»). */
 export function sidesOf(d: BootstrapDTO, conversationId: string, messageId?: string) {
-  return d.conversations
-    .filter((c) => c.deriveKind === 'side' && c.parentId === conversationId && (!messageId || c.parentMessageId === messageId))
+  return (childrenByParent(d.conversations).get(conversationId) ?? [])
+    .filter((c) => c.deriveKind === 'side' && (!messageId || c.parentMessageId === messageId))
     .sort((a, b) => (b.lastMessageAt ?? '').localeCompare(a.lastMessageAt ?? ''));
 }
 

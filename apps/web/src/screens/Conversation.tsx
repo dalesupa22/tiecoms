@@ -346,7 +346,22 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
   }, [id, !!embedded]);
 
   // Borrador local por conversación: sobrevive recargas y cambios de conversación.
-  useEffect(() => { try { if (text) localStorage.setItem(draftKey(id), text); else localStorage.removeItem(draftKey(id)); } catch {} }, [id, text]);
+  // Se guarda con un respiro (localStorage es síncrono y antes se escribía en cada tecla); al cambiar de chat,
+  // desmontar u ocultar la página se guarda enseguida para no perder lo último.
+  const draftPending = useRef<{ id: string; text: string } | null>(null);
+  const flushDraft = () => {
+    const p = draftPending.current; draftPending.current = null;
+    if (p) try { if (p.text) localStorage.setItem(draftKey(p.id), p.text); else localStorage.removeItem(draftKey(p.id)); } catch {}
+  };
+  useEffect(() => {
+    draftPending.current = { id, text };
+    const timer = setTimeout(flushDraft, 400);
+    return () => clearTimeout(timer);
+  }, [id, text]);
+  useEffect(() => {
+    window.addEventListener('pagehide', flushDraft);
+    return () => { window.removeEventListener('pagehide', flushDraft); flushDraft(); };
+  }, [id]);
   // El rótulo «Borrador de gg» se va cuando la caja queda vacía (se envió o se borró).
   useEffect(() => { if (!text.trim()) setGgDraft(false); }, [text]);
   // Esc quita la selección (sin gg abierto; con gg abierto ya lo hace su propio Esc).
@@ -366,6 +381,7 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
   useEffect(() => { if (local?.cached) markAgain(`chaggu:chat-painted:${id}`); }, [id, local?.cached]);
   const pending = useMemo(() => pendingAll.filter((p) => p.conversationId === id), [pendingAll, id]);
   const byId = useMemo(() => new Map((local?.messages ?? []).map((m) => [m.id, m])), [local?.messages]);
+  const bySeq = useMemo(() => new Map((local?.messages ?? []).map((m) => [m.seq, m])), [local?.messages]);
   const issueTopicOf = (m: MessageDTO) => {
     try { const p = JSON.parse(m.body); return p?.k === 'issue.created' ? allIssues[p.issueId]?.topicId ?? null : null; } catch { return null; }
   };
@@ -560,6 +576,12 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
   // El 🔕 y «Silenciado hasta…» se quitan solos cuando vence el silencio.
   useExpiry(conv?.mutedUntil);
 
+  const openHere = useMemo(() => (Object.values(allIssues) as IssueDTO[]).filter((i) => i.conversationId === id && !isClosed(i)), [allIssues, id]);
+  const issueByOrigin = useMemo(() => {
+    const m = new Map<string, IssueDTO>();
+    for (const i of openHere) if (i.originMessageId && !m.has(i.originMessageId)) m.set(i.originMessageId, i);
+    return m;
+  }, [openHere]);
   if (!conv) return <div className="page"><div className="empty">{t('chat.notFound')}</div></div>;
 
   const onScroll = () => {
@@ -711,8 +733,7 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
   // gg: su chat (responde a todo) o cualquier chat (responde a @gg).
   const ggDm = isGgChat(conv);
   const ggHere = ggDm || conv.kind !== 'direct';
-  const openHere = Object.values(allIssues).filter((i: IssueDTO) => i.conversationId === id && !isClosed(i));
-  const issueOf = (mid: string) => openHere.find((i) => i.originMessageId === mid);
+  const issueOf = (mid: string) => issueByOrigin.get(mid);
   // Asuntos, reuniones e hilos en todas (también directos y chats grupales). Fuera de un espacio el hilo es con
   // las mismas personas, y un hilo no se deriva otra vez.
   const canWork = conv.canPost;
@@ -1011,7 +1032,7 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
                     </div>
                   )}
                   {r.cont && !embedded && m.topicId && !m.deletedAt && (() => {
-                    const prevM = (local?.messages ?? []).find((x) => x.seq === m.seq - 1);
+                    const prevM = bySeq.get(m.seq - 1);
                     return prevM?.topicId === m.topicId ? null : <div className="msg-meta is-topic-only"><TopicTag topic={topicById.get(m.topicId)} /></div>;
                   })()}
                   {m.replyTo && (

@@ -147,8 +147,27 @@ export function Modal({ title, onClose, children }: { title: string; onClose: ()
 }
 
 // ---------- Selectores sobre el snapshot ----------
-export const orgById = (d: BootstrapDTO, id: string | null | undefined) => d.organizations.find((o) => o.id === id) ?? null;
-export const personById = (d: BootstrapDTO, id: string | null | undefined) => d.people.find((p) => p.id === id) ?? null;
+// Índices por id cacheados por arreglo: el cliente reemplaza los arreglos al cambiar (nunca los muta), así que el
+// índice vive lo mismo que el arreglo. Estas búsquedas se hacen varias veces por mensaje en cada pintada.
+const idIndexes = new WeakMap<readonly { id: string }[], Map<string, { id: string }>>();
+export function indexById<T extends { id: string }>(list: readonly T[]): Map<string, T> {
+  let m = idIndexes.get(list);
+  if (!m) { m = new Map(list.map((x) => [x.id, x])); idIndexes.set(list, m); }
+  return m as Map<string, T>;
+}
+// Hijos por conversación padre, calculado una vez por arreglo de conversaciones (se llama por cada mensaje pintado).
+const childIndexes = new WeakMap<readonly ConversationDTO[], Map<string, ConversationDTO[]>>();
+export function childrenByParent(list: readonly ConversationDTO[]) {
+  let m = childIndexes.get(list);
+  if (!m) {
+    m = new Map();
+    for (const c of list) if (c.parentId) { const arr = m.get(c.parentId); if (arr) arr.push(c); else m.set(c.parentId, [c]); }
+    childIndexes.set(list, m);
+  }
+  return m;
+}
+export const orgById = (d: BootstrapDTO, id: string | null | undefined) => (id == null ? null : indexById(d.organizations).get(id) ?? null);
+export const personById = (d: BootstrapDTO, id: string | null | undefined) => (id == null ? null : indexById(d.people).get(id) ?? null);
 
 export function conversationTitle(d: BootstrapDTO, c: ConversationDTO) {
   if (c.kind === 'direct') {

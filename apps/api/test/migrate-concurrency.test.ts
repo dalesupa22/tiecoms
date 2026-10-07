@@ -40,6 +40,8 @@ it.runIf(local)('tres migradores en paralelo sobre una base vacía no chocan ni 
     const db = new pg.default.Client({ connectionString: url.toString() });
     await db.connect();
     expect((await db.query('SELECT count(*)::int AS n FROM schema_migrations')).rows[0].n).toBe(files.length);
+    // Las migraciones sin transacción (CREATE INDEX CONCURRENTLY) no pueden dejar índices inválidos por la espera de los demás.
+    expect((await db.query('SELECT indexrelid::regclass::text AS name FROM pg_index WHERE NOT indisvalid')).rows).toEqual([]);
     await db.end();
   } finally {
     await admin.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`);

@@ -109,9 +109,18 @@ function membersOf(d: BootstrapDTO, conversationId: string | null) {
 }
 
 /** Tareas hijas visibles de un asunto (el servidor solo manda las que puedo ver). */
+// Índice padre → hijas por objeto de asuntos (el cliente lo reemplaza al cambiar): cada fila lo consultaba
+// recorriendo todos los asuntos, O(n²) en listas grandes.
+const childIssueIndexes = new WeakMap<Record<string, IssueDTO>, Map<string, IssueDTO[]>>();
 export function childrenOf(all: Record<string, IssueDTO>, parentId: string) {
-  return Object.values(all).filter((x) => x.parentIssueId === parentId)
-    .sort((a, b) => Number(isClosed(a)) - Number(isClosed(b)) || a.createdAt.localeCompare(b.createdAt));
+  let index = childIssueIndexes.get(all);
+  if (!index) {
+    index = new Map();
+    for (const x of Object.values(all)) if (x.parentIssueId) { const arr = index.get(x.parentIssueId); if (arr) arr.push(x); else index.set(x.parentIssueId, [x]); }
+    for (const arr of index.values()) arr.sort((a, b) => Number(isClosed(a)) - Number(isClosed(b)) || a.createdAt.localeCompare(b.createdAt));
+    childIssueIndexes.set(all, index);
+  }
+  return [...(index.get(parentId) ?? [])];
 }
 const isRestricted = (i: IssueDTO) => !!i.visibility && i.visibility !== 'all';
 /** «Solo Xertify» / «Privada»: quién la ve, en palabras. */

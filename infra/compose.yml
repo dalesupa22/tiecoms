@@ -36,7 +36,7 @@ services:
     command: ["node", "--enable-source-maps", "worker.js"]
     environment:
       INSTANCE_ID: worker-1
-      DB_POOL_MAX: "3"
+      DB_POOL_MAX: "5"
     healthcheck: { disable: true }
     deploy:
       resources:

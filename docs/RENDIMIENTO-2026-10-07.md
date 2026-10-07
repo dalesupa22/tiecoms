@@ -39,7 +39,7 @@ No se midió con datos de producción: `EXPLAIN`, `pg_stat_statements` y la late
   - `EXPLAIN (ANALYZE, BUFFERS)` de `/bootstrap`, `queryIssues`, `searchAll` y `queueSharedVoiceNotes` con un usuario pesado.
   - `pool.waitingCount` y el lag del event loop.
 - **Pool:**
-  - Subir `DB_POOL_MAX` del worker de 3 a 5, porque ahora hay dos carriles más el ciclo periódico.
+  - Hecho: `DB_POOL_MAX` del worker subió de 3 a 5 (`infra/compose.yml`) por los dos carriles más el ciclo periódico.
   - Evaluar subir el del API o poner PgBouncer.
 - **`/bootstrap`:** limitar o paginar las conversaciones y sacar `member_ids` y `link_count` del snapshot (cambio de contrato).
 - **Cliente:**

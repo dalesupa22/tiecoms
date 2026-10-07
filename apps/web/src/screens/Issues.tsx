@@ -709,7 +709,7 @@ export function IssuesBody() {
   const d = useClient((s) => s.data)!;
   const all = useClient((s) => s.issues);
   const preferences = usePersonalPreferences();
-  const [scope, setScope] = useState<'mine' | 'all'>('mine');
+  const [scope, setScope] = useState<'mine' | 'byMe' | 'all'>('mine');
   const [stateFilter, setStateFilter] = useState<'all' | 'open' | 'closed'>('all');
   const [table, setTableState] = useState(readTablePref);
   const setTable = (on: boolean) => { setTableState(on); try { localStorage.setItem(TABLE_KEY, on ? '1' : '0'); } catch { /* sin almacenamiento */ } };
@@ -717,6 +717,8 @@ export function IssuesBody() {
   const groupBy = preferences.issues?.grouping === 'assignee' ? 'person' : 'group';
   const [pendingMoves, setPendingMoves] = useState<Set<string>>(() => new Set());
   const [query, setQuery] = useState('');
+  // «Asignadas por mí»: las que creé o pedí para otras personas.
+  const byMe = (i: IssueDTO) => (i.createdBy === d.me.id || i.requestedBy === d.me.id) && taskAssignees(i).some((u) => u !== d.me.id);
   const [reviewFilter, setReviewFilter] = useState<'all' | IssueReview>('all');
   const [groupFilter, setGroupFilter] = useState<string>('all');
   const inbox = useClient((s) => s.taskInbox);
@@ -728,7 +730,7 @@ export function IssuesBody() {
   // Los restringidos pueden ser de un chat que no leo (me asignaron una tarea): el servidor ya filtró.
   const list = Object.values(all)
     .filter((i) => !i.conversationId || visibleConvs.has(i.conversationId) || isRestricted(i))
-    .filter((i) => scope === 'all' || assignedTo(i, d.me.id))
+    .filter((i) => scope === 'all' || (scope === 'byMe' ? byMe(i) : assignedTo(i, d.me.id)))
     .filter((i) => stateFilter === 'all' || (stateFilter === 'closed' ? isClosed(i) : !isClosed(i)))
     .filter((i) => reviewFilter === 'all' || i.review === reviewFilter)
     .filter((i) => groupFilter === 'all' || (i.parentIssueId && all[i.parentIssueId] ? all[i.parentIssueId]!.conversationId : i.conversationId) === groupFilter)
@@ -775,6 +777,7 @@ export function IssuesBody() {
       <div className="row issue-toolbar">
         <div className="seg" role="radiogroup" aria-label={taskText('Responsables', 'Assignees')}>
           <button role="radio" aria-checked={scope === 'mine'} className={scope === 'mine' ? 'on' : ''} onClick={() => setScope('mine')}>{taskText('Mis tareas', 'My tasks')} <span className="muted">{eligible.filter((i) => assignedTo(i, d.me.id)).length}</span></button>
+          <button role="radio" aria-checked={scope === 'byMe'} className={scope === 'byMe' ? 'on' : ''} title={taskText('Las que creé o pedí, asignadas a otras personas', 'Tasks I created or requested')} onClick={() => setScope('byMe')}>{taskText('Asignadas por mí', 'Assigned by me')} <span className="muted">{eligible.filter(byMe).length}</span></button>
           <button role="radio" aria-checked={scope === 'all'} className={scope === 'all' ? 'on' : ''} onClick={() => setScope('all')}>{taskText('Todas', 'All')} <span className="muted">{eligible.length}</span></button>
         </div>
         <select className="input" aria-label={taskText('Estado', 'Status')} value={stateFilter} onChange={(e) => setStateFilter(e.target.value as typeof stateFilter)}>

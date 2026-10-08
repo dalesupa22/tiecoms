@@ -107,6 +107,7 @@ function prompt(agent, task, chatId, trigger) {
     `TAREA (${task.ticket ? `ticket #${task.ticket}` : 'tarea'}): ${task.title}`,
     `id: ${task.id} · chat de la tarea: ${chatId} · quien revisa: ${REVIEWER}`,
     ...(task.meta ? [`Datos del ticket: ${Object.entries(task.meta).filter(([k]) => !/adjuntos/i.test(k)).map(([k, v]) => `${k}: ${v}`).join(' · ')}`] : []),
+    ...(task.fields ? [`Campos de la tarjeta: ${Object.entries(task.fields).map(([k, v]) => `${k}: ${v}`).join(' · ')}`] : []),
     ...(ticketEmail(task) ? [`CUENTA DEL CLIENTE: usa SIEMPRE la cuenta del correo del ticket (${ticketEmail(task)}). Ubica la cuenta/emisor por ese correo, nunca por el nombre de la empresa; si ese correo no tiene cuenta o hay varias, pregunta (paso 7) antes de tocar nada.`] : []),
     `Por qué te despertaron: ${why}`,
     '',
@@ -125,7 +126,8 @@ function prompt(agent, task, chatId, trigger) {
 }
 
 /** Correo del ticket (regla de Danny 8-oct: la cuenta a usar es siempre la de ese correo). */
-const ticketEmail = (task) => Object.entries(task.meta ?? {}).find(([k]) => /^(correo|email|e-mail)$/i.test(k.trim()))?.[1] ?? null;
+const ticketEmail = (task) => [...Object.entries(task.meta ?? {}), ...Object.entries(task.fields ?? {})]
+  .find(([k, v]) => /^(correo|email|e-mail)( del cliente)?$/i.test(k.trim()) && typeof v === 'string' && v.includes('@'))?.[1] ?? null;
 
 function runEngine(agent, text) {
   return new Promise((resolve) => {

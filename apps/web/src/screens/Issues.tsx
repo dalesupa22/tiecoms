@@ -414,6 +414,72 @@ function FlowCard({ i, stage, where, needsCustomer, onOpen, onError }: { i: Issu
   );
 }
 
+/**
+ * Nueva tarjeta desde cero en el Flujo IA (pedido de Lorena 8-oct): título, descripción, grupo, cliente y correo del
+ * cliente (opcionales; el correo es la cuenta que usará el agente) y a quién asignarla. Sin responsable queda «En espera».
+ * Al crearla se abre para adjuntar capturas o archivos (arrastrar o pegar).
+ */
+function NewFlowCardDialog({ defaultConv, onClose, onCreated }: { defaultConv: string | null; onClose: () => void; onCreated: (id: string) => void }) {
+  const d = useClient((s) => s.data)!;
+  const groups = useMemo(() => issueDestinations(d), [d]);
+  const [conv, setConv] = useState<string>(() => (defaultConv && groups.some((c) => c.id === defaultConv) ? defaultConv : groups.find((c) => /ticket/i.test(c.name ?? ''))?.id ?? groups[0]?.id ?? ''));
+  const [title, setTitle] = useState('');
+  const [desc, setDesc] = useState('');
+  const [customer, setCustomer] = useState('');
+  const [email, setEmail] = useState('');
+  const [who, setWho] = useState<string>('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const people = membersOf(d, conv || null, { agents: true });
+  const agents = people.filter((p) => p.kind === 'agent');
+  const humans = people.filter((p) => p.kind === 'human');
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (busy || title.trim().length < 2 || !conv) return;
+    setBusy(true); setErr(null);
+    try {
+      const fields: Record<string, IssueFieldValue> = {};
+      if (customer.trim()) fields.Cliente = customer.trim();
+      if (email.trim()) fields.Correo = email.trim();
+      const i = await client.createIssue(conv, { title: title.trim(), ...(who ? { assigneeIds: [who] } : {}), ...(Object.keys(fields).length ? { fields } : {}) });
+      if (desc.trim()) await client.commentIssue(i.id, desc.trim());
+      onCreated(i.id);
+    } catch (e2) { setErr(errorText(e2)); } finally { setBusy(false); }
+  };
+  return (
+    <Modal title={taskText('Nueva tarjeta', 'New card')} onClose={onClose}>
+      <form className="new-card" onSubmit={(e) => void submit(e)}>
+        <label className="field"><span>{taskText('Título', 'Title')}</span>
+          <input className="input" autoFocus required minLength={2} maxLength={200} value={title} onChange={(e) => setTitle(e.target.value)} placeholder={taskText('Qué hay que hacer (p. ej. Habilitar la cuenta de Moodle para las microcredenciales)', 'What needs to be done')} /></label>
+        <label className="field"><span>{taskText('Descripción y definiciones', 'Description')}</span>
+          <textarea className="input" rows={5} maxLength={20000} value={desc} onChange={(e) => setDesc(e.target.value)} placeholder={taskText('Contexto, pasos, criterios de «listo»… Después de crearla puedes arrastrar o pegar capturas y archivos.', 'Context, steps, done criteria…')} /></label>
+        <div className="new-card-row">
+          <label className="field"><span>{taskText('Grupo', 'Group')}</span>
+            <select className="input" value={conv} onChange={(e) => { setConv(e.target.value); setWho(''); }}>
+              {groups.map((c) => <option key={c.id} value={c.id}>{destinationLabel(d, c, conversationTitle(d, c))}</option>)}
+            </select></label>
+          <label className="field"><span>{taskText('Cliente (opcional)', 'Client (optional)')}</span>
+            <input className="input" maxLength={200} value={customer} onChange={(e) => setCustomer(e.target.value)} placeholder="Universidad…" /></label>
+          <label className="field"><span>{taskText('Correo del cliente (opcional)', 'Client email (optional)')}</span>
+            <input className="input" type="email" maxLength={200} value={email} onChange={(e) => setEmail(e.target.value)} placeholder={taskText('la cuenta que usará el agente', 'account the agent will use')} /></label>
+        </div>
+        <div className="field"><span>{taskText('¿Quién la hace?', 'Who does it?')}</span>
+          <div className="chips">
+            <button type="button" className={`chip ${who === '' ? 'on' : ''}`} onClick={() => setWho('')}>⏳ {taskText('Nadie: queda en espera', 'Nobody: stays waiting')}</button>
+            {agents.map((p) => <button type="button" key={p.id} className={`chip ${who === p.id ? 'on' : ''}`} onClick={() => setWho(p.id)}>🤖 {p.name}</button>)}
+            {humans.map((p) => <button type="button" key={p.id} className={`chip ${who === p.id ? 'on' : ''}`} onClick={() => setWho(p.id)}>{p.id === d.me.id ? t('issue.me') : p.name}</button>)}
+          </div>
+        </div>
+        {err && <div className="error">{err}</div>}
+        <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
+          <button type="button" className="btn ghost" onClick={onClose}>{taskText('Cancelar', 'Cancel')}</button>
+          <button className="btn primary" disabled={busy || title.trim().length < 2 || !conv}>{busy ? t('common.loading') : who && agents.some((a) => a.id === who) ? taskText('Crear y pasarla al agente', 'Create and hand to agent') : taskText('Crear tarjeta', 'Create card')}</button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
 /** Debajo de los que llegan o necesitan a una persona: a qué agente se la paso (o abrir para elegir persona). */
 function FlowAssign({ i, onOpen, onError }: { i: IssueDTO; onOpen: (id: string) => void; onError: (e: string) => void }) {
   const d = useClient((s) => s.data)!;
@@ -1069,6 +1135,7 @@ export function IssuesBody() {
   const inbox = useClient((s) => s.taskInbox);
   // ?issue=<id>: abre el asunto (enlaces de gg, del push o de un asunto personal).
   const [open, setOpen] = useState<string | null>(() => queryParam('issue'));
+  const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => { client.loadIssues({}).catch((e) => setError(errorText(e))); }, []);
   const visibleConvs = useMemo(() => new Set(d.conversations.map((c) => c.id)), [d]);
@@ -1202,7 +1269,7 @@ export function IssuesBody() {
       {view === 'flow' && <div className="flow-live small muted" title={taskText('Las tarjetas se mueven solas cuando cambian', 'Cards move by themselves when they change')}><span className="flow-live-dot" aria-hidden />{taskText('En vivo', 'Live')}</div>}
       {view === 'flow' && <div className="task-board task-flow">{FLOW_STAGES.map((stage) => {
         const items = list.filter((i) => !i.parentIssueId && flowStage(i, agentAsks(i)) === stage);
-        return <section key={stage} className={`task-board-column flow-${stage}`} aria-busy={pendingMoves.size > 0} onDragOver={(e) => { if (e.dataTransfer.types.includes('application/x-chaggu-issue-id')) { e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'move'; } }} onDrop={(e) => { e.preventDefault(); e.stopPropagation(); void moveToStage(e.dataTransfer.getData('application/x-chaggu-issue-id'), stage); }}><h3>{flowLabel(stage)} · {items.length}</h3>{items.map((i) => <FlowCard key={i.id} i={i} stage={stage} where={groupFilter === 'all' ? groupName(i) : null} needsCustomer={customerGroups.has(convOf(i))} onOpen={setOpen} onError={setError} />)}{items.length === 0 && <div className="fc-empty small muted">{stage === 'new' ? taskText('Los tickets nuevos esperan aquí a que alguien los asigne a un agente o a una persona.', 'New tickets wait here until someone assigns them.') : taskText('Nada aquí', 'Nothing here')}</div>}</section>;
+        return <section key={stage} className={`task-board-column flow-${stage}`} aria-busy={pendingMoves.size > 0} onDragOver={(e) => { if (e.dataTransfer.types.includes('application/x-chaggu-issue-id')) { e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'move'; } }} onDrop={(e) => { e.preventDefault(); e.stopPropagation(); void moveToStage(e.dataTransfer.getData('application/x-chaggu-issue-id'), stage); }}><h3>{flowLabel(stage)} · {items.length}</h3>{stage === 'new' && <button className="chip fc-new-btn" onClick={() => setCreating(true)}>＋ {taskText('Nueva tarjeta', 'New card')}</button>}{items.map((i) => <FlowCard key={i.id} i={i} stage={stage} where={groupFilter === 'all' ? groupName(i) : null} needsCustomer={customerGroups.has(convOf(i))} onOpen={setOpen} onError={setError} />)}{items.length === 0 && <div className="fc-empty small muted">{stage === 'new' ? taskText('Los tickets nuevos esperan aquí a que alguien los asigne a un agente o a una persona.', 'New tickets wait here until someone assigns them.') : taskText('Nada aquí', 'Nothing here')}</div>}</section>;
       })}</div>}
       {view !== 'board' && view !== 'table' && view !== 'flow' && sections.map(([k, items]) => (
         <section key={k} style={{ marginBottom: 18 }}>
@@ -1213,6 +1280,7 @@ export function IssuesBody() {
         </section>
       ))}
       {open && <IssueDrawer id={open} onClose={() => setOpen(null)} />}
+      {creating && <NewFlowCardDialog defaultConv={groupFilter === 'all' ? null : groupFilter} onClose={() => setCreating(false)} onCreated={(id) => { setCreating(false); setOpen(id); }} />}
     </>
   );
 }

@@ -86,7 +86,7 @@ describe('bandeja de tareas y revisión humana', () => {
 
   it('aprobar o marcar intervención humana; quitar la revisión la deja como antes', async () => {
     expect((await call(`/api/v1/issues/${taskId}`, { method: 'PATCH', token: lorena.token, body: { review: 'human' } })).json.review).toBe('human');
-    expect((await call(`/api/v1/issues/${taskId}`, { method: 'PATCH', token: lorena.token, body: { review: 'approved' } })).json.review).toBe('approved');
+    expect((await call(`/api/v1/issues/${taskId}`, { method: 'PATCH', token: lorena.token, body: { review: 'approved' } })).json.status).toBe('done');
     const cleared = (await call(`/api/v1/issues/${taskId}`, { method: 'PATCH', token: ia.token, body: { review: null } })).json;
     expect(cleared.review).toBeUndefined();
     expect((await call(`/api/v1/issues/${taskId}`, { method: 'PATCH', token: extra.token, body: { review: 'approved' } })).status).toBe(404);

@@ -98,8 +98,8 @@ function prompt(agent, task, chatId, trigger) {
   const why = {
     work: 'Te asignaron esta tarjeta y está pendiente.',
     changes: `La revisión pidió corrección: «${trigger.note ?? ''}».${trigger.files?.length ? ` Adjuntó: ${trigger.files.join(', ')} (míralos con get_task).` : ''}`,
-    comment: `Te escribieron en la tarjeta: «${trigger.text ?? ''}».${trigger.files?.length ? ` Adjuntó: ${trigger.files.join(', ')}.` : ''}`,
-    chat: `Te escribieron en el chat de la tarea: «${trigger.text ?? ''}».`,
+    comment: `Te escribieron en la tarjeta: «${trigger.text ?? ''}».${trigger.files?.length ? ` Adjuntó: ${trigger.files.join(', ')}.` : ''}${trigger.waiting ? ' La tarjeta estaba esperando tu pregunta: si esto la responde, continúa.' : ''}`,
+    chat: `Te escribieron en el chat de la tarea: «${trigger.text ?? ''}».${trigger.waiting ? ' La tarjeta estaba esperando tu pregunta: si esto la responde, continúa.' : ''}`,
   }[trigger.kind];
   return [
     agent.instructions ?? `Eres ${agent.name}, un agente que resuelve tickets en Chaggu.`,
@@ -111,12 +111,13 @@ function prompt(agent, task, chatId, trigger) {
     `Trabaja así, con las herramientas del MCP «${SERVER}» (eres ${agent.name} en Chaggu):`,
     '1. Lee la tarea completa con get_task (comentarios, archivos y datos del cliente).',
     trigger.kind === 'comment' || trigger.kind === 'chat'
-      ? `2. Si solo es una pregunta, respóndela con send_message en el chat ${chatId} (o comment_task) y termina. Si te piden cambios, sigue con los pasos 3-6.`
+      ? `2. Si es la respuesta a una pregunta tuya o te piden cambios, avisa en el chat ${chatId} que continúas y sigue con los pasos 3-6. Si solo te preguntan algo, respóndelo con send_message en el chat (o comment_task) y termina.`
       : `2. Cuenta en el chat de la tarea (send_message chat=${chatId}) que la tomaste y tu plan en una o dos líneas.`,
     '3. Resuélvela con tus herramientas. No le escribas al cliente directamente y no cierres la tarea.',
     '4. Evidencia: sube capturas, registros o un informe .md con upload_task_attachment y publica UN comment_task con attachment_ids que diga qué pidió el cliente, qué encontraste, qué hiciste y cómo verificarlo.',
     `5. Déjala por revisar: update_task review="pending" assignees=["${REVIEWER}"] con un review_note corto.`,
     `6. Si necesita a una persona (credenciales, firma, trámite manual, decisión de negocio): explícalo con comment_task y update_task review="human" assignees=["${REVIEWER}"].`,
+    `7. Si te falta un dato para seguir (algo que el ticket no dice y no puedes averiguar), NO adivines: pregunta concretamente en el chat de la tarea (send_message chat=${chatId}, mencionando a ${REVIEWER}) y en comment_task, deja update_task status="waiting" y termina. Cuando te respondan te volverán a despertar.`,
     'Si algo falla, explícalo en la tarea antes de terminar.',
   ].join('\n');
 }
@@ -174,9 +175,9 @@ async function runJob({ agent, taskId, trigger: first }) {
   const r = await runEngine(agent, prompt(agent, task, chat, trigger));
   const after = (await tool(agent, 'get_task', { id: taskId })).task;
   const key = `${agent.slug}:${taskId}`;
-  if (after.review === 'pending' || after.review === 'human' || after.status === 'done' || after.status === 'cancelled') {
+  if (after.review === 'pending' || after.review === 'human' || ['done', 'cancelled', 'waiting'].includes(after.status)) {
     attempts.delete(key);
-    log('👀', agent.name, 'terminó', taskId, after.review ?? after.status);
+    log(after.status === 'waiting' ? '❓' : '👀', agent.name, after.status === 'waiting' ? 'preguntó y espera respuesta' : 'terminó', taskId, after.review ?? after.status);
     if (after.claimedBy) await tool(agent, 'release_task', { id: taskId }).catch(() => {});
     return;
   }
@@ -203,7 +204,7 @@ async function poll() {
     try {
       const r = await tool(a, 'list_tasks', { mine: true, limit: 50 });
       for (const t of r.tasks ?? []) {
-        const open = !['done', 'cancelled'].includes(t.status);
+        const open = !['done', 'cancelled', 'waiting'].includes(t.status); // «waiting»: preguntó y espera la respuesta
         const waiting = !t.review || t.review === 'changes';
         const free = !t.claimedBy || t.claimedBy.endsWith('(tú)');
         if (open && waiting && free) enqueue(a, t.id, t.review === 'changes' ? { kind: 'changes', note: 'Revisa los comentarios de la revisión en la tarea.' } : { kind: 'work' });
@@ -219,7 +220,7 @@ function onEvent(agent, ev) {
   switch (ev.type) {
     case 'task.assigned': return enqueue(agent, ev.task.id, { kind: 'work' });
     case 'task.changes_requested': return enqueue(agent, ev.task.id, { kind: 'changes', note: ev.note, files });
-    case 'task.commented': return enqueue(agent, ev.task.id, { kind: 'comment', text: ev.comment?.body, files });
+    case 'task.commented': return enqueue(agent, ev.task.id, { kind: 'comment', text: ev.comment?.body, files, waiting: ev.task.status === 'waiting' });
     case 'task.approved': return enqueue(agent, ev.task.id, { kind: 'approved' });
     case 'message.created': case 'message.mention': case 'message.reply':
       if (ev.conversation?.taskId) return enqueue(agent, ev.conversation.taskId, { kind: 'chat', text: ev.message?.body });

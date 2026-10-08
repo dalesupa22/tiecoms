@@ -372,7 +372,13 @@ export async function updateIssue(userId: string, issueId: string, input: z.infe
       && cur.review_requested_by && cur.review_requested_by !== userId) {
       input = { ...input, assigneeIds: [cur.review_requested_by] };
     }
+    // Aprobar = completar (8-oct): un solo paso; quien la resolvió y la integración ven el cierre.
+    if (input.review === 'approved' && cur.review !== 'approved' && input.status === undefined && !CLOSED.has(cur.status)) {
+      input = { ...input, status: 'done' };
+    }
     const assignees = normalizeAssignees(input, previousAssignees);
+    // Cerrarla o dejarla por revisar termina el trabajo de quien la tenía tomada (una sola vez en el UPDATE).
+    let releaseClaim = false;
     const owner = assignees[0] ?? null;
     // Una transición a todo el chat también valida responsables antiguos para no dejarlos invisibles.
     if (input.assigneeIds !== undefined || input.ownerId !== undefined || moving || (nextVis === 'all' && cur.visibility !== 'all')) {
@@ -412,7 +418,8 @@ export async function updateIssue(userId: string, issueId: string, input: z.infe
     if (input.status !== undefined && input.status !== cur.status) {
       add('status', input.status);
       sets.push('status_since = now()');
-      sets.push(CLOSED.has(input.status) ? 'closed_at = now(), claimed_by = NULL, claimed_until = NULL' : 'closed_at = NULL');
+      sets.push(CLOSED.has(input.status) ? 'closed_at = now()' : 'closed_at = NULL');
+      if (CLOSED.has(input.status)) releaseClaim = true;
       if (input.status !== 'waiting') add('waiting_on_org_id', null);
       events.push(['status', { from: cur.status, to: input.status }]);
     }
@@ -434,7 +441,7 @@ export async function updateIssue(userId: string, issueId: string, input: z.infe
       sets.push(input.review ? 'review_at = now()' : 'review_at = NULL');
       if (input.review === 'pending') add('review_requested_by', userId);
       // Dejarla por revisar termina el trabajo de quien la tenía tomada.
-      if (input.review === 'pending' || input.review === 'approved') sets.push('claimed_by = NULL, claimed_until = NULL');
+      if (input.review === 'pending' || input.review === 'approved') releaseClaim = true;
       events.push(['review', { from: prevReview, to: input.review, ...(input.reviewNote ? { note: input.reviewNote } : {}) }]);
     }
     if (input.reviewNote && !reviewChanged) throw badRequest('reviewNote va con un cambio de revisión');
@@ -450,6 +457,7 @@ export async function updateIssue(userId: string, issueId: string, input: z.infe
     // Re-applying the current topic also repairs historical notices left untagged by older clients.
     const repairedNotices = input.topicId !== undefined ? await syncIssueMessageTopics(c, destination, issueId, topicId, userId) : 0;
     if (!events.length && !topicChanged && !repairedNotices && !(input.viewerIds?.length)) return load(c, issueId);
+    if (releaseClaim) sets.push('claimed_by = NULL, claimed_until = NULL');
     await c.query(`UPDATE issues SET ${sets.join(', ')} WHERE id = $1`, vals);
     for (const [kind, payload] of events) {
       await c.query('INSERT INTO issue_events (issue_id, actor_id, kind, payload) VALUES ($1,$2,$3,$4)', [issueId, userId, kind, JSON.stringify(payload)]);

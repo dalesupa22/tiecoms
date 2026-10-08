@@ -25,6 +25,9 @@ final class Share1715Tests: XCTestCase {
     }
 
     func testActionsDependOnWhatIsShared() {
+        let language = L10n.choice
+        L10n.choice = .es
+        defer { L10n.choice = language }
         let pdf = SharedItem(kind: .file, name: "contrato.pdf", contentType: "application/pdf", data: Data([1]))
         let img = SharedItem(kind: .image, name: "a.jpg", contentType: "image/jpeg", data: Data([1]))
         XCTAssertEqual(ShareActionsRule.available(attachments: [pdf], hasText: false), [.send, .sign, .analyze, .task, .save])

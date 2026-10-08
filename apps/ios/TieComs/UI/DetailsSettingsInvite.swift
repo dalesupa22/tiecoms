@@ -458,6 +458,7 @@ struct SettingsView: View {
                     }
                 }
             }
+            if store.me != nil { AppleAccountLinkSection() }
             Section(L("safety.title")) {
                 NavigationLink { BlockedUsersView() } label: { Label(L("safety.blockedUsers"), systemImage: "person.slash") }
                     .accessibilityIdentifier("settings.blockedUsers")

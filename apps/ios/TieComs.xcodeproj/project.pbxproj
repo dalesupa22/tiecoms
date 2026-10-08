@@ -86,6 +86,7 @@
 		455950A863EB2B934147DD26 /* PerfCounters.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB6F841DCFF333C9A2740865 /* PerfCounters.swift */; };
 		4570A01F25E3C5B753F0763A /* SocketIOClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 310CB4DC9C904F41CD395304 /* SocketIOClient.swift */; };
 		4575784212C42A63866E36D8 /* Calls171Tests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7ABD55CF24BEE201F8E3E781 /* Calls171Tests.swift */; };
+		45B10D586FE49CEA753BE855 /* AppleSignInUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D4BCC82F27F780F3DD06CD3 /* AppleSignInUITests.swift */; };
 		46109632E09B688B3F4B4713 /* GifsMemes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02DE7E76922A8E5C16A7881D /* GifsMemes.swift */; };
 		46B2FEB8B2EDC92A44C57169 /* ShareItems.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFB29A1A5F72FAF013E3473A /* ShareItems.swift */; };
 		46B7BBCD1ABD2B119DBC9044 /* Naming.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38C26BEA687D356B4765DDC8 /* Naming.swift */; };
@@ -170,6 +171,7 @@
 		8A36FA17146F410E84957B19 /* MailModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB55373E228F420DD0F286FF /* MailModels.swift */; };
 		8ABBB2938D2BC0DC3F453A54 /* snd_spark_m.caf in Resources */ = {isa = PBXBuildFile; fileRef = 62003B52D5A7BF5BE2A03825 /* snd_spark_m.caf */; };
 		8AC2E905821FD283821301E8 /* Sheets.swift in Sources */ = {isa = PBXBuildFile; fileRef = A19A9902A951D7919FF42F1D /* Sheets.swift */; };
+		8C2E6FFD1EC5D1DA00F66179 /* AppleSignInTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C58633227DB28C377878EED8 /* AppleSignInTests.swift */; };
 		8CE882C2AD795A84A129E83E /* Capturas1713UITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D219CAFE934D181A7F100911 /* Capturas1713UITests.swift */; };
 		8DC588B7EE521B2231C813F6 /* GifMemeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 874B2B6B9E6C0A4AE63C709B /* GifMemeTests.swift */; };
 		8E7D451CB1CCCA1AC57A620F /* snd_energy.caf in Resources */ = {isa = PBXBuildFile; fileRef = ECF940F96E3E7A3ABD265441 /* snd_energy.caf */; };
@@ -261,6 +263,7 @@
 		DA996AB6EFAF6FFBDAC0D53C /* QuickSearchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F54037674E327B223BFB8EA /* QuickSearchTests.swift */; };
 		DAC31F587C1983F670DB93CE /* V4Tests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4061A07914937650EBD662D4 /* V4Tests.swift */; };
 		DAE0E12B2B7EC2CC962C53E3 /* Meetings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 104FD74C279B12F5172964BD /* Meetings.swift */; };
+		DB31084C944D8B6245B023F1 /* AppleSignIn.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6F41FDFCE489BF4B6CE0F29 /* AppleSignIn.swift */; };
 		DC9B9B1BFE194309ADC252BB /* GroupsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57E4213BD30CF814CD853450 /* GroupsTests.swift */; };
 		DD393326D0F19E2CF8B81F7A /* GreatVibes-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 5FB5F68EF387B128DA56C4DE /* GreatVibes-Regular.ttf */; };
 		DDD279A8340681B482AF570B /* NightContractTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 248F60A61D31B5D30C676B39 /* NightContractTests.swift */; };
@@ -278,6 +281,7 @@
 		E6D0CF9A07083AAB76A12A8A /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 583E047F344413AFA12319CA /* Assets.xcassets */; };
 		E918783B7780F302E5C9637B /* Groups.swift in Sources */ = {isa = PBXBuildFile; fileRef = F68682AA201ADAADDD25DBD8 /* Groups.swift */; };
 		E9A396E4BEEA18DA79E2F65A /* SoundsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0596818D27C40A03BBD41CD /* SoundsTests.swift */; };
+		EA8A077E06CDF9C22000AAC9 /* AppleSignInButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7BEC1607398F0B7ED5515442 /* AppleSignInButton.swift */; };
 		EAE45A159934152229C767F8 /* snd_brisa.caf in Resources */ = {isa = PBXBuildFile; fileRef = B0149835A8C3A80BEDE4AFE1 /* snd_brisa.caf */; };
 		ECE58ABB4A1CDE85CF61D735 /* AddMembersSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0EC9F09A4A7F9ADCC5DF67D /* AddMembersSheet.swift */; };
 		EE00C59FB235D866D9880928 /* WaInboxGgTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32C92B3EB6C2850260878BD8 /* WaInboxGgTests.swift */; };
@@ -492,7 +496,9 @@
 		7ABD55CF24BEE201F8E3E781 /* Calls171Tests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Calls171Tests.swift; sourceTree = "<group>"; };
 		7B359F9C564097CEE34D2A05 /* SSO.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSO.swift; sourceTree = "<group>"; };
 		7BB86FFB2306485743B9C208 /* UpdateViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateViews.swift; sourceTree = "<group>"; };
+		7BEC1607398F0B7ED5515442 /* AppleSignInButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleSignInButton.swift; sourceTree = "<group>"; };
 		7C18DE0E15BD168ACCB41745 /* GuestCallViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GuestCallViews.swift; sourceTree = "<group>"; };
+		7D4BCC82F27F780F3DD06CD3 /* AppleSignInUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleSignInUITests.swift; sourceTree = "<group>"; };
 		7E3C4FF55AD5EFBB6F904775 /* ChatBarViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatBarViews.swift; sourceTree = "<group>"; };
 		7E92142E64AEB1EEAA060B74 /* IntegrationV8MediaTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntegrationV8MediaTests.swift; sourceTree = "<group>"; };
 		803208A97EA747D7846268CA /* snd_marimba.caf */ = {isa = PBXFileReference; path = snd_marimba.caf; sourceTree = "<group>"; };
@@ -567,6 +573,7 @@
 		B52B41CC252A748322D44E63 /* Tanda17UITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Tanda17UITests.swift; sourceTree = "<group>"; };
 		B5E87C423391FC6DFBA28D1B /* SignIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignIntegrationTests.swift; sourceTree = "<group>"; };
 		B6C6D89C1C0A915A5831A75C /* GgViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GgViews.swift; sourceTree = "<group>"; };
+		B6F41FDFCE489BF4B6CE0F29 /* AppleSignIn.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleSignIn.swift; sourceTree = "<group>"; };
 		B70974444ADBE38043BB433E /* EventCardTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventCardTests.swift; sourceTree = "<group>"; };
 		B725A99713D31DE419505933 /* CallsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallsTests.swift; sourceTree = "<group>"; };
 		B7568544A40900AFE4D73CA5 /* Sounds.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sounds.swift; sourceTree = "<group>"; };
@@ -579,6 +586,7 @@
 		C2FB64772EFA2D4814AFBC97 /* ShareHandoff.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareHandoff.swift; sourceTree = "<group>"; };
 		C335C5192C1E3560004AD1C4 /* CallRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallRecorder.swift; sourceTree = "<group>"; };
 		C3C077B49624604810EB0C19 /* snd_marimba_m.caf */ = {isa = PBXFileReference; path = snd_marimba_m.caf; sourceTree = "<group>"; };
+		C58633227DB28C377878EED8 /* AppleSignInTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleSignInTests.swift; sourceTree = "<group>"; };
 		C65C910BCFA9055C4CAEF2A6 /* snd_cristal_m.caf */ = {isa = PBXFileReference; path = snd_cristal_m.caf; sourceTree = "<group>"; };
 		C9588E3F5C22848C8993510F /* TieComs.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = TieComs.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		CA542D9BCCE55DDE5000F83F /* LlamadaEnlaceUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LlamadaEnlaceUITests.swift; sourceTree = "<group>"; };
@@ -647,6 +655,7 @@
 		118A408D65EB46BE1704F061 /* TieComsUITests */ = {
 			isa = PBXGroup;
 			children = (
+				7D4BCC82F27F780F3DD06CD3 /* AppleSignInUITests.swift */,
 				BE4840348E1744F41C5D7E32 /* AssistantUITests.swift */,
 				D219CAFE934D181A7F100911 /* Capturas1713UITests.swift */,
 				E416DB50231C5B045DE66D53 /* Capturas1714UITests.swift */,
@@ -696,6 +705,7 @@
 			children = (
 				E350A8EAD5807021812F01A5 /* AddInvite.swift */,
 				C0EE4F0835A244D173D5CE5E /* APIClient.swift */,
+				B6F41FDFCE489BF4B6CE0F29 /* AppleSignIn.swift */,
 				9FBBF6EF55B008956531AAC9 /* AppStore.swift */,
 				6F521EF4D592789CF8E947FE /* AppStore+Features.swift */,
 				9E2BD7D5BDD9AFE8C71F3356 /* AppStore+ReadTree.swift */,
@@ -843,6 +853,7 @@
 			children = (
 				E0EC9F09A4A7F9ADCC5DF67D /* AddMembersSheet.swift */,
 				00A0096904EBC6C5EB1BA1A1 /* AgendaViews.swift */,
+				7BEC1607398F0B7ED5515442 /* AppleSignInButton.swift */,
 				6A577B2ED81F6A227F542212 /* AssistantViews.swift */,
 				787E89B5DD3CCB47B23CF7B9 /* AttachmentViews.swift */,
 				959E3DC72E9AF90351D4A075 /* AuthViews.swift */,
@@ -956,6 +967,7 @@
 			isa = PBXGroup;
 			children = (
 				D0136BBEE7057B57391B6EF6 /* AddInviteTests.swift */,
+				C58633227DB28C377878EED8 /* AppleSignInTests.swift */,
 				87BB95987B5C698468620E2C /* AppUpdateTests.swift */,
 				A49B7BC21933C038BE7A3E19 /* AssistantTests.swift */,
 				F25672AE6355CE649E04FF44 /* BandejaTests.swift */,
@@ -1259,6 +1271,8 @@
 				0D2EB01988F6AA05517FF249 /* AppStore+Silence.swift in Sources */,
 				5C5E810AB205F55137AC159E /* AppStore.swift in Sources */,
 				CA2891F17AD00FFD4D140CC9 /* AppUpdate.swift in Sources */,
+				DB31084C944D8B6245B023F1 /* AppleSignIn.swift in Sources */,
+				EA8A077E06CDF9C22000AAC9 /* AppleSignInButton.swift in Sources */,
 				7E55D7C316E16C7E29BDD886 /* Assistant.swift in Sources */,
 				0E4FB9A297D873A1ABF99DFE /* AssistantViews.swift in Sources */,
 				39170673C86561E1D51BEB5E /* AssistantVoice.swift in Sources */,
@@ -1410,6 +1424,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				45B10D586FE49CEA753BE855 /* AppleSignInUITests.swift in Sources */,
 				92B838B4EDD1F56EA574710C /* AssistantUITests.swift in Sources */,
 				8CE882C2AD795A84A129E83E /* Capturas1713UITests.swift in Sources */,
 				A022039E1D94C67893621FDE /* Capturas1714UITests.swift in Sources */,
@@ -1448,6 +1463,7 @@
 			files = (
 				A48DF411C5EF677FCECCED60 /* AddInviteTests.swift in Sources */,
 				033A6B8013D9AC878A7E6743 /* AppUpdateTests.swift in Sources */,
+				8C2E6FFD1EC5D1DA00F66179 /* AppleSignInTests.swift in Sources */,
 				3309B10A7D72102369213B8B /* AssistantTests.swift in Sources */,
 				16E63735D9967CBBA9BCB2F0 /* BandejaTests.swift in Sources */,
 				B186685CD82FD534F8D5E9D5 /* CalendarGridTests.swift in Sources */,
@@ -1735,7 +1751,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 56;
+				CURRENT_PROJECT_VERSION = 57;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = B76US7H3L3;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -1757,7 +1773,7 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = NO;
-				MARKETING_VERSION = 1.7.16;
+				MARKETING_VERSION = 1.7.17;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -1844,7 +1860,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 56;
+				CURRENT_PROJECT_VERSION = 57;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = B76US7H3L3;
 				ENABLE_NS_ASSERTIONS = NO;
@@ -1860,7 +1876,7 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = NO;
-				MARKETING_VERSION = 1.7.16;
+				MARKETING_VERSION = 1.7.17;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";

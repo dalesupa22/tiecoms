@@ -67,6 +67,7 @@ struct ErrorBanner: View {
 
 struct LoginView: View {
     @Environment(AppStore.self) private var store
+    @Environment(\.colorScheme) private var colorScheme
     @State private var email = ""
     @State private var password = ""
     @State private var error: String?
@@ -83,6 +84,12 @@ struct LoginView: View {
                 Text(L("brand.tagline")).font(.body).foregroundStyle(Theme.textSecondary).multilineTextAlignment(.center)
                     .frame(maxWidth: .infinity)
                 LegalConsentView(accepted: $acceptedSSOTerms, identifier: "login.acceptTerms")
+                AppleSignInButton(enabled: acceptedSSOTerms && !busy && ssoBusy == nil && !store.appleSignInBusy,
+                                  identifier: "login.sso.apple", action: apple)
+                    .disabled(!acceptedSSOTerms || busy || ssoBusy != nil || store.appleSignInBusy)
+                    .id(colorScheme)
+                    .frame(height: 50)
+                if store.appleSignInBusy { ProgressView(L("common.wait")) }
                 ForEach(SSOProvider.allCases) { provider in
                     Button { sso(provider) } label: {
                         HStack(spacing: 10) {
@@ -94,7 +101,7 @@ struct LoginView: View {
                         .background(RoundedRectangle(cornerRadius: 14).fill(Theme.surface))
                         .overlay(RoundedRectangle(cornerRadius: 14).stroke(Theme.textSecondary.opacity(0.35)))
                     }
-                    .disabled(!acceptedSSOTerms || busy || ssoBusy != nil)
+                    .disabled(!acceptedSSOTerms || busy || ssoBusy != nil || store.appleSignInBusy)
                     .accessibilityIdentifier("login.sso.\(provider.rawValue)")
                 }
                 HStack(spacing: 10) {
@@ -108,11 +115,12 @@ struct LoginView: View {
                 if let error { ErrorBanner(text: error) }
                 Button(action: submit) { Text(busy ? L("common.wait") : L("auth.login")) }
                     .buttonStyle(PrimaryButtonStyle())
-                    .disabled(busy || email.isEmpty || password.isEmpty)
+                    .disabled(busy || ssoBusy != nil || store.appleSignInBusy || email.isEmpty || password.isEmpty)
                     .accessibilityIdentifier("login.submit")
                 VStack(spacing: 4) {
                     Text(L("auth.noAccount")).foregroundStyle(Theme.textSecondary).multilineTextAlignment(.center)
                     Button(L("auth.createAccount")) { store.signupOrgToken = nil; store.showSignup = true }
+                        .disabled(busy || ssoBusy != nil || store.appleSignInBusy)
                         .fontWeight(.semibold)
                         .frame(minHeight: 44)
                         .accessibilityIdentifier("login.createAccount")
@@ -141,8 +149,17 @@ struct LoginView: View {
         #endif
     }
 
+    private func apple() {
+        guard acceptedSSOTerms, !busy, ssoBusy == nil, !store.appleSignInBusy else { return }
+        error = nil
+        Task {
+            do { try await store.loginWithApple() }
+            catch { self.error = appleErrorText(error) }
+        }
+    }
+
     private func sso(_ provider: SSOProvider) {
-        guard acceptedSSOTerms else { return }
+        guard acceptedSSOTerms, !busy, ssoBusy == nil, !store.appleSignInBusy else { return }
         ssoBusy = provider
         error = nil
         Task {
@@ -160,7 +177,7 @@ struct LoginView: View {
     }
 
     private func submit() {
-        guard !busy, !email.isEmpty, !password.isEmpty else { return }
+        guard !busy, ssoBusy == nil, !store.appleSignInBusy, !email.isEmpty, !password.isEmpty else { return }
         busy = true
         error = nil
         Task {
@@ -172,6 +189,7 @@ struct LoginView: View {
 
 struct SignupView: View {
     @Environment(AppStore.self) private var store
+    @Environment(\.colorScheme) private var colorScheme
     var orgToken: String?
     @State private var name = ""
     @State private var email = ""
@@ -184,8 +202,18 @@ struct SignupView: View {
     @State private var ssoBusy: SSOProvider?
     @State private var acceptedTerms = false
 
+    private func apple() {
+        guard acceptedTerms, !busy, ssoBusy == nil, !store.appleSignInBusy else { return }
+        if !joining && orgName.trimmingCharacters(in: .whitespaces).count < 2 { error = L("auth.ssoNeedsCompany"); return }
+        error = nil
+        Task {
+            do { try await store.loginWithApple(orgInviteToken: orgToken, orgName: joining ? nil : orgName.trimmingCharacters(in: .whitespaces)) }
+            catch { self.error = appleErrorText(error) }
+        }
+    }
+
     private func sso(_ provider: SSOProvider) {
-        guard acceptedTerms else { return }
+        guard acceptedTerms, !busy, ssoBusy == nil, !store.appleSignInBusy else { return }
         if !joining && orgName.trimmingCharacters(in: .whitespaces).isEmpty { error = L("auth.ssoNeedsCompany"); return }
         ssoBusy = provider
         error = nil
@@ -205,7 +233,7 @@ struct SignupView: View {
 
     private var joining: Bool { orgToken != nil }
     private var canSubmit: Bool {
-        acceptedTerms && !busy && name.trimmingCharacters(in: .whitespaces).count >= 2 && email.contains("@") && password.count >= 10
+        acceptedTerms && !busy && ssoBusy == nil && !store.appleSignInBusy && name.trimmingCharacters(in: .whitespaces).count >= 2 && email.contains("@") && password.count >= 10
             && (joining ? orgInvite?.valid != false : orgName.trimmingCharacters(in: .whitespaces).count >= 2)
     }
 
@@ -233,6 +261,13 @@ struct SignupView: View {
                     AuthField(label: L("auth.company"), text: $orgName, content: .organizationName, identifier: "signup.company")
                 }
                 LegalConsentView(accepted: $acceptedTerms, identifier: "signup.acceptTerms")
+                AppleSignInButton(signingUp: true,
+                    enabled: acceptedTerms && !busy && ssoBusy == nil && !store.appleSignInBusy && (!joining || orgInvite?.valid != false),
+                    identifier: "signup.sso.apple", action: apple)
+                    .disabled(!acceptedTerms || busy || ssoBusy != nil || store.appleSignInBusy || (joining && orgInvite?.valid == false))
+                    .id(colorScheme)
+                    .frame(height: 50)
+                if store.appleSignInBusy { ProgressView(L("common.wait")) }
                 ForEach(SSOProvider.allCases) { provider in
                     Button { sso(provider) } label: {
                         HStack(spacing: 10) {
@@ -244,7 +279,7 @@ struct SignupView: View {
                         .background(RoundedRectangle(cornerRadius: 14).fill(Theme.surface))
                         .overlay(RoundedRectangle(cornerRadius: 14).stroke(Theme.textSecondary.opacity(0.35)))
                     }
-                    .disabled(!acceptedTerms || busy || ssoBusy != nil || (joining && orgInvite?.valid == false))
+                    .disabled(!acceptedTerms || busy || ssoBusy != nil || store.appleSignInBusy || (joining && orgInvite?.valid == false))
                     .accessibilityIdentifier("signup.sso.\(provider.rawValue)")
                 }
                 Text(L("auth.orEmail")).font(.footnote).foregroundStyle(Theme.textSecondary).frame(maxWidth: .infinity)

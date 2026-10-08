@@ -6254,5 +6254,45 @@
   "share.remove": [
     "Quitar a {name}",
     "Remove {name}"
+  ],
+  "auth.appleLinkTitle": [
+    "Cuenta · Apple",
+    "Account · Apple"
+  ],
+  "auth.appleLinkHint": [
+    "Vincula tu cuenta de Apple para entrar a esta misma cuenta de chaggu. Puedes ocultar tu correo; no crearemos otra cuenta de chaggu.",
+    "Link your Apple Account to sign in to this same chaggu account. You can hide your email; we will not create another chaggu account."
+  ],
+  "auth.appleLinked": [
+    "Apple vinculado a tu cuenta.",
+    "Apple linked to your account."
+  ],
+  "err.apple_signin_failed": [
+    "No se pudo completar el inicio con Apple. Inténtalo de nuevo.",
+    "Could not complete Sign in with Apple. Please try again."
+  ],
+  "err.apple_link_required": [
+    "Ya existe una cuenta con ese correo. Entra con tu método habitual y vincula Apple en Tú > Cuenta · Apple.",
+    "An account with that email already exists. Sign in with your usual method and link Apple in You > Account · Apple."
+  ],
+  "err.apple_identity_linked": [
+    "Esta cuenta de Apple ya está vinculada a otra cuenta de chaggu.",
+    "This Apple Account is already linked to another chaggu account."
+  ],
+  "err.apple_invitation_mismatch": [
+    "La invitación no corresponde a esta cuenta. Entra con la cuenta invitada y después vincula Apple en Tú > Cuenta · Apple.",
+    "This invitation does not match this account. Sign in with the invited account, then link Apple in You > Account · Apple."
+  ],
+  "err.apple_invalid_credential": [
+    "La autorización de Apple venció o no es válida. Vuelve a intentarlo.",
+    "Your Apple authorization expired or is invalid. Please try again."
+  ],
+  "err.apple_email_unverified": [
+    "Apple no confirmó el correo de esta cuenta. Verifícalo con Apple y vuelve a intentarlo.",
+    "Apple could not verify this account’s email. Verify it with Apple and try again."
+  ],
+  "err.apple_unavailable": [
+    "El inicio con Apple no está disponible en este momento. Inténtalo de nuevo más tarde.",
+    "Sign in with Apple is unavailable right now. Please try again later."
   ]
 }

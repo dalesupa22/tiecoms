@@ -188,7 +188,7 @@ final class APIClient {
     }
 
     private func raw(_ path: String, method: String = "GET", json: [String: Any]? = nil, body: RawBody? = nil, auth: Bool = true, uncached: Bool = false) async throws -> (Data, HTTPURLResponse) {
-        let uncached = uncached || path.contains("/whatsapp/") || path.contains("/gg/side") || path == "/bootstrap"
+        let uncached = uncached || path.contains("/whatsapp/") || path.contains("/gg/side") || path == "/bootstrap" || path.hasPrefix(AuthRoutes.base + "/apple/")
         var req = URLRequest(url: url(path))
         if uncached { req.cachePolicy = .reloadIgnoringLocalCacheData; req.setValue("no-store", forHTTPHeaderField: "cache-control") }
         req.httpMethod = method
@@ -389,6 +389,45 @@ final class APIClient {
         apply(r)
         return r
     }
+
+    #if !SHARE_EXTENSION
+    func appleChallenge(proof: PKCE, linking: Bool = false, orgInviteToken: String? = nil, orgName: String? = nil) async throws -> AppleChallenge {
+        var body: [String: Any] = ["codeChallenge": proof.challenge, "device": device()]
+        if let orgInviteToken { body["orgInviteToken"] = orgInviteToken }
+        else if let orgName, !orgName.isEmpty { body["orgName"] = orgName }
+        let path = AuthRoutes.base + (linking ? "/apple/link/challenge" : "/apple/challenge")
+        if linking { return try await request(path, method: "POST", json: body) }
+        return try await publicRequest(path, method: "POST", json: body)
+    }
+
+    func appleComplete(challenge: AppleChallenge, proof: PKCE, authorization: AppleAuthorization) async throws -> AuthResult {
+        try authorization.validate(for: challenge)
+        invalidateRequests()
+        let generation = requestGeneration
+        let body = authorization.completionBody(challenge: challenge, proof: proof, device: device())
+        let (data, res) = try await raw(AuthRoutes.base + "/apple/complete", method: "POST", json: body, auth: false, uncached: true)
+        guard (200..<300).contains(res.statusCode) else { throw APIClient.parseError(data, status: res.statusCode) }
+        try requireGeneration(generation)
+        let result: AuthResult = try decode(data)
+        apply(result)
+        return result
+    }
+
+    func appleLinkComplete(challenge: AppleChallenge, proof: PKCE, authorization: AppleAuthorization) async throws {
+        try authorization.validate(for: challenge)
+        struct Linked: Decodable { let linked: Bool }
+        let generation = requestGeneration
+        // A proof is single use. Refresh before sending, never replay it after an Apple 401.
+        guard await freshAccessToken() != nil else { throw ApiRequestError(status: 401, code: "unauthorized", message: "") }
+        try requireGeneration(generation)
+        let (data, response) = try await raw(AuthRoutes.base + "/apple/link/complete", method: "POST",
+            json: authorization.completionBody(challenge: challenge, proof: proof, device: device()), uncached: true)
+        try requireGeneration(generation)
+        guard (200..<300).contains(response.statusCode) else { throw APIClient.parseError(data, status: response.statusCode) }
+        let result: Linked = try decode(data)
+        guard result.linked else { throw AppleSignInError.invalidResponse }
+    }
+    #endif
 
     private func apply(_ r: AuthResult) {
         accessToken = r.accessToken

@@ -422,7 +422,16 @@ final class AppStore {
     var liveBurst: LiveBurst?
     @ObservationIgnored var onReady: (() -> Void)?
 
-    init(baseURL: URL, secrets: SecretStore, outbox: OutboxStore = OutboxStore(), feedback: FeedbackSink?, session: URLSession? = nil) {
+    var appleSignInBusy = false
+    @ObservationIgnored private let appleIdentitySecrets: SecretStore
+    @ObservationIgnored private let appleCredentialChecker: AppleCredentialChecking
+    @ObservationIgnored private var appleCredentialObserver: AppleCredentialObserver?
+    @ObservationIgnored private var appleCredentialCheckTask: Task<Void, Never>?
+
+    init(baseURL: URL, secrets: SecretStore, outbox: OutboxStore = OutboxStore(), feedback: FeedbackSink?, session: URLSession? = nil,
+         appleIdentitySecrets: SecretStore? = nil, appleCredentialChecker: AppleCredentialChecking? = nil) {
+        self.appleIdentitySecrets = appleIdentitySecrets ?? AppleIdentitySecretStore(apiURL: baseURL)
+        self.appleCredentialChecker = appleCredentialChecker ?? AppleCredentialChecker()
         let api = APIClient(baseURL: baseURL, secrets: secrets, session: session)
         self.api = api
         pushTokenSync = PushTokenSync { operation in
@@ -454,6 +463,9 @@ final class AppStore {
         }
         socket.onEvent = { [weak self] name, payload in self?.onSocketEvent(name, payload) }
         callCenter.store = self
+        appleCredentialObserver = AppleCredentialObserver { [weak self] in
+            Task { await self?.verifyAppleCredential() }
+        }
     }
 
     var me: UserDTO? { data?.me }
@@ -463,6 +475,8 @@ final class AppStore {
     /// Arranque: intenta reanudar la sesión guardada en el Keychain.
     func start() async {
         status = .loading
+        guard api.hasStoredSession else { appleIdentitySecrets.set(nil); status = .anonymous; return }
+        await verifyAppleCredential()
         guard api.hasStoredSession else { status = .anonymous; return }
         // 1.7.0: con caché de esta cuenta, la lista sale al instante y la red revalida detrás.
         if restoreSnapshot() {
@@ -493,6 +507,7 @@ final class AppStore {
         case .ok:
             do { try await afterLogin() } catch { status = api.accessToken == nil ? .anonymous : .unreachable }
         case .unauthorized:
+            appleIdentitySecrets.set(nil)
             api.clearCredentials()
             status = .anonymous
         case .network:
@@ -505,6 +520,7 @@ final class AppStore {
         let stamp = sessionStamp
         _ = try await api.login(email: email.trimmingCharacters(in: .whitespacesAndNewlines), password: password)
         try requireSession(stamp)
+        appleIdentitySecrets.set(nil)
         try await afterLogin()
     }
 
@@ -516,6 +532,7 @@ final class AppStore {
         if let title, !title.isEmpty { input["title"] = title }
         _ = try await api.signup(input)
         try requireSession(stamp)
+        appleIdentitySecrets.set(nil)
         try await afterLogin()
     }
 
@@ -536,7 +553,74 @@ final class AppStore {
         let stamp = sessionStamp
         _ = try await api.ssoExchange(code: code, verifier: verifier)
         try requireSession(stamp)
+        appleIdentitySecrets.set(nil)
         try await afterLogin()
+    }
+
+    /// Login and authenticated linking use distinct, server-bound challenges. Email never links accounts here.
+    @discardableResult
+    func loginWithApple(orgInviteToken: String? = nil, orgName: String? = nil, linking: Bool = false,
+                        authorizer: AppleAuthorizing? = nil) async throws -> Bool {
+        guard !appleSignInBusy else { throw AppleSignInError.alreadyRunning }
+        if linking, me == nil { throw AppleSignInError.unavailable }
+        appleSignInBusy = true
+        defer { appleSignInBusy = false }
+        let stamp = sessionStamp
+        let proof = try AppleProof.generate()
+        do {
+            let challenge = try await api.appleChallenge(proof: proof, linking: linking, orgInviteToken: orgInviteToken, orgName: orgName)
+            try requireSession(stamp)
+            let authorization = try await (authorizer ?? AppleNativeAuthorizer()).authorize(challenge: challenge)
+            try requireSession(stamp)
+            try authorization.validate(for: challenge)
+            if linking {
+                try await api.appleLinkComplete(challenge: challenge, proof: proof, authorization: authorization)
+                try requireSession(stamp)
+                guard let userID = me?.id else { throw CancellationError() }
+                try AppleSessionIdentity(userID: userID, appleUserID: authorization.userID).save(to: appleIdentitySecrets)
+                return true
+            }
+            invalidateSessionWork()
+            let loginStamp = sessionStamp
+            let result = try await api.appleComplete(challenge: challenge, proof: proof, authorization: authorization)
+            try requireSession(loginStamp)
+            do { try AppleSessionIdentity(userID: result.user.id, appleUserID: authorization.userID).save(to: appleIdentitySecrets) }
+            catch { await logout(); throw error }
+            try await afterLogin()
+            return true
+        } catch {
+            if AppleSignInError.isCancellation(error) { return false }
+            throw error
+        }
+    }
+
+    /// A transient Apple service error preserves the session; a revoked/not-found credential closes it.
+    func verifyAppleCredential() async {
+        if let running = appleCredentialCheckTask { await running.value; return }
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.performAppleCredentialCheck()
+        }
+        appleCredentialCheckTask = task
+        await task.value
+        appleCredentialCheckTask = nil
+    }
+
+    private func performAppleCredentialCheck() async {
+        guard let identity = AppleSessionIdentity.read(from: appleIdentitySecrets) else { return }
+        if let userID = me?.id, userID != identity.userID { appleIdentitySecrets.set(nil); return }
+        let stamp = sessionStamp
+        do {
+            let state = try await appleCredentialChecker.state(for: identity.appleUserID)
+            guard stamp == sessionStamp, identity == AppleSessionIdentity.read(from: appleIdentitySecrets) else { return }
+            switch state {
+            case .authorized: break
+            case .revoked, .notFound, .transferred:
+                status = .loading
+                await logout()
+            @unknown default: break
+            }
+        } catch { /* Network/unavailable is not proof of revocation. */ }
     }
 
     private func afterLogin() async throws {
@@ -598,6 +682,7 @@ final class AppStore {
     }
 
     private func handleSignedOut() {
+        appleIdentitySecrets.set(nil)
         invalidateSessionWork()
         snapshotTask?.cancel(); snapshotTask = nil
         SnapshotCache.clearAll()
@@ -1656,6 +1741,7 @@ final class AppStore {
 
     func becameActive() {
         appActive = true
+        Task { await verifyAppleCredential() }
         guard status == .ready else {
             if status == .unreachable { Task { await start() } }
             return

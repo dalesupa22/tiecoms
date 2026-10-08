@@ -3042,3 +3042,15 @@
 "tasks.filter.emptyHint" = "Prueba otros responsables o estados.";
 "tasks.filter.closed" = "Cerradas recientes";
 "tasks.filter.result" = "1 tarea";
+
+// Sign in with Apple
+"auth.appleLinkTitle" = "Cuenta · Apple";
+"auth.appleLinkHint" = "Vincula tu cuenta de Apple para entrar a esta misma cuenta de chaggu. Puedes ocultar tu correo; no crearemos otra cuenta de chaggu.";
+"auth.appleLinked" = "Apple vinculado a tu cuenta.";
+"err.apple_signin_failed" = "No se pudo completar el inicio con Apple. Inténtalo de nuevo.";
+"err.apple_link_required" = "Ya existe una cuenta con ese correo. Entra con tu método habitual y vincula Apple en Tú > Cuenta · Apple.";
+"err.apple_identity_linked" = "Esta cuenta de Apple ya está vinculada a otra cuenta de chaggu.";
+"err.apple_invitation_mismatch" = "La invitación no corresponde a esta cuenta. Entra con la cuenta invitada y después vincula Apple en Tú > Cuenta · Apple.";
+"err.apple_invalid_credential" = "La autorización de Apple venció o no es válida. Vuelve a intentarlo.";
+"err.apple_email_unverified" = "Apple no confirmó el correo de esta cuenta. Verifícalo con Apple y vuelve a intentarlo.";
+"err.apple_unavailable" = "El inicio con Apple no está disponible en este momento. Inténtalo de nuevo más tarde.";

@@ -3042,3 +3042,15 @@
 "tasks.filter.emptyHint" = "Try other assignees or statuses.";
 "tasks.filter.closed" = "Recently closed";
 "tasks.filter.result" = "1 task";
+
+// Sign in with Apple
+"auth.appleLinkTitle" = "Account · Apple";
+"auth.appleLinkHint" = "Link your Apple Account to sign in to this same chaggu account. You can hide your email; we will not create another chaggu account.";
+"auth.appleLinked" = "Apple linked to your account.";
+"err.apple_signin_failed" = "Could not complete Sign in with Apple. Please try again.";
+"err.apple_link_required" = "An account with that email already exists. Sign in with your usual method and link Apple in You > Account · Apple.";
+"err.apple_identity_linked" = "This Apple Account is already linked to another chaggu account.";
+"err.apple_invitation_mismatch" = "This invitation does not match this account. Sign in with the invited account, then link Apple in You > Account · Apple.";
+"err.apple_invalid_credential" = "Your Apple authorization expired or is invalid. Please try again.";
+"err.apple_email_unverified" = "Apple could not verify this account’s email. Verify it with Apple and try again.";
+"err.apple_unavailable" = "Sign in with Apple is unavailable right now. Please try again later.";

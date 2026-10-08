@@ -317,7 +317,7 @@ function useJustChanged(id: string, st: TaskState) {
  * Tarjeta compacta del Flujo IA: número de ticket y cliente, título en dos líneas y un pie con quién la tiene,
  * comentarios, archivos y hace cuánto está en la etapa. La etapa ya la dice la columna, así que no repite estados.
  */
-function FlowCard({ i, stage, onOpen, onError }: { i: IssueDTO; stage: FlowStage; onOpen: (id: string) => void; onError: (e: string) => void }) {
+function FlowCard({ i, stage, where, onOpen, onError }: { i: IssueDTO; stage: FlowStage; where?: string | null; onOpen: (id: string) => void; onError: (e: string) => void }) {
   const d = useClient((s) => s.data)!;
   const isNew = useClient((s) => s.taskInbox.some((x) => x.issueId === i.id));
   const who = taskAssignees(i).map((u) => personById(d, u)).filter((p): p is NonNullable<typeof p> => !!p);
@@ -341,6 +341,7 @@ function FlowCard({ i, stage, onOpen, onError }: { i: IssueDTO; stage: FlowStage
         <span className="fc-age" title={taskText('En esta etapa', 'In this stage')}>{ago(since)}</span>
       </div>
       <div className="fc-title">{i.title}</div>
+      {where && <div className="fc-where ellipsis" title={where}># {where}</div>}
       {stage !== 'new' && <div className="fc-state"><StatePill i={i} /></div>}
       <div className="fc-foot">
         {who.length > 0
@@ -963,6 +964,7 @@ function IssueTable({ list, onOpen }: { list: IssueDTO[]; onOpen: (id: string) =
 
 const TABLE_KEY = 'chaggu.issues.table';
 const FLOW_KEY = 'chaggu.issues.flow';
+const INBOX_KEY = 'chaggu.issues.inbox-open';
 function readFlowPref() { try { return localStorage.getItem(FLOW_KEY) === '1'; } catch { return false; } }
 function readTablePref() { try { return localStorage.getItem(TABLE_KEY) === '1'; } catch { return false; } }
 
@@ -990,6 +992,10 @@ export function IssuesBody() {
   const [table, setTableState] = useState(readTablePref);
   const setTable = (on: boolean) => { setTableState(on); try { localStorage.setItem(TABLE_KEY, on ? '1' : '0'); } catch { /* sin almacenamiento */ } };
   const [flow, setFlowState] = useState(readFlowPref);
+  // «Nuevas» se puede recoger (pedido de Danny 8-oct): se recuerda; sin preferencia, plegada en el Flujo IA.
+  const [inboxPref, setInboxPref] = useState<string | null>(() => { try { return localStorage.getItem(INBOX_KEY); } catch { return null; } });
+  const inboxOpen = inboxPref === null ? !flow : inboxPref === '1';
+  const setInboxOpen = (on: boolean) => { setInboxPref(on ? '1' : '0'); try { localStorage.setItem(INBOX_KEY, on ? '1' : '0'); } catch { /* sin almacenamiento */ } };
   const setFlow = (on: boolean) => { setFlowState(on); try { localStorage.setItem(FLOW_KEY, on ? '1' : '0'); } catch { /* sin almacenamiento */ } };
   const view = flow ? 'flow' : table ? 'table' : preferences.issues?.view ?? 'list';
   const groupBy = preferences.issues?.grouping === 'assignee' ? 'person' : 'group';
@@ -1051,6 +1057,8 @@ export function IssuesBody() {
     finally { setPendingMoves((ids) => { const next = new Set(ids); next.delete(taskId); return next; }); }
   };
   // Soltar en una etapa del flujo: a la IA (el agente del grupo), por revisar, intervención humana o aprobar.
+  // Grupo o chat de la tarea (en la tarjeta del flujo cuando no hay filtro de grupo).
+  const groupName = (i: IssueDTO) => { const k = convOf(i); if (k === PERSONAL) return t('issue.personalShort'); const c = d.conversations.find((x) => x.id === k); return c ? conversationTitle(d, c) : null; };
   // Soltar en una columna: en espera (sin responsable), en proceso, por revisar, necesita persona o completar.
   const moveToStage = async (taskId: string, stage: FlowStage) => {
     const i = all[taskId];
@@ -1096,17 +1104,19 @@ export function IssuesBody() {
         <TaskReportButton />
       </div>
       {fresh.length > 0 && (
-        <section className="task-inbox" aria-label={taskText('Nuevas', 'New')}>
-          <div className="row" style={{ marginBottom: 8 }}>
-            <span className="eyebrow grow">🔔 {taskText('Nuevas', 'New')} · {fresh.length}</span>
+        <section className={`task-inbox ${inboxOpen ? '' : 'is-collapsed'}`} aria-label={taskText('Nuevas', 'New')}>
+          <div className="row" style={{ marginBottom: inboxOpen ? 8 : 0 }}>
+            <button className="eyebrow grow task-inbox-toggle" aria-expanded={inboxOpen} onClick={() => setInboxOpen(!inboxOpen)}>
+              {inboxOpen ? '▾' : '▸'} 🔔 {taskText('Nuevas', 'New')} · {fresh.length}{!inboxOpen && <span className="small muted"> · {taskText('clic para verlas', 'click to show')}</span>}
+            </button>
             <button className="btn ghost small" onClick={() => void client.markTaskInboxSeen()}>{taskText('Marcar todas como vistas', 'Mark all as seen')}</button>
           </div>
-          <div className="list" style={{ gap: 6 }}>{fresh.map(({ x, i }) => (
+          {inboxOpen && <div className="list" style={{ gap: 6 }}>{fresh.map(({ x, i }) => (
             <div key={x.issueId} className="task-inbox-item">
               <span className="small muted">{inboxReasonLabel(x.reason)}{x.actorId ? ` · ${personById(d, x.actorId)?.name ?? t('common.participant')}` : ''}</span>
               <IssueRow i={i} showWhere onOpen={setOpen} />
             </div>
-          ))}</div>
+          ))}</div>}
         </section>
       )}
       {stateFilter !== 'done' && stateFilter !== 'cancelled' && <QuickAddIssue />}
@@ -1122,7 +1132,7 @@ export function IssuesBody() {
       {view === 'flow' && <div className="flow-live small muted" title={taskText('Las tarjetas se mueven solas cuando cambian', 'Cards move by themselves when they change')}><span className="flow-live-dot" aria-hidden />{taskText('En vivo', 'Live')}</div>}
       {view === 'flow' && <div className="task-board task-flow">{FLOW_STAGES.map((stage) => {
         const items = list.filter((i) => !i.parentIssueId && flowStage(i) === stage);
-        return <section key={stage} className={`task-board-column flow-${stage}`} aria-busy={pendingMoves.size > 0} onDragOver={(e) => { if (e.dataTransfer.types.includes('application/x-chaggu-issue-id')) { e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'move'; } }} onDrop={(e) => { e.preventDefault(); e.stopPropagation(); void moveToStage(e.dataTransfer.getData('application/x-chaggu-issue-id'), stage); }}><h3>{flowLabel(stage)} · {items.length}</h3>{items.map((i) => <FlowCard key={i.id} i={i} stage={stage} onOpen={setOpen} onError={setError} />)}{items.length === 0 && <div className="fc-empty small muted">{stage === 'new' ? taskText('Los tickets nuevos esperan aquí a que alguien los asigne a un agente o a una persona.', 'New tickets wait here until someone assigns them.') : taskText('Nada aquí', 'Nothing here')}</div>}</section>;
+        return <section key={stage} className={`task-board-column flow-${stage}`} aria-busy={pendingMoves.size > 0} onDragOver={(e) => { if (e.dataTransfer.types.includes('application/x-chaggu-issue-id')) { e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'move'; } }} onDrop={(e) => { e.preventDefault(); e.stopPropagation(); void moveToStage(e.dataTransfer.getData('application/x-chaggu-issue-id'), stage); }}><h3>{flowLabel(stage)} · {items.length}</h3>{items.map((i) => <FlowCard key={i.id} i={i} stage={stage} where={groupFilter === 'all' ? groupName(i) : null} onOpen={setOpen} onError={setError} />)}{items.length === 0 && <div className="fc-empty small muted">{stage === 'new' ? taskText('Los tickets nuevos esperan aquí a que alguien los asigne a un agente o a una persona.', 'New tickets wait here until someone assigns them.') : taskText('Nada aquí', 'Nothing here')}</div>}</section>;
       })}</div>}
       {view !== 'board' && view !== 'table' && view !== 'flow' && sections.map(([k, items]) => (
         <section key={k} style={{ marginBottom: 18 }}>

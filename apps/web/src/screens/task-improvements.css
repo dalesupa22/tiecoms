@@ -95,3 +95,7 @@
 @keyframes fc-glow { 0%,40% { box-shadow:0 0 0 3px color-mix(in srgb, var(--fc-glow, #7c5cff) 55%, transparent), 0 6px 20px color-mix(in srgb, var(--fc-glow, #7c5cff) 25%, transparent) } 100% { box-shadow:0 1px 0 rgba(0,0,0,.03) } }
 .flow-live { display:flex; align-items:center; gap:6px; margin:4px 2px 6px } .flow-live-dot { width:8px; height:8px; border-radius:50%; background:#30a46c; animation:fc-pulse 1.6s ease-in-out infinite }
 @media (prefers-reduced-motion: reduce) { .flow-card.just-changed, .fc-pulse, .flow-live-dot { animation:none } }
+/* «Nuevas» plegable y grupo en la tarjeta del flujo (8-oct). */
+.task-inbox-toggle { background:none; border:0; padding:0; cursor:pointer; text-align:left; font:inherit; color:inherit }
+.task-inbox.is-collapsed { padding-top:8px; padding-bottom:8px }
+.fc-where { font-size:11px; color:var(--muted, #6b7470); min-width:0 }

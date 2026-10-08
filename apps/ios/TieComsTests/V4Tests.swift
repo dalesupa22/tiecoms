@@ -248,6 +248,26 @@ final class V4Tests: XCTestCase {
         XCTAssertTrue(signedOut)
     }
 
+    /// 8-oct: un 301 del proxy en /issues llevó la petición a /issues/ sin Authorization (401) y la app cerraba
+    /// la sesión aunque el refresh era válido. Con el refresh aceptado, el 401 de una ruta no cierra la sesión.
+    @MainActor
+    func testRoute401WithValidRefreshKeepsSession() async throws {
+        MockURLProtocol.requests = []
+        MockURLProtocol.routes = ["/api/v1/issues": (401, #"{"error":{"code":"unauthorized","message":"no"}}"#),
+                                  "/api/v1/auth/refresh": (200, #"{"accessToken":"acc","accessExpiresAt":"2099-01-01T00:00:00.000Z","refreshToken":"rt-2","sessionId":"s1","user":{"id":"u1","name":"Ana","kind":"human","primaryOrgId":null}}"#)]
+        let secrets = MemorySecretStore()
+        secrets.set("rt-1")
+        var signedOut = false
+        let api = APIClient(baseURL: URL(string: "http://localhost:3043")!, secrets: secrets, session: MockURLProtocol.session())
+        api.onSignedOut = { signedOut = true }
+        do { try await api.requestData("/issues?open=1"); XCTFail("debía fallar") } catch let e as ApiRequestError {
+            XCTAssertEqual(e.status, 401)
+        }
+        XCTAssertFalse(signedOut, "el refresh fue aceptado: la sesión sigue")
+        XCTAssertEqual(secrets.get(), "rt-2")
+        XCTAssertEqual(MockURLProtocol.requests.filter { $0.path == "/api/v1/issues" }.count, 2, "reintenta una sola vez")
+    }
+
     /// Keychain real del simulador: cada servidor tiene su propia sesión y no se copia la de producción
     /// (Chaggu es una app nueva; ya no existe la migración de la build 6 de TieComs).
     func testKeychainSessionsPerServerAreIsolated() {

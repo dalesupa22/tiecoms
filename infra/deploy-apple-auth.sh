@@ -66,7 +66,7 @@ done
 test "$ok" = 1
 test "$(docker inspect --format '{{.State.Running}}' tiecoms-worker-1)" = true
 # A readiness response alone cannot prove that the service user can read the key
-# or that migration 108 and the encryption configuration work. This creates only
+# or that migration 109 and the encryption configuration work. This creates only
 # an expiring anonymous challenge; no Apple account or Chaggu session is created.
 docker exec -i tiecoms-api-1 node --input-type=module <<'CHECK_APPLE'
 import { createHash, randomBytes, randomUUID } from 'node:crypto';

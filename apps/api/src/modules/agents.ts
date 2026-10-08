@@ -117,7 +117,7 @@ export async function queueAgentEvents(c: Tx, m: MessageDTO) {
   );
   if (!agents.length) return;
   const ctx = (await c.query(
-    `SELECT cv.kind, cv.name, a.name AS author_name, a.kind AS author_kind, o.name AS author_org,
+    `SELECT cv.kind, cv.name, cv.side_issue_id, a.name AS author_name, a.kind AS author_kind, o.name AS author_org,
             (SELECT author_id FROM messages WHERE id = $3) AS reply_author
        FROM conversations cv JOIN users a ON a.id = $2 LEFT JOIN organizations o ON o.id = a.primary_org_id WHERE cv.id = $1`,
     [m.conversationId, m.authorId, m.replyTo],
@@ -128,12 +128,13 @@ export async function queueAgentEvents(c: Tx, m: MessageDTO) {
     const type: AgentEventType | null = ctx.kind === 'direct' ? 'message.direct'
       : mentioned.has(a.id) || namedIn(m.body, a.name) ? 'message.mention'
         : m.replyTo && ctx.reply_author === a.id ? 'message.reply'
-          : a.all_messages ? 'message.created' : null;
+          // El chat de una tarea (open_task_chat) es su mesa de trabajo: le llega todo lo que escriben ahí.
+          : a.all_messages || ctx.side_issue_id ? 'message.created' : null;
     if (!type) continue;
     const event = {
       id: randomUUID(), type, createdAt: new Date().toISOString(),
       agent: { id: a.id, name: a.name },
-      conversation: { id: m.conversationId, kind: ctx.kind, name: ctx.kind === 'direct' ? null : ctx.name },
+      conversation: { id: m.conversationId, kind: ctx.kind, name: ctx.kind === 'direct' ? null : ctx.name, ...(ctx.side_issue_id ? { taskId: ctx.side_issue_id } : {}) },
       message: {
         id: m.id, seq: m.seq, body: m.body, replyTo: m.replyTo, topicId: m.topicId ?? null,
         attachments: (m.attachments ?? []).map((x) => ({ id: x.id, name: x.name, contentType: x.contentType, sizeBytes: x.sizeBytes })),

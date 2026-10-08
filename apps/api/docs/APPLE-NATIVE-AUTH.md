@@ -25,7 +25,7 @@ Configure the API and the worker with the same values:
 
 The native app's explicit bundle identifier must have Sign in with Apple enabled and its provisioning profile/entitlements regenerated as appropriate. Store configuration and key provisioning are release-owner responsibilities. Missing, inconsistent or invalid local credentials fail closed with `apple_unavailable`; Google/Microsoft remain functional.
 
-Apply migration `108_apple_native_auth.sql` before serving this code. The standard migrator and its no-transaction/advisory-lock behavior are unchanged. Migration 108 widens only `user_identities.provider`, adds one-Apple-identity-per-user uniqueness, challenge storage, encrypted token vault, and short-lived hashed deletion markers.
+Apply migration `109_apple_native_auth.sql` before serving this code. The standard migrator and its no-transaction/advisory-lock behavior are unchanged. Migration 109 widens only `user_identities.provider`, adds one-Apple-identity-per-user uniqueness, challenge storage, encrypted token vault, and short-lived hashed deletion markers.
 
 ## Identity and organization boundaries
 

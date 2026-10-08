@@ -1,0 +1,29 @@
+{
+  "mcpUrl": "https://app.chaggu.com/api/mcp",
+  "host": "127.0.0.1",
+  "port": 14190,
+  "pollMinutes": 10,
+  "maxConcurrent": 2,
+  "runTimeoutMinutes": 40,
+  "reviewer": "Lorena Tapias",
+  "agents": [
+    {
+      "name": "Agente Xertify",
+      "tokenEnv": "CHAGGU_TOKEN_XERTIFY",
+      "secretEnv": "CHAGGU_SECRET_XERTIFY",
+      "engine": "claude",
+      "cwd": "/home/user/workspace",
+      "instructions": "Eres el Agente Xertify: resuelves tickets de clientes de Xertify (certificados, wallet, emisiones, firmas). Usa las skills de Xertify del entorno. Nunca toques producción sin dejar evidencia en la tarea.",
+      "args": ["--permission-mode", "acceptEdits"]
+    },
+    {
+      "name": "Agente Xertiflow",
+      "tokenEnv": "CHAGGU_TOKEN_XERTIFLOW",
+      "secretEnv": "CHAGGU_SECRET_XERTIFLOW",
+      "engine": "codex",
+      "cwd": "/home/user/workspace",
+      "instructions": "Eres el Agente Xertiflow: resuelves tickets de procesos y flujos WAT de Xertiflow (casos detenidos, asignaciones, entidades).",
+      "args": ["--sandbox", "workspace-write"]
+    }
+  ]
+}

@@ -20,7 +20,7 @@ Missing configuration makes Apple authentication unavailable without disabling t
 
 1. Review and commit source; push it, fetch/pull the exact deployment commit into a clean checkout, and verify `HEAD == origin/principal` for the API release.
 2. Reconcile the running API/web release IDs and any concurrent releases. Supply those exact IDs as `EXPECTED_API_RELEASE` and `EXPECTED_WEB_RELEASE` to `bash infra/deploy-apple-auth.sh`.
-3. The script builds the API and legal site, applies additive migration 108, and replaces the API/worker. It preserves the current web-app bytes and WhatsApp bridge container. A failed verification restores previous binaries/static pointers while retaining the additive schema.
+3. The script builds the API and legal site, applies additive migration 109, and replaces the API/worker. It preserves the current web-app bytes and WhatsApp bridge container. A failed verification restores previous binaries/static pointers while retaining the additive schema.
 4. Verify API readiness, configured Apple challenge behavior, worker health, deployed legal pages and preserved clients. Do not describe a mock Apple token exchange as real authentication.
 5. Archive iOS from its separately reviewed source, with the Apple entitlement only on the main app. Use an App Store eligible export and a new verified version/build number. Preserve extensions, testers and existing review metadata.
 6. Verify signed artifact identity/hash, Apple processing and build audience before selecting it for App Review. Record real authentication evidence separately from simulator tests and compile results. Answer App Review using the actual submitted version and current no-charge model; retain tentative future prices outside the response.

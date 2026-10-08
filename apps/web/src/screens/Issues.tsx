@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent } from 'react';
 import type { BootstrapDTO, IssueDTO, IssueEventDTO, IssueFieldValue, IssueReview, IssueStatus, IssueVisibility, TaskInboxReason } from '@tiecoms/contracts';
 import { apiUrl, client, useClient } from '../app-client.ts';
 import { updateIssuePreferences, usePersonalPreferences } from '../personal-prefs.ts';
@@ -46,9 +46,9 @@ export function dueLabel(i: IssueDTO) {
 /** Revisión humana (llamada con Lorena 7-oct): la IA resuelve, una persona aprueba, pide corrección o la toma. */
 export const REVIEWS: IssueReview[] = ['pending', 'changes', 'human', 'approved'];
 export function reviewLabel(r: IssueReview) {
-  return ({ pending: taskText('Por revisar', 'To review'), approved: taskText('Aprobada', 'Approved'), changes: taskText('Corregir', 'Changes requested'), human: taskText('Intervención humana', 'Needs a person') })[r];
+  return ({ pending: taskText('Por revisar', 'To review'), approved: taskText('Aprobada', 'Approved'), changes: taskText('Devuelta', 'Returned'), human: taskText('Intervención humana', 'Needs a person') })[r];
 }
-const REVIEW_ICON: Record<IssueReview, string> = { pending: '👀', approved: '✅', changes: '✎', human: '🙋' };
+const REVIEW_ICON: Record<IssueReview, string> = { pending: '👀', approved: '✅', changes: '↩', human: '🙋' };
 export function ReviewPill({ review }: { review: IssueReview }) {
   return <span className={`review-pill review-${review}`}>{REVIEW_ICON[review]} {reviewLabel(review)}</span>;
 }
@@ -56,16 +56,18 @@ export function inboxReasonLabel(r: TaskInboxReason) {
   return ({ assigned: taskText('Te la asignaron', 'Assigned to you'), review: taskText('Te piden revisarla', 'Review requested'), reviewed: taskText('Ya la revisaron', 'Reviewed'), ticket: taskText('Llegó un ticket', 'New ticket') })[r];
 }
 
-/** Revisar: aprobar, pedir corrección (con comentario para quien la resolvió) o marcar que necesita a una persona. */
+/** Revisar: aprobar, devolver (con nota y capturas: vuelve a quien la resolvió) o marcar que necesita a una persona. */
 function ReviewBar({ i, onError }: { i: IssueDTO; onError: (e: string) => void }) {
   const d = useClient((s) => s.data)!;
   const [note, setNote] = useState('');
-  const [busy, setBusy] = useState(false);
+  // «Mira esto, te quedó mal»: la corrección puede llevar capturas (pegadas, arrastradas o con 📎); le llegan al agente.
+  const { files, setFiles, busy, setBusy, dropProps, onPaste, chips, button } = useTaskFiles(i.id);
   const set = async (r: IssueReview | null) => {
     if (busy) return;
-    if (r === 'changes' && !note.trim()) { onError(taskText('Escribe qué hay que corregir.', 'Write what needs to change.')); return; }
+    if (r === 'changes' && !note.trim()) { onError(taskText('Escribe por qué la devuelves.', 'Write why you return it.')); return; }
+    if (files.length && !note.trim()) { onError(taskText('Escribe una nota para acompañar los archivos.', 'Add a note for the files.')); return; }
     setBusy(true);
-    try { await client.reviewIssue(i.id, r, note.trim() || undefined); setNote(''); } catch (e) { onError(errorText(e)); } finally { setBusy(false); }
+    try { await client.reviewIssue(i.id, r, note.trim() || undefined, files.map((f) => f.id)); setNote(''); setFiles([]); } catch (e) { onError(errorText(e)); } finally { setBusy(false); }
   };
   const by = i.reviewBy ? personById(d, i.reviewBy)?.name : null;
   return (
@@ -73,13 +75,17 @@ function ReviewBar({ i, onError }: { i: IssueDTO; onError: (e: string) => void }
       <div className="issue-q-label">{taskText('Revisión', 'Review')}{i.review ? <> · <ReviewPill review={i.review} />{by ? <span className="small muted"> {by}</span> : null}</> : null}</div>
       <div className="chips">
         {i.review !== 'approved' && <button className="chip" disabled={busy} onClick={() => void set('approved')}>✅ {taskText('Aprobar', 'Approve')}</button>}
-        <button className="chip" disabled={busy} onClick={() => void set('changes')}>✎ {taskText('Pedir corrección', 'Request changes')}</button>
+        <button className="chip" disabled={busy} title={taskText('Vuelve a quien la resolvió con tu nota', 'Goes back to whoever solved it with your note')} onClick={() => void set('changes')}>↩ {taskText('Devolver', 'Return')}</button>
         {i.review !== 'human' && <button className="chip" disabled={busy} onClick={() => void set('human')}>🙋 {taskText('Necesita intervención humana', 'Needs a person')}</button>}
         {!i.review && <button className="chip ghost" disabled={busy} onClick={() => void set('pending')}>👀 {taskText('Dejar por revisar', 'Mark for review')}</button>}
         {i.review && <button className="chip ghost" disabled={busy} onClick={() => void set(null)}>{taskText('Quitar revisión', 'Clear review')}</button>}
       </div>
-      <textarea className="input" rows={2} maxLength={4000} value={note} onChange={(e) => setNote(e.target.value)}
-        placeholder={taskText('Comentario para quien la resolvió (obligatorio para pedir corrección)', 'Note for whoever solved it (required to request changes)')} />
+      <div className="review-note" {...dropProps}>
+        <textarea className="input" rows={2} maxLength={4000} value={note} onChange={(e) => setNote(e.target.value)} onPaste={onPaste}
+          placeholder={taskText('Por qué la devuelves / qué hay que corregir (obligatorio para devolver). Pega o adjunta capturas con 📎', 'Why you return it (required to return). Paste or attach screenshots')} />
+        {chips}
+        <div className="row">{button}<span className="small muted">{busy ? t('common.loading') : taskText('Capturas o archivos para quien la resolvió', 'Screenshots or files for whoever solved it')}</span></div>
+      </div>
     </div>
   );
 }
@@ -88,8 +94,8 @@ function ReviewBar({ i, onError }: { i: IssueDTO; onError: (e: string) => void }
  * Responder una tarea o ticket (pedido de Lorena 7-oct): texto largo (hasta 20.000) y capturas pegadas (Ctrl+V),
  * arrastradas o elegidas con 📎. Las capturas quedan como archivos de la tarea y el comentario las muestra.
  */
-export function TaskReply({ issue, compact = false, onSent }: { issue: IssueDTO; compact?: boolean; onSent?: () => void }) {
-  const [text, setText] = useState('');
+/** Capturas y archivos que se van subiendo a la tarea antes de enviar un comentario o una corrección (📎, pegar, arrastrar). */
+function useTaskFiles(issueId: string) {
   const [files, setFiles] = useState<{ id: string; name: string }[]>([]);
   const [busy, setBusy] = useState(false);
   const pick = useRef<HTMLInputElement>(null);
@@ -99,11 +105,28 @@ export function TaskReply({ issue, compact = false, onSent }: { issue: IssueDTO;
     try {
       for (const f of list.slice(0, 10 - files.length)) {
         const name = f.name && f.name !== 'image.png' ? f.name : `captura-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '')}.png`;
-        const a = await client.uploadIssueAttachment(issue.id, f, name);
+        const a = await client.uploadIssueAttachment(issueId, f, name);
         setFiles((cur) => [...cur, { id: a.id, name }]);
       }
     } catch (e) { toast(errorText(e)); } finally { setBusy(false); }
   };
+  const remove = (id: string) => setFiles((cur) => cur.filter((x) => x.id !== id));
+  const dropProps = {
+    onDragOver: (e: DragEvent) => { if (e.dataTransfer.types.includes('Files')) e.preventDefault(); },
+    onDrop: (e: DragEvent) => { if (e.dataTransfer.files.length) { e.preventDefault(); void add(Array.from(e.dataTransfer.files)); } },
+  };
+  const onPaste = (e: ClipboardEvent) => { const imgs = Array.from(e.clipboardData.files); if (imgs.length) { e.preventDefault(); void add(imgs); } };
+  const chips = files.length > 0 && <div className="task-reply-files">{files.map((f) => <span key={f.id} className="issue-field-chip">📎 {f.name} <button className="link-btn" aria-label={taskText('Quitar', 'Remove')} onClick={() => remove(f.id)}>×</button></span>)}</div>;
+  const button = <>
+    <button type="button" className="btn ghost small" disabled={busy || files.length >= 10} title={taskText('Adjuntar captura o archivo (también puedes pegar con Ctrl+V)', 'Attach a screenshot or file (or paste with Ctrl+V)')} onClick={() => pick.current?.click()}>📎</button>
+    <input ref={pick} type="file" multiple hidden onChange={(e) => { void add(Array.from(e.target.files ?? [])); e.target.value = ''; }} />
+  </>;
+  return { files, setFiles, busy, setBusy, add, dropProps, onPaste, chips, button };
+}
+
+export function TaskReply({ issue, compact = false, onSent }: { issue: IssueDTO; compact?: boolean; onSent?: () => void }) {
+  const [text, setText] = useState('');
+  const { files, setFiles, busy, setBusy, dropProps, onPaste, chips, button } = useTaskFiles(issue.id);
   const send = async () => {
     const body = text.trim();
     if ((!body && !files.length) || busy) return;
@@ -112,17 +135,14 @@ export function TaskReply({ issue, compact = false, onSent }: { issue: IssueDTO;
     catch (e) { toast(errorText(e)); } finally { setBusy(false); }
   };
   return (
-    <div className={`task-reply ${compact ? 'is-compact' : ''}`}
-      onDragOver={(e) => { if (e.dataTransfer.types.includes('Files')) e.preventDefault(); }}
-      onDrop={(e) => { if (e.dataTransfer.files.length) { e.preventDefault(); void add(Array.from(e.dataTransfer.files)); } }}>
+    <div className={`task-reply ${compact ? 'is-compact' : ''}`} {...dropProps}>
       <textarea className="input" rows={compact ? 1 : 3} maxLength={20000} value={text} placeholder={compact ? t('task.cardComment') : t('issue.commentPh')}
         onChange={(e) => setText(e.target.value)}
-        onPaste={(e) => { const imgs = Array.from(e.clipboardData.files); if (imgs.length) { e.preventDefault(); void add(imgs); } }}
+        onPaste={onPaste}
         onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey || (compact && !e.shiftKey)) && !e.nativeEvent.isComposing) { e.preventDefault(); void send(); } }} />
-      {files.length > 0 && <div className="task-reply-files">{files.map((f) => <span key={f.id} className="issue-field-chip">📎 {f.name} <button className="link-btn" aria-label={taskText('Quitar', 'Remove')} onClick={() => setFiles((cur) => cur.filter((x) => x.id !== f.id))}>×</button></span>)}</div>}
+      {chips}
       <div className="row task-reply-actions">
-        <button type="button" className="btn ghost small" disabled={busy || files.length >= 10} title={taskText('Adjuntar captura o archivo (también puedes pegar con Ctrl+V)', 'Attach a screenshot or file (or paste with Ctrl+V)')} onClick={() => pick.current?.click()}>📎</button>
-        <input ref={pick} type="file" multiple hidden onChange={(e) => { void add(Array.from(e.target.files ?? [])); e.target.value = ''; }} />
+        {button}
         <span className="grow small muted">{text.length > 15000 ? `${text.length}/20000` : busy ? t('common.loading') : ''}</span>
         <button type="button" className="btn primary small" disabled={busy || (!text.trim() && !files.length)} onClick={() => void send()}>{t('issue.comment')}</button>
       </div>
@@ -158,10 +178,110 @@ export function fieldColumns(list: IssueDTO[]) {
   return cols;
 }
 
-function membersOf(d: BootstrapDTO, conversationId: string | null) {
+function membersOf(d: BootstrapDTO, conversationId: string | null, opts: { agents?: boolean } = {}) {
   if (!conversationId) return [];
   const c = d.conversations.find((x) => x.id === conversationId);
-  return (c?.memberIds ?? []).map((id) => personById(d, id)).filter((p): p is NonNullable<typeof p> => !!p && p.kind === 'human');
+  return (c?.memberIds ?? []).map((id) => personById(d, id)).filter((p): p is NonNullable<typeof p> => !!p && (p.kind === 'human' || (!!opts.agents && isTaskAgent(p))));
+}
+
+/** Agente IA miembro (tiene empresa); los bots de integración y gg no toman tareas. */
+const isTaskAgent = (p: { kind: string; orgId: string | null }) => p.kind === 'agent' && !!p.orgId;
+
+/** Agentes IA del chat de la tarea (se les puede asignar: escuchan el tablero por su webhook). */
+export function agentsOf(d: BootstrapDTO, conversationId: string | null) {
+  return membersOf(d, conversationId, { agents: true }).filter((p) => p.kind === 'agent');
+}
+const isAgentId = (d: BootstrapDTO, id: string) => personById(d, id)?.kind === 'agent';
+
+/**
+ * Flujo IA (llamada con Lorena, 7-oct): la etapa sale del estado, la revisión y quién la tiene.
+ * Llega → la IA la toma → la resuelve y carga la evidencia → por revisar → aprobada (se entrega) o corregir (vuelve a la IA);
+ * lo que la IA no puede hacer queda en intervención humana para asignarlo a una persona.
+ */
+export type FlowStage = 'new' | 'ai' | 'review' | 'human' | 'people' | 'done';
+export const FLOW_STAGES: FlowStage[] = ['new', 'ai', 'review', 'human', 'people', 'done'];
+export function flowStage(d: BootstrapDTO, i: IssueDTO): FlowStage {
+  if (i.review === 'approved' || isClosed(i)) return 'done';
+  if (i.review === 'pending') return 'review';
+  if (i.review === 'human') return 'human';
+  const who = taskAssignees(i);
+  if (who.some((u) => isAgentId(d, u))) return 'ai';
+  return who.length ? 'people' : 'new';
+}
+/** Asignar a un agente IA: le llega task.assigned por su webhook y él toma la tarjeta. */
+export async function assignToAgent(i: IssueDTO, agentId: string) {
+  if (i.review) await client.reviewIssue(i.id, null);
+  await client.updateIssue(i.id, { assigneeIds: [agentId] });
+}
+
+/** Hace cuánto (corto): «ahora», «12 min», «3 h», «2 d». */
+function ago(iso: string | null | undefined) {
+  if (!iso) return '';
+  const m = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 60_000));
+  return m < 1 ? taskText('ahora', 'now') : m < 60 ? `${m} min` : m < 1440 ? `${Math.round(m / 60)} h` : `${Math.round(m / 1440)} d`;
+}
+
+/**
+ * Tarjeta compacta del Flujo IA: número de ticket y cliente, título en dos líneas y un pie con quién la tiene,
+ * comentarios, archivos y hace cuánto está en la etapa. La etapa ya la dice la columna, así que no repite estados.
+ */
+function FlowCard({ i, stage, onOpen, onError }: { i: IssueDTO; stage: FlowStage; onOpen: (id: string) => void; onError: (e: string) => void }) {
+  const d = useClient((s) => s.data)!;
+  const isNew = useClient((s) => s.taskInbox.some((x) => x.issueId === i.id));
+  const who = taskAssignees(i).map((u) => personById(d, u)).filter((p): p is NonNullable<typeof p> => !!p);
+  const meta = i.externalMeta ?? {};
+  const customer = meta.Cliente ?? meta.cliente ?? meta.Client ?? null;
+  const urgent = /alta|urgente|high/i.test(meta.Prioridad ?? meta.prioridad ?? '');
+  const since = stage === 'review' || stage === 'human' ? i.reviewAt : stage === 'done' ? i.closedAt ?? i.reviewAt : i.statusSince;
+  const files = i.attachments?.length ?? 0;
+  return (
+    <div role="button" tabIndex={0} draggable className={`flow-card ${isNew ? 'is-new' : ''} ${i.review === 'changes' ? 'is-changes' : ''}`}
+      onDragStart={(e) => { setDrag(e, 'task', { id: i.id, title: i.title }, i.title); e.dataTransfer.setData('application/x-chaggu-issue-id', i.id); }}
+      onClick={() => onOpen(i.id)} onKeyDown={(e) => { if (e.key === 'Enter') onOpen(i.id); }} {...menuProps(() => issueQuickMenu(i))}>
+      <div className="fc-top">
+        {isNew && <span className="new-dot" aria-label={taskText('Nueva', 'New')} />}
+        {i.externalId && <span className="fc-id">#{i.externalId}</span>}
+        {customer && <span className="fc-client ellipsis">{customer}</span>}
+        {urgent && <span className="fc-urgent">{taskText('Alta', 'High')}</span>}
+        <span className="grow" />
+        <span className="fc-age" title={taskText('En esta etapa', 'In this stage')}>{ago(since)}</span>
+      </div>
+      <div className="fc-title">{i.title}</div>
+      {i.claimedBy && <div className="fc-working"><span className="fc-pulse" aria-hidden />{taskText('Trabajando ahora', 'Working now')} · {personById(d, i.claimedBy)?.name ?? t('common.participant')}</div>}
+      {i.review === 'changes' && <div className="fc-flag">↩ {taskText('Devuelta: corrigiendo', 'Returned: fixing')}</div>}
+      <div className="fc-foot">
+        {who.length > 0
+          ? <span className="fc-who ellipsis"><Avatar person={who[0]} org={orgById(d, who[0]!.orgId)} size={18} /> {who[0]!.kind === 'agent' ? '🤖 ' : ''}{who[0]!.id === d.me.id ? t('issue.me') : who[0]!.name}{who.length > 1 ? ` +${who.length - 1}` : ''}</span>
+          : <span className="fc-who muted">{t('issue.noOwner')}</span>}
+        <span className="grow" />
+        {i.commentCount > 0 && <span className="fc-count" title={taskText('Comentarios', 'Comments')}>💬 {i.commentCount}</span>}
+        {files > 0 && <span className="fc-count" title={taskText('Archivos y evidencia', 'Files and evidence')}>📎 {files}</span>}
+      </div>
+      {(stage === 'new' || stage === 'human') && <div onClick={(e) => e.stopPropagation()}><FlowAssign i={i} onOpen={onOpen} onError={onError} /></div>}
+    </div>
+  );
+}
+
+/** Debajo de los que llegan o necesitan a una persona: a qué agente se la paso (o abrir para elegir persona). */
+function FlowAssign({ i, onOpen, onError }: { i: IssueDTO; onOpen: (id: string) => void; onError: (e: string) => void }) {
+  const d = useClient((s) => s.data)!;
+  const [busy, setBusy] = useState(false);
+  const agents = i.review === 'human' ? [] : agentsOf(d, i.conversationId);
+  const go = async (agentId: string) => { if (busy) return; setBusy(true); try { await assignToAgent(i, agentId); } catch (e) { onError(errorText(e)); } finally { setBusy(false); } };
+  return (
+    <div className="flow-assign">
+      <span className="small muted">{taskText('Asignar a', 'Assign to')}</span>
+      {agents.map((a) => <button key={a.id} className="chip" disabled={busy} onClick={() => void go(a.id)}>🤖 {a.name}</button>)}
+      <button className="chip ghost" disabled={busy} onClick={() => onOpen(i.id)}>👤 {taskText('Persona…', 'Person…')}</button>
+    </div>
+  );
+}
+
+export function flowLabel(s: FlowStage) {
+  return ({
+    new: taskText('🆕 Llegaron', '🆕 Incoming'), ai: taskText('🤖 IA trabajando', '🤖 AI working'), review: taskText('👀 Por revisar', '👀 To review'),
+    human: taskText('🙋 Intervención humana', '🙋 Needs a person'), people: taskText('👤 Con personas', '👤 With people'), done: taskText('✅ Aprobadas / entregadas', '✅ Approved / delivered'),
+  })[s];
 }
 
 /** Tareas hijas visibles de un asunto (el servidor solo manda las que puedo ver). */
@@ -266,7 +386,7 @@ export function IssueRow({ i, showWhere = true, showOwner = true, child = false,
   const d = useClient((s) => s.data)!;
   const all = useClient((s) => s.issues);
   const owner = personById(d, i.ownerId);
-  const responsible = taskAssignees(i).map((uid) => personById(d, uid)?.name ?? t('common.participant')).join(', ');
+  const responsible = taskAssignees(i).map((uid) => { const p = personById(d, uid); return `${p?.kind === 'agent' ? '🤖 ' : ''}${p?.name ?? t('common.participant')}`; }).join(', ');
   const conv = d.conversations.find((c) => c.id === i.conversationId);
   const f = issueFlags(i);
   const done = isClosed(i);
@@ -430,7 +550,7 @@ export function NewIssueDialog({ conversationId, originMessageId, defaultTitle =
   const d = useClient((s) => s.data)!;
   const destinations = useMemo(() => (conversationId ? [] : issueDestinations(d)), [d, conversationId]);
   const [conv, setConv] = useState(conversationId ?? PERSONAL_DEST);
-  const members = membersOf(d, conv);
+  const members = membersOf(d, conv, { agents: true });
   const [title, setTitle] = useState(defaultTitle);
   const [assigneeIds, setAssigneeIds] = useState<string[]>(() => {
     const fold = (x: string) => x.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase().trim();
@@ -468,7 +588,7 @@ export function NewIssueDialog({ conversationId, originMessageId, defaultTitle =
         {conv === PERSONAL_DEST && <div className="hint">🔒 {t('issue.personalHint')}</div>}
         <div className="row" style={{ gap: 12, flexWrap: 'wrap' }}>
           {conv !== PERSONAL_DEST && <label className="field grow"><span>{t('issue.owner')}</span>
-            <div className="chips">{members.map((p) => <button key={p.id} type="button" className={`chip-person ${assigneeIds.includes(p.id) ? 'on' : ''}`} aria-pressed={assigneeIds.includes(p.id)} onClick={() => setAssigneeIds((ids) => ids.includes(p.id) ? ids.filter((uid) => uid !== p.id) : [...ids, p.id])}>{p.name}{p.id === d.me.id ? ` ${t('common.you')}` : ''}</button>)}</div>
+            <div className="chips">{members.map((p) => <button key={p.id} type="button" className={`chip-person ${assigneeIds.includes(p.id) ? 'on' : ''}`} aria-pressed={assigneeIds.includes(p.id)} onClick={() => setAssigneeIds((ids) => ids.includes(p.id) ? ids.filter((uid) => uid !== p.id) : [...ids, p.id])}>{p.kind === 'agent' ? '🤖 ' : ''}{p.name}{p.id === d.me.id ? ` ${t('common.you')}` : ''}</button>)}</div>
           </label>}
           <label className="field"><span>{t('issue.due')}</span><input className="input" type="date" value={due} onChange={(e) => setDue(e.target.value)} /></label>
         </div>
@@ -523,12 +643,12 @@ export function IssueDrawer({ id: startId, onClose }: { id: string; onClose: () 
   const i = live;
   const done = isClosed(i);
   const conv = d.conversations.find((c) => c.id === i.conversationId);
-  const chatMembers = membersOf(d, i.conversationId);
+  const chatMembers = membersOf(d, i.conversationId, { agents: true });
   const extra = (i.viewerIds ?? []).filter((u) => !chatMembers.some((p) => p.id === u)).map((u) => personById(d, u)).filter((p): p is NonNullable<typeof p> => !!p);
   const members = [...(i.visibility === 'org' ? chatMembers.filter((p) => p.orgId === i.visibleOrgId) : i.visibility === 'private' ? [] : chatMembers), ...extra,
     ...(i.visibility === 'private' ? chatMembers.filter((p) => (i.viewerIds ?? []).includes(p.id)) : [])]
     .filter((p, k, arr) => arr.findIndex((x) => x.id === p.id) === k);
-  const orgIds = [...new Set(chatMembers.map((p) => p.orgId).filter(Boolean))] as string[];
+  const orgIds = [...new Set(chatMembers.filter((p) => p.kind === 'human').map((p) => p.orgId).filter(Boolean))] as string[];
   const f = issueFlags(i);
   const canSeeOrigin = !!conv && i.originMessageSeq !== null && i.originMessageSeq > conv.historyFromSeq;
   const requester = personById(d, i.requestedBy);
@@ -583,7 +703,7 @@ export function IssueDrawer({ id: startId, onClose }: { id: string; onClose: () 
         <div className="chips">
           {members.map((p) => (
             <button key={p.id} className={`chip-person ${assignedTo(i, p.id) ? 'on' : ''}`} aria-pressed={assignedTo(i, p.id)} disabled={saving} onClick={() => update({ assigneeIds: assignedTo(i, p.id) ? taskAssignees(i).filter((uid) => uid !== p.id) : [...taskAssignees(i), p.id] })}>
-              <Avatar person={p} org={orgById(d, p.orgId)} size={22} /> {p.id === d.me.id ? t('issue.me') : p.name.split(' ')[0]}
+              <Avatar person={p} org={orgById(d, p.orgId)} size={22} /> {p.kind === 'agent' ? `🤖 ${p.name}` : p.id === d.me.id ? t('issue.me') : p.name.split(' ')[0]}
             </button>
           ))}
           {taskAssignees(i).length > 0 && <button className="chip-person ghost" disabled={saving} onClick={() => update({ assigneeIds: [] })}>{t('issue.noOwner')}</button>}
@@ -778,6 +898,8 @@ function IssueTable({ list, onOpen }: { list: IssueDTO[]; onOpen: (id: string) =
 }
 
 const TABLE_KEY = 'chaggu.issues.table';
+const FLOW_KEY = 'chaggu.issues.flow';
+function readFlowPref() { try { return localStorage.getItem(FLOW_KEY) === '1'; } catch { return false; } }
 function readTablePref() { try { return localStorage.getItem(TABLE_KEY) === '1'; } catch { return false; } }
 
 /** Fechas de un toque en la hora local: hoy, mañana, el viernes y el lunes que viene. */
@@ -802,7 +924,9 @@ export function IssuesBody() {
   const [stateFilter, setStateFilter] = useState<'all' | 'open' | 'closed'>('all');
   const [table, setTableState] = useState(readTablePref);
   const setTable = (on: boolean) => { setTableState(on); try { localStorage.setItem(TABLE_KEY, on ? '1' : '0'); } catch { /* sin almacenamiento */ } };
-  const view = table ? 'table' : preferences.issues?.view ?? 'list';
+  const [flow, setFlowState] = useState(readFlowPref);
+  const setFlow = (on: boolean) => { setFlowState(on); try { localStorage.setItem(FLOW_KEY, on ? '1' : '0'); } catch { /* sin almacenamiento */ } };
+  const view = flow ? 'flow' : table ? 'table' : preferences.issues?.view ?? 'list';
   const groupBy = preferences.issues?.grouping === 'assignee' ? 'person' : 'group';
   const [pendingMoves, setPendingMoves] = useState<Set<string>>(() => new Set());
   const [query, setQuery] = useState('');
@@ -863,6 +987,25 @@ export function IssuesBody() {
     catch (err) { setError(errorText(err)); }
     finally { setPendingMoves((ids) => { const next = new Set(ids); next.delete(taskId); return next; }); }
   };
+  // Soltar en una etapa del flujo: a la IA (el agente del grupo), por revisar, intervención humana o aprobar.
+  const moveToStage = async (taskId: string, stage: FlowStage) => {
+    const i = all[taskId];
+    if (!i || pendingMoves.has(taskId) || flowStage(d, i) === stage) return;
+    setPendingMoves((ids) => new Set([...ids, taskId])); setError(null);
+    try {
+      if (stage === 'ai') {
+        const agents = agentsOf(d, convOf(i) === PERSONAL ? null : convOf(i));
+        if (!agents.length) throw new Error(taskText('Este grupo no tiene un agente IA. Agrégalo al grupo para poder asignarle tareas.', 'This group has no AI agent.'));
+        // Con varios agentes (Xertify, Xertiflow…) la persona elige a cuál: se abre la tarjeta.
+        if (agents.length > 1) { setOpen(i.id); return; }
+        await assignToAgent(i, agents[0]!.id);
+      } else if (stage === 'review') await client.reviewIssue(i.id, 'pending');
+      else if (stage === 'human') await client.reviewIssue(i.id, 'human');
+      else if (stage === 'done') await client.reviewIssue(i.id, 'approved');
+      else if (stage === 'people') setOpen(i.id);
+    } catch (err) { setError(errorText(err)); }
+    finally { setPendingMoves((ids) => { const next = new Set(ids); next.delete(taskId); return next; }); }
+  };
   return (
     <>
       <div className="row issue-toolbar">
@@ -887,7 +1030,7 @@ export function IssuesBody() {
         <div className="seg" role="radiogroup" aria-label={t('issue.groupBy')}>
           {(['group', 'person'] as const).map((g) => <button key={g} role="radio" aria-checked={groupBy === g} className={groupBy === g ? 'on' : ''} onClick={() => { void updateIssuePreferences({ grouping: g === 'person' ? 'assignee' : 'group' }).catch(() => {}); }}>{g === 'group' ? t('issue.byGroup') : t('issue.byPerson')}</button>)}
         </div>
-        <div className="seg" role="radiogroup" aria-label={taskText('Vista de tareas', 'Task view')}>{(['list', 'cards', 'board'] as const).map((v) => <button key={v} role="radio" aria-checked={view === v} className={view === v ? 'on' : ''} onClick={() => { setTable(false); void updateIssuePreferences({ view: v }).catch(() => {}); }}>{v === 'list' ? taskText('Lista', 'List') : v === 'cards' ? taskText('Tarjetas', 'Cards') : taskText('Tablero', 'Board')}</button>)}<button role="radio" aria-checked={view === 'table'} className={view === 'table' ? 'on' : ''} title={taskText('Una columna por cada campo de las tareas', 'One column per task field')} onClick={() => setTable(true)}>{taskText('Tabla', 'Table')}</button></div>
+        <div className="seg" role="radiogroup" aria-label={taskText('Vista de tareas', 'Task view')}>{(['list', 'cards', 'board'] as const).map((v) => <button key={v} role="radio" aria-checked={view === v} className={view === v ? 'on' : ''} onClick={() => { setTable(false); setFlow(false); void updateIssuePreferences({ view: v }).catch(() => {}); }}>{v === 'list' ? taskText('Lista', 'List') : v === 'cards' ? taskText('Tarjetas', 'Cards') : taskText('Tablero', 'Board')}</button>)}<button role="radio" aria-checked={view === 'table'} className={view === 'table' ? 'on' : ''} title={taskText('Una columna por cada campo de las tareas', 'One column per task field')} onClick={() => { setFlow(false); setTable(true); }}>{taskText('Tabla', 'Table')}</button><button role="radio" aria-checked={view === 'flow'} className={view === 'flow' ? 'on' : ''} title={taskText('Llega → la IA la toma → por revisar → aprobada o corregir', 'Incoming → AI → review → approved or changes')} onClick={() => setFlow(true)}>🤖 {taskText('Flujo IA', 'AI flow')}</button></div>
         {view === 'table' && d.conversations.some((c) => c.canManage && c.kind !== 'direct') && <button className="btn small" onClick={() => openDialog((close) => <TaskColumnsDialog onClose={close} />)}>⚙ {taskText('Columnas', 'Columns')}</button>}
         <TaskReportButton />
       </div>
@@ -915,7 +1058,11 @@ export function IssuesBody() {
       ].filter(Boolean).join(' · ')}</div>}
       {view === 'board' && <div className="task-board">{ISSUE_STATUSES.map((status) => <section key={status} className="task-board-column" aria-busy={pendingMoves.size > 0} onDragOver={(e) => { if (e.dataTransfer.types.includes('application/x-chaggu-issue-id')) { e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'move'; } }} onDrop={(e) => { e.preventDefault(); e.stopPropagation(); const taskId = e.dataTransfer.getData('application/x-chaggu-issue-id'); void move(taskId, status); }}><h3>{t(`issue.st.${status}`)} · {list.filter((i) => i.status === status).length}</h3>{list.filter((i) => i.status === status).map((i) => <IssueRow key={i.id} i={i} showWhere onOpen={setOpen} />)}</section>)}</div>}
       {view === 'table' && list.length > 0 && <IssueTable list={list} onOpen={setOpen} />}
-      {view !== 'board' && view !== 'table' && sections.map(([k, items]) => (
+      {view === 'flow' && <div className="task-board task-flow">{FLOW_STAGES.map((stage) => {
+        const items = list.filter((i) => !i.parentIssueId && flowStage(d, i) === stage);
+        return <section key={stage} className={`task-board-column flow-${stage}`} aria-busy={pendingMoves.size > 0} onDragOver={(e) => { if (e.dataTransfer.types.includes('application/x-chaggu-issue-id')) { e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'move'; } }} onDrop={(e) => { e.preventDefault(); e.stopPropagation(); void moveToStage(e.dataTransfer.getData('application/x-chaggu-issue-id'), stage); }}><h3>{flowLabel(stage)} · {items.length}</h3>{items.map((i) => <FlowCard key={i.id} i={i} stage={stage} onOpen={setOpen} onError={setError} />)}{items.length === 0 && <div className="fc-empty small muted">{taskText('Nada aquí', 'Nothing here')}</div>}</section>;
+      })}</div>}
+      {view !== 'board' && view !== 'table' && view !== 'flow' && sections.map(([k, items]) => (
         <section key={k} style={{ marginBottom: 18 }}>
           <div className="eyebrow" style={{ marginBottom: 8 }}>{sectionTitle(k)} · {items.length}</div>
           <div className={view === 'cards' ? 'task-cards' : 'list'} style={{ gap: 6 }}>{items.map((i) => groupBy === 'group'

@@ -1466,6 +1466,8 @@ export const TaskInboxSeenInput = z.object({ issueIds: z.array(z.uuid()).max(500
 export const IssueCommentInput = z.object({
   body: z.string().trim().max(20_000).default(''),
   attachmentIds: z.array(z.uuid()).max(10).optional(),
+  /** Tickets de una integración: true = este comentario también le llega al cliente. Por defecto es interno (8-oct). */
+  toClient: z.boolean().optional(),
 }).refine((v) => v.body.length > 0 || (v.attachmentIds?.length ?? 0) > 0, { message: 'Escribe algo o adjunta un archivo' });
 
 export const DeriveInput = z.object({

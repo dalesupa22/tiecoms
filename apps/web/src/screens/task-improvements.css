@@ -147,3 +147,8 @@
 .new-card { display:flex; flex-direction:column; gap:12px; min-width:min(560px, 86vw) }
 .new-card .field { display:flex; flex-direction:column; gap:4px } .new-card .field > span { font-size:12px; color:var(--muted) }
 .new-card-row { display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:10px }
+/* Comentarios de tickets: internos por defecto; «Enviar también al cliente» explícito (8-oct). */
+.to-client-toggle { display:inline-flex; align-items:center; gap:5px; font-size:12px; color:var(--muted); cursor:pointer; white-space:nowrap }
+.task-reply.is-to-client textarea { border-color:#f5a524; box-shadow:0 0 0 2px color-mix(in srgb, #f5a524 25%, transparent) }
+.task-reply.is-to-client .to-client-toggle { color:var(--amber-ink, #a15c00); font-weight:600 }
+.to-client-tag { margin-left:6px; font-size:11px; padding:1px 6px; border-radius:6px; background:color-mix(in srgb, #f5a524 15%, transparent); color:var(--amber-ink, #a15c00) }

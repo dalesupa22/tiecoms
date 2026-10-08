@@ -215,9 +215,11 @@ describe('integraciones por grupo', () => {
     expect(received.length).toBe(0);
   });
 
-  it('cambios de estado y comentarios de la gente llegan al webhook de salida, firmados', async () => {
+  it('cambios de estado y los comentarios marcados para el cliente llegan al webhook de salida, firmados; los internos no', async () => {
     expect((await call(`/issues/${issueId}`, { method: 'PATCH', token: pedro.token, body: { status: 'in_progress' } })).status).toBe(200);
-    expect((await call(`/issues/${issueId}/comments`, { token: pedro.token, body: { body: 'Ya lo estamos revisando' } })).status).toBe(200);
+    // Interno por defecto (8-oct): no sale al sistema del cliente.
+    expect((await call(`/issues/${issueId}/comments`, { token: pedro.token, body: { body: 'Nota interna del equipo' } })).status).toBe(200);
+    expect((await call(`/issues/${issueId}/comments`, { token: pedro.token, body: { body: 'Ya lo estamos revisando', toClient: true } })).status).toBe(200);
     await until(() => (received.length >= 2 ? true : undefined));
     const events = received.map((r) => {
       const [t, v1] = String(r.headers['x-chaggu-signature']).split(',').map((p) => p.split('=')[1]);
@@ -226,6 +228,7 @@ describe('integraciones por grupo', () => {
     });
     expect(events.find((e) => e.type === 'issue.status_changed')).toMatchObject({ from: 'open', to: 'in_progress', issue: { externalId: 'XT-0001' }, actor: { id: pedro.id } });
     expect(events.find((e) => e.type === 'issue.commented')).toMatchObject({ comment: { body: 'Ya lo estamos revisando' } });
+    expect(events.some((e) => e.type === 'issue.commented' && e.comment?.body === 'Nota interna del equipo')).toBe(false);
   });
 
   it('reintenta si el sistema externo falla', async () => {

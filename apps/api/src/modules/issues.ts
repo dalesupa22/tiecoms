@@ -494,7 +494,8 @@ export async function updateIssue(userId: string, issueId: string, input: z.infe
       } else if (input.review) {
         for (const uid of new Set([cur.review_requested_by, cur.created_by].filter(Boolean) as string[])) await notifyInbox(c, issueId, uid, userId, 'reviewed', input.reviewNote, reviewFiles);
       }
-      if (cur.integration_id) await queueIntegrationEvent(c, issueId, userId, { type: 'issue.review_changed', from: prevReview, to: input.review ?? null, ...(input.reviewNote ? { note: input.reviewNote } : {}) });
+      // La nota de revisión es interna (entre quien revisa y quien resolvió): al cliente solo le llega el cambio de estado.
+      if (cur.integration_id) await queueIntegrationEvent(c, issueId, userId, { type: 'issue.review_changed', from: prevReview, to: input.review ?? null });
     }
     await audit(c, userId, 'issue.updated', { type: 'issue', id: issueId, workspaceId: cur.workspace_id }, { changes: events.map(([k]) => k) });
     return dto;
@@ -685,7 +686,11 @@ async function bindCommentFiles(c: Tx, userId: string, issueId: string, conversa
   return files;
 }
 
-export async function commentIssue(userId: string, issueId: string, body: string, extra: { author?: string; at?: string } = {}, existing?: Tx, attachmentIds?: string[]) {
+/**
+ * toClient (8-oct, urgente): en los tickets de una integración (mesa de ayuda de Xertify) el comentario es INTERNO por
+ * defecto; solo vuelve al sistema del cliente si quien escribe lo marca «Enviar al cliente». Los de agentes nunca.
+ */
+export async function commentIssue(userId: string, issueId: string, body: string, extra: { author?: string; at?: string } = {}, existing?: Tx, attachmentIds?: string[], toClient = false) {
   return inTransaction(existing, async (c) => {
     const { rows } = await c.query('SELECT conversation_id, topic_id, visibility, integration_id, title, review_requested_by FROM issues WHERE id = $1 FOR UPDATE', [issueId]);
     if (!rows[0]) throw taskNotFound();
@@ -693,10 +698,11 @@ export async function commentIssue(userId: string, issueId: string, body: string
     if (rows[0].visibility === 'all') await conversationAccess(c, userId, rows[0].conversation_id, 'post', true);
     // `author`: quién lo escribió fuera de Chaggu (comentarios que trae una integración). Los clientes muestran el cuerpo.
     const files = await bindCommentFiles(c, userId, issueId, rows[0].conversation_id, attachmentIds);
-    await c.query("INSERT INTO issue_events (issue_id, actor_id, kind, payload) VALUES ($1,$2,'comment',$3)", [issueId, userId, JSON.stringify({ body, ...extra, ...(files.length ? { attachmentIds: files } : {}) })]);
+    const toClientNow = toClient && !!rows[0].integration_id;
+    await c.query("INSERT INTO issue_events (issue_id, actor_id, kind, payload) VALUES ($1,$2,'comment',$3)", [issueId, userId, JSON.stringify({ body, ...extra, ...(files.length ? { attachmentIds: files } : {}), ...(toClientNow ? { toClient: true } : {}) })]);
     await c.query('UPDATE issues SET updated_at = now() WHERE id = $1', [issueId]);
     if (!body && files.length) body = `📎 ${files.length === 1 ? 'Archivo adjunto' : `${files.length} archivos adjuntos`}`;
-    if (rows[0].integration_id) await queueIntegrationEvent(c, issueId, userId, { type: 'issue.commented', body });
+    if (toClientNow) await queueIntegrationEvent(c, issueId, userId, { type: 'issue.commented', body });
     // Aviso agrupado en el chat (tanda 1.7): solo lo que ve todo el chat.
     if (rows[0].visibility === 'all' && rows[0].conversation_id) {
       const actorName = extra.author || (await c.query('SELECT name FROM users WHERE id = $1', [userId])).rows[0]?.name || '';

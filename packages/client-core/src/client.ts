@@ -1320,8 +1320,8 @@ export class TieComsClient {
     this.putIssues([r.issue, ...(r.children ?? [])]);
     return r;
   }
-  async commentIssue(id: string, body: string, attachmentIds?: string[]) {
-    const i = await this.request<IssueDTO>(`/issues/${id}/comments`, { method: 'POST', json: { body, ...(attachmentIds?.length ? { attachmentIds } : {}) } });
+  async commentIssue(id: string, body: string, attachmentIds?: string[], toClient = false) {
+    const i = await this.request<IssueDTO>(`/issues/${id}/comments`, { method: 'POST', json: { body, ...(attachmentIds?.length ? { attachmentIds } : {}), ...(toClient ? { toClient: true } : {}) } });
     this.putIssues([i]);
     return i;
   }

@@ -231,15 +231,18 @@ export function TaskReply({ issue, compact = false, onSent }: { issue: IssueDTO;
     zone.addEventListener('dragenter', enter); zone.addEventListener('dragleave', leave); zone.addEventListener('dragover', over); zone.addEventListener('drop', drop);
     return () => { zone.classList.remove('is-file-drag'); zone.removeEventListener('dragenter', enter); zone.removeEventListener('dragleave', leave); zone.removeEventListener('dragover', over); zone.removeEventListener('drop', drop); };
   }, [compact]);
+  // Ticket de la mesa de ayuda: el comentario es interno salvo que se marque para el cliente (8-oct).
+  const isTicket = !!issue.integrationId;
+  const [toClient, setToClient] = useState(false);
   const send = async () => {
     const body = text.trim();
     if ((!body && !files.length) || busy) return;
     setBusy(true);
-    try { await client.commentIssue(issue.id, body, files.map((f) => f.id)); setText(''); setFiles([]); onSent?.(); }
+    try { await client.commentIssue(issue.id, body, files.map((f) => f.id), isTicket && toClient); setText(''); setFiles([]); setToClient(false); onSent?.(); }
     catch (e) { toast(errorText(e)); } finally { setBusy(false); }
   };
   return (
-    <div ref={box} className={`task-reply ${compact ? 'is-compact' : ''}`} {...dropProps}>
+    <div ref={box} className={`task-reply ${compact ? 'is-compact' : ''} ${isTicket && toClient ? 'is-to-client' : ''}`} {...dropProps}>
       <textarea className="input" rows={compact ? 1 : 3} maxLength={20000} value={text} placeholder={compact ? t('task.cardComment') : t('issue.commentPh')}
         onChange={(e) => setText(e.target.value)}
         onPaste={onPaste}
@@ -248,7 +251,10 @@ export function TaskReply({ issue, compact = false, onSent }: { issue: IssueDTO;
       <div className="row task-reply-actions">
         {button}
         <span className="grow small muted">{text.length > 15000 ? `${text.length}/20000` : busy ? t('common.loading') : compact ? '' : taskText('Arrastra capturas o archivos, o pégalos con Ctrl+V', 'Drag screenshots or files, or paste with Ctrl+V')}</span>
-        <button type="button" className="btn primary small" disabled={busy || (!text.trim() && !files.length)} onClick={() => void send()}>{t('issue.comment')}</button>
+        {isTicket && <label className="to-client-toggle" title={taskText('Apagado: solo lo ve el equipo. Encendido: también le llega al cliente en la mesa de ayuda.', 'Off: team only. On: also sent to the client.')}>
+          <input type="checkbox" checked={toClient} onChange={(e) => setToClient(e.target.checked)} /> 📨 {taskText('Enviar también al cliente', 'Also send to client')}
+        </label>}
+        <button type="button" className="btn primary small" disabled={busy || (!text.trim() && !files.length)} onClick={() => void send()}>{isTicket && toClient ? taskText('Enviar al cliente', 'Send to client') : isTicket ? taskText('Comentar (interno)', 'Comment (internal)') : t('issue.comment')}</button>
       </div>
     </div>
   );
@@ -956,7 +962,7 @@ export function IssueDrawer({ id: startId, onClose }: { id: string; onClose: () 
             <div key={e.id} className="issue-ev is-comment">
               <Avatar person={who} org={orgById(d, who?.orgId)} size={24} />
               <div className="grow" style={{ minWidth: 0 }}>
-                <div className="small"><b>{who?.name ?? t('common.participant')}</b> <span className="muted">· {when(e.createdAt)}</span></div>
+                <div className="small"><b>{who?.name ?? t('common.participant')}</b> <span className="muted">· {when(e.createdAt)}</span>{(e.payload as any).toClient ? <span className="to-client-tag">📨 {taskText('Enviado al cliente', 'Sent to client')}</span> : null}</div>
                 {String((e.payload as any).body ?? '') && <div className="issue-comment">{String((e.payload as any).body)}</div>}
                 <CommentFiles issue={i} ids={(e.payload as any).attachmentIds} />
               </div>

@@ -787,7 +787,7 @@ const tools: Tool[] = [
   },
   {
     name: 'comment_task', scope: 'tasks:write',
-    description: 'Comenta una tarea o ticket. En los tickets de la mesa de ayuda el comentario también vuelve al sistema del cliente. attachment_ids: capturas o archivos ya subidos a esa tarea con upload_task_attachment (p. ej. la evidencia) que se muestran dentro del comentario. Usa idempotency_key para reintentar sin duplicar el comentario.',
+    description: 'Comenta una tarea o ticket. El comentario es INTERNO: en los tickets de la mesa de ayuda no le llega al cliente (solo una persona decide qué se le envía desde la app). attachment_ids: capturas o archivos ya subidos a esa tarea con upload_task_attachment (p. ej. la evidencia) que se muestran dentro del comentario. Usa idempotency_key para reintentar sin duplicar el comentario.',
     schema: z.object({ id: z.string().uuid(), text: z.string().trim().min(1).max(20_000), attachment_ids: z.array(z.string().uuid()).max(10).optional(), idempotency_key: idempotencyKey.optional() }),
     run: async (userId, a, ctx) => idempotent(ctx, a.idempotency_key, 'comment_task', { id: a.id, text: a.text, ...(a.attachment_ids?.length ? { attachment_ids: a.attachment_ids } : {}) },
       (c) => mcpAttachments.taskWriteAccess(c, userId, a.id),

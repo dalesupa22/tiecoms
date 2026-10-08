@@ -337,7 +337,12 @@ function FlowCard({ i, stage, where, onOpen, onError }: { i: IssueDTO; stage: Fl
   const who = taskAssignees(i).map((u) => personById(d, u)).filter((p): p is NonNullable<typeof p> => !!p);
   const meta = i.externalMeta ?? {};
   const customer = ticketCustomer(i);
-  const urgent = /alta|urgente|high/i.test(meta.Prioridad ?? meta.prioridad ?? '');
+  const priority = (meta.Prioridad ?? meta.prioridad ?? meta.Priority ?? '').trim();
+  const level = /alta|urgente|high|crític/i.test(priority) ? 'high' : /media|medium/i.test(priority) ? 'mid' : priority ? 'low' : null;
+  // «Ticket 20261008001 · API» repite el número: la línea principal pasa a ser el cliente y la categoría va como etiqueta.
+  const generic = !!i.externalId && new RegExp(`^ticket\\s*#?${i.externalId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*[·:-]?\\s*`, 'i').test(i.title);
+  const category = (meta['Categoría'] ?? meta.Categoria ?? meta.Category ?? (generic ? i.title.replace(/^ticket\s*#?\S+\s*[·:-]?\s*/i, '') : '')).trim();
+  const headline = generic && customer ? customer : i.title;
   const since = stage === 'review' || stage === 'human' || i.review === 'changes' ? i.reviewAt : stage === 'done' ? i.closedAt ?? i.reviewAt : i.statusSince;
   const files = i.attachments?.length ?? 0;
   const st = taskState(i);
@@ -349,13 +354,16 @@ function FlowCard({ i, stage, where, onOpen, onError }: { i: IssueDTO; stage: Fl
       <div className="fc-top">
         {isNew && <span className="new-dot" aria-label={taskText('Nueva', 'New')} />}
         {i.externalId && <span className="fc-id">#{i.externalId}</span>}
-        {urgent && <span className="fc-urgent">{taskText('Alta', 'High')}</span>}
+        {level && <span className={`fc-prio is-${level}`} title={`${taskText('Prioridad', 'Priority')}: ${priority}`}><span className="fc-prio-dot" aria-hidden />{priority}</span>}
         <span className="grow" />
         <span className="fc-age" title={taskText('En esta etapa', 'In this stage')}>{ago(since)}</span>
       </div>
-      {customer && <div className="fc-customer ellipsis" title={customer}>🏢 {customer}</div>}
-      <div className="fc-title">{i.title}</div>
-      {where && <div className="fc-where ellipsis" title={where}># {where}</div>}
+      <div className="fc-title" title={i.title}>{headline}</div>
+      {customer && headline !== customer && <div className="fc-customer ellipsis" title={customer}>{customer}</div>}
+      {(category || where) && <div className="fc-tags">
+        {category && <span className="fc-tag">{category}</span>}
+        {where && <span className="fc-where ellipsis" title={where}># {where}</span>}
+      </div>}
       {stage !== 'new' && <div className="fc-state"><StatePill i={i} /></div>}
       <div className="fc-foot">
         {who.length > 0
@@ -521,7 +529,7 @@ export function IssueRow({ i, showWhere = true, showOwner = true, child = false,
       <IssueCheck i={i} size={child ? 18 : 20} />
       <span className="grow" style={{ minWidth: 0 }}>
         <b className="ellipsis issue-title" style={{ display: 'block' }}>
-          {i.externalId && <span className="ticket-id small muted">#{i.externalId} </span>}
+          {i.externalId && <span className="ticket-id small muted" style={{ fontWeight: 400 }}>#{i.externalId} </span>}
           {isNew && <span className="new-dot" title={taskText('Nueva', 'New')} aria-label={taskText('Nueva', 'New')} />}
           {(isRestricted(i) || isPersonal(i)) && <span className="lock" title={isPersonal(i) ? t('issue.personalOption') : visibilityLabel(d, i)} aria-label={isPersonal(i) ? t('issue.personalOption') : visibilityLabel(d, i)}>🔒 </span>}{i.title}
         </b>

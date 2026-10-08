@@ -57,10 +57,10 @@
 .flow-card.is-changes { border-left:3px solid #f5a524 }
 .flow-done .flow-card { opacity:.72 } .flow-done .flow-card .fc-title { text-decoration:line-through; text-decoration-color:rgba(0,0,0,.25) }
 .fc-top, .fc-foot { display:flex; align-items:center; gap:6px; font-size:11.5px; min-width:0 }
-.fc-id { font-weight:700; color:var(--muted, #6b7470) } .fc-client { color:var(--muted, #6b7470); min-width:0 }
+.fc-id { font-weight:400; color:var(--muted, #6b7470); font-variant-numeric:tabular-nums; letter-spacing:.01em }
 .fc-urgent { background:#fde8e8; color:#b42318; border-radius:6px; padding:0 5px; font-weight:600; font-size:10.5px }
 .fc-age { color:var(--muted, #6b7470); white-space:nowrap }
-.fc-title { font-weight:600; font-size:13px; line-height:1.3; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; overflow-wrap:anywhere }
+.fc-title { font-weight:500; font-size:13.5px; color:var(--ink, #1b2420); line-height:1.3; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; overflow-wrap:anywhere }
 .fc-flag { font-size:11px; color:#a15c00 }
 .fc-who { display:inline-flex; align-items:center; gap:4px; min-width:0 } .fc-count { color:var(--muted, #6b7470); white-space:nowrap }
 .fc-empty { padding:10px 4px; text-align:center }
@@ -99,4 +99,14 @@
 .task-inbox-toggle { background:none; border:0; padding:0; cursor:pointer; text-align:left; font:inherit; color:inherit }
 .task-inbox.is-collapsed { padding-top:8px; padding-bottom:8px }
 .fc-where { font-size:11px; color:var(--muted, #6b7470); min-width:0 }
-.fc-customer { font-size:12px; font-weight:700; color:var(--ink, #1b2420); min-width:0 }
+.fc-customer { font-size:12px; font-weight:400; color:var(--muted, #6b7470); min-width:0 }
+
+/* Tarjeta más limpia (8-oct): solo la línea principal tiene peso; número, prioridad y categoría van suaves. */
+.fc-prio { display:inline-flex; align-items:center; gap:4px; font-size:11px; color:var(--muted, #6b7470) }
+.fc-prio-dot { width:7px; height:7px; border-radius:50%; background:#9aa5a0 }
+.fc-prio.is-high .fc-prio-dot { background:#e5484d } .fc-prio.is-mid .fc-prio-dot { background:#f5a524 } .fc-prio.is-low .fc-prio-dot { background:#30a46c }
+.fc-tags { display:flex; align-items:center; gap:6px; min-width:0; flex-wrap:wrap }
+.fc-tag { font-size:11px; padding:1px 7px; border-radius:6px; background:var(--bg-soft, #f1f4f3); color:var(--muted, #5f6a66); border:1px solid var(--line, #e3ebe8) }
+.fc-tags .fc-where { font-size:11px }
+.fc-top { flex-wrap:nowrap } .fc-top .fc-id { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:0 1 auto }
+.fc-top .fc-prio, .fc-top .fc-age { flex:0 0 auto }

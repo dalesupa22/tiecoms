@@ -675,10 +675,12 @@ function tops(list: IssueDTO[], all: Record<string, IssueDTO>) {
  * Alta rápida: se escribe y Enter. Responsable (yo por defecto) y fecha opcionales al lado;
  * el campo queda listo para el siguiente, como una lista de tareas.
  */
-export function QuickAddIssue({ conversationId }: { conversationId?: string }) {
+export function QuickAddIssue({ conversationId, defaultDest }: { conversationId?: string; defaultDest?: string | null }) {
   const d = useClient((s) => s.data)!;
   const destinations = useMemo(() => (conversationId ? [] : issueDestinations(d)), [d, conversationId]);
-  const [conv, setConv] = useState(conversationId ?? PERSONAL_DEST);
+  // Parada en un grupo (filtro de grupo en Tareas): la tarea nueva va a ese grupo y no a «Personal» (pedido de Lorena 8-oct).
+  const [conv, setConv] = useState(conversationId ?? (defaultDest && destinations.some((c) => c.id === defaultDest) ? defaultDest : PERSONAL_DEST));
+  useEffect(() => { if (!conversationId && defaultDest && destinations.some((c) => c.id === defaultDest)) setConv(defaultDest); }, [defaultDest, conversationId, destinations]);
   const members = membersOf(d, conv);
   const [title, setTitle] = useState('');
   const [ownerId, setOwnerId] = useState(d.me.id);
@@ -1256,7 +1258,7 @@ export function IssuesBody() {
           ))}</div>}
         </section>
       )}
-      {stateFilter !== 'done' && stateFilter !== 'cancelled' && <QuickAddIssue />}
+      {stateFilter !== 'done' && stateFilter !== 'cancelled' && <QuickAddIssue defaultDest={groupFilter === 'all' ? null : groupFilter} />}
       {error && <div className="error">{error}</div>}
       {list.length === 0 && <div className="empty">{t('issue.empty')}</div>}
       {view === 'board' && <div className="board-title">{taskText('Tablero', 'Board')}: {[

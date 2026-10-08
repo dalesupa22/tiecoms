@@ -114,6 +114,10 @@
   --side-bg: #16312E;
   color-scheme: dark;
 }
+/* Listas desplegables nativas en modo oscuro (reporte de Lorena 8-oct): Chrome en Windows pinta las opciones con fondo
+   blanco y hereda el texto claro de la app, y no se leían. Fondo y texto explícitos para todas. */
+:root[data-theme="dark"] select option, :root[data-theme="dark"] select optgroup { background-color: var(--card); color: var(--ink); }
+:root[data-theme="dark"] select option:disabled { color: var(--muted); }
 :root[data-theme="dark"] .c-blue { --tp-bg: #1e2c3d; --tp-ink: #93abc8; }
 :root[data-theme="dark"] .c-green { --tp-bg: #243420; --tp-ink: #9bb899; }
 :root[data-theme="dark"] .c-orange { --tp-bg: #442a19; --tp-ink: #cfa88e; }

@@ -113,3 +113,12 @@
 .fc-customer.is-missing { font-style:italic; opacity:.75 }
 /* Modo oscuro (8-oct): la sombra clara no se nota sobre fondo oscuro. */
 :root[data-theme="dark"] .flow-card:hover { box-shadow:0 4px 14px rgba(0,0,0,.4) }
+/* Nada se sale de la tarjeta (8-oct): la píldora de estado y los chips parten en dos líneas si la columna es angosta. */
+.flow-card { min-width:0; overflow:hidden }
+.fc-state { min-width:0; flex-wrap:wrap; gap:4px }
+.fc-state .state-pill { white-space:normal; max-width:100%; border-radius:10px; line-height:1.35; padding:2px 8px }
+.fc-foot .fc-who { flex:1 1 auto } .fc-tags .fc-tag { max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+.flow-assign .chip { max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+:root[data-theme="dark"] .task-flow .flow-review { background:color-mix(in srgb, #f5a524 6%, var(--paper-2)) }
+:root[data-theme="dark"] .task-flow .flow-human { background:color-mix(in srgb, #e5484d 6%, var(--paper-2)) }
+:root[data-theme="dark"] .task-flow .flow-done { background:color-mix(in srgb, #30a46c 7%, var(--paper-2)) }

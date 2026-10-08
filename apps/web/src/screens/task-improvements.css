@@ -110,3 +110,4 @@
 .fc-tags .fc-where { font-size:11px }
 .fc-top { flex-wrap:nowrap } .fc-top .fc-id { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:0 1 auto }
 .fc-top .fc-prio, .fc-top .fc-age { flex:0 0 auto }
+.fc-customer.is-missing { font-style:italic; opacity:.75 }

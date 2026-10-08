@@ -397,11 +397,16 @@ function FlowCard({ i, stage, where, needsCustomer, onOpen, onError }: { i: Issu
       {stage !== 'new' && <div className="fc-state"><StatePill i={i} /></div>}
       <div className="fc-foot">
         {who.length > 0
-          ? <span className="fc-who ellipsis"><Avatar person={who[0]} org={orgById(d, who[0]!.orgId)} size={18} /> {who[0]!.kind === 'agent' ? '🤖 ' : ''}{who[0]!.id === d.me.id ? t('issue.me') : who[0]!.name}{who.length > 1 ? ` +${who.length - 1}` : ''}</span>
-          : <span className="fc-who muted">{t('issue.noOwner')}</span>}
-        <span className="grow" />
-        {i.commentCount > 0 && <span className="fc-count" title={taskText('Comentarios', 'Comments')}>💬 {i.commentCount}</span>}
-        {files > 0 && <span className="fc-count" title={taskText('Archivos y evidencia', 'Files and evidence')}>📎 {files}</span>}
+          ? <span className="fc-who" title={who.map((p) => p.name).join(', ')}>
+              <Avatar person={who[0]} org={orgById(d, who[0]!.orgId)} size={20} />
+              <span className="fc-who-name">{who[0]!.id === d.me.id ? t('issue.me') : who[0]!.name}</span>
+              {who.length > 1 && <span className="fc-more">+{who.length - 1}</span>}
+            </span>
+          : <span className="fc-who fc-nobody">{t('issue.noOwner')}</span>}
+        {(i.commentCount > 0 || files > 0) && <span className="fc-counts">
+          {i.commentCount > 0 && <span title={taskText('Comentarios', 'Comments')}>💬 {i.commentCount}</span>}
+          {files > 0 && <span title={taskText('Archivos y evidencia', 'Files and evidence')}>📎 {files}</span>}
+        </span>}
       </div>
       {(stage === 'new' || (stage === 'human' && st !== 'blocked')) && <div onClick={(e) => e.stopPropagation()}><FlowAssign i={i} onOpen={onOpen} onError={onError} /></div>}
       {stage === 'human' && st === 'blocked' && <div className="flow-assign"><button className="chip is-primary" onClick={(e) => { e.stopPropagation(); onOpen(i.id); }}>💬 {taskText('Responder al agente', 'Answer the agent')}</button></div>}
@@ -1128,6 +1133,12 @@ export function IssuesBody() {
       else if (stage === 'work') {
         // Sin responsable hay que elegir a quién (agente o persona): se abre la tarjeta.
         if (!taskAssignees(i).length) { setOpen(i.id); return; }
+        // Desde «Por revisar» o «Necesita persona»: arrastrar a «En proceso» = devolverla a quien la resolvió (el agente
+        // vuelve a tomarla y lee los comentarios y archivos nuevos). El servidor la reasigna a quien pidió la revisión.
+        if (i.review === 'pending' || i.review === 'human') {
+          await client.reviewIssue(i.id, 'changes', taskText('Devuelta desde el tablero: revisa los comentarios y archivos más recientes y continúa.', 'Returned from the board: check the latest comments and files and continue.'));
+          return;
+        }
         if (i.review) await client.reviewIssue(i.id, null);
         await client.updateIssue(i.id, { status: 'in_progress' });
       } else if (stage === 'review') await client.reviewIssue(i.id, 'pending');

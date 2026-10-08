@@ -113,7 +113,7 @@ final class UploadProgress: NSObject, URLSessionTaskDelegate, @unchecked Sendabl
 }
 
 /// HTTP del API con renovación de sesión: un único refresh en vuelo, reintento
-/// una vez ante 401 y cierre de sesión si el refresh también devuelve 401.
+/// una vez ante 401 y cierre de sesión solo si el propio refresh devuelve 401/403.
 @MainActor
 final class APIClient {
     enum RefreshOutcome { case ok, unauthorized, network }
@@ -265,16 +265,20 @@ final class APIClient {
             let r = await refresh()
             try requireGeneration(generation)
             try requirePrivacy()
-            if r == .ok { (data, res) = try await raw(path, method: method, json: json, body: body, uncached: uncached) }
+            switch r {
+            case .ok: (data, res) = try await raw(path, method: method, json: json, body: body, uncached: uncached)
             // Solo se cierra la sesión si el servidor rechaza el refresh; un fallo de red o un 5xx
             // (API reiniciándose) no la borra.
-            else if r == .network { throw APIClient.parseError(data, status: 401) }
+            case .network: throw APIClient.parseError(data, status: 401)
+            case .unauthorized:
+                signedOut()
+                throw APIClient.parseError(data, status: 401)
+            }
         }
         try requireGeneration(generation)
-        if res.statusCode == 401 {
-            signedOut()
-            throw APIClient.parseError(data, status: 401)
-        }
+        // Con el refresh aceptado, un 401 de una sola ruta (p. ej. una redirección del proxy que pierde la
+        // cabecera Authorization, 8-oct) es un error de esa petición, no el fin de la sesión.
+        if res.statusCode == 401 { throw APIClient.parseError(data, status: 401) }
         if let source = privacySource, let privacyToken {
             guard try (waPrivacyCheck?(source) ?? 0) == privacyToken else { throw CancellationError() }
             if [403, 404].contains(res.statusCode), APIClient.parseError(data, status: res.statusCode).code != "ai_consent_required" { waPrivacyDenied?(source) }
@@ -314,11 +318,13 @@ final class APIClient {
             switch result {
             case .ok: (body, res) = try await attempt()
             case .network: throw APIClient.parseError(body, status: 401)
-            case .unauthorized: break
+            case .unauthorized:
+                signedOut()
+                throw APIClient.parseError(body, status: 401)
             }
         }
         try requireGeneration(generation)
-        if res.statusCode == 401 { signedOut(); throw APIClient.parseError(body, status: 401) }
+        if res.statusCode == 401 { throw APIClient.parseError(body, status: 401) }
         guard (200..<300).contains(res.statusCode) else { throw APIClient.parseError(body, status: res.statusCode) }
         progress(1)
         return try decode(body)

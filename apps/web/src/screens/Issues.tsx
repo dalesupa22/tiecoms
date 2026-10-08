@@ -63,6 +63,8 @@ export function taskState(i: IssueDTO): TaskState {
   if (i.status === 'done' || i.review === 'approved') return 'done';
   if (i.review === 'pending') return 'review';
   if (i.review === 'human') return 'human';
+  // Mientras alguien la tiene tomada se ve «Procesando», también si venía devuelta.
+  if (i.claimedBy) return 'processing';
   if (i.review === 'changes') return 'returned';
   if (i.status === 'waiting') return 'blocked';
   if (i.claimedBy || i.status === 'in_progress') return 'processing';
@@ -290,11 +292,13 @@ export function agentsOf(d: BootstrapDTO, conversationId: string | null) {
  */
 export type FlowStage = 'new' | 'work' | 'review' | 'human' | 'done';
 export const FLOW_STAGES: FlowStage[] = ['new', 'work', 'review', 'human', 'done'];
-export function flowStage(i: IssueDTO): FlowStage | null {
+export function flowStage(i: IssueDTO, agentAsks = false): FlowStage | null {
   const st = taskState(i);
   if (st === 'cancelled') return null;
   if (st === 'waiting') return 'new';
   if (st === 'review' || st === 'human' || st === 'done') return st;
+  // El agente se detuvo a preguntar: le toca a una persona responder.
+  if (st === 'blocked' && agentAsks) return 'human';
   return 'work';
 }
 /** Asignar a un agente IA: le llega task.assigned por su webhook y él toma la tarjeta. */
@@ -374,7 +378,8 @@ function FlowCard({ i, stage, where, needsCustomer, onOpen, onError }: { i: Issu
         {i.commentCount > 0 && <span className="fc-count" title={taskText('Comentarios', 'Comments')}>💬 {i.commentCount}</span>}
         {files > 0 && <span className="fc-count" title={taskText('Archivos y evidencia', 'Files and evidence')}>📎 {files}</span>}
       </div>
-      {(stage === 'new' || stage === 'human') && <div onClick={(e) => e.stopPropagation()}><FlowAssign i={i} onOpen={onOpen} onError={onError} /></div>}
+      {(stage === 'new' || (stage === 'human' && st !== 'blocked')) && <div onClick={(e) => e.stopPropagation()}><FlowAssign i={i} onOpen={onOpen} onError={onError} /></div>}
+      {stage === 'human' && st === 'blocked' && <div className="flow-assign"><button className="chip is-primary" onClick={(e) => { e.stopPropagation(); onOpen(i.id); }}>💬 {taskText('Responder al agente', 'Answer the agent')}</button></div>}
     </div>
   );
 }
@@ -1082,6 +1087,8 @@ export function IssuesBody() {
     finally { setPendingMoves((ids) => { const next = new Set(ids); next.delete(taskId); return next; }); }
   };
   // Soltar en una etapa del flujo: a la IA (el agente del grupo), por revisar, intervención humana o aprobar.
+  // Esperando respuesta con un agente a cargo = el agente preguntó algo.
+  const agentAsks = (i: IssueDTO) => i.status === 'waiting' && taskAssignees(i).some((u) => personById(d, u)?.kind === 'agent');
   // Grupos que trabajan con cliente (alguna tarea lo tiene): ahí la que no lo tenga lo dice para completarlo.
   const customerGroups = new Set(eligible.filter((i) => ticketCustomer(i)).map(convOf));
   // Grupo o chat de la tarea (en la tarjeta del flujo cuando no hay filtro de grupo).
@@ -1089,7 +1096,7 @@ export function IssuesBody() {
   // Soltar en una columna: en espera (sin responsable), en proceso, por revisar, necesita persona o completar.
   const moveToStage = async (taskId: string, stage: FlowStage) => {
     const i = all[taskId];
-    if (!i || pendingMoves.has(taskId) || flowStage(i) === stage) return;
+    if (!i || pendingMoves.has(taskId) || flowStage(i, agentAsks(i)) === stage) return;
     setPendingMoves((ids) => new Set([...ids, taskId])); setError(null);
     try {
       if (stage === 'new') { if (i.review) await client.reviewIssue(i.id, null); await client.updateIssue(i.id, { assigneeIds: [], status: 'open' }); }
@@ -1158,7 +1165,7 @@ export function IssuesBody() {
       {view === 'table' && list.length > 0 && <IssueTable list={list} onOpen={setOpen} />}
       {view === 'flow' && <div className="flow-live small muted" title={taskText('Las tarjetas se mueven solas cuando cambian', 'Cards move by themselves when they change')}><span className="flow-live-dot" aria-hidden />{taskText('En vivo', 'Live')}</div>}
       {view === 'flow' && <div className="task-board task-flow">{FLOW_STAGES.map((stage) => {
-        const items = list.filter((i) => !i.parentIssueId && flowStage(i) === stage);
+        const items = list.filter((i) => !i.parentIssueId && flowStage(i, agentAsks(i)) === stage);
         return <section key={stage} className={`task-board-column flow-${stage}`} aria-busy={pendingMoves.size > 0} onDragOver={(e) => { if (e.dataTransfer.types.includes('application/x-chaggu-issue-id')) { e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'move'; } }} onDrop={(e) => { e.preventDefault(); e.stopPropagation(); void moveToStage(e.dataTransfer.getData('application/x-chaggu-issue-id'), stage); }}><h3>{flowLabel(stage)} · {items.length}</h3>{items.map((i) => <FlowCard key={i.id} i={i} stage={stage} where={groupFilter === 'all' ? groupName(i) : null} needsCustomer={customerGroups.has(convOf(i))} onOpen={setOpen} onError={setError} />)}{items.length === 0 && <div className="fc-empty small muted">{stage === 'new' ? taskText('Los tickets nuevos esperan aquí a que alguien los asigne a un agente o a una persona.', 'New tickets wait here until someone assigns them.') : taskText('Nada aquí', 'Nothing here')}</div>}</section>;
       })}</div>}
       {view !== 'board' && view !== 'table' && view !== 'flow' && sections.map(([k, items]) => (

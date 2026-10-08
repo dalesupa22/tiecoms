@@ -296,9 +296,11 @@ export async function createIssue(integ: IntegrationAuth, input: Omit<z.infer<ty
       if (prev.rows[0]) return { issue: (await issues.getIssue(integ.botUserId, prev.rows[0].id, c)).issue, created: false };
     }
     const who = await membersByEmail(c, integ.conversationId, input.assigneeEmails);
+    // Columnas del grupo que salen de los datos del ticket (p. ej. «Cliente» ← Empresa); lo que mande la integración gana.
+    const fields = { ...await issues.fieldsFromMeta(c, integ.conversationId, input.externalMeta), ...(input.fields ?? {}) };
     const dto = await issues.createIssue(integ.botUserId, integ.conversationId, {
       title: input.title, ownerId: null, visibility: 'all', topicId: input.topicId, ...(who.ids.length ? { assigneeIds: who.ids } : {}),
-      ...(input.dueDate ? { dueDate: input.dueDate } : {}), ...(input.fields ? { fields: input.fields } : {}),
+      ...(input.dueDate ? { dueDate: input.dueDate } : {}), ...(Object.keys(fields).length ? { fields } : {}),
     } as any, c);
     // The issue, source binding, comments, announcement and outbox are one atomic import.
     await c.query('UPDATE issues SET integration_id = $2, external_id = $3, external_meta = $4 WHERE id = $1', [dto.id, integ.id, input.externalId ?? null, input.externalMeta ? JSON.stringify(input.externalMeta) : null]);

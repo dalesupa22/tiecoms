@@ -242,6 +242,20 @@ export function StatusPill({ status }: { status: IssueStatus }) {
 }
 
 /** Valor de un campo dinámico para mostrar: sí/no en los booleanos. */
+/** Cliente del ticket (pedido de Danny 8-oct): la columna «Cliente» o, si no hay, lo que mandó la integración (Empresa). */
+const foldKey = (k: string) => k.normalize('NFD').replace(/\p{M}/gu, '').trim().toLowerCase();
+const CUSTOMER_KEYS = ['cliente', 'empresa', 'client', 'company'];
+export function ticketCustomer(i: IssueDTO): string | null {
+  for (const src of [i.fields ?? {}, i.externalMeta ?? {}] as Record<string, unknown>[]) {
+    for (const key of CUSTOMER_KEYS) {
+      const v = Object.entries(src).find(([k]) => foldKey(k) === key)?.[1];
+      if (typeof v === 'string' && v.trim()) return v.trim();
+    }
+  }
+  return null;
+}
+const isCustomerKey = (k: string) => CUSTOMER_KEYS.includes(foldKey(k));
+
 export function fieldText(v: IssueFieldValue | undefined) {
   if (v === undefined) return '';
   if (typeof v === 'boolean') return v ? taskText('Sí', 'Yes') : taskText('No', 'No');
@@ -322,7 +336,7 @@ function FlowCard({ i, stage, where, onOpen, onError }: { i: IssueDTO; stage: Fl
   const isNew = useClient((s) => s.taskInbox.some((x) => x.issueId === i.id));
   const who = taskAssignees(i).map((u) => personById(d, u)).filter((p): p is NonNullable<typeof p> => !!p);
   const meta = i.externalMeta ?? {};
-  const customer = meta.Cliente ?? meta.cliente ?? meta.Client ?? null;
+  const customer = ticketCustomer(i);
   const urgent = /alta|urgente|high/i.test(meta.Prioridad ?? meta.prioridad ?? '');
   const since = stage === 'review' || stage === 'human' || i.review === 'changes' ? i.reviewAt : stage === 'done' ? i.closedAt ?? i.reviewAt : i.statusSince;
   const files = i.attachments?.length ?? 0;
@@ -335,11 +349,11 @@ function FlowCard({ i, stage, where, onOpen, onError }: { i: IssueDTO; stage: Fl
       <div className="fc-top">
         {isNew && <span className="new-dot" aria-label={taskText('Nueva', 'New')} />}
         {i.externalId && <span className="fc-id">#{i.externalId}</span>}
-        {customer && <span className="fc-client ellipsis">{customer}</span>}
         {urgent && <span className="fc-urgent">{taskText('Alta', 'High')}</span>}
         <span className="grow" />
         <span className="fc-age" title={taskText('En esta etapa', 'In this stage')}>{ago(since)}</span>
       </div>
+      {customer && <div className="fc-customer ellipsis" title={customer}>🏢 {customer}</div>}
       <div className="fc-title">{i.title}</div>
       {where && <div className="fc-where ellipsis" title={where}># {where}</div>}
       {stage !== 'new' && <div className="fc-state"><StatePill i={i} /></div>}
@@ -490,7 +504,9 @@ export function IssueRow({ i, showWhere = true, showOwner = true, child = false,
   // Una tarea en un sidechat se marca para que se sepa dónde se habla de ella.
   const inSide = !!parent && parent.conversationId !== i.conversationId;
   const isNew = useClient((s) => s.taskInbox.some((x) => x.issueId === i.id));
+  const customer = ticketCustomer(i);
   const meta = [
+    customer ? `🏢 ${customer}` : null,
     isPersonal(i) ? t('issue.personalShort') : showOwner ? responsible || t('issue.noOwner') : null,
     !child && parent ? `↳ ${parent.title}` : null,
     !child && !parent && i.parentIssueId ? t('task.ofHidden') : null,
@@ -512,7 +528,7 @@ export function IssueRow({ i, showWhere = true, showOwner = true, child = false,
         {(meta.length > 0 || i.topicId) && <span className="small muted ellipsis issue-meta" style={{ display: 'block' }}>
           <IssueTopicTag issueId={i.id} conversationId={i.conversationId} topicId={i.topicId} canEdit={!!conv?.canPost} />{meta.join(' · ')}
         </span>}
-        {!hideFields && i.fields && <span className="issue-fields-inline ellipsis">{Object.entries(i.fields).slice(0, 4).map(([k, v]) => <span key={k} className="issue-field-chip"><span className="muted">{k}</span> {fieldText(v)}</span>)}</span>}
+        {!hideFields && i.fields && <span className="issue-fields-inline ellipsis">{Object.entries(i.fields).filter(([k]) => !isCustomerKey(k)).slice(0, 4).map(([k, v]) => <span key={k} className="issue-field-chip"><span className="muted">{k}</span> {fieldText(v)}</span>)}</span>}
       </span>
       {kids.length > 0 && <span className={`kids-badge ${kidsDone === kids.length ? 'all-done' : ''}`} title={t('task.progress', { done: kidsDone, n: kids.length })}>☑ {kidsDone}/{kids.length}</span>}
       {f.stalledDays > 0 && <span className="jam-badge" title={t('issue.bottleneck')}>⏱ {f.stalledDays === 1 ? t('issue.stalledOne') : t('issue.stalled', { n: f.stalledDays })}</span>}

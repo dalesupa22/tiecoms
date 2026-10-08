@@ -563,6 +563,23 @@ export async function openTaskChat(userId: string, issueId: string, people: stri
   return { id: r.id, created: true };
 }
 
+/**
+ * Columnas de texto del grupo que se llenan con los datos del ticket externo (pedido de Danny 8-oct): misma clave sin
+ * importar mayúsculas ni tildes, y «Cliente» también acepta Empresa/Company/Client (la mesa de ayuda de Xertify envía Empresa).
+ */
+const META_ALIASES: Record<string, string[]> = { cliente: ['cliente', 'empresa', 'client', 'company', 'organizacion'] };
+export async function fieldsFromMeta(c: Db, conversationId: string, meta: Record<string, string> | null | undefined) {
+  if (!meta) return {};
+  const out: Record<string, string> = {};
+  for (const col of await loadColumns(c, conversationId)) {
+    if (col.type !== 'text') continue;
+    const keys = META_ALIASES[fold(col.name)] ?? [fold(col.name)];
+    const hit = keys.map((k) => Object.entries(meta).find(([mk]) => fold(mk) === k)?.[1]).find((v) => typeof v === 'string' && v.trim());
+    if (hit) out[col.name] = hit.trim().slice(0, 500);
+  }
+  return out;
+}
+
 const fieldsJson = (f: Fields | null) => (f ? JSON.stringify(f) : null);
 
 // ---------- Columnas del grupo (texto, lista desplegable, número, casilla) ----------

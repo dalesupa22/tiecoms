@@ -99,3 +99,4 @@
 .task-inbox-toggle { background:none; border:0; padding:0; cursor:pointer; text-align:left; font:inherit; color:inherit }
 .task-inbox.is-collapsed { padding-top:8px; padding-bottom:8px }
 .fc-where { font-size:11px; color:var(--muted, #6b7470); min-width:0 }
+.fc-customer { font-size:12px; font-weight:700; color:var(--ink, #1b2420); min-width:0 }

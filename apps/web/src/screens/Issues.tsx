@@ -175,7 +175,7 @@ function StateBar({ i, orgIds, onError }: { i: IssueDTO; orgIds: string[]; onErr
  */
 /** Capturas y archivos que se van subiendo a la tarea antes de enviar un comentario o una corrección (📎, pegar, arrastrar). */
 function useTaskFiles(issueId: string) {
-  const [files, setFiles] = useState<{ id: string; name: string }[]>([]);
+  const [files, setFiles] = useState<{ id: string; name: string; preview?: string }[]>([]);
   const [busy, setBusy] = useState(false);
   const pick = useRef<HTMLInputElement>(null);
   const add = async (list: File[]) => {
@@ -185,17 +185,19 @@ function useTaskFiles(issueId: string) {
       for (const f of list.slice(0, 10 - files.length)) {
         const name = f.name && f.name !== 'image.png' ? f.name : `captura-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '')}.png`;
         const a = await client.uploadIssueAttachment(issueId, f, name);
-        setFiles((cur) => [...cur, { id: a.id, name }]);
+        setFiles((cur) => [...cur, { id: a.id, name, ...(f.type.startsWith('image/') ? { preview: URL.createObjectURL(f) } : {}) }]);
       }
     } catch (e) { toast(errorText(e)); } finally { setBusy(false); }
   };
   const remove = (id: string) => setFiles((cur) => cur.filter((x) => x.id !== id));
   const dropProps = {
     onDragOver: (e: DragEvent) => { if (e.dataTransfer.types.includes('Files')) e.preventDefault(); },
-    onDrop: (e: DragEvent) => { if (e.dataTransfer.files.length) { e.preventDefault(); void add(Array.from(e.dataTransfer.files)); } },
+    onDrop: (e: DragEvent) => { if (e.dataTransfer.files.length) { e.preventDefault(); e.stopPropagation(); void add(Array.from(e.dataTransfer.files)); } },
   };
   const onPaste = (e: ClipboardEvent) => { const imgs = Array.from(e.clipboardData.files); if (imgs.length) { e.preventDefault(); void add(imgs); } };
-  const chips = files.length > 0 && <div className="task-reply-files">{files.map((f) => <span key={f.id} className="issue-field-chip">📎 {f.name} <button className="link-btn" aria-label={taskText('Quitar', 'Remove')} onClick={() => remove(f.id)}>×</button></span>)}</div>;
+  const chips = files.length > 0 && <div className="task-reply-files">{files.map((f) => f.preview
+    ? <span key={f.id} className="task-reply-thumb" title={f.name}><img src={f.preview} alt={f.name} /><button className="link-btn" aria-label={taskText('Quitar', 'Remove')} onClick={() => remove(f.id)}>×</button></span>
+    : <span key={f.id} className="issue-field-chip">📎 {f.name} <button className="link-btn" aria-label={taskText('Quitar', 'Remove')} onClick={() => remove(f.id)}>×</button></span>)}</div>;
   const button = <>
     <button type="button" className="btn ghost small" disabled={busy || files.length >= 10} title={taskText('Adjuntar captura o archivo (también puedes pegar con Ctrl+V)', 'Attach a screenshot or file (or paste with Ctrl+V)')} onClick={() => pick.current?.click()}>📎</button>
     <input ref={pick} type="file" multiple hidden onChange={(e) => { void add(Array.from(e.target.files ?? [])); e.target.value = ''; }} />
@@ -205,7 +207,30 @@ function useTaskFiles(issueId: string) {
 
 export function TaskReply({ issue, compact = false, onSent }: { issue: IssueDTO; compact?: boolean; onSent?: () => void }) {
   const [text, setText] = useState('');
-  const { files, setFiles, busy, setBusy, dropProps, onPaste, chips, button } = useTaskFiles(issue.id);
+  const { files, setFiles, busy, setBusy, add, dropProps, onPaste, chips, button } = useTaskFiles(issue.id);
+  // Arrastrar capturas o archivos sobre cualquier parte del detalle de la tarea los adjunta a este comentario.
+  const box = useRef<HTMLDivElement>(null);
+  const addRef = useRef(add);
+  addRef.current = add;
+  useEffect(() => {
+    const zone = compact ? null : box.current?.closest('.modal') as HTMLElement | null;
+    if (!zone) return;
+    let depth = 0;
+    const isFiles = (e: globalThis.DragEvent) => !!e.dataTransfer?.types.includes('Files');
+    const enter = (e: globalThis.DragEvent) => { if (!isFiles(e)) return; depth++; zone.classList.add('is-file-drag'); };
+    const leave = (e: globalThis.DragEvent) => { if (!isFiles(e)) return; depth = Math.max(0, depth - 1); if (!depth) zone.classList.remove('is-file-drag'); };
+    const over = (e: globalThis.DragEvent) => { if (isFiles(e)) e.preventDefault(); };
+    const drop = (e: globalThis.DragEvent) => {
+      depth = 0; zone.classList.remove('is-file-drag');
+      // Sobre un cuadro que ya recibe archivos (este comentario o la nota del estado) lo atiende ese cuadro.
+      if (!e.dataTransfer?.files.length || (e.target as Element | null)?.closest?.('.review-note, .task-reply')) return;
+      e.preventDefault();
+      void addRef.current(Array.from(e.dataTransfer.files));
+      box.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    };
+    zone.addEventListener('dragenter', enter); zone.addEventListener('dragleave', leave); zone.addEventListener('dragover', over); zone.addEventListener('drop', drop);
+    return () => { zone.classList.remove('is-file-drag'); zone.removeEventListener('dragenter', enter); zone.removeEventListener('dragleave', leave); zone.removeEventListener('dragover', over); zone.removeEventListener('drop', drop); };
+  }, [compact]);
   const send = async () => {
     const body = text.trim();
     if ((!body && !files.length) || busy) return;
@@ -214,7 +239,7 @@ export function TaskReply({ issue, compact = false, onSent }: { issue: IssueDTO;
     catch (e) { toast(errorText(e)); } finally { setBusy(false); }
   };
   return (
-    <div className={`task-reply ${compact ? 'is-compact' : ''}`} {...dropProps}>
+    <div ref={box} className={`task-reply ${compact ? 'is-compact' : ''}`} {...dropProps}>
       <textarea className="input" rows={compact ? 1 : 3} maxLength={20000} value={text} placeholder={compact ? t('task.cardComment') : t('issue.commentPh')}
         onChange={(e) => setText(e.target.value)}
         onPaste={onPaste}
@@ -222,7 +247,7 @@ export function TaskReply({ issue, compact = false, onSent }: { issue: IssueDTO;
       {chips}
       <div className="row task-reply-actions">
         {button}
-        <span className="grow small muted">{text.length > 15000 ? `${text.length}/20000` : busy ? t('common.loading') : ''}</span>
+        <span className="grow small muted">{text.length > 15000 ? `${text.length}/20000` : busy ? t('common.loading') : compact ? '' : taskText('Arrastra capturas o archivos, o pégalos con Ctrl+V', 'Drag screenshots or files, or paste with Ctrl+V')}</span>
         <button type="button" className="btn primary small" disabled={busy || (!text.trim() && !files.length)} onClick={() => void send()}>{t('issue.comment')}</button>
       </div>
     </div>

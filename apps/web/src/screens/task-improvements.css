@@ -122,3 +122,11 @@
 :root[data-theme="dark"] .task-flow .flow-review { background:color-mix(in srgb, #f5a524 6%, var(--paper-2)) }
 :root[data-theme="dark"] .task-flow .flow-human { background:color-mix(in srgb, #e5484d 6%, var(--paper-2)) }
 :root[data-theme="dark"] .task-flow .flow-done { background:color-mix(in srgb, #30a46c 7%, var(--paper-2)) }
+/* Adjuntar arrastrando sobre el detalle de la tarea (8-oct): aviso grande mientras se arrastra y miniaturas. */
+.modal.is-file-drag { position:relative }
+.modal.is-file-drag::after { content:'📎 Suelta aquí para adjuntar al comentario'; position:absolute; inset:8px; border:2px dashed #3b82f6; border-radius:14px;
+  background:color-mix(in srgb, #3b82f6 10%, var(--bg, #fff)); display:flex; align-items:center; justify-content:center; font-weight:600; font-size:16px; color:#1d4ed8; z-index:50; pointer-events:none }
+.task-reply-files { display:flex; flex-wrap:wrap; gap:6px; align-items:center }
+.task-reply-thumb { position:relative; display:inline-block; width:64px; height:64px; border-radius:8px; overflow:hidden; border:1px solid var(--line, #dce7e3) }
+.task-reply-thumb img { width:100%; height:100%; object-fit:cover; display:block }
+.task-reply-thumb button { position:absolute; top:2px; right:2px; background:rgba(0,0,0,.6); color:#fff; border-radius:50%; width:18px; height:18px; line-height:16px; font-size:12px; padding:0 }

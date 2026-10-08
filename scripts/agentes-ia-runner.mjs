@@ -97,8 +97,8 @@ function pump() {
 function prompt(agent, task, chatId, trigger) {
   const why = {
     work: 'Te asignaron esta tarjeta y está pendiente.',
-    changes: `La revisión pidió corrección: «${trigger.note ?? ''}».${trigger.files?.length ? ` Adjuntó: ${trigger.files.join(', ')} (míralos con get_task).` : ''}`,
-    comment: `Te escribieron en la tarjeta: «${trigger.text ?? ''}».${trigger.files?.length ? ` Adjuntó: ${trigger.files.join(', ')}.` : ''}${trigger.waiting ? ' La tarjeta estaba esperando tu pregunta: si esto la responde, continúa.' : ''}`,
+    changes: `La revisión pidió corrección: «${trigger.note ?? ''}».${trigger.files?.length ? ` Adjuntó: ${trigger.files.join(', ')}: ábrelos con read_task_attachment.` : ''}`,
+    comment: `Te escribieron en la tarjeta: «${trigger.text ?? ''}».${trigger.files?.length ? ` Adjuntó: ${trigger.files.join(', ')}: ábrelos con read_task_attachment.` : ''}${trigger.waiting ? ' La tarjeta estaba esperando tu pregunta: si esto la responde, continúa.' : ''}`,
     chat: `Te escribieron en el chat de la tarea: «${trigger.text ?? ''}».${trigger.waiting ? ' La tarjeta estaba esperando tu pregunta: si esto la responde, continúa.' : ''}`,
   }[trigger.kind];
   return [
@@ -111,7 +111,7 @@ function prompt(agent, task, chatId, trigger) {
     `Por qué te despertaron: ${why}`,
     '',
     `Trabaja así, con las herramientas del MCP «${SERVER}» (eres ${agent.name} en Chaggu):`,
-    '1. Lee la tarea completa con get_task (comentarios, archivos y datos del cliente).',
+    '1. Lee la tarea completa con get_task (comentarios, archivos y datos del cliente) y abre con read_task_attachment las capturas y archivos que necesites (las imágenes las ves).',
     trigger.kind === 'comment' || trigger.kind === 'chat'
       ? `2. Si es la respuesta a una pregunta tuya o te piden cambios, avisa en el chat ${chatId} que continúas y sigue con los pasos 3-6. Si solo te preguntan algo, respóndelo con send_message en el chat (o comment_task) y termina.`
       : `2. Cuenta en el chat de la tarea (send_message chat=${chatId}) que la tomaste y tu plan en una o dos líneas.`,

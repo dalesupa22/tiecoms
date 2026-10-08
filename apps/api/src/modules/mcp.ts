@@ -219,6 +219,7 @@ function taskView(b: BootstrapDTO, i: IssueDTO) {
     id: i.id, title: i.title, status: i.status, due: i.dueDate, attachments: i.attachments ?? [],
     assignees: (i.assigneeIds ?? (i.ownerId ? [i.ownerId] : [])).map(name), requestedBy: name(i.requestedBy), chat: c ? chatName(b, c) : null, chatId: i.conversationId,
     ...(i.externalId ? { ticket: i.externalId } : {}), ...(i.externalMeta ? { meta: i.externalMeta } : {}), ...(i.fields ? { fields: i.fields } : {}), ...(i.review ? { review: i.review, reviewBy: name(i.reviewBy), reviewAt: i.reviewAt } : {}), comments: i.commentCount, updatedAt: i.updatedAt,
+    ...(i.claimedBy ? { claimedBy: name(i.claimedBy), claimedUntil: i.claimedUntil } : {}),
   };
 }
 
@@ -721,7 +722,7 @@ const tools: Tool[] = [
   // ---------- Tareas y tickets (asuntos; los de la mesa de ayuda llegan por integración) ----------
   {
     name: 'list_tasks', readOnly: true, scope: 'tasks:read',
-    description: 'Tareas y tickets que puedo ver. review filtra por revisión humana (pending = por revisar, changes = piden corrección, human = necesita intervención humana, approved). mine=true: solo los asignados a mí. chat: solo las de ese chat o grupo. Incluye los tickets de la mesa de ayuda (con cliente y correo en meta) y los campos dinámicos de cada tarea (fields, que en la app son columnas). field + field_value filtran por un campo.',
+    description: 'Tareas y tickets que puedo ver. review filtra por revisión humana (pending = por revisar, changes = devuelta (vuelve a quien la dejó por revisar), human = necesita intervención humana, approved). mine=true: solo los asignados a mí. chat: solo las de ese chat o grupo. Incluye los tickets de la mesa de ayuda (con cliente y correo en meta) y los campos dinámicos de cada tarea (fields, que en la app son columnas). field + field_value filtran por un campo.',
     schema: z.object({
       mine: z.boolean().optional(), include_closed: z.boolean().optional(), query: z.string().max(120).optional(), limit: z.number().int().min(1).max(100).optional(),
       chat: z.string().max(200).optional().describe('Id o nombre del chat o grupo'),
@@ -780,11 +781,11 @@ const tools: Tool[] = [
   },
   {
     name: 'comment_task', scope: 'tasks:write',
-    description: 'Comenta una tarea o ticket. En los tickets de la mesa de ayuda el comentario también vuelve al sistema del cliente. Usa idempotency_key para reintentar sin duplicar el comentario.',
-    schema: z.object({ id: z.string().uuid(), text: z.string().trim().min(1).max(20_000), idempotency_key: idempotencyKey.optional() }),
-    run: async (userId, a, ctx) => idempotent(ctx, a.idempotency_key, 'comment_task', { id: a.id, text: a.text },
+    description: 'Comenta una tarea o ticket. En los tickets de la mesa de ayuda el comentario también vuelve al sistema del cliente. attachment_ids: capturas o archivos ya subidos a esa tarea con upload_task_attachment (p. ej. la evidencia) que se muestran dentro del comentario. Usa idempotency_key para reintentar sin duplicar el comentario.',
+    schema: z.object({ id: z.string().uuid(), text: z.string().trim().min(1).max(20_000), attachment_ids: z.array(z.string().uuid()).max(10).optional(), idempotency_key: idempotencyKey.optional() }),
+    run: async (userId, a, ctx) => idempotent(ctx, a.idempotency_key, 'comment_task', { id: a.id, text: a.text, ...(a.attachment_ids?.length ? { attachment_ids: a.attachment_ids } : {}) },
       (c) => mcpAttachments.taskWriteAccess(c, userId, a.id),
-      async (c) => { const task = await issues.commentIssue(userId, a.id, a.text, {}, c); return { ok: true, taskId: task.id, status: task.status, comments: task.commentCount }; }),
+      async (c) => { const task = await issues.commentIssue(userId, a.id, a.text, {}, c, a.attachment_ids); return { ok: true, taskId: task.id, status: task.status, comments: task.commentCount }; }),
   },
   {
     name: 'update_task', scope: 'tasks:write',
@@ -796,7 +797,7 @@ const tools: Tool[] = [
       due_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional().describe('AAAA-MM-DD o null para quitarla'),
       title: z.string().trim().min(2).max(200).optional(),
       fields: IssueFieldsInput.optional().describe('Campos dinámicos { "Servicios": "…", "Prioridad": 2, "Bloqueado": true }; null borra'),
-      review: z.enum(['pending', 'approved', 'changes', 'human']).nullable().optional().describe('Revisión humana: pending = la IA lo resolvió y queda para que el responsable lo apruebe (sube antes la evidencia con upload_task_attachment y comment_task); changes/human/approved las marca la persona; null la quita'),
+      review: z.enum(['pending', 'approved', 'changes', 'human']).nullable().optional().describe('Revisión humana: pending = la IA lo resolvió y queda para que el responsable lo apruebe (sube antes la evidencia con upload_task_attachment y comment_task); changes (devolver: vuelve sola a quien la dejó por revisar), human y approved las marca la persona; null la quita'),
       review_note: z.string().trim().min(1).max(4000).optional().describe('Comentario que acompaña el cambio de revisión'),
     }),
     run: async (userId, a, ctx) => {
@@ -814,6 +815,28 @@ const tools: Tool[] = [
         (c) => mcpAttachments.taskWriteAccess(c, userId, a.id),
         async (c) => ({ task: taskView(b, await issues.updateIssue(userId, a.id, input as any, c)) }),
         async (c, response) => { response.task.attachments = (await issues.loadVisible(c, userId, a.id)).attachments ?? []; });
+    },
+  },
+  {
+    name: 'claim_task', scope: 'tasks:write',
+    description: 'Toma una tarea para trabajarla ahora (agentes IA): reserva atómica por minutes (30 por defecto) para que otra corrida no la tome a la vez; la deja en curso y asignada a mí. Si otro la tiene → error task_claimed: no la trabajes. Al dejarla por revisar (update_task review=pending) o cerrarla se libera sola; si fallas, usa release_task.',
+    schema: z.object({ id: z.string().uuid(), minutes: z.number().int().min(5).max(240).optional() }),
+    run: async (userId, a) => ({ task: taskView(await bootstrap(userId), await issues.claimIssue(userId, a.id, a.minutes ?? 30)) }),
+  },
+  {
+    name: 'release_task', scope: 'tasks:write',
+    description: 'Suelta la reserva de claim_task (p. ej. si no pudiste terminar), para que otra corrida o una persona la tome.',
+    schema: z.object({ id: z.string().uuid() }),
+    run: async (userId, a) => ({ task: taskView(await bootstrap(userId), await issues.releaseIssue(userId, a.id)) }),
+  },
+  {
+    name: 'open_task_chat', scope: 'tasks:write',
+    description: 'Abre (o reutiliza) el chat de una tarea: un sidechat ligado a la tarea con las personas indicadas (nombres o ids, p. ej. quien revisa). Ahí cuenta avances y conversa con send_message; lo que te escriban ahí te llega por el webhook. Devuelve el id del chat.',
+    schema: z.object({ id: z.string().uuid(), people: z.array(z.string().min(1).max(200)).min(1).max(10) }),
+    run: async (userId, a) => {
+      const b = await bootstrap(userId);
+      const r = await issues.openTaskChat(userId, a.id, a.people.map((x: string) => personId(b, x)));
+      return { chat: r.id, created: r.created };
     },
   },
   {

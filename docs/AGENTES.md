@@ -62,6 +62,48 @@ mensajes de una sola vista no se avisan; antes de cada entrega se revisa que el 
 Responder con 2xx en menos de 10 s y hacer el trabajo después (el agente contesta por el MCP cuando termine).
 Prueba: `apps/api/test/agents-webhook.test.ts`.
 
+### Tareas: la IA escucha el tablero (llamada con Lorena, 7-oct)
+
+El mismo webhook avisa de las tareas de los chats del agente (`apps/api/src/modules/agent-tasks.ts`):
+
+- `task.created`: llegó un ticket sin responsable al grupo. Solo se escucha: la persona elige a qué agente
+  asignarlo (p. ej. «Agente Xertify» o «Agente Xertiflow») desde la vista «🤖 Flujo IA» del tablero.
+- `task.assigned`: se la asignaron al agente → la toma (`update_task` status `in_progress`), la resuelve, sube la
+  evidencia (`upload_task_attachment` + `comment_task`) y la deja `review: "pending"` asignada a quien revisa.
+- `task.changes_requested` (con `note`): la persona pidió corrección → el agente la retoma y vuelve a pedir revisión.
+- `task.approved` / `task.needs_human`: la persona aprobó (el agente entrega y avisa al cliente) o la mandó a una persona.
+- `task.commented` (con `comment.body`): la persona escribió en una tarea que el agente tiene o dejó por revisar.
+
+El cuerpo trae `task` (id, título, estado, revisión, responsables, ticket externo, URL), `actor` y `tools` con las
+llamadas MCP sugeridas. Lo que hace un agente miembro no le avisa a ningún agente; los bots de integración sí (son los
+que abren los tickets). Si un comentario o una corrección traen capturas, el aviso las lista en `attachments`
+(nombre y tipo; `get_task` da la URL).
+
+Herramientas MCP del ciclo:
+
+- `claim_task` (id, minutes): reserva atómica. Si otra corrida la tiene → error `task_claimed`. La deja en curso y
+  asignada al agente; dejarla por revisar o cerrarla libera la reserva. `release_task` la suelta si la corrida falla.
+- `open_task_chat` (id, people): abre o reutiliza el chat de la tarea (sidechat ligado a la tarea) con quien revisa. Todo
+  lo que escriben ahí le llega al agente como `message.created` con `conversation.taskId`.
+- `comment_task` acepta `attachment_ids` (subidos antes con `upload_task_attachment`): la evidencia queda dentro del
+  comentario.
+
+### Runner: Claude Code / Codex trabajando las tarjetas
+
+`scripts/agentes-ia-runner.mjs` corre en la máquina que resuelve (repos, servidores, skills). Webhook
+`POST /hook/<agente>` para reaccionar al instante y cron cada `pollMinutes` como red de seguridad (`--once` hace una
+pasada, útil desde crontab). Por tarjeta: `claim_task` → `open_task_chat` con quien revisa → `claude -p` o
+`codex exec` con un prompt que exige evidencia y `review: pending` (o `human` si necesita a una persona). Si la corrida
+no la deja lista, comenta y la suelta; tras `maxAttempts` (2) pasa a intervención humana. «Aprobada» se entrega sin
+modelo (comentario + `status: done`).
+
+Aislamiento: el modelo solo tiene el MCP `chaggu_agente` con el token del agente (Claude con `--strict-mcp-config`,
+Codex con un `CODEX_HOME` propio por agente con `default_tools_approval_mode = "approve"`), nunca la sesión de Chaggu
+de la persona dueña de la máquina. Config de ejemplo: `scripts/agentes-ia-runner.example.json` (tokens y secretos en
+variables de entorno).
+
+Agente de demostración sin modelo: `scripts/agente-tablero-demo.mjs`. Prueba: `apps/api/test/agent-tasks.test.ts`.
+
 ## Agentes en producción
 
 | Agente | Empresa | Dueño | Grupos | Secreto |

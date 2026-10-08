@@ -1000,6 +1000,9 @@ export interface IssueDTO {
   review?: IssueReview | null;
   reviewBy?: string | null;
   reviewAt?: string | null;
+  /** Agente (o persona) trabajándola ahora mismo, con reserva vigente hasta claimedUntil. Ausente = libre. */
+  claimedBy?: string | null;
+  claimedUntil?: string | null;
 }
 export type IssueFieldValue = string | number | boolean;
 export type IssueVisibility = 'all' | 'org' | 'private';
@@ -1435,6 +1438,8 @@ export const UpdateIssueInput = z.object({
   review: z.enum(ISSUE_REVIEWS).nullable().optional(),
   /** Comentario que acompaña la revisión (p. ej. qué corregir); queda como comentario de la tarea. */
   reviewNote: z.string().trim().min(1).max(4000).optional(),
+  /** Capturas o archivos de la nota de revisión («mira, esto quedó mal»), subidos antes a la tarea. Requieren reviewNote. */
+  reviewAttachmentIds: z.array(z.uuid()).max(10).optional(),
 });
 export const TaskInboxSeenInput = z.object({ issueIds: z.array(z.uuid()).max(500).optional() });
 /** Comentario de una tarea: hasta 20.000 caracteres y capturas/archivos subidos a la tarea (POST /issues/:id/attachments). */

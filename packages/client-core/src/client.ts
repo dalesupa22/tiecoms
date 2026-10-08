@@ -1267,8 +1267,8 @@ export class TieComsClient {
     await this.request('/issues/inbox/seen', { method: 'POST', json: ids ? { issueIds: ids } : {} }).catch(() => {});
   }
   /** Revisión humana de una tarea (aprobar, pedir corrección, intervención humana o dejarla por revisar). */
-  async reviewIssue(id: string, review: IssueReview | null, note?: string) {
-    const i = await this.request<IssueDTO>(`/issues/${id}`, { method: 'PATCH', json: { review, ...(note ? { reviewNote: note } : {}) } });
+  async reviewIssue(id: string, review: IssueReview | null, note?: string, attachmentIds?: string[]) {
+    const i = await this.request<IssueDTO>(`/issues/${id}`, { method: 'PATCH', json: { review, ...(note ? { reviewNote: note } : {}), ...(note && attachmentIds?.length ? { reviewAttachmentIds: attachmentIds } : {}) } });
     this.putIssues([i]);
     return i;
   }

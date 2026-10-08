@@ -1,14 +1,16 @@
 import type { z } from 'zod';
-import { ISSUE_FIELDS_MAX, type IssueReview, type TaskInboxItemDTO, type TaskInboxReason, type TaskColumnDTO, type TaskColumnsInput, type CreateIssueInput, type IssueDTO, type IssueFieldValue, type IssueEventDTO, type IssueVisibility, type UpdateIssueInput } from '@tiecoms/contracts';
+import { AddMembersInput, ISSUE_FIELDS_MAX, type IssueReview, type TaskInboxItemDTO, type TaskInboxReason, type TaskColumnDTO, type TaskColumnsInput, type CreateIssueInput, type IssueDTO, type IssueFieldValue, type IssueEventDTO, type IssueVisibility, type UpdateIssueInput } from '@tiecoms/contracts';
 import { conversationAccess } from '../access.ts';
 import { audit, enqueueOutbox, pool, tx, type Db, type Tx } from '../db.ts';
-import { badRequest, forbidden, notFound, taskNotFound } from '../errors.ts';
+import { ApiError, badRequest, forbidden, notFound, taskNotFound } from '../errors.ts';
+import { addMembers, createSideConversation } from './workspaces.ts';
 import { appendEvent, appendMessage, toMessageDTO } from './messages.ts';
 import { queueIntegrationEvent } from './integration-events.ts';
 import { bumpCommentNotice } from './chat-notices.ts';
 import { viewOnceConflict } from '../errors.ts';
 import { normalizeAssignees } from './issue-assignees.ts';
 import { issuePage } from './issue-pagination.ts';
+import { agentEventFor, agentsWithWebhook, queueAgentTaskEvent } from './agent-tasks.ts';
 
 /** Mensaje de sistema estructurado: cada cliente lo muestra en su idioma. */
 const sys = (k: string, p: Record<string, unknown> = {}) => JSON.stringify({ k, ...p });
@@ -76,6 +78,7 @@ function toDTO(r: any): IssueDTO {
     ...(r.integration_id ? { integrationId: r.integration_id, externalId: r.external_id ?? null, externalMeta: r.external_meta ?? null } : {}),
     ...(r.fields && Object.keys(r.fields).length ? { fields: r.fields } : {}),
     ...(r.review ? { review: r.review, reviewBy: r.review_by ?? null, reviewAt: iso(r.review_at) } : {}),
+    ...(r.claimed_by && r.claimed_until && new Date(r.claimed_until).getTime() > Date.now() ? { claimedBy: r.claimed_by, claimedUntil: iso(r.claimed_until) } : {}),
   };
 }
 
@@ -171,7 +174,7 @@ async function queueAssignedPush(c: Tx, issueId: string, ownerId: string | null,
  * Bandeja «Nuevas» (llamada con Lorena, 7-oct): las tareas que llegan quedan marcadas hasta que la persona las ve,
  * con push y aviso en vivo. Solo si la persona ve la tarea; nunca a quien hizo el cambio.
  */
-export async function notifyInbox(c: Tx, issueId: string, userId: string | null, actorId: string, reason: TaskInboxReason) {
+export async function notifyInbox(c: Tx, issueId: string, userId: string | null, actorId: string, reason: TaskInboxReason, note?: string, attachmentIds?: string[]) {
   if (!userId || userId === actorId) return;
   let issue: IssueDTO;
   try { issue = await loadVisible(c, userId, issueId); } catch { return; }
@@ -183,6 +186,12 @@ export async function notifyInbox(c: Tx, issueId: string, userId: string | null,
   );
   const item: TaskInboxItemDTO = { issueId, reason, actorId, at: iso(rows[0].created_at)! };
   await enqueueOutbox(c, 'account.event', { userIds: [userId], event: { type: 'issue.inbox', item, issue } });
+  // Un agente con webhook no tiene push: se le avisa al instante para que tome o retome la tarjeta.
+  if ((await agentsWithWebhook(c, [userId])).length) {
+    const type = agentEventFor(reason, issue);
+    if (type) await queueAgentTaskEvent(c, userId, issue, actorId, type, { ...(note ? { note } : {}), attachmentIds });
+    return;
+  }
   await c.query("INSERT INTO jobs (kind, payload, max_attempts) VALUES ('push.issue', $1, 2)", [JSON.stringify({ issueId, ownerId: userId, actorId, reason })]);
 }
 
@@ -357,6 +366,12 @@ export async function updateIssue(userId: string, issueId: string, input: z.infe
       if (input.visibility !== 'all') await addViewers(c, issueId, userId, [cur.created_by, ...(cur.owner_id ? [cur.owner_id] : [])]);
     }
     const previousAssignees: string[] = cur.assignee_ids?.length ? cur.assignee_ids : cur.owner_id ? [cur.owner_id] : [];
+    // «Devolver» (llamada con Lorena 7-oct): pedir corrección le regresa la tarjeta a quien la dejó por revisar
+    // (el agente o la persona que la resolvió), salvo que en el mismo cambio se elijan otros responsables.
+    if (input.review === 'changes' && cur.review !== 'changes' && input.assigneeIds === undefined && input.ownerId === undefined
+      && cur.review_requested_by && cur.review_requested_by !== userId) {
+      input = { ...input, assigneeIds: [cur.review_requested_by] };
+    }
     const assignees = normalizeAssignees(input, previousAssignees);
     const owner = assignees[0] ?? null;
     // Una transición a todo el chat también valida responsables antiguos para no dejarlos invisibles.
@@ -397,7 +412,7 @@ export async function updateIssue(userId: string, issueId: string, input: z.infe
     if (input.status !== undefined && input.status !== cur.status) {
       add('status', input.status);
       sets.push('status_since = now()');
-      sets.push(CLOSED.has(input.status) ? 'closed_at = now()' : 'closed_at = NULL');
+      sets.push(CLOSED.has(input.status) ? 'closed_at = now(), claimed_by = NULL, claimed_until = NULL' : 'closed_at = NULL');
       if (input.status !== 'waiting') add('waiting_on_org_id', null);
       events.push(['status', { from: cur.status, to: input.status }]);
     }
@@ -418,9 +433,12 @@ export async function updateIssue(userId: string, issueId: string, input: z.infe
       add('review', input.review); add('review_by', input.review ? userId : null);
       sets.push(input.review ? 'review_at = now()' : 'review_at = NULL');
       if (input.review === 'pending') add('review_requested_by', userId);
+      // Dejarla por revisar termina el trabajo de quien la tenía tomada.
+      if (input.review === 'pending' || input.review === 'approved') sets.push('claimed_by = NULL, claimed_until = NULL');
       events.push(['review', { from: prevReview, to: input.review, ...(input.reviewNote ? { note: input.reviewNote } : {}) }]);
     }
     if (input.reviewNote && !reviewChanged) throw badRequest('reviewNote va con un cambio de revisión');
+    if (input.reviewAttachmentIds?.length && !input.reviewNote) throw badRequest('Los archivos de la revisión van con una nota (reviewNote)');
     let topicChanged = false;
     const currentTopicId = moving ? null : cur.topic_id;
     if (input.topicId !== undefined) {
@@ -461,17 +479,80 @@ export async function updateIssue(userId: string, issueId: string, input: z.infe
     }
     for (const uid of assignees.filter((uid) => !previousAssignees.includes(uid))) await queueAssignedPush(c, issueId, uid, userId);
     if (reviewChanged) {
-      if (input.reviewNote) await c.query("INSERT INTO issue_events (issue_id, actor_id, kind, payload) VALUES ($1,$2,'comment',$3)", [issueId, userId, JSON.stringify({ body: input.reviewNote })]);
+      const reviewFiles = input.reviewNote ? await bindCommentFiles(c, userId, issueId, destination, input.reviewAttachmentIds) : [];
+      if (input.reviewNote) await c.query("INSERT INTO issue_events (issue_id, actor_id, kind, payload) VALUES ($1,$2,'comment',$3)", [issueId, userId, JSON.stringify({ body: input.reviewNote, ...(reviewFiles.length ? { attachmentIds: reviewFiles } : {}) })]);
       if (input.review === 'pending') {
         for (const uid of assignees) await notifyInbox(c, issueId, uid, userId, 'review');
       } else if (input.review) {
-        for (const uid of new Set([cur.review_requested_by, cur.created_by].filter(Boolean) as string[])) await notifyInbox(c, issueId, uid, userId, 'reviewed');
+        for (const uid of new Set([cur.review_requested_by, cur.created_by].filter(Boolean) as string[])) await notifyInbox(c, issueId, uid, userId, 'reviewed', input.reviewNote, reviewFiles);
       }
       if (cur.integration_id) await queueIntegrationEvent(c, issueId, userId, { type: 'issue.review_changed', from: prevReview, to: input.review ?? null, ...(input.reviewNote ? { note: input.reviewNote } : {}) });
     }
     await audit(c, userId, 'issue.updated', { type: 'issue', id: issueId, workspaceId: cur.workspace_id }, { changes: events.map(([k]) => k) });
     return dto;
   });
+}
+
+// ---------- Tomar una tarjeta (reserva) ----------
+
+/**
+ * Reserva atómica: solo una corrida trabaja la tarjeta. Si otro la tiene con reserva vigente → 409 con quién y hasta
+ * cuándo. Tomarla la deja «en curso» y asignada a quien la toma (avisa como cualquier cambio).
+ */
+export async function claimIssue(userId: string, issueId: string, minutes: number) {
+  return tx(async (c) => {
+    const cur = await loadVisible(c, userId, issueId);
+    if (CLOSED.has(cur.status)) throw badRequest('La tarea ya está cerrada');
+    const { rows } = await c.query(
+      `UPDATE issues SET claimed_by = $2, claimed_until = now() + make_interval(mins => $3)
+        WHERE id = $1 AND (claimed_by IS NULL OR claimed_by = $2 OR claimed_until < now()) RETURNING id`,
+      [issueId, userId, minutes],
+    );
+    if (!rows[0]) {
+      const r = (await c.query('SELECT u.name, i.claimed_until FROM issues i JOIN users u ON u.id = i.claimed_by WHERE i.id = $1', [issueId])).rows[0];
+      throw new ApiError(409, 'task_claimed', `La está trabajando ${r?.name ?? 'otra corrida'} hasta ${iso(r?.claimed_until) ?? 'pronto'}`);
+    }
+    const patch: z.infer<typeof UpdateIssueInput> = {};
+    if (cur.status !== 'in_progress') patch.status = 'in_progress';
+    const who = cur.assigneeIds ?? [];
+    if (who.length !== 1 || who[0] !== userId) patch.assigneeIds = [userId];
+    const dto = Object.keys(patch).length ? await updateIssue(userId, issueId, patch as any, c) : await load(c, issueId);
+    await publish(c, dto);
+    return dto;
+  });
+}
+
+/** Suelta la reserva propia (p. ej. si la corrida falla); la de otro no se toca. */
+export async function releaseIssue(userId: string, issueId: string) {
+  return tx(async (c) => {
+    await loadVisible(c, userId, issueId);
+    await c.query('UPDATE issues SET claimed_by = NULL, claimed_until = NULL WHERE id = $1 AND claimed_by = $2', [issueId, userId]);
+    const dto = await load(c, issueId);
+    await publish(c, dto);
+    return dto;
+  });
+}
+
+/**
+ * Chat de la tarea (CH-IA-02): un sidechat ligado a la tarea donde el agente trabaja con las personas. Reutiliza el que
+ * ya tenga quien lo pide (y suma a quien falte); si no hay, lo crea con esas personas.
+ */
+export async function openTaskChat(userId: string, issueId: string, people: string[]) {
+  const issue = await loadVisible(pool, userId, issueId);
+  if (!issue.conversationId) throw badRequest('Una tarea personal no tiene chat');
+  const { rows } = await pool.query(
+    `SELECT c.id FROM conversations c JOIN conversation_memberships m ON m.conversation_id = c.id AND m.user_id = $2 AND m.removed_at IS NULL
+      WHERE c.side_issue_id = $1 AND c.derive_kind = 'side' AND c.archived_at IS NULL ORDER BY c.created_at LIMIT 1`,
+    [issueId, userId],
+  );
+  if (rows[0]) {
+    const have = new Set((await pool.query('SELECT user_id FROM conversation_memberships WHERE conversation_id = $1 AND removed_at IS NULL', [rows[0].id])).rows.map((r) => r.user_id as string));
+    const missing = people.filter((p) => !have.has(p) && p !== userId);
+    if (missing.length) await addMembers(userId, rows[0].id, AddMembersInput.parse({ userIds: missing, history: 'all' }));
+    return { id: rows[0].id as string, created: false };
+  }
+  const r = await createSideConversation(userId, issue.conversationId, { issueId, userIds: people });
+  return { id: r.id, created: true };
 }
 
 const fieldsJson = (f: Fields | null) => (f ? JSON.stringify(f) : null);
@@ -561,24 +642,28 @@ async function syncIssueMessageTopics(c: Tx, conversationId: string, issueId: st
   return updated.length;
 }
 
+/** Capturas o archivos de un comentario: quedan como archivos de la tarea (mismo acceso) y el comentario los nombra. */
+async function bindCommentFiles(c: Tx, userId: string, issueId: string, conversationId: string | null, attachmentIds?: string[]) {
+  const files = attachmentIds?.length ? [...new Set(attachmentIds)] : [];
+  if (!files.length) return files;
+  const { rows: att } = await c.query('SELECT * FROM attachments WHERE id = ANY($1::uuid[]) AND deleted_at IS NULL FOR UPDATE', [files]);
+  if (att.length !== files.length || att.some((a) => a.message_id || (a.issue_id ? a.issue_id !== issueId : a.owner_id !== userId || a.conversation_id !== conversationId))) {
+    throw badRequest('Algún archivo no es tuyo, ya se usó o pertenece a otra tarea');
+  }
+  const count = (await c.query('SELECT count(*)::int AS n FROM attachments WHERE issue_id = $1 AND deleted_at IS NULL AND NOT (id = ANY($2::uuid[]))', [issueId, files])).rows[0].n;
+  if (count + files.length > 50) throw badRequest('Máximo 50 archivos por tarea');
+  for (let n = 0; n < files.length; n++) await c.query('UPDATE attachments SET issue_id = $2, position = $3 WHERE id = $1 AND issue_id IS DISTINCT FROM $2', [files[n], issueId, count + n]);
+  return files;
+}
+
 export async function commentIssue(userId: string, issueId: string, body: string, extra: { author?: string; at?: string } = {}, existing?: Tx, attachmentIds?: string[]) {
   return inTransaction(existing, async (c) => {
-    const { rows } = await c.query('SELECT conversation_id, topic_id, visibility, integration_id, title FROM issues WHERE id = $1 FOR UPDATE', [issueId]);
+    const { rows } = await c.query('SELECT conversation_id, topic_id, visibility, integration_id, title, review_requested_by FROM issues WHERE id = $1 FOR UPDATE', [issueId]);
     if (!rows[0]) throw taskNotFound();
     await loadVisible(c, userId, issueId);
     if (rows[0].visibility === 'all') await conversationAccess(c, userId, rows[0].conversation_id, 'post', true);
     // `author`: quién lo escribió fuera de Chaggu (comentarios que trae una integración). Los clientes muestran el cuerpo.
-    // Capturas o archivos del comentario: quedan como archivos de la tarea (mismo acceso) y el comentario los nombra.
-    const files = attachmentIds?.length ? [...new Set(attachmentIds)] : [];
-    if (files.length) {
-      const { rows: att } = await c.query('SELECT * FROM attachments WHERE id = ANY($1::uuid[]) AND deleted_at IS NULL FOR UPDATE', [files]);
-      if (att.length !== files.length || att.some((a) => a.message_id || (a.issue_id ? a.issue_id !== issueId : a.owner_id !== userId || a.conversation_id !== rows[0].conversation_id))) {
-        throw badRequest('Algún archivo no es tuyo, ya se usó o pertenece a otra tarea');
-      }
-      const count = (await c.query('SELECT count(*)::int AS n FROM attachments WHERE issue_id = $1 AND deleted_at IS NULL AND NOT (id = ANY($2::uuid[]))', [issueId, files])).rows[0].n;
-      if (count + files.length > 50) throw badRequest('Máximo 50 archivos por tarea');
-      for (let n = 0; n < files.length; n++) await c.query('UPDATE attachments SET issue_id = $2, position = $3 WHERE id = $1 AND issue_id IS DISTINCT FROM $2', [files[n], issueId, count + n]);
-    }
+    const files = await bindCommentFiles(c, userId, issueId, rows[0].conversation_id, attachmentIds);
     await c.query("INSERT INTO issue_events (issue_id, actor_id, kind, payload) VALUES ($1,$2,'comment',$3)", [issueId, userId, JSON.stringify({ body, ...extra, ...(files.length ? { attachmentIds: files } : {}) })]);
     await c.query('UPDATE issues SET updated_at = now() WHERE id = $1', [issueId]);
     if (!body && files.length) body = `📎 ${files.length === 1 ? 'Archivo adjunto' : `${files.length} archivos adjuntos`}`;
@@ -590,6 +675,9 @@ export async function commentIssue(userId: string, issueId: string, body: string
     }
     const dto = await load(c, issueId);
     await publish(c, dto);
+    // La persona le escribe a la IA sobre la tarea (p. ej. «no me parece, corrige X»): la IA responde en la misma tarea.
+    const listeners = await agentsWithWebhook(c, [...new Set([...(dto.assigneeIds ?? []), ...(rows[0].review_requested_by ? [rows[0].review_requested_by] : [])])]);
+    for (const agentId of listeners) await queueAgentTaskEvent(c, agentId, dto, userId, 'task.commented', { comment: body, attachmentIds: files });
     return dto;
   });
 }

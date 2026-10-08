@@ -511,6 +511,10 @@ export async function claimIssue(userId: string, issueId: string, minutes: numbe
   return tx(async (c) => {
     const cur = await loadVisible(c, userId, issueId);
     if (CLOSED.has(cur.status)) throw badRequest('La tarea ya está cerrada');
+    // Por revisar o con una persona: no se la quita un agente (solo vuelve si la devuelven: review «changes»).
+    if (cur.review === 'pending' || cur.review === 'human' || cur.review === 'approved') {
+      throw new ApiError(409, 'task_in_review', cur.review === 'human' ? 'La tarea está con una persona' : 'La tarea está en revisión: espera a que la aprueben o la devuelvan');
+    }
     const { rows } = await c.query(
       `UPDATE issues SET claimed_by = $2, claimed_until = now() + make_interval(mins => $3)
         WHERE id = $1 AND (claimed_by IS NULL OR claimed_by = $2 OR claimed_until < now()) RETURNING id`,

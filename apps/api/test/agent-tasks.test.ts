@@ -114,6 +114,9 @@ describe('la IA escucha el tablero', { timeout: 60_000 }, () => {
     expect(r.json.result.structuredContent.error.code).toBe('task_claimed');
     await mcp(mcpToken, 'update_task', { id: t.json.id, review: 'pending', assignees: [lorena.id] });
     expect((await mcp(mcpToken, 'get_task', { id: t.json.id })).task.claimedBy).toBeUndefined();
+    // Por revisar: otra corrida no se la quita a quien revisa.
+    const again = await call('/api/mcp', { token: mcpToken, body: { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'claim_task', arguments: { id: t.json.id } } } });
+    expect(again.json.result?.structuredContent?.error?.code, JSON.stringify(again.json).slice(0, 400)).toBe('task_in_review');
   });
 
   it('open_task_chat abre (y reutiliza) el chat de la tarea y lo que escriben ahí le llega al agente', async () => {

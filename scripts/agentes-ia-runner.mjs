@@ -106,6 +106,8 @@ function prompt(agent, task, chatId, trigger) {
     '',
     `TAREA (${task.ticket ? `ticket #${task.ticket}` : 'tarea'}): ${task.title}`,
     `id: ${task.id} · chat de la tarea: ${chatId} · quien revisa: ${REVIEWER}`,
+    ...(task.meta ? [`Datos del ticket: ${Object.entries(task.meta).filter(([k]) => !/adjuntos/i.test(k)).map(([k, v]) => `${k}: ${v}`).join(' · ')}`] : []),
+    ...(ticketEmail(task) ? [`CUENTA DEL CLIENTE: usa SIEMPRE la cuenta del correo del ticket (${ticketEmail(task)}). Ubica la cuenta/emisor por ese correo, nunca por el nombre de la empresa; si ese correo no tiene cuenta o hay varias, pregunta (paso 7) antes de tocar nada.`] : []),
     `Por qué te despertaron: ${why}`,
     '',
     `Trabaja así, con las herramientas del MCP «${SERVER}» (eres ${agent.name} en Chaggu):`,
@@ -117,10 +119,13 @@ function prompt(agent, task, chatId, trigger) {
     '4. Evidencia: sube capturas, registros o un informe .md con upload_task_attachment y publica UN comment_task con attachment_ids que diga qué pidió el cliente, qué encontraste, qué hiciste y cómo verificarlo.',
     `5. Déjala por revisar: update_task review="pending" assignees=["${REVIEWER}"] con un review_note corto.`,
     `6. Si necesita a una persona (credenciales, firma, trámite manual, decisión de negocio): explícalo con comment_task y update_task review="human" assignees=["${REVIEWER}"].`,
-    `7. Si te falta un dato para seguir (algo que el ticket no dice y no puedes averiguar), NO adivines: pregunta concretamente en el chat de la tarea (send_message chat=${chatId}, mencionando a ${REVIEWER}) y en comment_task, deja update_task status="waiting" y termina. Cuando te respondan te volverán a despertar.`,
+    `7. Si te falta un dato para seguir (algo que el ticket no dice y no puedes averiguar), NO adivines: pregunta concretamente en el chat de la tarea (send_message chat=${chatId}, mencionando a ${REVIEWER}) y en comment_task, deja update_task status="waiting" SIN cambiar los responsables (la tarjeta sigue contigo) y termina. Cuando te respondan te volverán a despertar.`,
     'Si algo falla, explícalo en la tarea antes de terminar.',
   ].join('\n');
 }
+
+/** Correo del ticket (regla de Danny 8-oct: la cuenta a usar es siempre la de ese correo). */
+const ticketEmail = (task) => Object.entries(task.meta ?? {}).find(([k]) => /^(correo|email|e-mail)$/i.test(k.trim()))?.[1] ?? null;
 
 function runEngine(agent, text) {
   return new Promise((resolve) => {
@@ -165,9 +170,18 @@ async function runJob({ agent, taskId, trigger: first }) {
     log('✅', agent.name, 'entregó', taskId);
     return;
   }
+  // El aviso pudo quedar viejo (p. ej. el cron la encoló mientras otra corrida la terminaba): si ya está por revisar,
+  // con una persona, esperando respuesta o cerrada, no se vuelve a tomar.
+  if (trigger.kind === 'work') {
+    const now = (await tool(agent, 'get_task', { id: taskId })).task;
+    if (['pending', 'human', 'approved'].includes(now.review) || ['done', 'cancelled', 'waiting'].includes(now.status)) {
+      log('·', agent.name, 'salta', taskId, `ya está ${now.review ?? now.status}`);
+      return;
+    }
+  }
   let task;
   try { task = (await tool(agent, 'claim_task', { id: taskId, minutes: Math.ceil(RUN_TIMEOUT / 60_000) + 5 })).task; }
-  catch (e) { if (e.code === 'task_claimed' || e.code === 'bad_request') { log('·', agent.name, 'salta', taskId, e.message); return; } throw e; }
+  catch (e) { if (e.code === 'task_claimed' || e.code === 'task_in_review' || e.code === 'bad_request') { log('·', agent.name, 'salta', taskId, e.message); return; } throw e; }
   // Si la tarjeta viene devuelta, el prompt lo dice aunque el aviso haya sido solo «asignada» (p. ej. por el cron).
   if (trigger.kind === 'work' && task.review === 'changes') trigger = { kind: 'changes', note: 'La revisión la devolvió: lee el último comentario de revisión (y sus capturas) con get_task.' };
   const chat = (await tool(agent, 'open_task_chat', { id: taskId, people: [REVIEWER] })).chat;
@@ -204,7 +218,15 @@ async function poll() {
     try {
       const r = await tool(a, 'list_tasks', { mine: true, limit: 50 });
       for (const t of r.tasks ?? []) {
-        const open = !['done', 'cancelled', 'waiting'].includes(t.status); // «waiting»: preguntó y espera la respuesta
+        // «waiting»: preguntó y espera. Si después de su pregunta alguien escribió en la tarjeta, ya le respondieron.
+        if (t.status === 'waiting' && !t.claimedBy) {
+          const act = (await tool(a, 'get_task', { id: t.id })).activity ?? [];
+          const lastComment = [...act].reverse().find((x) => x.kind === 'comment');
+          const mine = (by) => !by || by === a.name || by.endsWith('(tú)');
+          if (lastComment && !mine(lastComment.by)) enqueue(a, t.id, { kind: 'comment', text: lastComment.text, waiting: true });
+          continue;
+        }
+        const open = !['done', 'cancelled', 'waiting'].includes(t.status);
         const waiting = !t.review || t.review === 'changes';
         const free = !t.claimedBy || t.claimedBy.endsWith('(tú)');
         if (open && waiting && free) enqueue(a, t.id, t.review === 'changes' ? { kind: 'changes', note: 'Revisa los comentarios de la revisión en la tarea.' } : { kind: 'work' });

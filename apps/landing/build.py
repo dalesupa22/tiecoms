@@ -40,6 +40,8 @@ print('landing: dist listo (es + en)')
 template = (src / 'legal' / 'template.html').read_text()
 UPDATED = {'es': 'Última actualización: 26 de septiembre de 2026', 'en': 'Last updated: September 26, 2026'}
 PRIVACY_UPDATED = {'es': 'Última actualización: 28 de septiembre de 2026', 'en': 'Last updated: September 28, 2026'}
+APPLE_LOGIN_UPDATED = {'es': 'Última actualización: 7 de octubre de 2026', 'en': 'Last updated: October 7, 2026'}
+APPLE_LOGIN_PAGES = {'privacidad.es.html', 'privacy.en.html', 'terminos.es.html', 'terms.en.html', 'eliminar-cuenta.es.html', 'delete-account.en.html'}
 PAGES = [
     # (idioma, ruta, fuente, título, ruta en el otro idioma, descripción)
     ('es', '/privacidad/', 'privacidad.es.html', 'Política de privacidad', '/en/privacy/', 'Cómo chaggu trata los datos personales.'),
@@ -59,7 +61,7 @@ for lang, path, source, title, alt, desc in PAGES:
         'lang': lang, 'title': title, 'description': desc, 'body': (src / 'legal' / source).read_text(),
         'path_es': path if es else alt, 'path_en': alt if es else path,
         'home': '/' if es else '/en/', 'alt_path': alt, 'alt_lang': 'en' if es else 'es', 'alt_label': 'EN' if es else 'ES',
-        'app_label': 'Entrar' if es else 'Sign in', 'eyebrow': 'Legal', 'updated': (PRIVACY_UPDATED if source in ('privacidad.es.html', 'privacy.en.html') else UPDATED)[lang],
+        'app_label': 'Entrar' if es else 'Sign in', 'eyebrow': 'Legal', 'updated': (APPLE_LOGIN_UPDATED if source in APPLE_LOGIN_PAGES else PRIVACY_UPDATED if source in ('privacidad.es.html', 'privacy.en.html') else UPDATED)[lang],
         'tagline': 'Conecta humanos, empresas y bots.' if es else 'Connects people, companies and bots.', 'footer_links': links,
     }
     page = template

@@ -134,6 +134,8 @@ describeDb('flujo SSO con la base de pruebas', () => {
     const domain = `nexo-${run}.co`;
     const first = await roundTrip('google', google(`uno@${domain}`, domain));
     expect(first.target.searchParams.get('code')).toBeTruthy();
+    // Migration 045 changed the default to auto; exercise invite policy explicitly.
+    await pool.query(`UPDATE organizations SET join_policy = 'invite' WHERE id = (SELECT org_id FROM org_domains WHERE domain = $1)`, [domain]);
     const second = await roundTrip('google', google(`dos@${domain}`, domain), {}, 'web');
     expect(second.target.origin + second.target.pathname).toMatch(/\/auth\/sso$/);
     expect(second.target.searchParams.get('error')).toBe('domain_claimed');

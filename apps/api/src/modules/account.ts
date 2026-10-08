@@ -1,6 +1,7 @@
 import { audit, enqueueOutbox, pool, tx } from '../db.ts';
 import { badRequest, forbidden, unauthorized } from '../errors.ts';
 import { verifyPassword } from '../security.ts';
+import { lockAppleAccountForDeletion, queueAppleAccountRevocation } from './apple-auth.ts';
 
 /**
  * Eliminar la cuenta (lo exigen App Store y Google Play). Los mensajes en
@@ -18,6 +19,10 @@ export async function deleteAccount(userId: string, input: { confirmEmail: strin
   if (u.password_hash && !(await verifyPassword(input.password ?? '', u.password_hash))) throw forbidden('Contraseña incorrecta');
 
   const waIds = await tx(async (c) => {
+    const appleSubjects = await lockAppleAccountForDeletion(c, userId);
+    const active = await c.query('SELECT id FROM users WHERE id = $1 AND disabled_at IS NULL FOR NO KEY UPDATE', [userId]);
+    if (!active.rows.length) throw unauthorized();
+    await queueAppleAccountRevocation(c, userId, appleSubjects);
     // Empresas donde era la única persona dueña: la administración pasa a quien lleve más tiempo.
     const owned = await c.query(
       `SELECT om.org_id FROM organization_memberships om WHERE om.user_id = $1 AND om.role = 'owner'

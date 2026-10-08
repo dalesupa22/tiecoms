@@ -23,6 +23,8 @@ import { pool } from './db.ts';
 import { ApiError, notFound, unauthorized } from './errors.ts';
 import * as auth from './modules/auth.ts';
 import * as sso from './modules/sso.ts';
+import * as appleAuth from './modules/apple-auth.ts';
+import { AppleChallengeInput, AppleCompleteInput } from '@tiecoms/contracts';
 import * as domains from './modules/domains.ts';
 import { deleteAccount } from './modules/account.ts';
 import { bootstrap } from './modules/bootstrap.ts';
@@ -95,7 +97,7 @@ export async function buildHttp() {
     trustProxy: config.trustProxy,
     bodyLimit: 64 * 1024,
     logger: {
-      level: config.env === 'production' ? 'info' : 'debug', redact: ['req.headers.authorization', 'req.headers.cookie'],
+      level: config.env === 'production' ? 'info' : 'debug', redact: ['req.headers.authorization', 'req.headers.cookie', 'req.body.identityToken', 'req.body.authorizationCode', 'req.body.codeVerifier'],
       // OAuth codes/state/receipts and other URL credentials must never enter access logs.
       serializers: { req: (req) => ({ method: req.method, url: safeRequestPath(req.url), hostname: req.hostname, remoteAddress: req.ip }) },
     },
@@ -224,6 +226,14 @@ export async function buildHttp() {
     return reply.redirect(await meetings.finishConnect(req.query, 'zoom'), 302);
   });
   app.post('/api/v1/auth/sso/exchange', authLimit, async (req, reply) => sendAuth(req, reply, await sso.exchange(SsoExchangeInput.parse(req.body))));
+  app.post('/api/v1/auth/apple/challenge', authLimit, async (req, reply) => {
+    reply.header('cache-control', 'no-store');
+    return appleAuth.challenge(AppleChallengeInput.parse(req.body));
+  });
+  app.post('/api/v1/auth/apple/complete', authLimit, async (req, reply) => {
+    reply.header('cache-control', 'no-store');
+    return sendAuth(req, reply, await appleAuth.complete(AppleCompleteInput.parse(req.body)));
+  });
 
   // ---------- Integraciones (token del grupo, sin sesión) ----------
   // Webhook entrante con el formato de Slack: el token en Authorization o, para quien solo acepta una URL, en la ruta.
@@ -331,6 +341,14 @@ export async function buildHttp() {
       await auth.revokeSession(req.userId, req.sessionId);
       reply.clearCookie(REFRESH_COOKIE, { path: COOKIE_PATH });
       return { ok: true };
+    });
+    priv.post('/api/v1/auth/apple/link/challenge', authLimit, async (req, reply) => {
+      reply.header('cache-control', 'no-store');
+      return appleAuth.challenge(AppleChallengeInput.parse(req.body), { userId: req.userId, sessionId: req.sessionId });
+    });
+    priv.post('/api/v1/auth/apple/link/complete', authLimit, async (req, reply) => {
+      reply.header('cache-control', 'no-store');
+      return appleAuth.complete(AppleCompleteInput.parse(req.body), { userId: req.userId, sessionId: req.sessionId });
     });
     priv.delete('/api/v1/account', { config: { rateLimit: { max: 5, timeWindow: '1 minute' } } }, async (req, reply) => {
       const out = await deleteAccount(req.userId, DeleteAccountInput.parse(req.body ?? {}));

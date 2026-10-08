@@ -47,7 +47,7 @@ export interface DomainProof { provider: 'google' | 'microsoft'; tenant: string 
  * garantiza Google Workspace o Microsoft Entra; sin él (registro con contraseña)
  * nunca se entra sola a una empresa ajena.
  */
-export async function placeNewUser(c: Tx, email: string, opts: { orgInviteToken?: string; orgName?: string; fallbackOrgName: string; proof?: DomainProof | null; /** Confirmó el correo con el enlace (registro con contraseña). */ emailProven?: boolean }) {
+export async function placeNewUser(c: Tx, email: string, opts: { orgInviteToken?: string; orgName?: string; fallbackOrgName: string; proof?: DomainProof | null; /** Apple verifies an address, never control of its organization/domain. */ skipDomainPlacement?: boolean; /** Confirmó el correo con el enlace (registro con contraseña). */ emailProven?: boolean }) {
   if (opts.orgInviteToken) {
     // Se une a una empresa existente: por enlace (token) o código; de un solo uso salvo `multi_use`, y puede exigir un correo.
     const code = normalizeInviteCode(opts.orgInviteToken);
@@ -60,7 +60,7 @@ export async function placeNewUser(c: Tx, email: string, opts: { orgInviteToken?
     return { orgId: inv.org_id as string, role: inv.role as OrgRole, inviteId: inv.id as string, invite: inv, via: 'invite' as const };
   }
   const domain = emailDomain(email);
-  const corporate = !isPublicDomain(domain);
+  const corporate = !opts.skipDomainPlacement && !isPublicDomain(domain);
   if (corporate) {
     const owner = await claimedBy(c, domain);
     if (owner) {

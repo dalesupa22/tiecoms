@@ -29,6 +29,14 @@ export const config = {
   nativeRedirect: process.env.SSO_NATIVE_REDIRECT ?? 'tiecoms://auth/callback',
   google: { clientId: process.env.GOOGLE_CLIENT_ID ?? '', clientSecret: process.env.GOOGLE_CLIENT_SECRET ?? '' },
   microsoft: { clientId: process.env.MICROSOFT_CLIENT_ID ?? '', clientSecret: process.env.MICROSOFT_CLIENT_SECRET ?? '' },
+  apple: {
+    clientId: process.env.APPLE_CLIENT_ID ?? 'com.chaggu.app',
+    teamId: process.env.APPLE_TEAM_ID ?? '',
+    keyId: process.env.APPLE_KEY_ID ?? '',
+    privateKeyPath: process.env.APPLE_PRIVATE_KEY_PATH ?? '',
+    /** Independent 32-byte key, encoded as 64 hex characters. Never reuse JWT_SECRET. */
+    tokenEncryptionKey: process.env.APPLE_TOKEN_ENCRYPTION_KEY ?? '',
+  },
   trustProxy: process.env.TRUST_PROXY !== 'false',
   /** Remitente de los correos (Brevo). Debe estar verificado en la cuenta de Brevo. */
   mailFrom: process.env.MAIL_FROM ?? 'admin@chaggu.com',

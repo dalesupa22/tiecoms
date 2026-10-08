@@ -12,6 +12,7 @@ import { fireDueReminders } from './modules/reminders.ts';
 import { sendDueScheduled } from './modules/scheduled.ts';
 import { sendDueWhatsappSchedules } from './modules/mcp-scheduled.ts';
 import { cleanupExpired as cleanupSso } from './modules/sso.ts';
+import { cleanupAppleAuth, revokeAppleToken } from './modules/apple-auth.ts';
 import { previewMessage } from './modules/link-preview.ts';
 import { deleteObject,objectKey,deletePersonalObject } from './storage.ts';
 import { notifyReport } from './modules/safety.ts';
@@ -38,6 +39,7 @@ const LEASE_SECONDS = 120;
 type Handler = (payload: any) => Promise<void>;
 
 const handlers: Record<string, Handler> = {
+  async 'apple.revoke'(p) { await revokeAppleToken(p.tokenId); },
   async 'wa.delete_original'(p) { if(typeof p.key==='string' && p.key.startsWith(objectKey('wa-originals/'))) await deleteObject(p.key); },
   async 'housekeeping.availability'() { await expireAvailability(); },
   /** gg responde en su chat o donde lo llamaron con @gg (docs/GG-CHAT.md). */
@@ -130,6 +132,7 @@ const handlers: Record<string, Handler> = {
     await pool.query("DELETE FROM audit_events WHERE created_at < now() - interval '24 months'");
     await pool.query("DELETE FROM safety_reports WHERE created_at < now() - interval '24 months'");
     await cleanupSso();
+    await cleanupAppleAuth();
     const once = await purgeViewOnce();
     if (once) console.log(`[worker] mensajes de una sola vista vencidos o ya vistos: ${once}`);
     const stale = await cleanupAttachments();

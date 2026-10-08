@@ -3,6 +3,18 @@
 # entre nodos y el outbox usa SKIP LOCKED); `worker` puede vivir en otra máquina.
 name: tiecoms
 
+# The Apple signing key is available only to the API and revocation worker.
+x-auth-volumes: &auth-volumes
+  - type: bind
+    source: /opt/tiecoms/shared/rds-ca.pem
+    target: /run/secrets/rds-ca.pem
+    read_only: true
+  - type: bind
+    source: /opt/tiecoms/shared/apple-auth
+    target: /run/secrets/apple-auth
+    read_only: true
+    bind: { create_host_path: false }
+
 x-common: &common
   image: "tiecoms-api:${TIECOMS_RELEASE:?set_release}"
   env_file: /opt/tiecoms/shared/api.env
@@ -22,6 +34,7 @@ x-common: &common
 services:
   api:
     <<: *common
+    volumes: *auth-volumes
     ports: ["127.0.0.1:3020:3020"]
     environment:
       INSTANCE_ID: api-1
@@ -33,6 +46,7 @@ services:
 
   worker:
     <<: *common
+    volumes: *auth-volumes
     command: ["node", "--enable-source-maps", "worker.js"]
     environment:
       INSTANCE_ID: worker-1

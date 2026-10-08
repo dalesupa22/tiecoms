@@ -243,6 +243,26 @@ export const SsoExchangeInput = z.preprocess(
 );
 export type SsoExchangeInput = z.infer<typeof SsoExchangeInput>;
 
+/** Native Sign in with Apple. The server issues a five-minute, single-use nonce
+ * bound to the device and its S256 proof. Apple is not a browser SsoProvider. */
+export const AppleChallengeInput = z.object({
+  codeChallenge: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
+  device: DeviceInfo.extend({ platform: z.literal('ios') }),
+  orgInviteToken: z.string().min(8).max(200).optional(),
+  orgName: z.string().trim().min(2).max(120).optional(),
+});
+export type AppleChallengeInput = z.infer<typeof AppleChallengeInput>;
+export interface AppleChallengeDTO { challengeId: string; nonce: string; expiresAt: string }
+export const AppleCompleteInput = z.object({
+  challengeId: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
+  codeVerifier: pkceVerifier,
+  identityToken: z.string().min(20).max(16384),
+  authorizationCode: z.string().min(1).max(4096),
+  fullName: z.string().trim().min(1).max(120).optional(),
+  device: DeviceInfo.extend({ platform: z.literal('ios') }),
+});
+export type AppleCompleteInput = z.infer<typeof AppleCompleteInput>;
+
 /** Eliminar la cuenta: se confirma escribiendo el correo; con contraseña, también se pide. */
 export const DeleteAccountInput = z.object({ confirmEmail: email, password: z.string().max(200).optional() });
 export const UpdateProfileInput = z.object({

@@ -9,7 +9,7 @@ const PUBLIC_DOMAINS = new Set([
   'gmail.com', 'googlemail.com', 'outlook.com', 'outlook.es', 'hotmail.com', 'hotmail.es', 'live.com', 'live.com.mx', 'msn.com',
   'yahoo.com', 'yahoo.es', 'yahoo.com.mx', 'ymail.com', 'icloud.com', 'me.com', 'mac.com', 'aol.com', 'proton.me', 'protonmail.com',
   'pm.me', 'gmx.com', 'gmx.net', 'mail.com', 'zoho.com', 'yandex.com', 'yandex.ru', 'qq.com', '163.com', 'tutanota.com', 'hey.com',
-  'fastmail.com', 'yopmail.com', 'mailinator.com', 'example.com',
+  'fastmail.com', 'yopmail.com', 'mailinator.com', 'example.com', 'privaterelay.appleid.com',
 ]);
 
 export const TXT_PREFIX = 'chaggu-verification=';

@@ -1,0 +1,51 @@
+#!/usr/bin/env node
+/**
+ * Genera Localizable.strings (es/en) de la app iOS a partir de los textos de la web
+ * (apps/web/src/i18n.ts, fuente de verdad) + los propios de iOS (tools/ios-strings.json).
+ * Si una clave existe en ambos, gana la web: así los textos son los mismos en todas las apps.
+ *
+ *   node apps/ios/tools/gen-strings.mjs
+ *   WEB_I18N=/ruta/a/otra/rama/apps/web/src/i18n.ts node apps/ios/tools/gen-strings.mjs
+ */
+import { readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const here = dirname(fileURLToPath(import.meta.url));
+const root = join(here, '..', '..', '..');
+// WEB_I18N permite tomar los textos de otra rama (p. ej. el worktree de backend con claves nuevas).
+const src = readFileSync(process.env.WEB_I18N || join(root, 'apps/web/src/i18n.ts'), 'utf8');
+
+function objectLiteral(startToken) {
+  const i = src.indexOf(startToken);
+  if (i < 0) throw new Error(`No encontré ${startToken}`);
+  let j = src.indexOf('{', i), depth = 0, k = j;
+  for (; k < src.length; k++) {
+    const ch = src[k];
+    if (ch === "'" || ch === '"' || ch === '`') { const q = ch; k++; while (src[k] !== q) { if (src[k] === '\\') k++; k++; } continue; }
+    if (ch === '/' && src[k + 1] === '/') { while (src[k] !== '\n') k++; continue; }
+    if (ch === '{') depth++;
+    if (ch === '}') { depth--; if (depth === 0) break; }
+  }
+  return new Function(`return ${src.slice(j, k + 1)}`)();
+}
+
+const web = { es: objectLiteral('const es = {'), en: objectLiteral('const en: Record<Key, string> = {') };
+const ios = JSON.parse(readFileSync(join(here, 'ios-strings.json'), 'utf8'));
+// Marca: la app se llama chaggu, en minúscula (antes TieComs; «Chaggu» con mayúscula hasta 1.6.4 build 19). Mientras la web conserve textos con el nombre o el
+// dominio anterior, aquí se reemplazan para que la app nunca los muestre. Solo cambia valores, no claves.
+const brand = (s) => s.replace(/app\.tiecoms\.com/g, 'app.chaggu.com').replace(/www\.tiecoms\.com/g, 'www.chaggu.com')
+  .replace(/\btiecoms\.com\b/g, 'chaggu.com').replace(/TieComs/g, 'chaggu').replace(/Chaggu/g, 'chaggu');
+// Producto (28-sep-2026, docs/TEMAS.md): los «asuntos» se llaman «tareas» y en inglés «Tasks», nunca «Issues». Solo el texto visible;
+// las claves, rutas y campos del API siguen diciendo issue.
+const subjects = (s) => s.replace(/\bIssues\b/g, 'Tasks').replace(/\bissues\b/g, 'tasks')
+  .replace(/\bIssue\b/g, 'Task').replace(/\bissue\b/g, 'task').replace(/\bISSUES\b/g, 'TASKS');
+const esc = (s) => s.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n');
+
+for (const [i, lang] of ['es', 'en'].entries()) {
+  const out = { ...Object.fromEntries(Object.entries(ios).map(([k, v]) => [k, v[i]])), ...web[lang] };
+  const lines = Object.keys(out).sort().map((k) => `"${k}" = "${esc(lang === 'en' ? subjects(brand(out[k])) : brand(out[k]))}";`);
+  const header = `/* Generado por apps/ios/tools/gen-strings.mjs desde apps/web/src/i18n.ts + ios-strings.json. No editar a mano. */\n\n`;
+  writeFileSync(join(here, '..', 'TieComs/Resources', `${lang}.lproj/Localizable.strings`), header + lines.join('\n') + '\n');
+  console.log(lang, lines.length, 'claves');
+}

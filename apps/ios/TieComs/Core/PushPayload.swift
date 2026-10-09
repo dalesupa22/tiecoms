@@ -1,0 +1,140 @@
+import Foundation
+
+/// Payload de un push de Chaggu (APNs): `aps` + datos (PushData del contrato).
+/// Tolerante: campos o tipos desconocidos no rompen; `type` desconocido → .message.
+struct PushPayload: Equatable {
+    /// reaction = reaccionaron a un mensaje mío: abre la conversación en `messageId`.
+    /// issue = me asignaron una tarea (docs/TAREAS.md): abre el asunto; si `inChat` es false, sin abrir el chat.
+    /// call = llamada entrante (docs/LLAMADAS.md › Push): Contestar entra con /calls/:id/join.
+    enum Kind: String { case message, reminder, event, side, mention, reaction, issue, call }
+
+    var kind: Kind
+    var conversationId: String
+    var messageId: String?
+    /// Seq y tema del mensaje, si el servidor los manda (opcionales; hoy el API solo manda `messageId`).
+    var messageSeq: Int?
+    var topicId: String?
+    var authorId: String?
+    var authorName: String?
+    /// Ruta relativa (/api/v1/avatars/…) o nil.
+    var authorAvatarPath: String?
+    var reminderId: String?
+    var eventId: String?
+    /// Push de tarea asignada (type 'issue').
+    var issueId: String?
+    /// ¿Estoy en el chat del asunto? Si no, se abre solo el asunto.
+    var inChat: Bool = true
+    /// Sidechat (type 'side'): origen, ancla y extracto (SPEC-v4 G).
+    var sideOfConversationId: String?
+    var sideOfMessageId: String?
+    var sideOfExcerpt: String?
+    /// Solo en el aviso de 10 min antes (la convocatoria no lo trae).
+    var minutes: Int?
+    /// Push de llamada (type 'call').
+    var callId: String?
+    var callKind: String?
+    var title: String
+    var subtitle: String?
+    var body: String
+    var threadId: String?
+    var category: String?
+    var badge: Int?
+
+    static let messageCategory = "TC_MESSAGE"
+    static let reminderCategory = "TC_REMINDER"
+    static let eventCategory = "TC_EVENT"
+    static let sideCategory = "TC_SIDE"
+    static let callCategory = "TC_CALL"
+    /// Archivo del tono elegido para el push de llamada (lo guarda la app en el grupo compartido; lo lee la extensión).
+    static let ringtoneKey = "tc.ringtoneFile"
+
+    init?(userInfo: [AnyHashable: Any]) {
+        func str(_ k: String) -> String? {
+            if let s = userInfo[k] as? String { return s.isEmpty ? nil : s }
+            if let n = userInfo[k] as? NSNumber { return n.stringValue }
+            return nil
+        }
+        guard let conv = str("conversationId") else { return nil }
+        conversationId = conv
+        kind = Kind(rawValue: str("type") ?? "message") ?? .message
+        messageId = str("messageId")
+        messageSeq = (str("seq") ?? str("messageSeq")).flatMap(Int.init)
+        topicId = str("topicId")
+        authorId = str("authorId")
+        authorName = str("authorName")
+        authorAvatarPath = str("authorAvatarUrl")
+        reminderId = str("reminderId")
+        eventId = str("eventId")
+        issueId = str("issueId")
+        callId = str("callId")
+        callKind = str("kind")
+        if let b = userInfo["inChat"] as? Bool { inChat = b } else if let s = str("inChat") { inChat = !(s == "false" || s == "0") }
+        minutes = str("minutes").flatMap(Int.init)
+        var sideOf = userInfo["sideOf"] as? [String: Any]
+        if sideOf == nil, let s = userInfo["sideOf"] as? String, let d = s.data(using: .utf8) { sideOf = try? JSONSerialization.jsonObject(with: d) as? [String: Any] }
+        sideOfConversationId = (sideOf?["conversationId"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        sideOfMessageId = sideOf?["messageId"] as? String
+        sideOfExcerpt = sideOf?["excerpt"] as? String
+        let aps = userInfo["aps"] as? [String: Any] ?? [:]
+        if let alert = aps["alert"] as? [String: Any] {
+            title = alert["title"] as? String ?? ""
+            subtitle = (alert["subtitle"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+            body = alert["body"] as? String ?? ""
+        } else {
+            title = str("title") ?? ""
+            subtitle = str("subtitle")
+            body = (aps["alert"] as? String) ?? str("body") ?? ""
+        }
+        threadId = aps["thread-id"] as? String ?? str("threadId") ?? conv
+        category = aps["category"] as? String ?? str("category")
+        badge = (aps["badge"] as? NSNumber)?.intValue
+    }
+
+    /// Qué abre un toque en la notificación (o en el aviso in-app, que lleva el mismo userInfo).
+    enum Route: Equatable {
+        case call(String)
+        case issue(String, conversationId: String, inChat: Bool)
+        case side(origin: String, side: String)
+        /// Mensaje, mención o reacción: el chat en el tema del mensaje y en el mensaje (1.7.5; antes solo la reacción).
+        case message(conversationId: String, messageId: String, seq: Int?, topicId: String?)
+        case conversation(String)
+    }
+
+    var route: Route {
+        switch kind {
+        case .call: if let callId { return .call(callId) }
+        case .issue: if let issueId { return .issue(issueId, conversationId: conversationId, inChat: inChat) }
+        case .side: if let o = sideOfConversationId { return .side(origin: o, side: conversationId) }
+        case .message, .mention, .reaction:
+            if let messageId { return .message(conversationId: conversationId, messageId: messageId, seq: messageSeq, topicId: topicId) }
+        case .reminder, .event: break
+        }
+        return .conversation(conversationId)
+    }
+
+    /// Aviso «Empieza en 10 min» frente a la convocatoria a una reunión.
+    var isEventSoon: Bool { kind == .event && minutes != nil }
+
+    /// Grupo (título = nombre del chat, subtítulo = «Autor · Empresa») frente a directo (título = autor, sin subtítulo).
+    var isGroup: Bool { subtitle != nil }
+
+    /// URL absoluta de la foto del autor, con la base del API.
+    func avatarURL(base: URL?) -> URL? {
+        guard let p = authorAvatarPath, let base else { return nil }
+        if p.hasPrefix("http://") || p.hasPrefix("https://") { return URL(string: p) }
+        return URL(string: base.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/")) + (p.hasPrefix("/") ? p : "/" + p))
+    }
+}
+
+/// Entorno de APNs según la compilación: Debug (Xcode) = sandbox; Release/TestFlight/App Store = production.
+enum PushEnvironment {
+    static var current: String {
+        #if DEBUG
+        return "sandbox"
+        #else
+        return "production"
+        #endif
+    }
+
+    static func hex(_ token: Data) -> String { token.map { String(format: "%02x", $0) }.joined() }
+}

@@ -1,0 +1,860 @@
+import Foundation
+
+// DTO de asuntos, agenda, recordatorios, reenvíos, dominios y WhatsApp.
+// Misma regla que Models.swift: decodificación tolerante (campos extra, nulos, tipos distintos).
+
+/// Valor JSON arbitrario (payloads libres como el historial de asuntos).
+enum JSONValue: Codable, Equatable, Sendable {
+    case string(String), number(Double), bool(Bool), object([String: JSONValue]), array([JSONValue]), null
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        if c.decodeNil() { self = .null }
+        else if let b = try? c.decode(Bool.self) { self = .bool(b) }
+        else if let n = try? c.decode(Double.self) { self = .number(n) }
+        else if let s = try? c.decode(String.self) { self = .string(s) }
+        else if let a = try? c.decode([JSONValue].self) { self = .array(a) }
+        else if let o = try? c.decode([String: JSONValue].self) { self = .object(o) }
+        else { self = .null }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        switch self {
+        case .string(let s): try c.encode(s)
+        case .number(let n): try c.encode(n)
+        case .bool(let b): try c.encode(b)
+        case .object(let o): try c.encode(o)
+        case .array(let a): try c.encode(a)
+        case .null: try c.encodeNil()
+        }
+    }
+
+    var stringValue: String? {
+        switch self { case .string(let s): return s; case .number(let n): return String(n); default: return nil }
+    }
+    subscript(key: String) -> JSONValue? { if case .object(let o) = self { return o[key] }; return nil }
+}
+
+enum ForwardSource: String, Codable, CaseIterable, Sendable { case whatsapp, slack, email, teams, tiecoms, other }
+
+struct ForwardedInfo: Codable, Equatable, Sendable {
+    var source: ForwardSource
+    var author: String?
+    var sentAt: String?
+    var fromConversationId: String?
+    /// Respuesta en privado: mensaje original al que se responde.
+    var messageId: String?
+    /// Los agrega el servidor cuando hay messageId: número del mensaje original y extracto (≤ 200). El cliente no los envía.
+    var messageSeq: Int?
+    var excerpt: String?
+
+    init(source: ForwardSource, author: String? = nil, sentAt: String? = nil, fromConversationId: String? = nil, messageId: String? = nil) {
+        self.source = source; self.author = author; self.sentAt = sentAt; self.fromConversationId = fromConversationId; self.messageId = messageId
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try container(decoder)
+        source = ForwardSource(rawValue: c.v("source", "other")) ?? .other
+        author = c.o("author")
+        sentAt = c.o("sentAt")
+        fromConversationId = c.o("fromConversationId")
+        messageId = c.o("messageId")
+        messageSeq = c.intOpt("messageSeq")
+        excerpt = c.o("excerpt")
+    }
+
+    var json: [String: Any] {
+        var o: [String: Any] = ["source": source.rawValue]
+        o["author"] = author ?? NSNull()
+        o["sentAt"] = sentAt ?? NSNull()
+        o["fromConversationId"] = fromConversationId ?? NSNull()
+        if let messageId { o["messageId"] = messageId }
+        return o
+    }
+}
+
+struct ReminderDTO: Codable, Equatable, Identifiable, Sendable {
+    var id: String
+    var conversationId: String
+    var messageId: String?
+    var messageSeq: Int?
+    var note: String?
+    var remindAt: String
+    var firedAt: String?
+    var doneAt: String?
+
+    init(from decoder: Decoder) throws {
+        let c = try container(decoder)
+        id = try c.decode(String.self, forKey: AnyKey("id"))
+        conversationId = c.v("conversationId", "")
+        messageId = c.o("messageId")
+        messageSeq = c.intOpt("messageSeq")
+        note = c.o("note")
+        remindAt = c.v("remindAt", "")
+        firedAt = c.o("firedAt")
+        doneAt = c.o("doneAt")
+    }
+}
+
+enum Rsvp: String, Codable, CaseIterable, Sendable { case pending, yes, no, maybe }
+
+/// Comentario de un evento (GET/POST /events/:id/comments).
+struct EventCommentDTO: Codable, Equatable, Identifiable, Sendable {
+    var id: String
+    var eventId: String
+    var authorId: String
+    var body: String
+    var createdAt: String
+    init(id: String, eventId: String, authorId: String, body: String, createdAt: String) {
+        self.id = id; self.eventId = eventId; self.authorId = authorId; self.body = body; self.createdAt = createdAt
+    }
+    init(from decoder: Decoder) throws {
+        let c = try container(decoder)
+        id = c.v("id", UUID().uuidString)
+        eventId = c.v("eventId", "")
+        authorId = c.o("authorId") ?? c.v("userId", "")
+        body = c.v("body", "")
+        createdAt = c.v("createdAt", "")
+    }
+}
+
+struct CalendarEventDTO: Codable, Equatable, Identifiable, Sendable {
+    struct Invitee: Codable, Equatable, Sendable {
+        var userId: String
+        var rsvp: Rsvp
+        init(from decoder: Decoder) throws {
+            let c = try container(decoder)
+            userId = c.v("userId", "")
+            rsvp = Rsvp(rawValue: c.v("rsvp", "pending")) ?? .pending
+        }
+    }
+    var id: String
+    /// Comentarios del evento (tanda 1.7 §5): cuántos y los 2 últimos.
+    var commentCount: Int = 0
+    var lastComments: [EventCommentDTO] = []
+    /// nil en directos, multi y laterales (SPEC-v4 E).
+    var workspaceId: String?
+    var conversationId: String
+    var originMessageId: String?
+    var title: String
+    var description: String?
+    var location: String?
+    var startsAt: String
+    var endsAt: String
+    var timezone: String
+    var organizerId: String
+    var invitees: [Invitee]
+    var cancelledAt: String?
+    var updatedAt: String
+
+    var start: Date { ISODate.parse(startsAt) ?? .distantPast }
+    var end: Date { ISODate.parse(endsAt) ?? .distantPast }
+    var isCancelled: Bool { cancelledAt != nil }
+
+    init(from decoder: Decoder) throws {
+        let c = try container(decoder)
+        id = try c.decode(String.self, forKey: AnyKey("id"))
+        commentCount = c.int("commentCount")
+        lastComments = c.lossyArray("lastComments")
+        workspaceId = c.o("workspaceId")
+        conversationId = c.v("conversationId", "")
+        originMessageId = c.o("originMessageId")
+        title = c.v("title", "")
+        description = c.o("description")
+        location = c.o("location")
+        startsAt = c.v("startsAt", "")
+        endsAt = c.v("endsAt", "")
+        timezone = c.v("timezone", "UTC")
+        organizerId = c.v("organizerId", "")
+        invitees = c.lossyArray("invitees")
+        cancelledAt = c.o("cancelledAt")
+        updatedAt = c.v("updatedAt", "")
+    }
+}
+
+enum IssueStatus: String, Codable, CaseIterable, Sendable {
+    case open, in_progress, waiting, done, cancelled
+    var closed: Bool { self == .done || self == .cancelled }
+}
+
+struct IssueDTO: Codable, Equatable, Identifiable, Sendable {
+    var id: String
+    /// nil en directos, multi y laterales (SPEC-v4 E) y en los personales.
+    var workspaceId: String?
+    /// nil = asunto personal: sin conversación, solo lo ve su dueño (contrato 2026-09-28).
+    var conversationId: String?
+    var originMessageId: String?
+    var originMessageSeq: Int?
+    var title: String
+    var status: IssueStatus
+    var waitingOnOrgId: String?
+    var ownerId: String?
+    var assigneeIds: [String] = []
+    var assignedIds: [String] { assigneeIds.isEmpty ? ownerId.map { [$0] } ?? [] : assigneeIds }
+    var requestedBy: String?
+    var dueDate: String?
+    var createdBy: String
+    var createdAt: String
+    var updatedAt: String
+    var statusSince: String
+    var closedAt: String?
+    var commentCount: Int
+    /// Tarea derivada de este asunto (nil = asunto principal). docs/TAREAS.md.
+    var parentIssueId: String?
+    /// Quién la ve: todo el chat, solo `visibleOrgId` (+ viewerIds) o solo viewerIds. Ausente = servidor anterior (all).
+    var visibility: IssueVisibility = .all
+    var visibleOrgId: String?
+    var viewerIds: [String] = []
+    /// Tema de la tarea (docs/TEMAS.md). nil = sin tema o servidor anterior.
+    var topicId: String?
+    /// Campos propios de la tarea (migración 097): nombre → texto, número o sí/no. Vacío = sin campos o servidor anterior.
+    var fields: [String: IssueFieldValue] = [:]
+    /// Archivos de la tarea (POST /issues/:id/attachments + PATCH attachmentIds). Vacío = sin archivos o servidor anterior.
+    var attachments: [AttachmentDTO] = []
+
+    init(from decoder: Decoder) throws {
+        let c = try container(decoder)
+        id = try c.decode(String.self, forKey: AnyKey("id"))
+        workspaceId = c.o("workspaceId")
+        conversationId = c.o("conversationId").flatMap { (s: String) in s.isEmpty ? nil : s }
+        originMessageId = c.o("originMessageId")
+        originMessageSeq = c.intOpt("originMessageSeq")
+        title = c.v("title", "")
+        status = IssueStatus(rawValue: c.v("status", "open")) ?? .open
+        waitingOnOrgId = c.o("waitingOnOrgId")
+        ownerId = c.o("ownerId")
+        assigneeIds = c.v("assigneeIds", [])
+        requestedBy = c.o("requestedBy")
+        dueDate = c.o("dueDate")
+        createdBy = c.v("createdBy", "")
+        createdAt = c.v("createdAt", "")
+        updatedAt = c.v("updatedAt", "")
+        statusSince = c.v("statusSince", createdAt)
+        closedAt = c.o("closedAt")
+        commentCount = c.int("commentCount")
+        parentIssueId = c.o("parentIssueId")
+        visibility = IssueVisibility(rawValue: c.v("visibility", "all")) ?? .all
+        visibleOrgId = c.o("visibleOrgId")
+        viewerIds = c.v("viewerIds", [])
+        topicId = c.o("topicId")
+        fields = (try? c.decodeIfPresent([String: IssueFieldValue].self, forKey: AnyKey("fields"))) ?? [:]
+        attachments = c.lossyArray("attachments")
+    }
+
+    /// Restringida: 'org' (solo mi empresa) o 'private'.
+    var isRestricted: Bool { visibility != .all }
+    /// Asunto personal («🔒 Personal · solo tú»): sin chat, sin responsable que elegir, sin tareas ni sidechat.
+    var isPersonal: Bool { conversationId == nil }
+}
+
+enum IssueVisibility: String, Codable, CaseIterable, Sendable { case all, org, `private` }
+
+/// Valor de un campo de tarea: texto, número o sí/no (IssueFieldValue del contrato).
+enum IssueFieldValue: Codable, Equatable, Sendable {
+    case text(String), number(Double), bool(Bool)
+    init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        if let b = try? c.decode(Bool.self) { self = .bool(b) }
+        else if let n = try? c.decode(Double.self) { self = .number(n) }
+        else { self = .text(try c.decode(String.self)) }
+    }
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        switch self { case .text(let s): try c.encode(s); case .number(let n): try c.encode(n); case .bool(let b): try c.encode(b) }
+    }
+    var json: Any { switch self { case .text(let s): s; case .number(let n): n; case .bool(let b): b } }
+    var display: String {
+        switch self {
+        case .text(let s): return s
+        case .number(let n): return n.rounded() == n && abs(n) < 1e15 ? String(Int64(n)) : String(n)
+        case .bool(let b): return b ? L("task.fieldYes") : L("task.fieldNo")
+        }
+    }
+}
+
+/// Columna de tareas definida por el grupo (GET /conversations/:id/task-columns).
+struct TaskColumnDTO: Decodable, Equatable, Sendable, Identifiable {
+    var name: String
+    var type: String
+    var options: [String]
+    var id: String { name }
+    init(name: String, type: String, options: [String] = []) { self.name = name; self.type = type; self.options = options }
+    init(from decoder: Decoder) throws {
+        let c = try container(decoder)
+        name = c.v("name", ""); type = c.v("type", "text"); options = c.v("options", [])
+    }
+}
+
+struct IssueEventDTO: Codable, Equatable, Identifiable, Sendable {
+    var id: Int
+    var issueId: String
+    var actorId: String
+    var kind: String
+    var payload: JSONValue
+    var createdAt: String
+
+    init(from decoder: Decoder) throws {
+        let c = try container(decoder)
+        id = c.int("id")
+        issueId = c.v("issueId", "")
+        actorId = c.v("actorId", "")
+        kind = c.v("kind", "")
+        payload = c.v("payload", JSONValue.null)
+        createdAt = c.v("createdAt", "")
+    }
+}
+
+struct IssueDetail: Decodable, Sendable {
+    var issue: IssueDTO
+    var events: [IssueEventDTO]
+    /// Solo las tareas hijas que yo veo.
+    var children: [IssueDTO]
+    init(from decoder: Decoder) throws {
+        let c = try container(decoder)
+        issue = try c.decode(IssueDTO.self, forKey: AnyKey("issue"))
+        events = c.lossyArray("events")
+        children = c.lossyArray("children")
+    }
+}
+
+struct OrgDomainDTO: Codable, Equatable, Identifiable, Sendable {
+    var domain: String
+    /// pending | idp | dns
+    var status: String
+    var txtName: String
+    var txtValue: String
+    var verifiedAt: String?
+    var lastCheckedAt: String?
+    var id: String { domain }
+
+    init(from decoder: Decoder) throws {
+        let c = try container(decoder)
+        domain = try c.decode(String.self, forKey: AnyKey("domain"))
+        status = c.v("status", "pending")
+        txtName = c.v("txtName", "")
+        txtValue = c.v("txtValue", "")
+        verifiedAt = c.o("verifiedAt")
+        lastCheckedAt = c.o("lastCheckedAt")
+    }
+}
+
+// MARK: WhatsApp
+
+enum WaCategory: String, Codable, CaseIterable, Sendable {
+    case trabajo, clientes, familia, amigos, comunidad, otros
+    var icon: String { ["trabajo": "💼", "clientes": "🤝", "familia": "🏠", "amigos": "🍻", "comunidad": "🏘", "otros": "◌"][rawValue] ?? "◌" }
+}
+
+struct WaAccountDTO: Codable, Equatable, Identifiable, Sendable {
+    var privacyReady: Bool?
+    var id: String
+    /// «Responder desde chaggu» activado en esta cuenta (apagado = solo lectura). Ausente en servidores anteriores.
+    var sendEnabled: Bool
+    var label: String
+    var kind: String
+    var status: String
+    var phone: String?
+    var pushName: String?
+    var platform: String?
+    var qr: String?
+    var pairingCode: String?
+    var lastError: String?
+    var connectedAt: String?
+    var lastSyncAt: String?
+    var chats: Int
+    var groups: Int
+    var createdAt: String
+
+    var isBusiness: Bool { kind == "business" || (platform ?? "").hasPrefix("smb") }
+    var isWaiting: Bool { ["pending", "qr", "reconnecting"].contains(status) }
+
+    init(from decoder: Decoder) throws {
+        let c = try container(decoder)
+        id = try c.decode(String.self, forKey: AnyKey("id"))
+        privacyReady = c.o("privacyReady")
+        sendEnabled = c.v("sendEnabled", false)
+        label = c.v("label", "")
+        kind = c.v("kind", "personal")
+        status = c.v("status", "pending")
+        phone = c.o("phone")
+        pushName = c.o("pushName")
+        platform = c.o("platform")
+        qr = c.o("qr")
+        pairingCode = c.o("pairingCode")
+        lastError = c.o("lastError")
+        connectedAt = c.o("connectedAt")
+        lastSyncAt = c.o("lastSyncAt")
+        chats = c.int("chats")
+        groups = c.int("groups")
+        createdAt = c.v("createdAt", "")
+    }
+}
+
+struct WaChatDTO: Codable, Hashable, Identifiable, Sendable {
+    var accountId: String
+    var accountLabel: String
+    var accountKind: String
+    var jid: String
+    var name: String
+    var isGroup: Bool
+    var participants: Int?
+    var description: String?
+    var lastMessageAt: String?
+    var lastPreview: String?
+    var unread: Int
+    var category: WaCategory
+    var categoryManual: Bool
+    var pinned: Bool
+    var hidden: Bool
+    var archivedInWhatsApp: Bool
+    var linkedConversationId: String?
+    /// Bandeja de chaggu (contrato 1-oct-2026, migr. 081): 'groups' | 'dms' | nil (solo en la pantalla WhatsApp).
+    var inboxPlace: String?
+    /// Fijado arriba en la bandeja (independiente de `pinned`, que es el fijado dentro de WhatsApp).
+    var inboxPinnedAt: String?
+    /// Estado de la cuenta (connected, logged_out…). Ausente en servidores anteriores.
+    var accountStatus: String?
+    var id: String { "\(accountId)|\(jid)" }
+    /// Clave de la fila en la bandeja y fuente de gg: `wa:<accountId>:<jid>`.
+    var inboxKey: String { "wa:\(accountId):\(jid)" }
+    var inInbox: Bool { inboxPlace != nil }
+    /// La sección que sugiere el servidor con 'auto': un grupo a Grupos, un 1 a 1 a DMs.
+    var suggestedPlace: String { isGroup ? "groups" : "dms" }
+    var isDisconnected: Bool { accountStatus.map { $0 != "connected" } ?? false }
+
+    init(from decoder: Decoder) throws {
+        let c = try container(decoder)
+        accountId = c.v("accountId", "")
+        accountLabel = c.v("accountLabel", "")
+        accountKind = c.v("accountKind", "personal")
+        jid = try c.decode(String.self, forKey: AnyKey("jid"))
+        name = c.v("name", "")
+        isGroup = c.v("isGroup", false)
+        participants = c.intOpt("participants")
+        description = c.o("description")
+        lastMessageAt = c.o("lastMessageAt")
+        lastPreview = c.o("lastPreview")
+        unread = c.int("unread")
+        category = WaCategory(rawValue: c.v("category", "otros")) ?? .otros
+        categoryManual = c.v("categoryManual", false)
+        pinned = c.v("pinned", false)
+        hidden = c.v("hidden", false)
+        archivedInWhatsApp = c.v("archivedInWhatsApp", false)
+        linkedConversationId = c.o("linkedConversationId")
+        inboxPlace = c.o("inboxPlace").flatMap { (x: String) in ["groups", "dms"].contains(x) ? x : nil }
+        inboxPinnedAt = c.o("inboxPinnedAt")
+        accountStatus = c.o("accountStatus")
+    }
+}
+
+struct WaMessageMedia: Codable, Equatable, Sendable {
+    var status: String
+    var attachment: AttachmentDTO?
+    var error: String?
+}
+struct WaMessageDTO: Codable, Equatable, Identifiable, Sendable {
+    var id: String
+    var fromMe: Bool
+    var author: String?
+    var kind: String
+    var body: String
+    var sentAt: String
+    var media: WaMessageMedia?
+    init(from decoder: Decoder) throws {
+        let c = try container(decoder)
+        id = try c.decode(String.self, forKey: AnyKey("id"))
+        media = c.o("media")
+        fromMe = c.v("fromMe", false)
+        author = c.o("author")
+        kind = c.v("kind", "text")
+        body = c.v("body", "")
+        sentAt = c.v("sentAt", "")
+    }
+}
+
+struct WaChatsPage: Decodable, Sendable {
+    struct Count: Decodable, Sendable {
+        var total: Int; var unread: Int
+        init(from decoder: Decoder) throws { let c = try container(decoder); total = c.int("total"); unread = c.int("unread") }
+    }
+    var chats: [WaChatDTO]
+    var categories: [String: Count]
+    var next: String?
+    var hasMore: Bool
+    var syncPartial: Bool
+    init(from decoder: Decoder) throws {
+        let c = try container(decoder)
+        chats = c.lossyArray("chats")
+        categories = c.v("categories", [:])
+        next = c.o("next"); hasMore = c.v("hasMore", false); syncPartial = c.v("syncPartial", false)
+    }
+}
+
+/// Envoltorios de listas del API.
+struct ListOf<T: Decodable>: Decodable {
+    var items: [T]
+    var max: Int?
+    init(from decoder: Decoder) throws {
+        let c = try container(decoder)
+        let key = c.allKeys.first { ["issues", "events", "reminders", "messages", "domains", "accounts"].contains($0.stringValue) }?.stringValue ?? ""
+        items = c.lossyArray(key)
+        max = c.intOpt("max")
+    }
+}
+
+// MARK: - Archivos (árbol de carpetas)
+
+struct DriveFolderDTO: Codable, Equatable, Identifiable, Sendable {
+    var id: String
+    var parentId: String?
+    var name: String
+    var createdBy: String?
+    var createdAt: String
+
+    init(from decoder: Decoder) throws {
+        let c = try container(decoder)
+        id = try c.decode(String.self, forKey: AnyKey("id"))
+        parentId = c.o("parentId")
+        name = c.v("name", "")
+        createdBy = c.o("createdBy")
+        createdAt = c.v("createdAt", "")
+    }
+}
+
+struct DriveFileDTO: Codable, Equatable, Identifiable, Sendable {
+    var id: String
+    var folderId: String?
+    var name: String
+    var contentType: String
+    var size: Int
+    var createdBy: String?
+    var createdAt: String
+
+    init(from decoder: Decoder) throws {
+        let c = try container(decoder)
+        id = try c.decode(String.self, forKey: AnyKey("id"))
+        folderId = c.o("folderId")
+        name = c.v("name", "")
+        contentType = c.v("contentType", "application/octet-stream")
+        size = c.int("size")
+        createdBy = c.o("createdBy")
+        createdAt = c.v("createdAt", "")
+    }
+}
+
+/// Un árbol completo: «Mis archivos» (workspaceId nil) o el de un espacio.
+struct DriveTreeDTO: Decodable, Equatable, Sendable {
+    var workspaceId: String?
+    var folders: [DriveFolderDTO]
+    var files: [DriveFileDTO]
+    var canManageAll: Bool
+
+    init(from decoder: Decoder) throws {
+        let c = try container(decoder)
+        workspaceId = c.o("workspaceId")
+        folders = c.lossyArray("folders")
+        files = c.lossyArray("files")
+        canManageAll = c.v("canManageAll", false)
+    }
+
+    func folders(in parent: String?) -> [DriveFolderDTO] {
+        folders.filter { $0.parentId == parent }.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+    func files(in folder: String?) -> [DriveFileDTO] {
+        files.filter { $0.folderId == folder }.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+}
+
+/// Resultado de POST /chats: con una persona, el directo existente; con varias, un chat grupal.
+struct CreateChatResult: Decodable, Sendable {
+    var id: String
+    var kind: ConversationKind
+    init(from decoder: Decoder) throws {
+        let c = try container(decoder)
+        id = try c.decode(String.self, forKey: AnyKey("id"))
+        kind = ConversationKind(rawValue: c.v("kind", "multi")) ?? .multi
+    }
+}
+
+
+// MARK: Adjuntos
+
+/// Quién firmó un PDF con Chaggu, cuándo y las huellas SHA-256 (hex) del original y del firmado.
+struct AttachmentSigningDTO: Codable, Equatable, Sendable, Identifiable {
+    var id: String
+    var signerId: String
+    var signerName: String
+    var signedAt: String
+    var originalSha256: String
+    var signedSha256: String
+
+    init(id: String, signerId: String = "", signerName: String, signedAt: String, originalSha256: String = "", signedSha256: String = "") {
+        self.id = id; self.signerId = signerId; self.signerName = signerName; self.signedAt = signedAt
+        self.originalSha256 = originalSha256; self.signedSha256 = signedSha256
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try container(decoder)
+        id = try c.decode(String.self, forKey: AnyKey("id"))
+        signerId = c.v("signerId", "")
+        signerName = c.v("signerName", "")
+        signedAt = c.v("signedAt", "")
+        originalSha256 = c.v("originalSha256", "")
+        signedSha256 = c.v("signedSha256", "")
+    }
+
+    /// Referencia impresa en el sello del PDF («Chaggu Ref. 3F9A21C0»): igual que `signingRef` del contrato.
+    static func ref(_ id: String) -> String { String(id.replacingOccurrences(of: "-", with: "").prefix(8)).uppercased() }
+}
+
+struct AttachmentProvenance: Codable, Equatable, Sendable {
+    var version = 1
+    var provider: String
+    var title: String
+    var attribution: String
+    var sourceUrl: String?
+    var author: String?
+    var license: String?
+    var licenseUrl: String?
+}
+
+struct AttachmentDTO: Codable, Equatable, Identifiable, Sendable {
+    var id: String
+    var name: String
+    var contentType: String
+    var sizeBytes: Int
+    var width: Int?
+    var height: Int?
+    /// /api/v1/attachments/<id> (autenticada con Bearer).
+    var url: String
+    var thumbUrl: String?
+    /// 'voice' en notas de voz (SPEC-v4 F); los adjuntos normales no lo traen.
+    var kind: String?
+    var durationMs: Int?
+    /// Hasta 64 valores 0…1.
+    var waveform: [Double]?
+    var transcript: VoiceTranscript?
+    /// Solo en PDFs firmados con Chaggu: quién firmó, cuándo y la huella del resultado.
+    var signing: AttachmentSigningDTO?
+    var provenance: AttachmentProvenance?
+
+    var isVoice: Bool { kind == "voice" }
+    var normalizedMIME: String { contentType.split(separator: ";", maxSplits: 1).first.map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() } ?? "" }
+    var isGif: Bool { normalizedMIME == "image/gif" }
+    var isImage: Bool { !isVoice && normalizedMIME.hasPrefix("image/") }
+    var isVideo: Bool { !isVoice && normalizedMIME.hasPrefix("video/") }
+    var isUTF8Text: Bool { normalizedMIME == "text/plain" && sizeBytes <= 1024 * 1024 }
+    var isMedia: Bool { isImage || isVideo }
+
+    init(id: String, name: String, contentType: String, sizeBytes: Int, width: Int? = nil, height: Int? = nil, url: String, thumbUrl: String? = nil,
+         kind: String? = nil, durationMs: Int? = nil, waveform: [Double]? = nil, transcript: VoiceTranscript? = nil, signing: AttachmentSigningDTO? = nil, provenance: AttachmentProvenance? = nil) {
+        self.id = id; self.name = name; self.contentType = contentType; self.sizeBytes = sizeBytes
+        self.width = width; self.height = height; self.url = url; self.thumbUrl = thumbUrl
+        self.kind = kind; self.durationMs = durationMs; self.waveform = waveform; self.transcript = transcript
+        self.signing = signing; self.provenance = provenance
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try container(decoder)
+        id = try c.decode(String.self, forKey: AnyKey("id"))
+        name = c.v("name", "archivo")
+        contentType = c.v("contentType", "application/octet-stream")
+        sizeBytes = c.int("sizeBytes")
+        width = c.intOpt("width")
+        height = c.intOpt("height")
+        url = c.v("url", "/api/v1/attachments/\(id)")
+        thumbUrl = c.o("thumbUrl")
+        kind = c.o("kind")
+        durationMs = c.intOpt("durationMs")
+        waveform = (c.o("waveform") as [Double]?).map { $0.prefix(64).map { min(1, max(0, $0)) } }
+        transcript = c.o("transcript")
+        signing = c.o("signing")
+        provenance = c.o("provenance")
+    }
+}
+
+/// Transcripción de una nota de voz: pending → done | failed; disabled si el servidor no tiene llave.
+struct VoiceTranscript: Codable, Equatable, Sendable {
+    enum Status: String, Codable, Sendable { case pending, done, failed, disabled }
+    var status: Status
+    var text: String?
+    var language: String?
+    var summary: String?
+    /// Título para el chip «Crear asunto: …».
+    var suggestedIssue: String?
+
+    init(status: Status, text: String? = nil, language: String? = nil, summary: String? = nil, suggestedIssue: String? = nil) {
+        self.status = status; self.text = text; self.language = language; self.summary = summary; self.suggestedIssue = suggestedIssue
+    }
+    init(from decoder: Decoder) throws {
+        let c = try container(decoder)
+        status = Status(rawValue: c.v("status", "pending")) ?? .pending
+        text = c.o("text"); language = c.o("language"); summary = c.o("summary"); suggestedIssue = c.o("suggestedIssue")
+    }
+}
+
+/// ConversationDTO.lastHumanPreview: el último mensaje de una persona.
+struct HumanPreview: Codable, Equatable, Sendable {
+    struct Counts: Codable, Equatable, Sendable {
+        var count: Int; var images: Int; var videos: Int; var files: Int; var firstName: String?
+        var voices: Int = 0; var voiceDurationMs: Int?
+        init(count: Int, images: Int, videos: Int, files: Int, firstName: String?, voices: Int = 0, voiceDurationMs: Int? = nil) {
+            self.count = count; self.images = images; self.videos = videos; self.files = files; self.firstName = firstName
+            self.voices = voices; self.voiceDurationMs = voiceDurationMs
+        }
+        init(from decoder: Decoder) throws {
+            let c = try container(decoder)
+            count = c.int("count"); images = c.int("images"); videos = c.int("videos"); files = c.int("files"); firstName = c.o("firstName")
+            voices = c.int("voices"); voiceDurationMs = c.intOpt("voiceDurationMs")
+        }
+    }
+    var messageId: String?
+    var seq: Int
+    var authorId: String?
+    var body: String
+    var attachments: Counts?
+    var createdAt: String?
+    /// Una sola vista (tanda 1.7): «① Foto», «① Mensaje» o «① Nota de voz», nunca el contenido.
+    var viewOnce = false
+
+    /// El «último mensaje de una persona» a partir de un mensaje (como humanPreviewOf de client-core, web 51b7536).
+    /// Con una sola vista el cuerpo va vacío.
+    init(_ m: MessageDTO) {
+        messageId = m.id; seq = m.seq; authorId = m.authorId; body = m.viewOnce ? "" : m.body; createdAt = m.createdAt; viewOnce = m.viewOnce
+        let voice = m.attachments.filter { $0.kind == "voice" }
+        let rest = m.attachments.filter { $0.kind != "voice" }
+        let images = rest.filter { $0.contentType.hasPrefix("image/") }.count
+        let videos = rest.filter { $0.contentType.hasPrefix("video/") }.count
+        attachments = m.attachments.isEmpty ? nil : Counts(count: m.attachments.count, images: images, videos: videos, files: rest.count - images - videos,
+                                                          firstName: m.attachments.first?.name, voices: voice.count, voiceDurationMs: voice.first?.durationMs)
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try container(decoder)
+        viewOnce = c.v("viewOnce", false)
+        messageId = c.o("messageId"); seq = c.int("seq"); authorId = c.o("authorId"); body = c.v("body", "")
+        attachments = c.o("attachments"); createdAt = c.o("createdAt")
+    }
+}
+
+/// Mención con @ (SPEC-v4 H): offsets en unidades UTF-16 sobre `body`; el tramo empieza con "@". `userId` puede ser 'all'.
+/// `#Nombre` de una conversación en el texto (docs/TANDA-1.7.md §1). `name` es el nombre al enviar; offsets UTF-16 sobre body.
+struct MessageRef: Codable, Equatable, Hashable, Sendable {
+    var conversationId: String
+    var name: String
+    var start: Int
+    var length: Int
+    var end: Int { start + length }
+    init(conversationId: String, name: String, start: Int, length: Int) {
+        self.conversationId = conversationId; self.name = name; self.start = start; self.length = length
+    }
+    init(from decoder: Decoder) throws {
+        let c = try container(decoder)
+        conversationId = c.v("conversationId", ""); name = c.v("name", ""); start = c.int("start"); length = c.int("length")
+    }
+    /// Lo que se envía (el servidor pone el nombre).
+    var json: [String: Any] { ["conversationId": conversationId, "start": start, "length": length] }
+}
+
+/// Quién abrió un mensaje de una sola vista (solo lo ve el autor).
+struct ViewOnceOpen: Codable, Equatable, Sendable {
+    var userId: String
+    var at: String
+    init(userId: String, at: String) { self.userId = userId; self.at = at }
+    init(from decoder: Decoder) throws {
+        let c = try container(decoder)
+        userId = c.v("userId", ""); at = c.v("at", "")
+    }
+}
+
+struct Mention: Codable, Equatable, Hashable, Sendable {
+    static let all = "all"
+    var userId: String
+    var start: Int
+    var length: Int
+    var end: Int { start + length }
+    var isAll: Bool { userId == Mention.all }
+
+    init(userId: String, start: Int, length: Int) { self.userId = userId; self.start = start; self.length = length }
+    init(from decoder: Decoder) throws {
+        let c = try container(decoder)
+        userId = c.v("userId", ""); start = c.int("start"); length = c.int("length")
+    }
+    var json: [String: Any] { ["userId": userId, "start": start, "length": length] }
+}
+
+/// Reacción agregada de un mensaje: quién reaccionó con ese emoji (orden de la primera reacción).
+/// `external`: reacciones que llegaron por el puente de WhatsApp (sin cuenta en Chaggu). docs/REACCIONES_ENLACES.md.
+struct ReactionDTO: Codable, Equatable, Sendable, Identifiable {
+    struct External: Codable, Equatable, Sendable {
+        var name: String
+        var source: ForwardSource
+        init(name: String, source: ForwardSource) { self.name = name; self.source = source }
+        init(from decoder: Decoder) throws {
+            let c = try container(decoder)
+            name = c.v("name", "")
+            source = ForwardSource(rawValue: c.v("source", "other")) ?? .other
+        }
+    }
+    var emoji: String
+    var userIds: [String]
+    var external: [External] = []
+    var id: String { emoji }
+    var count: Int { userIds.count + external.count }
+
+    init(emoji: String, userIds: [String], external: [External] = []) {
+        self.emoji = emoji; self.userIds = userIds; self.external = external
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try container(decoder)
+        emoji = try c.decode(String.self, forKey: AnyKey("emoji"))
+        userIds = c.v("userIds", [])
+        external = c.lossyArray("external")
+    }
+}
+
+// MARK: - Mensajes programados
+
+/// Mensajes programados (docs/PROGRAMADOS.md): se escriben ahora y salen solos a la hora elegida. Solo los ve quien
+/// los escribió hasta que salen. Mismas reglas que la web (Scheduled.tsx).
+struct ScheduledMessageDTO: Decodable, Equatable, Identifiable, Sendable {
+    enum Status: String, Sendable { case pending, sending, sent, cancelled, failed }
+    var id: String
+    var conversationId: String
+    var body: String
+    var mentions: [Mention]
+    var replyTo: String?
+    var sendAt: String
+    var status: Status
+    var messageId: String?
+    var error: String?
+    var createdAt: String
+    var sentAt: String?
+
+    /// Sigue en la lista mientras no haya salido ni se haya cancelado.
+    var isListed: Bool { status == .pending || status == .sending || status == .failed }
+    var failed: Bool { status == .failed }
+    var date: Date? { ISODate.parse(sendAt) }
+
+    init(from decoder: Decoder) throws {
+        let c = try container(decoder)
+        id = try c.decode(String.self, forKey: AnyKey("id"))
+        conversationId = c.v("conversationId", "")
+        body = c.v("body", "")
+        mentions = c.lossyArray("mentions")
+        replyTo = c.o("replyTo")
+        sendAt = c.v("sendAt", "")
+        status = Status(rawValue: c.v("status", "pending")) ?? .pending
+        messageId = c.o("messageId")
+        error = c.o("error")
+        createdAt = c.v("createdAt", "")
+        sentAt = c.o("sentAt")
+    }
+}
+
+struct ScheduledList: Decodable, Sendable {
+    var scheduled: [ScheduledMessageDTO]
+    init(from decoder: Decoder) throws { scheduled = (try container(decoder)).lossyArray("scheduled") }
+}

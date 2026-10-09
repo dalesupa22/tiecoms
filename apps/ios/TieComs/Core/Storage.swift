@@ -1,0 +1,298 @@
+import Foundation
+import Security
+
+/// Dónde se guarda el refresh token.
+protocol SecretStore: AnyObject {
+    func get() -> String?
+    func set(_ value: String?)
+}
+
+/// Refresh token en el Keychain, solo en este dispositivo y tras el primer desbloqueo.
+/// Se guarda en el grupo compartido `group.com.chaggu.app` para que la extensión de
+/// Compartir use la misma sesión. Si el grupo no está disponible (build sin firma),
+/// se usa el Keychain propio de la app, y el ítem sin grupo se pasa al grupo cuando vuelve a estarlo.
+/// Chaggu (com.chaggu.app) es una app nueva: no lee ni migra el Keychain de la app anterior (TieComs).
+final class KeychainSecretStore: SecretStore {
+    static let sharedGroup = "group.com.chaggu.app"
+    private let service: String
+    private static let legacyAccount = "refreshToken"
+    private let account: String
+    private let group: String?
+
+    /// La sesión se guarda por servidor: cambiar de API (producción, 3043, otro puerto) nunca borra
+    /// la sesión de otro. Producción usa la cuenta "refreshToken".
+    static func account(for apiURL: URL?) -> String {
+        guard let apiURL, let host = apiURL.host?.lowercased(), !AppConfig.productionHosts.contains(host) else { return legacyAccount }
+        return "refreshToken@\(host):\(apiURL.port ?? (apiURL.scheme == "http" ? 80 : 443))"
+    }
+
+    init(service: String = "com.chaggu.app.session", group: String? = KeychainSecretStore.sharedGroup, apiURL: URL? = nil) {
+        self.service = service
+        self.group = group
+        self.account = KeychainSecretStore.account(for: apiURL)
+    }
+
+    private func query(group: String?, account: String? = nil) -> [String: Any] {
+        var q: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
+                                kSecAttrService as String: service,
+                                kSecAttrAccount as String: account ?? self.account]
+        if let group { q[kSecAttrAccessGroup as String] = group }
+        return q
+    }
+
+    private func read(group: String?, account: String? = nil) -> String? {
+        var q = query(group: group, account: account)
+        q[kSecReturnData as String] = true
+        q[kSecMatchLimit as String] = kSecMatchLimitOne
+        var out: AnyObject?
+        guard SecItemCopyMatching(q as CFDictionary, &out) == errSecSuccess, let data = out as? Data else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    func get() -> String? {
+        if let group, let v = read(group: group) { return v }
+        // Grupo no disponible cuando se guardó (se usó el Keychain propio de la app).
+        if let local = read(group: nil) {
+            if group != nil { set(local) }
+            return local
+        }
+        #if DEBUG
+        return debugFallbackValue()
+        #else
+        return nil
+        #endif
+    }
+
+    func set(_ value: String?) {
+        if let group { SecItemDelete(query(group: group) as CFDictionary) }
+        SecItemDelete(query(group: nil) as CFDictionary)
+        #if DEBUG
+        // El borrado debe alcanzar también el fallback unsigned, incluso cuando value es nil.
+        debugFallback(nil)
+        #endif
+        guard let value, let data = value.data(using: .utf8) else { return }
+        func add(_ group: String?) -> OSStatus {
+            var q = query(group: group)
+            q[kSecValueData as String] = data
+            q[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+            return SecItemAdd(q as CFDictionary, nil)
+        }
+        var status = add(group)
+        if status != errSecSuccess && group != nil { status = add(nil) }
+        if status != errSecSuccess { NSLog("[Chaggu] Keychain SecItemAdd falló: \(status)") }
+        #if DEBUG
+        // Solo depuración: una build de simulador sin firmar no tiene entitlements (-34018) y la sesión
+        // se perdía en cada relanzamiento. En ese caso se guarda en un archivo protegido de la app.
+        debugFallback(status == errSecSuccess ? nil : value)
+        #endif
+    }
+
+    #if DEBUG
+    private var fallbackURL: URL? {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("debug-sessions", isDirectory: true)
+            .appendingPathComponent(service.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? service, isDirectory: true)
+            .appendingPathComponent((account.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? account) + ".txt")
+    }
+    private func debugFallback(_ value: String?) {
+        guard let url = fallbackURL else { return }
+        if let value {
+            try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try? Data(value.utf8).write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        } else { try? FileManager.default.removeItem(at: url) }
+    }
+    fileprivate func debugFallbackValue() -> String? {
+        fallbackURL.flatMap { try? String(contentsOf: $0, encoding: .utf8) }.flatMap { $0.isEmpty ? nil : $0 }
+    }
+    #endif
+}
+
+/// Lista de conversaciones para la extensión de Compartir (App Group). Solo títulos, sin mensajes.
+enum ShareTargets {
+    static let suite = "group.com.chaggu.app"
+    /// Lo que la extensión necesita para agrupar como Inicio (Empresa · Espacio, Chats) y mostrar la foto.
+    struct Target: Codable, Equatable, Identifiable {
+        var id: String
+        var title: String
+        var subtitle: String
+        /// «Empresa · Espacio» o nil (chats).
+        var group: String? = nil
+        var kind: String = "group"
+        var lastMessageAt: String? = nil
+        var avatarPath: String? = nil
+        var isSide: Bool = false
+        /// En un directo, la otra persona (humana). Con dos o más directos elegidos la extensión ofrece
+        /// «Enviar en un grupo» (POST /chats con estas personas). nil en grupos, notas propias, gg y datos viejos.
+        var peerId: String? = nil
+
+        init(id: String, title: String, subtitle: String, group: String? = nil, kind: String = "group", lastMessageAt: String? = nil,
+             avatarPath: String? = nil, isSide: Bool = false, peerId: String? = nil) {
+            self.id = id; self.title = title; self.subtitle = subtitle; self.group = group; self.kind = kind
+            self.lastMessageAt = lastMessageAt; self.avatarPath = avatarPath; self.isSide = isSide; self.peerId = peerId
+        }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: AnyKey.self)
+            id = try c.decode(String.self, forKey: AnyKey("id"))
+            title = c.v("title", "")
+            subtitle = c.v("subtitle", "")
+            group = c.o("group")
+            kind = c.v("kind", "group")
+            lastMessageAt = c.o("lastMessageAt")
+            avatarPath = c.o("avatarPath")
+            isSide = c.v("isSide", false)
+            peerId = c.o("peerId")
+        }
+    }
+
+    static func targets(_ d: BootstrapDTO) -> [Target] {
+        d.conversations.filter(\.canPost).map { c in
+            let other = c.kind == .direct ? Naming.otherInDirect(d, c) : nil
+            let peer = other.flatMap { $0.id != d.me.id && $0.kind == "human" && !Naming.isSide(c) ? $0.id : nil }
+            return Target(id: c.id, title: Naming.title(d, c),
+                   subtitle: d.workspaces.first(where: { $0.id == c.workspaceId })?.name ?? Naming.subtitle(d, c),
+                   group: Naming.route(d, c), kind: c.kind.rawValue, lastMessageAt: c.lastMessageAt,
+                   avatarPath: c.avatarUrl ?? other?.avatarUrl, isSide: Naming.isSide(c), peerId: peer)
+        }
+    }
+
+    static func save(_ d: BootstrapDTO, apiURL: URL) {
+        guard let defaults = UserDefaults(suiteName: suite) else { return }
+        let list = targets(d)
+        defaults.set(try? JSONEncoder().encode(list), forKey: "targets")
+        defaults.set(apiURL.absoluteString, forKey: "apiURL")
+        defaults.set(Prefs.deviceId, forKey: "deviceId")
+    }
+
+    static func load() -> (targets: [Target], apiURL: URL?, deviceId: String?) {
+        guard let defaults = UserDefaults(suiteName: suite) else { return ([], nil, nil) }
+        let list = (defaults.data(forKey: "targets")).flatMap { try? JSONDecoder().decode([Target].self, from: $0) } ?? []
+        return (list, defaults.string(forKey: "apiURL").flatMap(URL.init(string:)), defaults.string(forKey: "deviceId"))
+    }
+
+    static func clear() { UserDefaults(suiteName: suite)?.removeObject(forKey: "targets") }
+}
+
+/// Para pruebas: en memoria.
+final class MemorySecretStore: SecretStore {
+    private var value: String?
+    init(_ value: String? = nil) { self.value = value }
+    func get() -> String? { value }
+    func set(_ value: String?) { self.value = value }
+}
+
+/// Preferencias y datos locales no secretos.
+enum Prefs {
+    static let defaults = UserDefaults.standard
+    private static let deviceKey = "tc.deviceId"
+    private static let soundsKey = "tc.sounds"
+    private static let notificationsKey = "tc.notifications"
+    private static let apiURLKey = "tc.apiURL"
+
+    /// Identificador estable del dispositivo (UUID guardado la primera vez).
+    static var deviceId: String {
+        if let v = defaults.string(forKey: deviceKey), !v.isEmpty { return v }
+        let v = UUID().uuidString.lowercased()
+        defaults.set(v, forKey: deviceKey)
+        return v
+    }
+
+    /// Última cuenta con sesión en este dispositivo (para pintar su caché al abrir, antes de la red).
+    static var lastUserId: String? {
+        get { defaults.string(forKey: "tc.lastUserId") }
+        set { defaults.set(newValue, forKey: "tc.lastUserId") }
+    }
+
+    /// Nombre con el que entré la última vez a una llamada por enlace (se prellena la próxima).
+    static var guestCallName: String? {
+        get { defaults.string(forKey: "tc.guestCallName") }
+        set { defaults.set(newValue, forKey: "tc.guestCallName") }
+    }
+
+    static var soundsEnabled: Bool {
+        get { defaults.object(forKey: soundsKey) as? Bool ?? true }
+        set { defaults.set(newValue, forKey: soundsKey) }
+    }
+
+    /// Ya se mostró la pantalla previa al permiso de notificaciones.
+    static var pushPrompted: Bool {
+        get { defaults.bool(forKey: "tc.pushPrompted") }
+        set { defaults.set(newValue, forKey: "tc.pushPrompted") }
+    }
+
+    static var notificationsEnabled: Bool {
+        get { defaults.object(forKey: notificationsKey) as? Bool ?? true }
+        set { defaults.set(newValue, forKey: notificationsKey) }
+    }
+
+    /// URL del API elegida en la pantalla oculta de depuración (nil = la de por defecto).
+    static var customAPIURL: String? {
+        get { defaults.string(forKey: apiURLKey) }
+        set { if let newValue, !newValue.isEmpty { defaults.set(newValue, forKey: apiURLKey) } else { defaults.removeObject(forKey: apiURLKey) } }
+    }
+}
+
+/// Cola de salida persistente (JSON en Application Support), por usuario.
+final class OutboxStore {
+    private let dir: URL
+
+    init(directory: URL? = nil) {
+        let base = directory ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        dir = base.appendingPathComponent("TieComs", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    }
+
+    /// Pending meeting operations contain no OAuth credentials. Use the same protected, atomic local storage as the outbox.
+    private func meetingsFile(_ userId: String) -> URL { dir.appendingPathComponent("meetings-\(userId).json") }
+    func loadMeetingAttempts(userId: String) throws -> Data? {
+        let url = meetingsFile(userId)
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        return try Data(contentsOf: url)
+    }
+    func saveMeetingAttempts(_ data: Data, userId: String) throws {
+        try data.write(to: meetingsFile(userId), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+    }
+    func clearMeetingAttempts(userId: String) { try? FileManager.default.removeItem(at: meetingsFile(userId)) }
+
+    private func file(_ userId: String) -> URL { dir.appendingPathComponent("outbox-\(userId).json") }
+
+    func load(userId: String) -> [PendingMessage] {
+        guard let data = try? Data(contentsOf: file(userId)) else { return [] }
+        return (try? JSONDecoder().decode([PendingMessage].self, from: data)) ?? []
+    }
+
+    func save(_ list: [PendingMessage], userId: String) {
+        guard let data = try? JSONEncoder().encode(list) else { return }
+        try? data.write(to: file(userId), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+    }
+
+    func clear(userId: String) { try? FileManager.default.removeItem(at: file(userId)) }
+}
+
+struct PendingMessage: Codable, Equatable, Identifiable, Sendable {
+    enum Status: String, Codable, Sendable { case pending, sending, failed }
+    var clientMessageId: String
+    var conversationId: String
+    var body: String
+    var replyTo: String?
+    var forwarded: ForwardedInfo?
+    /// Adjuntos ya subidos (pendientes en el servidor hasta que este mensaje los use).
+    var attachmentIds: [String]? = nil
+    /// Reenvío: adjuntos de mensajes que puedo leer (el servidor copia la referencia).
+    var forwardAttachmentIds: [String]? = nil
+    /// Copia local para mostrar la burbuja mientras se envía.
+    var attachments: [AttachmentDTO]? = nil
+    /// Menciones con @ (offsets UTF-16 sobre body ya recortado).
+    var mentions: [Mention]? = nil
+    /// Tema con el que sale (la banderita elegida al escribir; docs/TEMAS.md).
+    var topicId: String? = nil
+    /// Una sola vista (tanda 1.7 §7).
+    var viewOnce: Bool? = nil
+    var createdAt: String
+    var attempts: Int
+    var status: Status
+    var error: String?
+    var nextAttemptAt: Double
+
+    var id: String { clientMessageId }
+}

@@ -1,0 +1,295 @@
+import SwiftUI
+import UIKit
+
+enum Theme {
+    /// Mandarina de la marca Chaggu (#FF5A36).
+    static let orange = Color(hex: 0xFF5A36)
+    static let orangeLight = Color(hex: 0xFF7B5E)
+    /// Tinta de la marca (#17161F).
+    static let ink = Color(hex: 0x17161F)
+    static let cream = Color(hex: 0xFDFAF7)
+
+    /// Fondo general: crema en claro, casi negro en oscuro.
+    static let background = Color(light: 0xFDFAF7, dark: 0x141414)
+    static let surface = Color(light: 0xFFFFFF, dark: 0x1F1F1F)
+    /// Burbuja de otra persona: gris cálido.
+    static let bubbleOther = Color(light: 0xEFEBE6, dark: 0x2E2A27)
+    static let textPrimary = Color(light: 0x1F1F1F, dark: 0xF4F1EA)
+    static let textSecondary = Color(light: 0x6B645B, dark: 0xA8A29A)
+    /// Mandarina para textos y enlaces con contraste AA: #C73A1A en claro (≈5:1 sobre crema) y la
+    /// mandarina pura #FF5A36 en oscuro (≈5,8:1 sobre tinta). La mandarina pura en claro queda para lo decorativo.
+    static let accentText = Color(light: 0xC73A1A, dark: 0xFF5A36)
+    /// Relleno de los botones principales: #C73A1A en claro (texto blanco) y mandarina #FF5A36 en oscuro (texto tinta).
+    static let primaryFill = Color(light: 0xC73A1A, dark: 0xFF5A36)
+    /// Texto sobre `primaryFill`: blanco en claro, tinta #17161F en oscuro.
+    static let onPrimary = Color(light: 0xFFFFFF, dark: 0x17161F)
+    /// Burbuja propia: mandarina sobria (#E8472A en claro, #C73E24 en oscuro), con texto blanco.
+    static let bubbleMine = Color(light: 0xE8472A, dark: 0xC73E24)
+    /// Sidechat (1.7.1): verde azulado sobrio, idéntico en web, iOS y Android. Texto/ícono #1F7A74 sobre #E0F2EF en claro;
+    /// #7FD3CA sobre #16312E en oscuro. Solo para lo que identifica sidechats (píldora, ícono de fila, chip, panel).
+    static let sideText = Color(light: 0x1F7A74, dark: 0x7FD3CA)
+    static let sideFill = Color(light: 0xE0F2EF, dark: 0x16312E)
+}
+
+extension Theme {
+    /// Contraste WCAG de un color "#RRGGBB" con texto blanco.
+    static func contrastWithWhite(_ css: String) -> Double? {
+        let s = css.trimmingCharacters(in: CharacterSet(charactersIn: "# "))
+        guard s.count == 6, let v = UInt32(s, radix: 16) else { return nil }
+        func lin(_ c: UInt32) -> Double { let x = Double(c) / 255; return x <= 0.03928 ? x / 12.92 : pow((x + 0.055) / 1.055, 2.4) }
+        let l = 0.2126 * lin((v >> 16) & 0xFF) + 0.7152 * lin((v >> 8) & 0xFF) + 0.0722 * lin(v & 0xFF)
+        return 1.05 / (l + 0.05)
+    }
+
+    /// Naranja sobrio de los badges (#B45309, AA con texto blanco en letra chica) y gris del silenciado; igual que la web.
+    static let badgeFallback = Color(hex: 0xB45309)
+    static let badgeMuted = Color(hex: 0x7A7368)
+    /// Llamadas perdidas: pastilla e ícono de la pestaña Llamadas y la etiqueta «Perdida» (el mismo rojo de la web).
+    static let missed = Color(hex: 0xD93025)
+
+    /// Badge de no leídos: el color de la empresa solo si cumple AA (4,5:1) con texto blanco; si no, el naranja sobrio.
+    static func badgeColor(_ css: String) -> Color? {
+        guard let r = contrastWithWhite(css), r >= 4.5 else { return nil }
+        return Color(css: css)
+    }
+}
+
+extension Color {
+    init(hex: UInt32, alpha: Double = 1) {
+        self.init(.sRGB, red: Double((hex >> 16) & 0xFF) / 255, green: Double((hex >> 8) & 0xFF) / 255, blue: Double(hex & 0xFF) / 255, opacity: alpha)
+    }
+
+    init(light: UInt32, dark: UInt32) {
+        self.init(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(hex: dark) : UIColor(hex: light) })
+    }
+
+    /// "#RRGGBB" de la API (colores de empresa).
+    init(css: String, fallback: Color = .gray) {
+        let s = css.trimmingCharacters(in: CharacterSet(charactersIn: "# "))
+        if s.count == 6, let v = UInt32(s, radix: 16) { self.init(hex: v) } else { self = fallback }
+    }
+}
+
+extension UIColor {
+    convenience init(hex: UInt32) {
+        self.init(red: CGFloat((hex >> 16) & 0xFF) / 255, green: CGFloat((hex >> 8) & 0xFF) / 255, blue: CGFloat(hex & 0xFF) / 255, alpha: 1)
+    }
+}
+
+/// Botón principal naranja.
+struct PrimaryButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var enabled
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.headline)
+            .foregroundStyle(Theme.onPrimary)
+            .frame(maxWidth: .infinity, minHeight: 50)
+            .background(RoundedRectangle(cornerRadius: 14).fill(Theme.primaryFill.opacity(enabled ? (configuration.isPressed ? 0.8 : 1) : 0.45)))
+            .contentShape(Rectangle())
+    }
+}
+
+extension View {
+    /// Botón relleno del sistema con la regla AA de Chaggu (`primaryFill` + `onPrimary`).
+    func primaryProminent() -> some View {
+        buttonStyle(.borderedProminent).tint(Theme.primaryFill).foregroundStyle(Theme.onPrimary)
+    }
+}
+
+/// Marca de una empresa (iniciales sobre su color).
+struct OrgMark: View {
+    var org: OrganizationDTO?
+    var size: CGFloat = 26
+    var body: some View {
+        Text(org?.mark ?? "◦")
+            .font(.system(size: size * 0.4, weight: .bold))
+            .foregroundStyle(Color(css: org?.colorFg ?? "#5C554C"))
+            .frame(width: size, height: size)
+            .background(RoundedRectangle(cornerRadius: size * 0.28).fill(Color(css: org?.colorBg ?? "#E0DACE")))
+            .accessibilityHidden(true)
+    }
+}
+
+struct Avatar: View {
+    var name: String
+    var org: OrganizationDTO?
+    var isAgent = false
+    var size: CGFloat = 40
+    /// Ruta relativa de la foto (/api/v1/avatars/…); sin foto o mientras carga, iniciales.
+    var photo: String? = nil
+    /// Se ignora: ya no se pinta la marca de la empresa en la esquina (el nombre de la empresa va escrito
+    /// junto a la persona y la letra suelta confundía). Se conserva para no tocar a quien la pasa.
+    var badge = false
+    /// Color propio (PersonColor) en vez del de la empresa: iniciales en blanco.
+    var fill: Color? = nil
+    /// gg (docs/GG-CHAT.md): su marca en vez de ◇.
+    var isGG = false
+    var availability: AvailabilityDTO? = nil
+
+    /// Avatar de una persona del snapshot (foto, iniciales o ◇ si es agente).
+    init(person: PersonDTO?, org: OrganizationDTO?, size: CGFloat = 40, badge: Bool = false) {
+        self.availability = person?.availability
+        self.name = person?.name ?? "?"
+        self.org = org
+        self.isAgent = person?.kind == "agent"
+        self.size = size
+        self.photo = person?.avatarUrl
+        self.badge = badge
+        // Como la web: iniciales blancas sobre el color estable de la persona.
+        self.fill = person.map { PersonColor.fill($0.id) }
+        self.isGG = person?.id == GG.id
+    }
+
+    init(name: String, org: OrganizationDTO?, isAgent: Bool = false, size: CGFloat = 40, photo: String? = nil, badge: Bool = false, fill: Color? = nil) {
+        self.name = name; self.org = org; self.isAgent = isAgent; self.size = size; self.photo = photo; self.badge = badge; self.fill = fill
+    }
+
+    var body: some View {
+        Group { if isGG { ggFace } else { face } }
+            .overlay(alignment: .bottomTrailing) {
+                if let availability, let mode = availability.mode {
+                    TimelineView(.periodic(from: .now, by: 30)) { _ in
+                        if availability.active {
+                            Circle().fill(mode == "available" ? Color.green : Color.orange).frame(width: max(7, size * 0.22), height: max(7, size * 0.22)).overlay(Circle().stroke(Theme.background, lineWidth: 1.5)).accessibilityLabel(L("availability.\(mode)"))
+                        }
+                    }
+                }
+            }
+    }
+
+    private var ggFace: some View {
+        GGMark(ink: Theme.ink)
+            .frame(width: size * 0.72, height: size * 0.72)
+            .frame(width: size, height: size)
+            .background(Circle().fill(Color.white))
+            .overlay(Circle().strokeBorder(Theme.orange.opacity(0.28), lineWidth: 1))
+            .accessibilityHidden(true)
+    }
+
+    private var face: some View {
+        let shape = RoundedRectangle(cornerRadius: isAgent ? 10 : size / 2)
+        return ZStack {
+            shape.fill(isAgent ? Theme.ink : fill ?? Color(css: org?.colorBg ?? "#E0DACE"))
+            Text(isAgent ? "◇" : Naming.initials(name))
+                .font(.system(size: size * 0.36, weight: .semibold))
+                .foregroundStyle(isAgent ? Theme.cream : fill != nil ? Color.white : Color(css: org?.colorFg ?? "#5C554C"))
+            if let url = MediaURL.absolute(photo) {
+                RemoteImage(url: url) { img in img.resizable().scaledToFill() }
+                    .frame(width: size, height: size)
+                    .clipShape(shape)
+            }
+        }
+        .frame(width: size, height: size)
+        .accessibilityHidden(true)
+    }
+}
+
+/// Caritas apiladas de un chat grupal (hasta 3). `box` > 0 las acomoda en un cuadro de ese lado
+/// (lista de chats: mismo ancho que el avatar de un directo); si no, en fila solapada como la web.
+struct StackedAvatars: View {
+    var d: BootstrapDTO
+    var c: ConversationDTO
+    var size: CGFloat = 24
+    var box: CGFloat = 0
+
+    var body: some View {
+        let others = Array(Naming.others(d, c).prefix(3))
+        Group {
+            if box > 0 { cluster(others) } else { row(others) }
+        }
+        .accessibilityHidden(true)
+    }
+
+    private func face(_ p: PersonDTO, _ s: CGFloat) -> some View {
+        Avatar(person: p, org: Naming.org(d, p.orgId), size: s)
+            .overlay(Circle().stroke(Theme.surface, lineWidth: 1.5))
+    }
+
+    @ViewBuilder private func row(_ others: [PersonDTO]) -> some View {
+        let step = size * 0.55
+        ZStack(alignment: .leading) {
+            ForEach(Array(others.enumerated()), id: \.element.id) { i, p in
+                face(p, size).offset(x: CGFloat(i) * step).zIndex(Double(3 - i))
+            }
+        }
+        .frame(width: size + CGFloat(max(0, others.count - 1)) * step, height: size, alignment: .leading)
+    }
+
+    @ViewBuilder private func cluster(_ others: [PersonDTO]) -> some View {
+        switch others.count {
+        case 0: Avatar(name: "?", org: nil, size: box)
+        case 1: face(others[0], box)
+        case 2:
+            let s = box * 0.68
+            ZStack(alignment: .topLeading) {
+                face(others[0], s)
+                face(others[1], s).offset(x: box - s, y: box - s)
+            }
+            .frame(width: box, height: box, alignment: .topLeading)
+        default:
+            let s = box * 0.56
+            ZStack(alignment: .topLeading) {
+                face(others[0], s).offset(x: (box - s) / 2, y: 0)
+                face(others[1], s).offset(x: 0, y: box - s)
+                face(others[2], s).offset(x: box - s, y: box - s)
+            }
+            .frame(width: box, height: box, alignment: .topLeading)
+        }
+    }
+}
+
+/// Imagen pública del API (fotos, miniaturas) con caché en memoria; URLCache guarda en disco
+/// según el cache-control inmutable que envía el servidor.
+struct RemoteImage<Content: View>: View {
+    let url: URL
+    @ViewBuilder var content: (Image) -> Content
+    @State private var image: UIImage?
+
+    var body: some View {
+        Group {
+            if let image { content(Image(uiImage: image)) } else { Color.clear }
+        }
+        .task(id: url) {
+            if let hit = RemoteImageCache.shared.object(forKey: url as NSURL) { image = hit; return }
+            image = nil
+            // Un intento con caché y otro sin él (una respuesta mala guardada no debe dejar la tarjeta sin imagen).
+            for policy in [URLRequest.CachePolicy.returnCacheDataElseLoad, .reloadIgnoringLocalCacheData] {
+                if Task.isCancelled { return }
+                var req = URLRequest(url: url, cachePolicy: policy, timeoutInterval: 20)
+                req.setValue("image/*", forHTTPHeaderField: "accept")
+                if let (data, resp) = try? await RemoteImageCache.session.data(for: req),
+                   (resp as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) ?? false,
+                   let img = UIImage(data: data) {
+                    RemoteImageCache.shared.setObject(img, forKey: url as NSURL)
+                    image = img
+                    return
+                }
+                try? await Task.sleep(nanoseconds: 800_000_000)
+            }
+        }
+    }
+}
+
+enum RemoteImageCache {
+    static let shared: NSCache<NSURL, UIImage> = { let c = NSCache<NSURL, UIImage>(); c.countLimit = 300; return c }()
+    static let session: URLSession = {
+        let cfg = URLSessionConfiguration.default
+        cfg.urlCache = URLCache(memoryCapacity: 8 << 20, diskCapacity: 80 << 20)
+        cfg.requestCachePolicy = .returnCacheDataElseLoad
+        cfg.timeoutIntervalForRequest = 20
+        return URLSession(configuration: cfg)
+    }()
+}
+
+/// Logo de Chaggu con transparencia real: letras en tinta en claro y en papel en oscuro
+/// (variantes del imageset `Logo`). Va directo sobre el fondo, sin placa.
+struct LogoView: View {
+    var width: CGFloat = 220
+    var body: some View {
+        Image("Logo")
+            .resizable()
+            .scaledToFit()
+            .frame(width: width)
+            .accessibilityLabel("chaggu")
+    }
+}

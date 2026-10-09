@@ -227,6 +227,18 @@ chat, para todos) y **Asunto** (no para terceros). Los dos se crean a mano.
 - Con `auto`, quien inicia sesión con Google o Microsoft con un correo de ese dominio entra a la empresa sin invitación.
 - `OrganizationDTO.joinPolicy` solo viene para owner/admin. En «Tú»: interruptor «Entrada automática con @dominio».
 
+## Barra de arriba y búsqueda rápida (27-sep-2026, iOS 1.6.3)
+
+- Grupos, DMs, Asuntos y Calendario llevan siempre los mismos dos botones arriba a la derecha:
+  **✏️ Mensaje nuevo** (escribir) y **＋ Crear** (Nuevo grupo · Nuevo asunto · Nueva reunión · Unirme con código).
+  El «…» de Grupos desaparece: Archivos, Recordatorios, Trazo y WhatsApp viven en «Tú»; plegar/desplegar es un
+  botón de vista arriba a la izquierda en Grupos; los recordatorios vencidos salen como una fila arriba de la lista.
+- «＋ Nuevo asunto» sin grupo de origen pide «Grupo o chat» (donde escribo y no soy tercero; el más reciente primero).
+- Mensaje nuevo: tocar a una persona abre su directo de una vez (el que existe o uno nuevo). Arriba, «Recientes»
+  (personas de mis directos) y «Chat con varias personas» (selección múltiple → chat grupal). Al buscar también salen grupos.
+- Buscar en Grupos o DMs encuentra personas (tocar = escribirle), grupos y chats. Quien ya tiene su directo entre los
+  chats encontrados sale una sola vez (en Chats).
+
 ## Plegado de asuntos, completar rápido e hilos en directos (26-sep-2026)
 
 - **Asuntos contraídos por defecto.** La fila del grupo lleva un chip «◆ N» (y «· M!» si hay vencidos). Tocarlo

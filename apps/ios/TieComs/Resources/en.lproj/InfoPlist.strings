@@ -1,0 +1,4 @@
+"CFBundleDisplayName" = "chaggu";
+"NSCameraUsageDescription" = "chaggu uses the camera for video calls and when you choose to take a profile or group photo, a photo or video to attach, or a photo of your handwritten signature.";
+"NSMicrophoneUsageDescription" = "chaggu uses the microphone for voice and video calls, to record the voice notes you send in your conversations and to listen when you talk to gg, the assistant.";
+"NSSpeechRecognitionUsageDescription" = "chaggu uses speech recognition to turn what you say to gg, the assistant, into text.";

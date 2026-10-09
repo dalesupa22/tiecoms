@@ -1,0 +1,224 @@
+import Foundation
+import SwiftUI
+
+// Temas del chat (docs/TEMAS.md): etiquetas de los mensajes que se ven como banderitas arriba del chat.
+// Un chat sigue siendo un solo chat; los temas no son hilos ni tareas. Igual que apps/web/src/screens/Topics.tsx.
+
+/// Reglas puras de los temas (sin red), compartidas por la vista y las pruebas.
+enum TopicRules {
+    /// Tope técnico del servidor (TOPIC_LIMIT). No hay límite práctico: si el servidor responde 409, se muestra su mensaje.
+    static let serverLimit = 50
+    static let colors = ["blue", "green", "orange", "violet", "magenta", "aqua", "red", "yellow"]
+    static let icons = ["🌐", "🌱", "💰", "📣", "📈", "🤝", "🎯", "🧾", "⚙️", "📦", "🎓", "⚖️"]
+
+    /// Activos en el orden de la fila (el servidor ya los manda así; se ordena por si acaso).
+    static func active(_ list: [TopicDTO]) -> [TopicDTO] {
+        list.filter { !$0.isArchived }.sorted { $0.position == $1.position ? $0.createdAt < $1.createdAt : $0.position < $1.position }
+    }
+    static func archived(_ list: [TopicDTO]) -> [TopicDTO] { list.filter(\.isArchived) }
+
+    /// Arrastrar la banderita `from` sobre `target` (dropOn de la web): hacia adelante queda después del destino, hacia
+    /// atrás queda antes. Devuelve los ids activos en el orden nuevo, o nil si no cambia nada.
+    static func reorder(_ ids: [String], moving from: String, onto target: String) -> [String]? {
+        guard from != target, let fi = ids.firstIndex(of: from), let ti = ids.firstIndex(of: target) else { return nil }
+        var out = ids.filter { $0 != from }
+        guard let t = out.firstIndex(of: target) else { return nil }
+        out.insert(from, at: t + (fi < ti ? 1 : 0))
+        return out == ids ? nil : out
+    }
+
+    /// Un paso a la izquierda (-1) o a la derecha (+1) (menú y VoiceOver).
+    static func step(_ ids: [String], _ id: String, by delta: Int) -> [String]? {
+        guard let i = ids.firstIndex(of: id) else { return nil }
+        let j = i + delta
+        guard ids.indices.contains(j) else { return nil }
+        return reorder(ids, moving: id, onto: ids[j])
+    }
+
+    /// La lista con las posiciones del orden nuevo (lo optimista, antes de que responda el API).
+    static func applyOrder(_ list: [TopicDTO], _ ids: [String]) -> [TopicDTO] {
+        let pos = Dictionary(uniqueKeysWithValues: ids.enumerated().map { ($1, $0) })
+        return list.map { t in var x = t; if let p = pos[t.id] { x.position = p }; return x }.sorted { $0.position < $1.position }
+    }
+
+    /// Mensajes (no eliminados) por tema, para el conteo de cada banderita.
+    static func counts(_ messages: [MessageDTO]) -> [String: Int] {
+        var n: [String: Int] = [:]
+        for m in messages where m.deletedAt == nil { if let t = m.topicId { n[t, default: 0] += 1 } }
+        return n
+    }
+
+    /// El filtro solo vale para un tema activo que exista (si lo archivan o quitan, el chat vuelve a «General»).
+    static func effectiveFilter(_ filter: String?, in list: [TopicDTO]) -> String? {
+        guard let filter, list.contains(where: { $0.id == filter && !$0.isArchived }) else { return nil }
+        return filter
+    }
+
+    /// ¿Se ve este mensaje con el filtro? Sin filtro, todos.
+    static func matches(_ m: MessageDTO, filter: String?) -> Bool { filter == nil || m.topicId == filter }
+
+    // Tres vistas (docs/TEMAS.md, 29-sep-2026; web Topics.tsx TOPIC_ALL y Conversation.tsx generalOnly):
+    // «General» (nil, así abre el chat) solo lo sin tema; «Todo» (`all`) todo con su etiqueta; un tema, solo lo suyo.
+
+    /// Filtro «Todo»: todos los mensajes, con y sin tema.
+    static let all = "__all"
+
+    /// Ids de los temas activos (los archivados cuentan como sin tema).
+    static func activeIds(_ list: [TopicDTO]) -> Set<String> { Set(list.filter { !$0.isArchived }.map(\.id)) }
+
+    /// En «General» (sin filtro y con temas activos) se esconde lo que tiene un tema activo, también las tarjetas de las
+    /// tareas de un tema (`issueTopic`), salvo el mensaje al que se saltó. «Todo» y un tema no esconden nada aquí.
+    static func hiddenInGeneral(_ m: MessageDTO, filter: String?, showAll: Bool, active: Set<String>, revealed: Set<Int>, issueTopic: String? = nil) -> Bool {
+        guard filter == nil, !showAll, !active.isEmpty, !revealed.contains(m.seq) else { return false }
+        if let t = m.topicId, active.contains(t) { return true }
+        if m.isSystem, let t = issueTopic, active.contains(t) { return true }
+        return false
+    }
+
+    /// Al saltar a un mensaje (burbuja, notificación, mención, búsqueda o enlace; 1.7.5): el chat queda en el tema del
+    /// mensaje si tiene uno activo; si no tiene (o su tema está archivado), en «Todo», que lo muestra con todo lo demás.
+    /// Sin temas activos no hay filtro (la única banderita es «Todo»). Si ya estaba en «Todo», el mensaje se ve y no cambia.
+    /// Una tarjeta de tarea (mensaje de sistema sin tema) va al tema de la tarea (`issueTopic`), como en Android.
+    /// Igual que `filterForMessage` de apps/web/src/topic-order.ts.
+    static func filterForJump(_ m: MessageDTO, active: Set<String>, current: String? = nil, issueTopic: String? = nil) -> String? {
+        guard !active.isEmpty else { return nil }
+        if current == all { return all }
+        if let t = m.topicId ?? (m.isSystem ? issueTopic : nil), active.contains(t) { return t }
+        return all
+    }
+
+    /// Filtro para un salto pedido por id o seq (push, aviso in-app, enlace): el tema del mensaje si ya está cargado; si
+    /// aún no, la pista `topicId` del push (si es un tema activo); si no hay nada, nil (se decide al cargar el mensaje).
+    static func filterForJump(messageId: String?, seq: Int?, in messages: [MessageDTO], hint: String?, active: Set<String>, current: String? = nil) -> String? {
+        if let m = messages.first(where: { (messageId != nil && $0.id == messageId) || (seq != nil && $0.seq == seq) }) {
+            return filterForJump(m, active: active, current: current)
+        }
+        if current == all, !active.isEmpty { return all }
+        if let hint, active.contains(hint) { return hint }
+        return nil
+    }
+
+    /// ¿Cuenta como no leído para las banderitas? Texto de otra persona, no eliminado, después de lo leído.
+    static func countsAsUnread(_ m: MessageDTO, after read: Int, me: String) -> Bool {
+        m.seq > read && m.deletedAt == nil && m.kind == "text" && m.authorId != me
+    }
+
+    /// Sin leer por tema activo; la clave "" es lo sin tema (el número de «General»). Sin pendientes, no hay clave.
+    static func unreadCounts(_ messages: [MessageDTO], read: Int, me: String, active: Set<String>) -> [String: Int] {
+        var n: [String: Int] = [:]
+        for m in messages where countsAsUnread(m, after: read, me: me) {
+            n[m.topicId.flatMap { active.contains($0) ? $0 : nil } ?? "", default: 0] += 1
+        }
+        return n
+    }
+
+    /// Al abrir desde la lista con no leídos (1.7.5): el tema del primer no leído; si ese no tiene tema (o está archivado),
+    /// «General» (nil), que es donde se ve. Sin no leídos, nil. Igual que `filterForEntry` de apps/web/src/topic-order.ts.
+    static func openFilter(_ messages: [MessageDTO], after read: Int, me: String, active: Set<String>) -> String? {
+        let first = messages.filter { countsAsUnread($0, after: read, me: me) }.min { $0.seq < $1.seq }
+        guard let t = first?.topicId, active.contains(t) else { return nil }
+        return t
+    }
+
+    /// Orden de la fila (1.7.5; «General» y «Todo» van antes, fijas): primero los temas con no leídos para mí y después el
+    /// resto, cada grupo en el orden guardado (arrastre / llegada). Nunca un tema dos veces. Al leerse, vuelve a su lugar.
+    /// El arrastre y «mover» siguen operando sobre el orden guardado (`active`), no sobre este.
+    static func dockOrder(_ active: [TopicDTO], unread: [String: Int]) -> [TopicDTO] {
+        var seen = Set<String>()
+        let once = active.filter { !$0.isArchived && seen.insert($0.id).inserted }
+        let hot = once.filter { (unread[$0.id] ?? 0) > 0 }
+        return hot + once.filter { (unread[$0.id] ?? 0) <= 0 }
+    }
+
+    /// Primer ícono y color que el chat aún no usa (como la web).
+    static func suggestedIcon(_ list: [TopicDTO]) -> String { icons.first { i in !list.contains { $0.icon == i } } ?? icons[0] }
+    static func suggestedColor(_ list: [TopicDTO]) -> String { colors.first { c in !list.contains { $0.color == c } } ?? "blue" }
+
+    /// «· tema puesto por X» cuando no lo puso el autor («Tú» si fui yo).
+    static func byLine(_ m: MessageDTO, me: String, name: (String) -> String?) -> String? {
+        guard let by = m.topicBy, m.topicId != nil, by != m.authorId else { return nil }
+        let who = by == me ? L("common.youShort") : (name(by)?.split(separator: " ").first.map(String.init) ?? "")
+        return L("topic.by", ["name": who])
+    }
+}
+
+/// Colores pastel de las banderitas (apps/web/src/styles.css, .c-<color>): fondo e tinta, con variante oscura.
+enum TopicPalette {
+    private static let table: [String: (bg: UInt32, ink: UInt32, darkBg: UInt32, darkInk: UInt32)] = [
+        "blue": (0xDBE8F8, 0x1D4F8C, 0x1E3350, 0xB9D3F2),
+        "green": (0xDCEFD6, 0x2F6B2A, 0x21381E, 0xBEE0B4),
+        "orange": (0xFBE2CF, 0x9A4A14, 0x442A17, 0xF5C8A6),
+        "violet": (0xE6E1F8, 0x4D3A9E, 0x2C2550, 0xCFC6F2),
+        "magenta": (0xF7DBE9, 0x8E2A5E, 0x44203A, 0xEEBDD6),
+        "aqua": (0xD5F0EC, 0x17665D, 0x173B37, 0xAEE2DA),
+        "red": (0xF9DCD6, 0x9A2E1C, 0x46221C, 0xF2BDB2),
+        "yellow": (0xF8EDC5, 0x7A5A06, 0x3E3313, 0xEDDB98),
+    ]
+    static func bg(_ color: String) -> Color {
+        let t = table[color] ?? table["blue"]!
+        return Color(light: t.bg, dark: t.darkBg)
+    }
+    static func ink(_ color: String) -> Color {
+        let t = table[color] ?? table["blue"]!
+        return Color(light: t.ink, dark: t.darkInk)
+    }
+    /// Archivado: gris.
+    static let grayBg = Color(light: 0xEFEBE6, dark: 0x2E2A27)
+    static let grayInk = Theme.textSecondary
+}
+
+// MARK: - Red
+
+extension AppStore {
+    func loadTopics(_ conversationId: String) async throws {
+        let stamp = sessionStamp
+        let r: TopicsResult = try await api.request("/conversations/\(conversationId)/topics")
+        try requireSession(stamp)
+        topics[conversationId] = r.topics
+    }
+
+    /// Crea un tema; 409 = nombre repetido o tope técnico (se muestra el mensaje del servidor).
+    @discardableResult
+    func createTopic(_ conversationId: String, name: String, icon: String, color: String) async throws -> TopicDTO? {
+        let r: TopicsResult = try await api.request("/conversations/\(conversationId)/topics", method: "POST",
+                                                    json: ["name": name.trimmingCharacters(in: .whitespacesAndNewlines), "icon": icon, "color": color])
+        topics[conversationId] = r.topics
+        return r.topic ?? r.topics.first { $0.name == name.trimmingCharacters(in: .whitespacesAndNewlines) }
+    }
+
+    /// PATCH /topics/:id con `{ name?, color?, icon?, archived?, position? }`.
+    func updateTopic(_ t: TopicDTO, _ patch: [String: Any]) async throws {
+        let r: TopicsResult = try await api.request("/topics/\(t.id)", method: "PATCH", json: patch)
+        topics[t.conversationId] = r.topics
+    }
+
+    /// Nuevo orden de los temas activos (PUT /conversations/:id/topics/order { ids }): lo ven todos los del chat.
+    /// Optimista; si el API falla vuelve al orden anterior y se lanza el error (la vista muestra el aviso).
+    func reorderTopics(_ conversationId: String, ids: [String]) async throws {
+        let before = topics[conversationId] ?? []
+        topics[conversationId] = TopicRules.applyOrder(before, ids)
+        do {
+            let r: TopicsResult = try await api.request("/conversations/\(conversationId)/topics/order", method: "PUT", json: ["ids": ids])
+            topics[conversationId] = r.topics
+        } catch {
+            topics[conversationId] = before
+            throw error
+        }
+    }
+
+    /// Quitar: se borra la banderita y sus mensajes quedan sin tema (no se borra ningún mensaje).
+    func deleteTopic(_ t: TopicDTO) async throws {
+        let r: TopicsResult = try await api.request("/topics/\(t.id)", method: "DELETE")
+        topics[t.conversationId] = r.topics
+        // Sin esperar los message.updated: la etiqueta desaparece al momento.
+        clearTopicLocally(t.id, in: t.conversationId)
+    }
+
+    /// Etiquetar cualquier mensaje del chat con un tema activo (o `nil` = sin tema).
+    @discardableResult
+    func setMessageTopic(_ m: MessageDTO, _ topicId: String?) async throws -> MessageDTO {
+        let out: MessageDTO = try await api.request("/messages/\(m.id)/topic", method: "PUT", json: ["topicId": topicId ?? NSNull()])
+        upsertLocal(out)
+        return out
+    }
+}

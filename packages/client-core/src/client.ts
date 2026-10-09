@@ -2,7 +2,7 @@ import { io, type Socket } from 'socket.io-client';
 import {
   CONTRACT_VERSION, SOCKET_EVENTS,
   type AccountEvent, type AgentDTO, type AuthResult, type BootstrapDTO, type ConversationDTO, type ConversationEvent, type DeviceInfo,
-  type AttachmentDTO, type MentionDTO, type MentionItemDTO, type CalendarEventDTO, type EventsPage, type ForwardedInfo, type InvitationPreviewDTO, type IssueDTO, type IssueVisibility, type IssueFieldValue, type TaskColumnDTO, type MeetingConnectionDTO, type MeetingDTO, type MeetingProvider, type IssueEventDTO, type MessageDTO, type OrgInvitationCreatedDTO, type OrgInvitationPreviewDTO, type PendingInvitationDTO, type Platform, type ReminderDTO, type Rsvp, type ScheduledMessageDTO, type SleepDTO,
+  type AttachmentDTO, type MentionDTO, type MentionItemDTO, type CalendarEventDTO, type EventsPage, type ForwardedInfo, type InvitationPreviewDTO, type IssueDTO, type IssueVisibility, type IssueFieldValue, type TaskColumnDTO, type TicketIntakeDTO, type MeetingConnectionDTO, type MeetingDTO, type MeetingProvider, type IssueEventDTO, type MessageDTO, type OrgInvitationCreatedDTO, type OrgInvitationPreviewDTO, type PendingInvitationDTO, type Platform, type ReminderDTO, type Rsvp, type ScheduledMessageDTO, type SleepDTO,
   type CreateGroupRequest, type CreateGroupResultDTO, type InvitationCreatedDTO, type OversightDTO,
   type LinkItemDTO, type LinkPreviewMode, type LinkSummaryDTO, type LinksPageDTO, type ReactionDTO, type TopicColor, type TopicDTO, type UserDTO, normalizeEmoji,
   type SoundChoice, type Ringtone, type CallDTO, type CallHistoryItemDTO, type CallJoinDTO, type CallLinkDTO, type SignupConfirmPreviewDTO, type CallKind, type CallTranscriptDTO, type CallTranscriptSegmentDTO, type CallTranscriptSegmentInput,
@@ -1314,6 +1314,12 @@ export class TieComsClient {
   }
   async setTaskColumns(conversationId: string, columns: TaskColumnDTO[]) {
     return this.request<{ columns: TaskColumnDTO[]; canEdit: boolean }>(`/conversations/${conversationId}/task-columns`, { method: 'PUT', json: { columns } });
+  }
+  async ticketIntake(conversationId: string) {
+    return this.request<{ intake: TicketIntakeDTO | null; canEdit: boolean }>(`/conversations/${conversationId}/ticket-intake`);
+  }
+  async setTicketIntake(conversationId: string, intake: TicketIntakeDTO | null) {
+    return this.request<{ intake: TicketIntakeDTO | null; canEdit: boolean }>(`/conversations/${conversationId}/ticket-intake`, { method: 'PUT', json: { intake } });
   }
   async issueDetail(id: string) {
     const r = await this.request<{ issue: IssueDTO; events: IssueEventDTO[]; children?: IssueDTO[] }>(`/issues/${id}`);

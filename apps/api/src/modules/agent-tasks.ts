@@ -19,13 +19,13 @@ import { botCanRead, issueUrl } from './integration-events.ts';
 
 const MAX_ATTEMPTS = 10;
 
-export type AgentTaskEventType = 'task.created' | 'task.assigned' | 'task.changes_requested' | 'task.approved' | 'task.needs_human' | 'task.commented';
+export type AgentTaskEventType = 'task.created' | 'task.assigned' | 'task.changes_requested' | 'task.approved' | 'task.deploy_approved' | 'task.needs_human' | 'task.commented';
 
 /** Qué aviso recibe un agente según el motivo de la bandeja «Nuevas». null = no le interesa (p. ej. «revisa tú»). */
 export function agentEventFor(reason: TaskInboxReason, issue: IssueDTO): AgentTaskEventType | null {
   if (reason === 'ticket') return 'task.created';
   if (reason === 'assigned') return 'task.assigned';
-  if (reason === 'reviewed') return issue.review === 'changes' ? 'task.changes_requested' : issue.review === 'approved' ? 'task.approved' : issue.review === 'human' ? 'task.needs_human' : null;
+  if (reason === 'reviewed') return issue.review === 'changes' ? 'task.changes_requested' : issue.review === 'approved' ? 'task.approved' : issue.review === 'deploy' ? 'task.deploy_approved' : issue.review === 'human' ? 'task.needs_human' : null;
   return null;
 }
 

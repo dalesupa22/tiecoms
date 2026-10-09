@@ -3,10 +3,10 @@
  * Funcionalidad nueva, Mejora), número o casilla. Las define quien administra el grupo.
  */
 import { useEffect, useState, useSyncExternalStore } from 'react';
-import type { IssueFieldValue, TaskColumnDTO, TaskColumnType } from '@tiecoms/contracts';
+import type { IssueFieldValue, TaskColumnDTO, TaskColumnType, TicketIntakeDTO } from '@tiecoms/contracts';
 import { client, useClient } from '../app-client.ts';
 import { errorText } from '../i18n.ts';
-import { Modal, conversationTitle } from '../ui.tsx';
+import { Modal, conversationTitle, personById } from '../ui.tsx';
 import { taskText } from './TaskReports.tsx';
 
 type Entry = { columns: TaskColumnDTO[]; canEdit: boolean };
@@ -70,6 +70,13 @@ export function TaskColumnsDialog({ conversationId, onClose }: { conversationId?
   const [rows, setRows] = useState<{ name: string; type: TaskColumnType; options: string }[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  /** Al llegar un ticket: null = manual; si no, a quién se asigna, en qué estado y con qué valores. */
+  const [intake, setIntake] = useState<TicketIntakeDTO | null | undefined>(undefined);
+  useEffect(() => {
+    if (!conv) return;
+    setIntake(undefined);
+    client.ticketIntake(conv).then((r) => setIntake(r.intake)).catch(() => setIntake(null));
+  }, [conv]);
   useEffect(() => {
     if (!conv) return;
     setRows(null); setError(null);
@@ -89,12 +96,18 @@ export function TaskColumnsDialog({ conversationId, onClose }: { conversationId?
         ...(r.type === 'select' ? { options: r.options.split(/[,\n]/).map((o) => o.trim()).filter(Boolean) } : {}),
       }));
       const r = await client.setTaskColumns(conv, columns);
-      cache.set(conv, r); emit(); onClose();
+      cache.set(conv, r); emit();
+      // Los valores de la regla deben existir en las columnas que se acaban de guardar.
+      if (intake !== undefined) {
+        const fields = Object.fromEntries(Object.entries(intake?.fields ?? {}).filter(([k, v]) => v !== '' && columns.some((c) => c.name === k && (c.options ?? []).includes(String(v)))));
+        await client.setTicketIntake(conv, intake && intake.assigneeIds.length ? { ...intake, fields } : null);
+      }
+      onClose();
     } catch (e) { setError(errorText(e)); } finally { setSaving(false); }
   };
   const current = d.conversations.find((c) => c.id === conv);
   return (
-    <Modal title={taskText('Columnas de las tareas', 'Task columns')} onClose={onClose}>
+    <Modal title={taskText('Columnas y tickets del grupo', 'Group columns & tickets')} onClose={onClose}>
       {!conversationId && (groups.length
         ? <label className="small muted">{taskText('Grupo', 'Group')} <select className="input" value={conv} onChange={(e) => setConv(e.target.value)}>{groups.map((c) => <option key={c.id} value={c.id}>{conversationTitle(d, c)}</option>)}</select></label>
         : <p className="muted">{taskText('No administras ningún grupo.', 'You don’t manage any group.')}</p>)}
@@ -112,11 +125,71 @@ export function TaskColumnsDialog({ conversationId, onClose }: { conversationId?
         ))}
         <button className="btn small" disabled={rows.length >= 30} onClick={() => setRows([...rows, { name: '', type: 'select', options: '' }])}>＋ {taskText('Agregar columna', 'Add column')}</button>
       </div>}
+      {conv && intake !== undefined && rows && <TicketIntakeEditor conversationId={conv} intake={intake} onChange={setIntake}
+        columns={rows.filter((r) => r.type === 'select' && r.name.trim()).map((r) => ({ name: r.name.trim(), options: r.options.split(/[,\n]/).map((o) => o.trim()).filter(Boolean) }))} />}
       {error && <div className="error">{error}</div>}
       <div className="row" style={{ justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
         <button className="btn ghost" onClick={onClose}>{taskText('Cancelar', 'Cancel')}</button>
         <button className="btn primary" disabled={!rows || saving || !conv} onClick={() => void save()}>{taskText('Guardar', 'Save')}</button>
       </div>
     </Modal>
+  );
+}
+
+/**
+ * Al llegar un ticket (pedido de Danny 9-oct). Manual: llega sin responsable a «Nuevas» del grupo y una persona decide
+ * si se lo pasa a la IA. Automático: se asigna solo a una persona o agente 🤖 del grupo, en el estado y con los valores
+ * de columna que se elijan (p. ej. «Estado»: «Ticket nuevo»).
+ */
+function TicketIntakeEditor({ conversationId, intake, columns, onChange }: { conversationId: string; intake: TicketIntakeDTO | null; columns: { name: string; options: string[] }[]; onChange: (x: TicketIntakeDTO | null) => void }) {
+  const d = useClient((s) => s.data)!;
+  const c = d.conversations.find((x) => x.id === conversationId);
+  const members = (c?.memberIds ?? []).map((id) => (id === d.me.id ? { id, name: d.me.name, kind: 'human' as const } : personById(d, id)))
+    .filter((p): p is NonNullable<typeof p> => !!p && (p.kind === 'human' || p.kind === 'agent'));
+  const agents = members.filter((p) => p.kind === 'agent');
+  const people = members.filter((p) => p.kind !== 'agent');
+  const auto = !!intake;
+  const first = agents[0]?.id ?? people[0]?.id ?? '';
+  const setField = (name: string, v: string) => {
+    if (!intake) return;
+    const fields = { ...(intake.fields ?? {}) };
+    if (v) fields[name] = v; else delete fields[name];
+    onChange({ ...intake, fields });
+  };
+  return (
+    <div className="ticket-intake">
+      <div className="ticket-intake-title">📥 {taskText('Al llegar un ticket', 'When a ticket arrives')}</div>
+      <label className="ticket-intake-opt">
+        <input type="radio" name="intake" checked={!auto} onChange={() => onChange(null)} />
+        <span><b>{taskText('Manual', 'Manual')}</b> · {taskText('llega sin responsable a «Nuevas» del grupo y una persona decide si se lo pasa a la IA.', 'arrives unassigned and a person decides whether to give it to the AI.')}</span>
+      </label>
+      <label className="ticket-intake-opt">
+        <input type="radio" name="intake" checked={auto} disabled={!first} onChange={() => onChange({ assigneeIds: [first], status: 'open' })} />
+        <span><b>{taskText('Automático', 'Automatic')}</b> · {taskText('se asigna solo apenas llega.', 'assigned as soon as it arrives.')}</span>
+      </label>
+      {auto && intake && <div className="ticket-intake-auto">
+        <label className="small">{taskText('Pasar a', 'Give to')}
+          <select className="input" value={intake.assigneeIds[0] ?? ''} onChange={(e) => onChange({ ...intake, assigneeIds: [e.target.value] })}>
+            {agents.length > 0 && <optgroup label={taskText('Agentes IA', 'AI agents')}>{agents.map((p) => <option key={p.id} value={p.id}>🤖 {p.name}</option>)}</optgroup>}
+            <optgroup label={taskText('Personas', 'People')}>{people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</optgroup>
+          </select>
+        </label>
+        <label className="small">{taskText('Entra como', 'Starts as')}
+          <select className="input" value={intake.status} onChange={(e) => onChange({ ...intake, status: e.target.value as TicketIntakeDTO['status'] })}>
+            <option value="open">{taskText('Asignada · por empezar', 'Assigned · not started')}</option>
+            <option value="in_progress">{taskText('En proceso', 'In progress')}</option>
+          </select>
+        </label>
+        {columns.filter((col) => col.options.length).map((col) => (
+          <label key={col.name} className="small">{col.name}
+            <select className="input" value={String(intake.fields?.[col.name] ?? '')} onChange={(e) => setField(col.name, e.target.value)}>
+              <option value="">—</option>
+              {col.options.map((o) => <option key={o} value={o}>{o}</option>)}
+            </select>
+          </label>
+        ))}
+      </div>}
+      {auto && intake && agents.some((a) => intake.assigneeIds.includes(a.id)) && <p className="hint">{taskText('El agente lo toma solo en unos minutos y, al terminar, lo deja en revisión de una persona.', 'The agent picks it up within minutes and leaves it for a person to review.')}</p>}
+    </div>
   );
 }

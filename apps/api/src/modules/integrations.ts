@@ -296,10 +296,14 @@ export async function createIssue(integ: IntegrationAuth, input: Omit<z.infer<ty
       if (prev.rows[0]) return { issue: (await issues.getIssue(integ.botUserId, prev.rows[0].id, c)).issue, created: false };
     }
     const who = await membersByEmail(c, integ.conversationId, input.assigneeEmails);
+    // Al llegar un ticket (regla del grupo, 9-oct): sin responsable propio, se asigna solo a quien diga el grupo y entra
+    // en su estado y con sus valores. Sin regla, llega sin responsable y una persona decide (manual).
+    const intake = who.ids.length ? null : await issues.ticketIntakeFor(c, integ.conversationId);
+    const assigneeIds = who.ids.length ? who.ids : intake?.assigneeIds ?? [];
     // Columnas del grupo que salen de los datos del ticket (p. ej. «Cliente» ← Empresa); lo que mande la integración gana.
-    const fields = { ...await issues.fieldsFromMeta(c, integ.conversationId, input.externalMeta), ...(input.fields ?? {}) };
+    const fields = { ...(intake?.fields ?? {}), ...await issues.fieldsFromMeta(c, integ.conversationId, input.externalMeta), ...(input.fields ?? {}) };
     const dto = await issues.createIssue(integ.botUserId, integ.conversationId, {
-      title: input.title, ownerId: null, visibility: 'all', topicId: input.topicId, ...(who.ids.length ? { assigneeIds: who.ids } : {}),
+      title: input.title, ownerId: null, visibility: 'all', topicId: input.topicId, ...(assigneeIds.length ? { assigneeIds } : {}),
       ...(input.dueDate ? { dueDate: input.dueDate } : {}), ...(Object.keys(fields).length ? { fields } : {}),
     } as any, c);
     // The issue, source binding, comments, announcement and outbox are one atomic import.
@@ -307,7 +311,7 @@ export async function createIssue(integ: IntegrationAuth, input: Omit<z.infer<ty
     if (input.description) await issues.commentIssue(integ.botUserId, dto.id, input.description, {}, c);
     // Ticket sin responsable: que se note en «Nuevas» de las personas del grupo (llamada con Lorena 7-oct).
     // Los agentes del grupo con webhook también lo escuchan (task.created) para poder tomarlo.
-    if (!who.ids.length) {
+    if (!assigneeIds.length) {
       const { rows: people } = await c.query(
         `SELECT cm.user_id FROM conversation_memberships cm JOIN users u ON u.id = cm.user_id
           LEFT JOIN agent_webhooks aw ON aw.agent_user_id = u.id AND aw.revoked_at IS NULL
@@ -318,7 +322,8 @@ export async function createIssue(integ: IntegrationAuth, input: Omit<z.infer<ty
     for (const h of input.history ?? []) {
       await issues.commentIssue(integ.botUserId, dto.id, `${h.author}${h.at ? ` · ${h.at}` : ''}\n${h.body}`, { author: h.author, ...(h.at ? { at: h.at } : {}) }, c);
     }
-    if (input.status && input.status !== 'open') await issues.updateIssue(integ.botUserId, dto.id, { status: input.status }, c);
+    const status = input.status ?? intake?.status;
+    if (status && status !== 'open') await issues.updateIssue(integ.botUserId, dto.id, { status }, c);
     if (input.announce) {
       const meta = [...fieldLines(input.externalMeta), ...fieldLines(dto.fields)].join('\n');
       const excerpt = input.description ? `\n\n${input.description.slice(0, 600)}${input.description.length > 600 ? '…' : ''}` : '';

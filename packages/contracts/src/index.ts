@@ -969,8 +969,9 @@ export type IssueStatus = 'open' | 'in_progress' | 'waiting' | 'done' | 'cancell
  * persona lo apruebe antes de entregarlo; «changes» pide corrección y «human» marca que necesita intervención
  * humana (p. ej. radicar una factura). null = sin revisión. Es independiente del estado.
  */
-export type IssueReview = 'pending' | 'approved' | 'changes' | 'human';
-export const ISSUE_REVIEWS = ['pending', 'approved', 'changes', 'human'] as const;
+export type IssueReview = 'pending' | 'approved' | 'changes' | 'human' | 'deploy';
+/** deploy (9-oct): «Aprobar y desplegar»: la persona aprueba el plan y la tarjeta vuelve a quien la resolvió para aplicarlo. */
+export const ISSUE_REVIEWS = ['pending', 'approved', 'changes', 'human', 'deploy'] as const;
 /** Por qué una tarea está en mi bandeja de «Nuevas»: me la asignaron, me piden revisarla, revisaron la que pedí o llegó un ticket sin responsable a mi grupo. */
 export type TaskInboxReason = 'assigned' | 'review' | 'reviewed' | 'ticket';
 export interface TaskInboxItemDTO { issueId: string; reason: TaskInboxReason; actorId: string | null; at: string }
@@ -1020,6 +1021,8 @@ export interface IssueDTO {
   review?: IssueReview | null;
   reviewBy?: string | null;
   reviewAt?: string | null;
+  /** Quién la dejó por revisar (quien la resolvió): a quien vuelve al pedir corrección. */
+  reviewRequestedBy?: string | null;
   /** Agente (o persona) trabajándola ahora mismo, con reserva vigente hasta claimedUntil. Ausente = libre. */
   claimedBy?: string | null;
   claimedUntil?: string | null;
@@ -1280,6 +1283,21 @@ export const TaskColumnInput = z.object({
   options: z.array(z.string().trim().min(1).max(80)).max(50).optional(),
 }).refine((c) => c.type !== 'select' || (c.options?.length ?? 0) > 0, 'Una lista desplegable necesita opciones');
 export const TaskColumnsInput = z.object({ columns: z.array(TaskColumnInput).max(ISSUE_FIELDS_MAX) });
+
+/**
+ * Al llegar un ticket (pedido de Danny 9-oct): por grupo, a quién se asigna solo (persona o agente 🤖 del grupo),
+ * en qué estado entra y qué valores de columna trae (p. ej. «Estado»: «Ticket nuevo»). null = manual: llega sin
+ * responsable, avisa al grupo en «Nuevas» y una persona decide si se lo pasa a la IA. Solo aplica a tickets que
+ * llegan por una integración del grupo sin responsable propio.
+ */
+export interface TicketIntakeDTO { assigneeIds: string[]; status: 'open' | 'in_progress'; fields?: Record<string, IssueFieldValue> }
+export const TicketIntakeInput = z.object({
+  intake: z.object({
+    assigneeIds: z.array(z.uuid()).min(1).max(5),
+    status: z.enum(['open', 'in_progress']).default('open'),
+    fields: IssueFieldsInput.optional(),
+  }).nullable(),
+});
 
 const ExternalMeta = z.record(z.string().max(60), z.string().max(500)).refine((m) => Object.keys(m).length <= 20, 'Máximo 20 campos');
 
@@ -2082,6 +2100,7 @@ export const PersonalPreferencesInput = z.object({
 export type PersonalPreferencesDTO = z.infer<typeof PersonalPreferencesInput>;
 // GIFs y memes (docs/GIFS.md).
 export * from './gifs.ts';
+export * from './task-state.ts';
 
 /** Atomic partial merge; a legacy full PUT does not erase additive preferences. */
 export const PersonalPreferencesPatchInput = z.object({ appearance: z.object({ mode: z.enum(['system', 'light', 'dark']).optional(), accent: z.string().regex(/^#[0-9a-fA-F]{6}$/).nullable().optional() }).optional(), issues: IssuePersonalPreferencesInput.optional() });

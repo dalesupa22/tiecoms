@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent, type ReactElement } from 'react';
+import { TASK_STATES, taskState, taskStateLabel, type TaskState } from '@tiecoms/contracts';
 import type { BootstrapDTO, IssueDTO, IssueEventDTO, IssueFieldValue, IssueReview, IssueStatus, IssueVisibility, TaskInboxReason } from '@tiecoms/contracts';
 import { apiUrl, client, useClient } from '../app-client.ts';
 import { updateIssuePreferences, usePersonalPreferences } from '../personal-prefs.ts';
@@ -44,11 +45,11 @@ export function dueLabel(i: IssueDTO) {
 }
 
 /** Revisión humana (llamada con Lorena 7-oct): la IA resuelve, una persona aprueba, pide corrección o la toma. */
-export const REVIEWS: IssueReview[] = ['pending', 'changes', 'human', 'approved'];
+export const REVIEWS: IssueReview[] = ['pending', 'changes', 'deploy', 'human', 'approved'];
 export function reviewLabel(r: IssueReview) {
-  return ({ pending: taskText('Por revisar', 'To review'), approved: taskText('Aprobada', 'Approved'), changes: taskText('Devuelta', 'Returned'), human: taskText('Intervención humana', 'Needs a person') })[r];
+  return ({ pending: taskText('Por revisar', 'To review'), approved: taskText('Aprobada', 'Approved'), changes: taskText('Corrección pedida', 'Fix requested'), deploy: taskText('Aprobada · por desplegar', 'Approved · to deploy'), human: taskText('Necesita una persona', 'Needs a person') })[r];
 }
-const REVIEW_ICON: Record<IssueReview, string> = { pending: '👀', approved: '✅', changes: '↩', human: '🙋' };
+const REVIEW_ICON: Record<IssueReview, string> = { pending: '👀', approved: '✅', changes: '↩', deploy: '🚀', human: '🙋' };
 export function ReviewPill({ review }: { review: IssueReview }) {
   return <span className={`review-pill review-${review}`}>{REVIEW_ICON[review]} {reviewLabel(review)}</span>;
 }
@@ -56,29 +57,14 @@ export function ReviewPill({ review }: { review: IssueReview }) {
  * Un solo estado para leer (pedido de Danny 8-oct): junta el estado de la tarea, la revisión humana y quién la tiene.
  * No cambia datos: es la misma información (status + review + responsables + reserva) leída como una sola cosa.
  */
-export type TaskState = 'waiting' | 'assigned' | 'processing' | 'blocked' | 'returned' | 'review' | 'human' | 'done' | 'cancelled';
-export const TASK_STATES: TaskState[] = ['waiting', 'assigned', 'processing', 'blocked', 'returned', 'review', 'human', 'done', 'cancelled'];
-export function taskState(i: IssueDTO): TaskState {
-  if (i.status === 'cancelled') return 'cancelled';
-  if (i.status === 'done' || i.review === 'approved') return 'done';
-  if (i.review === 'pending') return 'review';
-  if (i.review === 'human') return 'human';
-  // Mientras alguien la tiene tomada se ve «Procesando», también si venía devuelta.
-  if (i.claimedBy) return 'processing';
-  if (i.review === 'changes') return 'returned';
-  if (i.status === 'waiting') return 'blocked';
-  if (i.claimedBy || i.status === 'in_progress') return 'processing';
-  return taskAssignees(i).length ? 'assigned' : 'waiting';
+export type { TaskState } from '@tiecoms/contracts';
+export { TASK_STATES, taskState } from '@tiecoms/contracts';
+/** Nombre claro del estado (contracts/task-state.ts, el mismo que lee el MCP). */
+export function stateLabel(s: TaskState, i?: IssueDTO, d?: BootstrapDTO | null) {
+  const who = d ? (u: string) => (u === d.me.id ? { kind: 'human', name: t('issue.me') } : personById(d, u)) : undefined;
+  return taskStateLabel(s, taskText('es', 'en') as 'es' | 'en', i, who);
 }
-export function stateLabel(s: TaskState, i?: IssueDTO) {
-  if (s === 'processing' && i?.claimedBy) return taskText('Procesando', 'Processing');
-  return ({
-    waiting: taskText('En espera', 'Waiting'), assigned: taskText('Asignada · por empezar', 'Assigned · not started'), processing: taskText('En proceso', 'In progress'),
-    blocked: taskText('Esperando respuesta', 'Waiting for reply'), returned: taskText('Devuelta', 'Returned'), review: taskText('Por revisar', 'To review'),
-    human: taskText('Necesita persona', 'Needs a person'), done: taskText('Completada', 'Completed'), cancelled: taskText('Descartada', 'Dropped'),
-  })[s];
-}
-const STATE_ICON: Record<TaskState, string> = { waiting: '⏳', assigned: '🕒', processing: '⚙️', blocked: '⏸', returned: '↩', review: '👀', human: '🙋', done: '✅', cancelled: '✖' };
+const STATE_ICON: Record<TaskState, string> = { deploying: '🚀', waiting: '📥', assigned: '🕒', processing: '⚙️', blocked: '⏸', returned: '↩', review: '👀', human: '🙋', done: '✅', cancelled: '✖' };
 /** El estado en una píldora; «Procesando» palpita mientras un agente (o alguien) la tiene tomada. */
 export function StatePill({ i }: { i: IssueDTO }) {
   const d = useClient((st) => st.data);
@@ -86,7 +72,7 @@ export function StatePill({ i }: { i: IssueDTO }) {
   const live = s === 'processing' && !!i.claimedBy;
   // Esperando respuesta con un agente a cargo = el agente se detuvo a preguntar algo.
   const asks = s === 'blocked' && !!d && taskAssignees(i).some((u) => personById(d, u)?.kind === 'agent');
-  return <span className={`state-pill state-${s} ${live ? 'is-live' : ''} ${asks ? 'is-question' : ''}`}>{live ? <span className="fc-pulse" aria-hidden /> : asks ? '❓' : STATE_ICON[s]} {asks ? taskText('Pregunta del agente', 'Agent has a question') : stateLabel(s, i)}</span>;
+  return <span className={`state-pill state-${s} ${live ? 'is-live' : ''} ${asks ? 'is-question' : ''}`}>{live ? <span className="fc-pulse" aria-hidden /> : asks ? '❓' : STATE_ICON[s]} {stateLabel(s, i, d)}</span>;
 }
 
 export function inboxReasonLabel(r: TaskInboxReason) {
@@ -105,7 +91,7 @@ function StateBar({ i, orgIds, onError }: { i: IssueDTO; orgIds: string[]; onErr
   const personal = isPersonal(i);
   const who = taskAssignees(i).map((u) => personById(d, u)).filter((p): p is NonNullable<typeof p> => !!p);
   const whoText = who.map((p) => `${p.kind === 'agent' ? '🤖 ' : ''}${p.id === d.me.id ? t('issue.me') : p.name}`).join(', ');
-  const since = st === 'review' || st === 'human' || st === 'returned' ? i.reviewAt : st === 'done' || st === 'cancelled' ? i.closedAt ?? i.reviewAt : i.statusSince;
+  const since = st === 'review' || st === 'human' || st === 'returned' || st === 'deploying' ? i.reviewAt : st === 'done' || st === 'cancelled' ? i.closedAt ?? i.reviewAt : i.statusSince;
   const run = async (fn: () => Promise<unknown>) => {
     if (busy) return;
     setBusy(true);
@@ -122,29 +108,40 @@ function StateBar({ i, orgIds, onError }: { i: IssueDTO; orgIds: string[]; onErr
   });
   const returnIt = () => { if (!note.trim()) { onError(taskText('Escribe por qué la devuelves.', 'Write why you return it.')); return; } void review('changes'); };
   const takeIt = () => change({ assigneeIds: [d.me.id], status: 'in_progress' }, true);
+  /** Pasar a la IA (manual, 9-oct): una persona decide; el agente la toma solo en unos minutos. */
+  const agents = personal ? [] : agentsOf(d, i.conversationId);
+  const toAgent = (id: string) => run(async () => {
+    if (note.trim() || files.length) await client.commentIssue(i.id, note.trim(), ids());
+    await assignToAgent(i, id);
+  });
+  const solvedByAi = !!(i.reviewRequestedBy && personById(d, i.reviewRequestedBy)?.kind === 'agent');
   const chip = (label: string, onClick: () => void, opts: { primary?: boolean; ghost?: boolean; title?: string } = {}) =>
     <button className={`chip ${opts.primary ? 'is-primary' : ''} ${opts.ghost ? 'ghost' : ''}`} disabled={busy} title={opts.title} onClick={onClick}>{label}</button>;
   const actions = ({
-    waiting: [chip(`⚙️ ${taskText('Empezar yo', 'Start it myself')}`, () => void takeIt()), chip(`✖ ${taskText('Descartar', 'Drop')}`, () => void change({ status: 'cancelled' }), { ghost: true })],
+    waiting: [...agents.map((a, k) => chip(`🤖 ${taskText('Pasar a', 'Give to')} ${a.name}`, () => void toAgent(a.id), { primary: k === 0, title: taskText('El agente la toma solo en unos minutos', 'The agent picks it up within minutes') })),
+      chip(`⚙️ ${taskText('La tomo yo', 'I’ll take it')}`, () => void takeIt(), { primary: !agents.length }), chip(`✖ ${taskText('Descartar', 'Drop')}`, () => void change({ status: 'cancelled' }), { ghost: true })],
     assigned: [chip(`▶ ${taskText('Empezar', 'Start')}`, () => void change({ status: 'in_progress' }), { primary: true }), chip(`⏸ ${taskText('Esperando respuesta', 'Waiting for reply')}`, () => void change({ status: 'waiting' })), chip(`✅ ${taskText('Completar', 'Complete')}`, () => void change({ status: 'done' })), chip(`✖ ${taskText('Descartar', 'Drop')}`, () => void change({ status: 'cancelled' }), { ghost: true })],
     processing: [!personal && chip(`👀 ${taskText('Pasar a revisión', 'Send to review')}`, () => void review('pending'), { primary: true }), chip(`⏸ ${taskText('Esperando respuesta', 'Waiting for reply')}`, () => void change({ status: 'waiting' })), chip(`✅ ${taskText('Completar', 'Complete')}`, () => void change({ status: 'done' }), { primary: personal }), chip(`✖ ${taskText('Descartar', 'Drop')}`, () => void change({ status: 'cancelled' }), { ghost: true })],
     blocked: [chip(`▶ ${taskText('Reanudar', 'Resume')}`, () => void change({ status: 'in_progress' }), { primary: true }), chip(`✅ ${taskText('Completar', 'Complete')}`, () => void change({ status: 'done' })), chip(`✖ ${taskText('Descartar', 'Drop')}`, () => void change({ status: 'cancelled' }), { ghost: true })],
     returned: [chip(`👀 ${taskText('Pasar a revisión otra vez', 'Send to review again')}`, () => void review('pending'), { primary: true }), chip(`✅ ${taskText('Completar', 'Complete')}`, () => void change({ status: 'done' }, true)), chip(`✖ ${taskText('Descartar', 'Drop')}`, () => void change({ status: 'cancelled' }, true), { ghost: true })],
-    review: [chip(`✅ ${taskText('Aprobar y completar', 'Approve and complete')}`, () => void review('approved'), { primary: true }), chip(`↩ ${taskText('Devolver', 'Return')}`, returnIt, { title: taskText('Vuelve a quien la resolvió con tu nota', 'Goes back to whoever solved it with your note') }), chip(`🙋 ${taskText('Necesita persona', 'Needs a person')}`, () => void review('human'))],
-    human: [chip(`⚙️ ${taskText('Tomarla yo', 'Take it myself')}`, () => void takeIt(), { primary: true }), chip(`✅ ${taskText('Completar', 'Complete')}`, () => void change({ status: 'done' }, true)), chip(`✖ ${taskText('Descartar', 'Drop')}`, () => void change({ status: 'cancelled' }, true), { ghost: true })],
+    review: [chip(`✅ ${taskText('Aprobar y cerrar', 'Approve and close')}`, () => void review('approved'), { primary: true }),
+      solvedByAi && chip(`🚀 ${taskText('Aprobar y desplegar', 'Approve and deploy')}`, () => void review('deploy'), { title: taskText('Vuelve a la IA para que aplique lo aprobado (despliegue) y te la pase otra vez para verificar', 'Goes back to the AI to apply the approved plan and returns for verification') }), chip(`↩ ${solvedByAi ? taskText('Pedir corrección a la IA', 'Ask the AI for a fix') : taskText('Pedir corrección', 'Ask for a fix')}`, returnIt, { title: taskText('Vuelve a quien la resolvió con tu nota', 'Goes back to whoever solved it with your note') }), chip(`🙋 ${taskText('Pasar a una persona', 'Give to a person')}`, () => void review('human'))],
+    deploying: [chip(`⚙️ ${taskText('Mejor la tomo yo', 'I’ll take it instead')}`, () => void takeIt(), { ghost: true, title: taskText('La IA no despliega: queda contigo', 'The AI won’t deploy: it stays with you') }), chip(`✖ ${taskText('Descartar', 'Drop')}`, () => void change({ status: 'cancelled' }, true), { ghost: true })],
+    human: [chip(`⚙️ ${taskText('La tomo yo', 'I’ll take it')}`, () => void takeIt(), { primary: true }), chip(`✅ ${taskText('Completar', 'Complete')}`, () => void change({ status: 'done' }, true)), chip(`✖ ${taskText('Descartar', 'Drop')}`, () => void change({ status: 'cancelled' }, true), { ghost: true })],
     done: [chip(`↺ ${t('issue.reopen')}`, () => void change({ status: 'open' }, true))],
     cancelled: [chip(`↺ ${t('issue.reopen')}`, () => void change({ status: 'open' }, true))],
   } as Record<TaskState, (ReactElement | false)[]>)[st].filter(Boolean);
   const hint = ({
-    waiting: taskText('Nadie la tiene. Asígnala en «¿Quién lo hace?» a un agente 🤖 o a una persona.', 'Nobody has it. Assign it below.'),
+    waiting: agents.length ? taskText('Nadie la tiene. Decide: pásala a la IA 🤖, tómala tú o asígnala en «¿Quién lo hace?».', 'Nobody has it. Give it to the AI, take it, or assign it below.') : taskText('Nadie la tiene. Asígnala en «¿Quién lo hace?» o tómala tú.', 'Nobody has it. Assign it below.'),
     assigned: who.some((p) => p.kind === 'agent') ? taskText('El agente la tomará en un momento.', 'The agent will pick it up shortly.') : '',
     processing: i.claimedBy ? taskText('Trabajando en esto ahora mismo.', 'Being worked on right now.') : '',
     blocked: who.some((p) => p.kind === 'agent')
-      ? taskText('❓ El agente preguntó algo y está esperando. Respóndele en un comentario o en el chat de la tarea y sigue solo.', 'The agent asked something. Reply in a comment or the task chat and it continues.')
+      ? taskText('❓ La IA preguntó algo y está esperando. Respóndele con un comentario aquí abajo y sigue sola.', 'The AI asked something. Reply with a comment below and it continues.')
       : taskText('En pausa hasta que respondan.', 'Paused until someone replies.'),
-    returned: taskText('Se devolvió con una nota: quien la tiene la está corrigiendo.', 'Returned with a note: being fixed.'),
+    deploying: taskText('🚀 Aprobaste el plan: la IA lo aplica (despliega), deja la evidencia y te la pasa otra vez para que verifiques.', 'You approved the plan: the AI applies it and sends it back for you to verify.'),
+    returned: taskText('Se pidió una corrección con una nota: quien la tiene la está corrigiendo.', 'A fix was requested with a note: being fixed.'),
     review: taskText('Revisa la evidencia en los comentarios y decide.', 'Check the evidence in the comments and decide.'),
-    human: taskText('La IA no la puede hacer: asígnala a una persona o tómala.', 'AI cannot do it: assign it to a person or take it.'),
+    human: taskText('La IA no la puede hacer sola: tómala tú o asígnala a otra persona.', 'The AI can’t do it alone: take it or assign it to someone.'),
     done: '', cancelled: '',
   } as Record<TaskState, string>)[st];
   const withNote = st !== 'done' && st !== 'cancelled' && st !== 'waiting';
@@ -161,7 +158,7 @@ function StateBar({ i, orgIds, onError }: { i: IssueDTO; orgIds: string[]; onErr
       )}
       {withNote && <div className="review-note" {...dropProps}>
         <textarea className="input" rows={2} maxLength={4000} value={note} onChange={(e) => setNote(e.target.value)} onPaste={onPaste}
-          placeholder={st === 'review' ? taskText('Nota para quien la resolvió (obligatoria para devolver). Pega o adjunta capturas con 📎', 'Note for whoever solved it (required to return). Paste or attach screenshots') : taskText('Nota opcional que acompaña el cambio de estado. Pega o adjunta capturas con 📎', 'Optional note with the status change')} />
+          placeholder={st === 'review' ? taskText('Nota para quien la resolvió (obligatoria para pedir corrección). Pega o adjunta capturas con 📎', 'Note for whoever solved it (required to return). Paste or attach screenshots') : taskText('Nota opcional que acompaña el cambio de estado. Pega o adjunta capturas con 📎', 'Optional note with the status change')} />
         {chips}
         <div className="row">{button}<span className="small muted">{busy ? t('common.loading') : ''}</span></div>
       </div>}
@@ -503,8 +500,8 @@ function FlowAssign({ i, onOpen, onError }: { i: IssueDTO; onOpen: (id: string) 
 
 export function flowLabel(s: FlowStage) {
   return ({
-    new: taskText('⏳ En espera', '⏳ Waiting'), work: taskText('⚙️ En proceso', '⚙️ In progress'), review: taskText('👀 Por revisar', '👀 To review'),
-    human: taskText('🙋 Necesita persona', '🙋 Needs a person'), done: taskText('✅ Completadas', '✅ Completed'),
+    new: taskText('📥 Sin asignar', '📥 Unassigned'), work: taskText('⚙️ En proceso', '⚙️ In progress'), review: taskText('👀 Por revisar', '👀 To review'),
+    human: taskText('🙋 Necesita una persona', '🙋 Needs a person'), done: taskText('✅ Completadas', '✅ Completed'),
   })[s];
 }
 
@@ -1017,7 +1014,7 @@ function IssueFields({ issue, disabled, onSave }: { issue: IssueDTO; disabled: b
   return (
     <div className="issue-q">
       <div className="issue-q-label">{taskText('Campos', 'Fields')}{entries.length ? ` · ${entries.length}` : ''}
-        {canEditColumns && <button className="link-btn small" style={{ marginLeft: 8 }} onClick={() => openDialog((close) => <TaskColumnsDialog conversationId={issue.conversationId} onClose={close} />)}>⚙ {taskText('Columnas del grupo', 'Group columns')}</button>}
+        {canEditColumns && <button className="link-btn small" style={{ marginLeft: 8 }} onClick={() => openDialog((close) => <TaskColumnsDialog conversationId={issue.conversationId} onClose={close} />)}>⚙ {taskText('Columnas y tickets del grupo', 'Group columns & tickets')}</button>}
       </div>
       {defined.length > 0 && <dl className="issue-fields">
         {defined.map((col) => (
@@ -1245,7 +1242,7 @@ export function IssuesBody() {
           {(['group', 'person'] as const).map((g) => <button key={g} role="radio" aria-checked={groupBy === g} className={groupBy === g ? 'on' : ''} onClick={() => { void updateIssuePreferences({ grouping: g === 'person' ? 'assignee' : 'group' }).catch(() => {}); }}>{g === 'group' ? t('issue.byGroup') : t('issue.byPerson')}</button>)}
         </div>
         <div className="seg" role="radiogroup" aria-label={taskText('Vista de tareas', 'Task view')}>{(['list', 'cards', 'board'] as const).map((v) => <button key={v} role="radio" aria-checked={view === v} className={view === v ? 'on' : ''} onClick={() => { setTable(false); setFlow(false); void updateIssuePreferences({ view: v }).catch(() => {}); }}>{v === 'list' ? taskText('Lista', 'List') : v === 'cards' ? taskText('Tarjetas', 'Cards') : taskText('Tablero', 'Board')}</button>)}<button role="radio" aria-checked={view === 'table'} className={view === 'table' ? 'on' : ''} title={taskText('Una columna por cada campo de las tareas', 'One column per task field')} onClick={() => { setFlow(false); setTable(true); }}>{taskText('Tabla', 'Table')}</button><button role="radio" aria-checked={view === 'flow'} className={view === 'flow' ? 'on' : ''} title={taskText('En espera → asignas a un agente → trabaja → por revisar → apruebas o devuelves', 'Waiting → assign an agent → works → review → approve or return')} onClick={() => { setFlow(true); setScope('all'); }}>🤖 {taskText('Flujo IA', 'AI flow')}</button></div>
-        {view === 'table' && d.conversations.some((c) => c.canManage && c.kind !== 'direct') && <button className="btn small" onClick={() => openDialog((close) => <TaskColumnsDialog onClose={close} />)}>⚙ {taskText('Columnas', 'Columns')}</button>}
+        {d.conversations.some((c) => c.canManage && c.kind !== 'direct') && <button className="btn small" title={taskText('Columnas de las tareas y qué pasa al llegar un ticket', 'Task columns and what happens when a ticket arrives')} onClick={() => openDialog((close) => <TaskColumnsDialog conversationId={groupFilter !== 'all' && d.conversations.some((c) => c.id === groupFilter && c.canManage) ? groupFilter : undefined} onClose={close} />)}>⚙ {taskText('Columnas y tickets', 'Columns & tickets')}</button>}
         <TaskReportButton />
       </div>
       {fresh.length > 0 && (

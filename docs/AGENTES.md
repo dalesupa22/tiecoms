@@ -68,10 +68,19 @@ El mismo webhook avisa de las tareas de los chats del agente (`apps/api/src/modu
 
 - `task.created`: llegó un ticket sin responsable al grupo. Solo se escucha: la persona elige a qué agente
   asignarlo (p. ej. «Agente Xertify» o «Agente Xertiflow») desde la vista «🤖 Flujo IA» del tablero.
+  **Al llegar un ticket** (9-oct, por grupo, en «⚙ Columnas y tickets» o MCP `get_ticket_intake`/`set_ticket_intake`):
+  *manual* (por defecto: llega sin responsable, avisa al grupo y la persona decide; en la tarjeta «🤖 Pasar a …») o
+  *automático* (se asigna solo a una persona o agente del grupo, entra «por empezar» o «en proceso» y con los valores
+  de columna elegidos, p. ej. «Estado: Ticket nuevo»). Lo que mande la integración (responsable, campos) gana. Si quien
+  recibe sale del grupo, vuelve a manual. Columna `conversations.ticket_intake`; prueba `apps/api/test/ticket-intake.test.ts`.
 - `task.assigned`: se la asignaron al agente → la toma (`update_task` status `in_progress`), la resuelve, sube la
   evidencia (`upload_task_attachment` + `comment_task`) y la deja `review: "pending"` asignada a quien revisa.
 - `task.changes_requested` (con `note`): la persona pidió corrección → el agente la retoma y vuelve a pedir revisión.
-- `task.approved` / `task.needs_human`: la persona aprobó (el agente entrega y avisa al cliente) o la mandó a una persona.
+- `task.approved` / `task.needs_human`: la persona aprobó y cerró («Aprobar y cerrar» completa la tarea) o la mandó a una persona.
+- `task.deploy_approved` (con `note`, 9-oct): «🚀 Aprobar y desplegar» (`review: "deploy"`): la persona aprobó el plan y
+  la tarjeta vuelve sola al agente (sin cerrarse) para que aplique lo aprobado (despliegue), deje la evidencia y la pase
+  otra vez `review: "pending"` para verificar. Así el ciclo es: resuelve en testing → por revisar → corrección (si hace
+  falta) → aprobar y desplegar → desplegado, verifica → aprobar y cerrar.
 - `task.commented` (con `comment.body`): la persona escribió en una tarea que el agente tiene o dejó por revisar.
 
 El cuerpo trae `task` (id, título, estado, revisión, responsables, ticket externo, URL), `actor` y `tools` con las
@@ -94,8 +103,9 @@ Herramientas MCP del ciclo:
 `POST /hook/<agente>` para reaccionar al instante y cron cada `pollMinutes` como red de seguridad (`--once` hace una
 pasada, útil desde crontab). Por tarjeta: `claim_task` → `open_task_chat` con quien revisa → `claude -p` o
 `codex exec` con un prompt que exige evidencia y `review: pending` (o `human` si necesita a una persona). Si la corrida
-no la deja lista, comenta y la suelta; tras `maxAttempts` (2) pasa a intervención humana. «Aprobada» se entrega sin
-modelo (comentario + `status: done`).
+no la deja lista, comenta y la suelta; tras `maxAttempts` (2) pasa a intervención humana. `review: "deploy"` despierta
+al modelo con «aplica solo lo aprobado y despliega»; sin esa aprobación, lo que toca producción queda como plan en la
+evidencia («Requiere despliegue: …»).
 
 Aislamiento: el modelo solo tiene el MCP `chaggu_agente` con el token del agente (Claude con `--strict-mcp-config`,
 Codex con un `CODEX_HOME` propio por agente con `default_tools_approval_mode = "approve"`), nunca la sesión de Chaggu

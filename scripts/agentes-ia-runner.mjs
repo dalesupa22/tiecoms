@@ -3,7 +3,7 @@
  * Runner de agentes IA del tablero (CH-IA-03, llamada con Lorena 7-oct). Corre en la máquina que resuelve (repos,
  * servidores, skills) y trabaja las tarjetas asignadas a cada agente con Claude Code (`claude -p`) o Codex (`codex exec`):
  *
- * - Webhook: Chaggu avisa al instante (task.assigned, task.changes_requested, task.commented, task.approved y lo que
+ * - Webhook: Chaggu avisa al instante (task.assigned, task.changes_requested, task.deploy_approved, task.commented, task.approved y lo que
  *   escriben en el chat de la tarea). Ruta POST /hook/<agente>, firma x-chaggu-signature con el secreto del agente.
  * - Cron: cada pollMinutes revisa por el MCP las tarjetas de cada agente (red de seguridad si un aviso no llegó o no
  *   hay URL pública). Solo arranca el modelo si hay trabajo.
@@ -97,6 +97,7 @@ function pump() {
 function prompt(agent, task, chatId, trigger) {
   const why = {
     work: 'Te asignaron esta tarjeta y está pendiente.',
+    deploy: `${REVIEWER} APROBÓ tu plan y pidió desplegarlo${trigger.note ? `: «${trigger.note}»` : ''}. Aplica exactamente lo aprobado (despliegue a producción incluido) con las skills de despliegue del proyecto y su rama canónica (xertify-commits), verifica en producción y deja la evidencia.`,
     changes: `La revisión pidió corrección: «${trigger.note ?? ''}».${trigger.files?.length ? ` Adjuntó: ${trigger.files.join(', ')}: ábrelos con read_task_attachment.` : ''}`,
     comment: `Te escribieron en la tarjeta: «${trigger.text ?? ''}».${trigger.files?.length ? ` Adjuntó: ${trigger.files.join(', ')}: ábrelos con read_task_attachment.` : ''}${trigger.waiting ? ' La tarjeta estaba esperando tu pregunta: si esto la responde, continúa.' : ''}`,
     chat: `Te escribieron en el chat de la tarea: «${trigger.text ?? ''}».${trigger.waiting ? ' La tarjeta estaba esperando tu pregunta: si esto la responde, continúa.' : ''}`,
@@ -116,9 +117,13 @@ function prompt(agent, task, chatId, trigger) {
     trigger.kind === 'comment' || trigger.kind === 'chat'
       ? `2. Si es la respuesta a una pregunta tuya o te piden cambios, avisa en el chat ${chatId} que continúas y sigue con los pasos 3-6. Si solo te preguntan algo, respóndelo con send_message en el chat (o comment_task) y termina.`
       : `2. Cuenta en el chat de la tarea (send_message chat=${chatId}) que la tomaste y tu plan en una o dos líneas.`,
-    '3. Resuélvela con tus herramientas. No le escribas al cliente directamente y no cierres la tarea.',
+    trigger.kind === 'deploy'
+      ? `3. Despliega SOLO lo que quedó aprobado en la tarea (lee el plan y la aprobación con get_task). Si el plan cambió o algo no cuadra, no despliegues: pregunta (paso 7). No le escribas al cliente directamente y no cierres la tarea.`
+      : '3. Resuélvela con tus herramientas: diagnóstico, correcciones en ramas/worktrees y pruebas en testing. Lo que toque producción (desplegar, datos reales) déjalo como plan exacto en la evidencia para que lo aprueben con «Aprobar y desplegar». No le escribas al cliente directamente y no cierres la tarea.',
     '4. Evidencia: sube capturas, registros o un informe .md con upload_task_attachment y publica UN comment_task con attachment_ids que diga qué pidió el cliente, qué encontraste, qué hiciste y cómo verificarlo.',
-    `5. Déjala por revisar: update_task review="pending" assignees=["${REVIEWER}"] con un review_note corto.`,
+    trigger.kind === 'deploy'
+      ? `5. Déjala por revisar para que verifiquen el despliegue: update_task review="pending" assignees=["${REVIEWER}"] con review_note «Desplegado: verifica …» (commit, versión, cómo comprobarlo).`
+      : `5. Déjala por revisar: update_task review="pending" assignees=["${REVIEWER}"] con un review_note corto. Si hace falta desplegar, dilo en el review_note («Requiere despliegue: …») para que lo aprueben con «Aprobar y desplegar».`,
     `6. Si necesita a una persona (credenciales, firma, trámite manual, decisión de negocio): explícalo con comment_task y update_task review="human" assignees=["${REVIEWER}"].`,
     `7. Si te falta un dato para seguir (algo que el ticket no dice y no puedes averiguar), NO adivines: pregunta concretamente en el chat de la tarea (send_message chat=${chatId}, mencionando a ${REVIEWER}) y en comment_task, deja update_task status="waiting" SIN cambiar los responsables (la tarjeta sigue contigo) y termina. Cuando te respondan te volverán a despertar.`,
     'Si algo falla, explícalo en la tarea antes de terminar.',
@@ -185,6 +190,7 @@ async function runJob({ agent, taskId, trigger: first }) {
   try { task = (await tool(agent, 'claim_task', { id: taskId, minutes: Math.ceil(RUN_TIMEOUT / 60_000) + 5 })).task; }
   catch (e) { if (e.code === 'task_claimed' || e.code === 'task_in_review' || e.code === 'bad_request') { log('·', agent.name, 'salta', taskId, e.message); return; } throw e; }
   // Si la tarjeta viene devuelta, el prompt lo dice aunque el aviso haya sido solo «asignada» (p. ej. por el cron).
+  if (trigger.kind === 'work' && task.review === 'deploy') trigger = { kind: 'deploy' };
   if (trigger.kind === 'work' && task.review === 'changes') trigger = { kind: 'changes', note: 'La revisión la devolvió: lee el último comentario de revisión (y sus capturas) con get_task.' };
   const chat = (await tool(agent, 'open_task_chat', { id: taskId, people: [REVIEWER] })).chat;
   log('🤖', agent.name, 'toma', task.ticket ? `#${task.ticket}` : '', task.title, `(${trigger.kind}, ${agent.engine ?? 'claude'})`);
@@ -198,7 +204,7 @@ async function runJob({ agent, taskId, trigger: first }) {
     return;
   }
   // No la dejó por revisar: o solo respondió una pregunta, o falló. Si falló, que se note en la tarea.
-  if (trigger.kind === 'work' || trigger.kind === 'changes') {
+  if (trigger.kind === 'work' || trigger.kind === 'changes' || trigger.kind === 'deploy') {
     const n = (attempts.get(key) ?? 0) + 1;
     attempts.set(key, n);
     if (n >= MAX_ATTEMPTS) {
@@ -229,9 +235,9 @@ async function poll() {
           continue;
         }
         const open = !['done', 'cancelled', 'waiting'].includes(t.status);
-        const waiting = !t.review || t.review === 'changes';
+        const waiting = !t.review || t.review === 'changes' || t.review === 'deploy';
         const free = !t.claimedBy || t.claimedBy.endsWith('(tú)');
-        if (open && waiting && free) enqueue(a, t.id, t.review === 'changes' ? { kind: 'changes', note: 'Revisa los comentarios de la revisión en la tarea.' } : { kind: 'work' });
+        if (open && waiting && free) enqueue(a, t.id, t.review === 'changes' ? { kind: 'changes', note: 'Revisa los comentarios de la revisión en la tarea.' } : t.review === 'deploy' ? { kind: 'deploy' } : { kind: 'work' });
         if (t.review === 'approved' && open) enqueue(a, t.id, { kind: 'approved' });
       }
     } catch (e) { log('✗ cron', a.name, e.message); }
@@ -246,6 +252,7 @@ function onEvent(agent, ev) {
     case 'task.changes_requested': return enqueue(agent, ev.task.id, { kind: 'changes', note: ev.note, files });
     case 'task.commented': return enqueue(agent, ev.task.id, { kind: 'comment', text: ev.comment?.body, files, waiting: ev.task.status === 'waiting' });
     case 'task.approved': return enqueue(agent, ev.task.id, { kind: 'approved' });
+    case 'task.deploy_approved': return enqueue(agent, ev.task.id, { kind: 'deploy', note: ev.note });
     case 'message.created': case 'message.mention': case 'message.reply':
       if (ev.conversation?.taskId) return enqueue(agent, ev.conversation.taskId, { kind: 'chat', text: ev.message?.body });
       return undefined;

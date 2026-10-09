@@ -1,5 +1,5 @@
 import type { z } from 'zod';
-import { AddMembersInput, ISSUE_FIELDS_MAX, type IssueReview, type TaskInboxItemDTO, type TaskInboxReason, type TaskColumnDTO, type TaskColumnsInput, type CreateIssueInput, type IssueDTO, type IssueFieldValue, type IssueEventDTO, type IssueVisibility, type UpdateIssueInput } from '@tiecoms/contracts';
+import { AddMembersInput, ISSUE_FIELDS_MAX, type IssueReview, type TaskInboxItemDTO, type TaskInboxReason, type TaskColumnDTO, type TaskColumnsInput, type TicketIntakeDTO, type TicketIntakeInput, type CreateIssueInput, type IssueDTO, type IssueFieldValue, type IssueEventDTO, type IssueVisibility, type UpdateIssueInput } from '@tiecoms/contracts';
 import { conversationAccess } from '../access.ts';
 import { audit, enqueueOutbox, pool, tx, type Db, type Tx } from '../db.ts';
 import { ApiError, badRequest, forbidden, notFound, taskNotFound } from '../errors.ts';
@@ -77,7 +77,7 @@ function toDTO(r: any): IssueDTO {
     ...(r.visibility && r.visibility !== 'all' ? { viewerIds: r.viewer_ids ?? [] } : {}),
     ...(r.integration_id ? { integrationId: r.integration_id, externalId: r.external_id ?? null, externalMeta: r.external_meta ?? null } : {}),
     ...(r.fields && Object.keys(r.fields).length ? { fields: r.fields } : {}),
-    ...(r.review ? { review: r.review, reviewBy: r.review_by ?? null, reviewAt: iso(r.review_at) } : {}),
+    ...(r.review ? { review: r.review, reviewBy: r.review_by ?? null, reviewAt: iso(r.review_at), reviewRequestedBy: r.review_requested_by ?? null } : {}),
     ...(r.claimed_by && r.claimed_until && new Date(r.claimed_until).getTime() > Date.now() ? { claimedBy: r.claimed_by, claimedUntil: iso(r.claimed_until) } : {}),
   };
 }
@@ -368,7 +368,8 @@ export async function updateIssue(userId: string, issueId: string, input: z.infe
     const previousAssignees: string[] = cur.assignee_ids?.length ? cur.assignee_ids : cur.owner_id ? [cur.owner_id] : [];
     // «Devolver» (llamada con Lorena 7-oct): pedir corrección le regresa la tarjeta a quien la dejó por revisar
     // (el agente o la persona que la resolvió), salvo que en el mismo cambio se elijan otros responsables.
-    if (input.review === 'changes' && cur.review !== 'changes' && input.assigneeIds === undefined && input.ownerId === undefined
+    // «Aprobar y desplegar» (9-oct) también: vuelve a quien la resolvió para que aplique lo aprobado.
+    if ((input.review === 'changes' || input.review === 'deploy') && cur.review !== input.review && input.assigneeIds === undefined && input.ownerId === undefined
       && cur.review_requested_by && cur.review_requested_by !== userId) {
       input = { ...input, assigneeIds: [cur.review_requested_by] };
     }
@@ -644,6 +645,55 @@ export async function setTaskColumns(userId: string, conversationId: string, inp
     await c.query('UPDATE conversations SET task_columns = $2 WHERE id = $1', [conversationId, columns.length ? JSON.stringify(columns) : null]);
     await audit(c, userId, 'task_columns.updated', { type: 'conversation', id: conversationId, workspaceId: a.workspaceId }, { columns: columns.map((x) => x.name) });
     return { columns, canEdit: true };
+  });
+}
+
+// ---------- Al llegar un ticket (regla del grupo) ----------
+
+/** Responsables de la regla que siguen en el grupo y activos (alguien pudo salir después de configurarla). */
+async function activeMembers(c: Db, conversationId: string, ids: string[]) {
+  const { rows } = await c.query(
+    `SELECT cm.user_id FROM conversation_memberships cm JOIN users u ON u.id = cm.user_id
+      WHERE cm.conversation_id = $1 AND cm.user_id = ANY($2) AND cm.removed_at IS NULL AND u.disabled_at IS NULL`, [conversationId, ids]);
+  const ok = new Set(rows.map((r) => r.user_id as string));
+  return ids.filter((x) => ok.has(x));
+}
+
+/**
+ * Regla vigente para un ticket nuevo del grupo, o null = manual. Si ya nadie de la regla está en el grupo, también es
+ * manual: mejor que llegue a «Nuevas» de todos a que quede asignado a alguien que no lo verá.
+ */
+export async function ticketIntakeFor(c: Db, conversationId: string): Promise<TicketIntakeDTO | null> {
+  const { rows } = await c.query('SELECT ticket_intake FROM conversations WHERE id = $1', [conversationId]);
+  const rule = rows[0]?.ticket_intake as TicketIntakeDTO | null;
+  if (!rule?.assigneeIds?.length) return null;
+  const assigneeIds = await activeMembers(c, conversationId, rule.assigneeIds);
+  return assigneeIds.length ? { ...rule, assigneeIds } : null;
+}
+
+export async function getTicketIntake(userId: string, conversationId: string) {
+  const a = await conversationAccess(pool, userId, conversationId, 'read');
+  const { rows } = await pool.query('SELECT ticket_intake FROM conversations WHERE id = $1', [conversationId]);
+  return { intake: (rows[0]?.ticket_intake ?? null) as TicketIntakeDTO | null, canEdit: !!a.canManage };
+}
+
+/** La cambia quien administra el grupo. Los responsables deben estar en el grupo; los valores, ser de sus columnas. */
+export async function setTicketIntake(userId: string, conversationId: string, input: z.infer<typeof TicketIntakeInput>) {
+  return tx(async (c) => {
+    const a = await conversationAccess(c, userId, conversationId, 'read');
+    if (!a.canManage) throw forbidden('Solo quien administra el grupo cambia qué pasa al llegar un ticket');
+    let intake: TicketIntakeDTO | null = null;
+    if (input.intake) {
+      const ids = [...new Set(input.intake.assigneeIds)];
+      const ok = await activeMembers(c, conversationId, ids);
+      if (ok.length !== ids.length) throw badRequest('Quien recibe los tickets debe estar en el grupo');
+      const fields = applyColumns(await loadColumns(c, conversationId), input.intake.fields) as Record<string, IssueFieldValue | null> | undefined;
+      const clean = Object.fromEntries(Object.entries(fields ?? {}).filter(([, v]) => v !== null && v !== '')) as Record<string, IssueFieldValue>;
+      intake = { assigneeIds: ids, status: input.intake.status, ...(Object.keys(clean).length ? { fields: clean } : {}) };
+    }
+    await c.query('UPDATE conversations SET ticket_intake = $2 WHERE id = $1', [conversationId, intake ? JSON.stringify(intake) : null]);
+    await audit(c, userId, 'ticket_intake.updated', { type: 'conversation', id: conversationId, workspaceId: a.workspaceId }, { mode: intake ? 'auto' : 'manual', assigneeIds: intake?.assigneeIds ?? [], status: intake?.status ?? null });
+    return { intake, canEdit: true };
   });
 }
 

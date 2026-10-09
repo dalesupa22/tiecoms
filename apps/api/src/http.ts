@@ -13,7 +13,7 @@ import {
   UpdateProfileInput, DndInput, MeetingProvider, MeetingConnectInput, MeetingConfirmInput, CreateMeetingInput, SleepInput, CreateChatInput, DriveTreeQuery, CreateDriveDocumentInput, CreateFolderInput, UpdateFolderInput, UpdateFileInput, UploadFileQuery, CreateWaAccountInput, UpdateWaAccountInput, RelinkWaAccountInput, WaChatsQuery, UpdateWaChatInput, WaMessagesQuery, WaSendInput, MailLiveReplyInput,
   SideConversationInput, PushTokenInput, ReactInput, LinksQuery, SavedLinksQuery, LinkStateInput, ReactionActionsInput, CreateAgentInput,
   SignPdfInput, MAX_SIGNATURE_BYTES, SigningHistoryQuery,
-  CreateIntegrationInput, IncomingWebhookInput, IntegrationCommentInput, IntegrationCreateIssueInput, IntegrationUpdateIssueInput, WebhookTaskInput, TaskColumnsInput,
+  CreateIntegrationInput, IncomingWebhookInput, IntegrationCommentInput, IntegrationCreateIssueInput, IntegrationUpdateIssueInput, WebhookTaskInput, TaskColumnsInput, TicketIntakeInput,
   ChatSearchQuery, GlobalSearchQuery, EventCommentInput, MailProvider, MailListQuery, ShareMailInput, MailReplyInput, MailTaskInput, ShareWaInput, ForwardSharedInput,
   GgSideQuery, GgSideSourceInput, GgSideAskInput, GgSideReplyInput, GgSideSuggestInput, GgSidePendingQuery,
   SetAdminInput, UpdateIntegrationInput, StartCallInput, CallDeviceInput, SoundsInput, CallTranscriptionInput, CallTranscriptInput, CallHistoryQuery, CallShareInput, CallInviteInput, GuestJoinInput, GuestSecretInput, CreateRoomInput, BookingCreateInput, BookingRescheduleInput, BookingPageInput, BookingPagePatch, SignupConfirmInput, ReorderTopicsInput,
@@ -831,6 +831,9 @@ export async function buildHttp() {
     priv.patch<{ Params: { id: string } }>('/api/v1/issues/:id', async (req) => issues.updateIssue(req.userId, req.params.id, UpdateIssueInput.parse(req.body)));
     priv.get<{ Params: { id: string } }>('/api/v1/conversations/:id/task-columns', async (req) => issues.getTaskColumns(req.userId, req.params.id));
     priv.put<{ Params: { id: string } }>('/api/v1/conversations/:id/task-columns', async (req) => issues.setTaskColumns(req.userId, req.params.id, TaskColumnsInput.parse(req.body)));
+    // Al llegar un ticket (regla del grupo, 9-oct): manual (null) o asignar solo a quien diga el grupo.
+    priv.get<{ Params: { id: string } }>('/api/v1/conversations/:id/ticket-intake', async (req) => issues.getTicketIntake(req.userId, req.params.id));
+    priv.put<{ Params: { id: string } }>('/api/v1/conversations/:id/ticket-intake', async (req) => issues.setTicketIntake(req.userId, req.params.id, TicketIntakeInput.parse(req.body)));
     priv.post<{ Params: { id: string } }>('/api/v1/issues/:id/children', async (req) => issues.createChildIssue(req.userId, req.params.id, CreateChildIssueInput.parse(req.body)));
     priv.post<{ Params: { id: string } }>('/api/v1/issues/:id/comments', async (req) => { const input = IssueCommentInput.parse(req.body); return issues.commentIssue(req.userId, req.params.id, input.body, {}, undefined, input.attachmentIds, input.toClient === true); });
 

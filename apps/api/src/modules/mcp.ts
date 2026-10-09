@@ -9,7 +9,7 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { BootstrapDTO, CalendarEventDTO, ConversationDTO, IssueDTO, MessageDTO } from '@tiecoms/contracts';
-import { IssueFieldsInput, TaskColumnInput } from '@tiecoms/contracts';
+import { IssueFieldsInput, TaskColumnInput, taskState, taskStateLabel } from '@tiecoms/contracts';
 import { pool, type Tx } from '../db.ts';
 import { conversationAccess } from '../access.ts';
 import { ApiError, badRequest, notFound, unauthorized } from '../errors.ts';
@@ -220,6 +220,8 @@ function taskView(b: BootstrapDTO, i: IssueDTO) {
     assignees: (i.assigneeIds ?? (i.ownerId ? [i.ownerId] : [])).map(name), requestedBy: name(i.requestedBy), chat: c ? chatName(b, c) : null, chatId: i.conversationId,
     ...(i.externalId ? { ticket: i.externalId } : {}), ...(i.externalMeta ? { meta: i.externalMeta } : {}), ...(i.fields ? { fields: i.fields } : {}), ...(i.review ? { review: i.review, reviewBy: name(i.reviewBy), reviewAt: i.reviewAt } : {}), comments: i.commentCount, updatedAt: i.updatedAt,
     ...(i.claimedBy ? { claimedBy: name(i.claimedBy), claimedUntil: i.claimedUntil } : {}),
+    // Nombre claro del estado, el mismo de la web («La IA pregunta · falta respuesta», «Revisión de Lorena»…).
+    state: taskState(i), stateLabel: taskStateLabel(taskState(i), 'es', i, (u) => (u === b.me.id ? { kind: b.me.kind ?? 'human', name: b.me.name } : b.people.find((p) => p.id === u))),
   };
 }
 
@@ -728,7 +730,7 @@ const tools: Tool[] = [
       chat: z.string().max(200).optional().describe('Id o nombre del chat o grupo'),
       field: z.string().max(60).optional().describe('Nombre de un campo dinámico (p. ej. «Resultado»)'),
       field_value: z.string().max(200).optional().describe('Valor que debe contener ese campo'),
-      review: z.enum(['pending', 'approved', 'changes', 'human']).optional().describe('Solo las que están en esa revisión humana'),
+      review: z.enum(['pending', 'approved', 'changes', 'human', 'deploy']).optional().describe('Solo las que están en esa revisión humana'),
     }),
     run: async (userId, a) => {
       const b = await bootstrap(userId);
@@ -803,7 +805,7 @@ const tools: Tool[] = [
       due_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional().describe('AAAA-MM-DD o null para quitarla'),
       title: z.string().trim().min(2).max(200).optional(),
       fields: IssueFieldsInput.optional().describe('Campos dinámicos { "Servicios": "…", "Prioridad": 2, "Bloqueado": true }; null borra'),
-      review: z.enum(['pending', 'approved', 'changes', 'human']).nullable().optional().describe('Revisión humana: pending = la IA lo resolvió y queda para que el responsable lo apruebe (sube antes la evidencia con upload_task_attachment y comment_task); changes (devolver: vuelve sola a quien la dejó por revisar), human y approved las marca la persona; null la quita'),
+      review: z.enum(['pending', 'approved', 'changes', 'human', 'deploy']).nullable().optional().describe('Revisión humana: pending = la IA lo resolvió y queda para que el responsable lo apruebe (sube antes la evidencia con upload_task_attachment y comment_task); changes (pedir corrección: vuelve sola a quien la dejó por revisar); deploy (aprobar y desplegar: vuelve a quien la resolvió para que aplique/despliegue lo aprobado y la pase otra vez por revisar); human y approved (aprobar y cerrar) las marca la persona; null la quita'),
       review_note: z.string().trim().min(1).max(4000).optional().describe('Comentario que acompaña el cambio de revisión'),
     }),
     run: async (userId, a, ctx) => {
@@ -862,6 +864,35 @@ const tools: Tool[] = [
     description: 'Define las columnas de las tareas de un grupo (reemplaza la lista completa; trae primero las actuales con get_task_columns). type: text, select (lista desplegable con options), number o checkbox. Solo quien administra el grupo. Confirma antes con la persona.',
     schema: z.object({ chat: z.string().min(1).max(200), columns: z.array(TaskColumnInput).max(30) }),
     run: async (userId, a) => issues.setTaskColumns(userId, findChat(await bootstrap(userId), a.chat).id, { columns: a.columns }),
+  },
+  {
+    name: 'get_ticket_intake', readOnly: true, scope: 'tasks:read',
+    description: 'Qué pasa al llegar un ticket a un grupo: mode manual (llega sin responsable y una persona decide si se lo pasa a la IA) o auto (se asigna solo a assignees, entra en status y con los valores de columna fields).',
+    schema: z.object({ chat: z.string().min(1).max(200).describe('Id o nombre del grupo') }),
+    run: async (userId, a) => {
+      const b = await bootstrap(userId);
+      const r = await issues.getTicketIntake(userId, findChat(b, a.chat).id);
+      const name = (id: string) => (id === b.me.id ? `${b.me.name} (tú)` : b.people.find((p) => p.id === id)?.name ?? id);
+      return { mode: r.intake ? 'auto' : 'manual', canEdit: r.canEdit, ...(r.intake ? { assignees: r.intake.assigneeIds.map(name), status: r.intake.status, fields: r.intake.fields ?? {} } : {}) };
+    },
+  },
+  {
+    name: 'set_ticket_intake', scope: 'tasks:write',
+    description: 'Configura qué pasa al llegar un ticket a un grupo. mode manual = llega sin responsable y una persona decide. mode auto = se asigna solo a assignees (personas o agentes 🤖 del grupo, por nombre o id), en status open (por empezar) o in_progress, y con fields (valores de las columnas del grupo, p. ej. { "Estado": "Ticket nuevo" }). Solo quien administra el grupo. Confirma antes con la persona.',
+    schema: z.object({
+      chat: z.string().min(1).max(200),
+      mode: z.enum(['manual', 'auto']),
+      assignees: z.array(z.string().min(1).max(200)).min(1).max(5).optional(),
+      status: z.enum(['open', 'in_progress']).optional(),
+      fields: IssueFieldsInput.optional(),
+    }),
+    run: async (userId, a) => {
+      const b = await bootstrap(userId);
+      if (a.mode === 'auto' && !a.assignees?.length) throw badRequest('En modo auto di a quién se asigna (assignees)');
+      const intake = a.mode === 'manual' ? null : { assigneeIds: a.assignees!.map((x: string) => personId(b, x)), status: a.status ?? 'open', ...(a.fields ? { fields: a.fields } : {}) };
+      const r = await issues.setTicketIntake(userId, findChat(b, a.chat).id, { intake } as any);
+      return { mode: r.intake ? 'auto' : 'manual', intake: r.intake };
+    },
   },
   {
     name: 'create_task', scope: 'tasks:write',

@@ -538,6 +538,7 @@ export async function pushWaDrafts(userId: string) {
 
 function reviewedTitle(en: boolean, who: string, review: string | null) {
   if (review === 'approved') return en ? `${who} approved a task` : `${who} aprobó una tarea`;
+  if (review === 'deploy') return en ? `${who} approved deploying a task` : `${who} aprobó desplegar una tarea`;
   if (review === 'changes') return en ? `${who} asks for changes` : `${who} pidió corregir una tarea`;
   if (review === 'human') return en ? `${who} marked a task for a person` : `${who} marcó una tarea para intervención humana`;
   return en ? `${who} reviewed a task` : `${who} revisó una tarea`;

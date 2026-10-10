@@ -142,6 +142,55 @@ describe('MCP attachments over HTTP in an authorized fixture DM', () => {
     bad(await tool(outsider.mcp, 'update_task', { id: task, status: 'done' }));
   });
 
+  it('accepts a real MP4 in base64 and plays it as video', async () => {
+    const mp4 = Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from('ftypisom'), Buffer.alloc(4000, 7)]);
+    const up = good(await tool(ana.mcp, 'upload_chat_attachment', { chat, ...file('clip.mp4', mp4, 'video/mp4') }));
+    expect(up.attachment).toMatchObject({ name: 'clip.mp4', contentType: 'video/mp4', sizeBytes: mp4.length });
+    bad(await tool(ana.mcp, 'upload_chat_attachment', { chat, ...file('fake.mp4', PDF, 'video/mp4') }), 'unsupported_type');
+  });
+
+  it('create_upload_link streams a large video to a chat once, and a file to a task, with the token owner permissions', async () => {
+    const mp4 = Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from('ftypmp42'), Buffer.alloc(3 * 1024 * 1024, 9)]);
+    const link = good(await tool(ana.mcp, 'create_upload_link', { chat, name: 'demo.mp4', content_type: 'video/mp4' }));
+    expect(link.upload_url).toMatch(/\/api\/mcp\/uploads\/[0-9a-f-]{36}\/[A-Za-z0-9_-]{43}$/);
+    const path = new URL(link.upload_url).pathname;
+    const post = (body: Buffer, p = path) => fetch(`${API}${p}`, { method: 'POST', body, headers: { 'content-type': 'video/mp4' } });
+    const r = await post(mp4);
+    expect(r.status).toBe(200);
+    const out = await r.json() as any;
+    expect(out.attachment).toMatchObject({ name: 'demo.mp4', contentType: 'video/mp4', sizeBytes: mp4.length });
+    // Reintento con la misma URL: mismo adjunto, sin otra subida.
+    const again = await (await post(Buffer.from('ignored'))).json() as any;
+    expect(again.attachment.id).toBe(out.attachment.id);
+    expect((await pool.query("SELECT count(*)::int AS n FROM attachments WHERE owner_id=$1 AND name='demo.mp4'", [ana.id])).rows[0].n).toBe(1);
+    const sent = good(await tool(ana.mcp, 'send_message', { chat, text: 'video', attachment_ids: [out.attachment.id], idempotency_key: randomUUID() }));
+    const seen = good(await tool(beto.mcp, 'read_messages', { chat })).messages.find((m: any) => m.id === sent.messageId);
+    expect(seen.attachment_details[0]).toMatchObject({ id: out.attachment.id });
+    const dl = await fetch(`${API}${seen.attachment_details[0].url}`, { headers: { authorization: `Bearer ${beto.session}` } });
+    expect(dl.status).toBe(200);
+    expect(Buffer.from(await dl.arrayBuffer()).equals(mp4)).toBe(true);
+    // Destinos ajenos, tipos activos, secretos inválidos y enlaces vencidos.
+    bad(await tool(outsider.mcp, 'create_upload_link', { chat, name: 'x.mp4', content_type: 'video/mp4' }));
+    bad(await tool(ana.mcp, 'create_upload_link', { chat, name: 'x.html', content_type: 'text/html' }), 'unsupported_type');
+    bad(await tool(ana.mcp, 'create_upload_link', { name: 'x.mp4', content_type: 'video/mp4' }), 'bad_request');
+    expect((await post(mp4, path.replace(/[A-Za-z0-9_-]{43}$/, 'A'.repeat(43)))).status).toBe(404);
+    const stale = good(await tool(ana.mcp, 'create_upload_link', { chat, name: 'late.mp4', content_type: 'video/mp4' }));
+    await pool.query("UPDATE mcp_idempotency SET request = convert_to(jsonb_set(convert_from(request,'UTF8')::jsonb, '{exp}', '0')::text, 'UTF8') WHERE key LIKE 'upload-link:%' AND response IS NULL");
+    expect((await post(mp4, new URL(stale.upload_url).pathname)).status).toBe(410);
+    // Tarea: el archivo se agrega a sus adjuntos.
+    const tl = good(await tool(ana.mcp, 'create_upload_link', { task_id: task, name: 'plano.ai', content_type: 'application/postscript' }));
+    const tr = await fetch(`${API}${new URL(tl.upload_url).pathname}`, { method: 'POST', body: PDF, headers: { 'content-type': 'application/postscript' } });
+    expect(tr.status).toBe(200);
+    const tout = await tr.json() as any;
+    expect(tout.attachments.map((x: any) => x.id)).toContain(tout.attachment.id);
+    // Un token revocado invalida sus enlaces pendientes (token aparte para no afectar las otras pruebas).
+    const spare = (await request('/api/v1/me/mcp-tokens', ana.session, { name: `spare ${run}` })).json.token;
+    const pending = good(await tool(spare, 'create_upload_link', { chat, name: 'revoked.mp4', content_type: 'video/mp4' }));
+    const pendingPath = new URL(pending.upload_url).pathname;
+    await pool.query('UPDATE mcp_tokens SET revoked_at = now() WHERE id = $1', [pendingPath.split('/')[4]]);
+    expect((await post(mp4, pendingPath)).status).toBe(404);
+  });
+
   it('rejects invalid encodings/types, missing retry keys and insufficient scopes before writes', async () => {
     const count = async () => (await pool.query('SELECT count(*)::int AS n FROM attachments WHERE owner_id=$1', [ana.id])).rows[0].n;
     const before = await count();

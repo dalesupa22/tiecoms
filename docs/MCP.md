@@ -7,7 +7,7 @@ Claude, Codex, ChatGPT y otras IAs leen y escriben en chaggu como la persona, co
 - **Token manual:** en la app, *Tú › Conector para IAs › Crear token* (o `POST /api/v1/me/mcp-tokens`). Empieza por `chgmcp_`,
   se muestra una vez, se guarda solo el hash (tabla `mcp_tokens`, migración 080) y se revoca en la misma pantalla.
 - **Herramientas:**
-  - Chats de chaggu: `whoami`, `list_chats`, `read_messages`, `upload_chat_attachment`, `send_message`, `send_direct_message`, `search_messages`, `unread_summary`, `mark_read`, `list_people`.
+  - Chats de chaggu: `whoami`, `list_chats`, `read_messages`, `upload_chat_attachment`, `create_upload_link`, `send_message`, `send_direct_message`, `search_messages`, `unread_summary`, `mark_read`, `list_people`.
   - Programados de texto: `schedule_message`, `list_scheduled_messages`, `update_scheduled_message`, `cancel_scheduled_message`; WhatsApp: `schedule_whatsapp`, `list_scheduled_whatsapp`, `update_scheduled_whatsapp`, `cancel_scheduled_whatsapp`. Persisten en el servidor; no requieren dejar la IA ni la app abiertas. Ver [Programados](PROGRAMADOS.md) para fechas, recibos, permisos y límites.
   - WhatsApp (ver «Privacidad de WhatsApp» abajo): `list_whatsapp_numbers`, `list_whatsapp_chats` (cursor, since, teléfono, quién habló de último; vista previa solo con `include_preview`), `read_whatsapp` (`fromMe`, `kind`, teléfono, transcripción de notas de voz; `since`/`before`/`kinds`), `find_whatsapp_chat` (por teléfono, también `@lid`), `get_whatsapp_group` (participantes), `search_whatsapp` (texto y transcripciones), `send_whatsapp` (a `chat` o a `phone` nuevo, con `idempotency_key`; devuelve `outboxId` y, si ya salió, `messageId` = id de WhatsApp de `read_whatsapp`), `create_whatsapp_draft` / `list_whatsapp_drafts` / `delete_whatsapp_draft` (por aprobar en WhatsApp › Por enviar), `set_whatsapp_webhook` / `get_whatsapp_webhook` / `delete_whatsapp_webhook`.
   - Correo (Gmail/Outlook propio): `list_emails`, `read_email`, `reply_email`.
@@ -48,7 +48,7 @@ Para tareas, `upload_task_attachment {id, name, content_type, data_base64, idemp
 ### Formato, permisos y reintentos
 
 - `data_base64` debe ser base64 estándar canónico, sin espacios ni prefijo `data:`. No se aceptan URLs, rutas locales ni descargas por parte del servidor. La longitud se valida antes de reservar el buffer decodificado.
-- Se comprueba el contenido de PNG, JPEG, GIF, WebP y HEIC/HEIF usando el detector de imágenes del producto; PDF requiere cabecera y cierre; texto plano/CSV/Markdown debe ser UTF-8 sin NUL; JSON debe parsear; ZIP requiere su firma. El MIME declarado debe coincidir. Para otros archivos se admite `application/octet-stream`, servido como descarga por las reglas del producto. No se procesan ni ejecutan los archivos.
+- Se comprueba el contenido de PNG, JPEG, GIF, WebP y HEIC/HEIF usando el detector de imágenes del producto; PDF requiere cabecera y cierre; texto plano/CSV/Markdown debe ser UTF-8 sin NUL; JSON debe parsear; ZIP requiere su firma. El MIME declarado debe coincidir. Videos MP4/MOV/WebM se reconocen por su contenedor y se guardan como `video/*` (se reproducen en línea). Cualquier otro archivo (Office, Illustrator, PostScript…) conserva su MIME real `application/*`, `font/*` o `model/*`, o `application/octet-stream`; el audio queda como descarga genérica. Siguen rechazados HTML, SVG, XML y JavaScript. No se procesan ni ejecutan los archivos.
 - `upload_chat_attachment` y `send_message` requieren `chats:write`; `upload_task_attachment`, comentarios y estados requieren `tasks:write`. Se comprueba acceso a la conversación o visibilidad de la tarea, bloqueos y permiso de publicar. Una subida no permite usar archivos ajenos, de otra conversación, borrados o ya consumidos en otro mensaje.
 - Usa una llave distinta para cada subida, envío, comentario o cambio. En un reintento usa **la misma llave y contenido con el mismo token**. Cambiar operación, destino o contenido produce `idempotency_mismatch`. La ventana garantizada es 24 horas, igual que la tabla MCP existente; después verifica el mensaje/tarea antes de repetir una operación.
 - Efecto SQL y recibo se confirman en la misma transacción. Las subidas retienen un bloqueo de sesión por token/llave mientras escriben S3, **sin una transacción SQL abierta durante la red**, y vuelven a validar permisos antes de persistir. El objeto y el ID son deterministas: un fallo después de S3 y antes del commit se recupera escribiendo la misma ubicación, sin duplicar archivos. Un fallo sin reintento puede dejar un objeto sin fila, como una subida interrumpida del producto.
@@ -62,6 +62,19 @@ Ejemplo de secuencia (sustituir los IDs y el base64 por los reales):
 {"name":"send_message","arguments":{"chat":"CHAT_ID","text":"Adjuntos de prueba autorizados","attachment_ids":["PNG_ID","PDF_ID"],"idempotency_key":"prueba-envio-001"}}
 {"name":"read_messages","arguments":{"chat":"CHAT_ID"}}
 ```
+
+### Videos y archivos grandes: `create_upload_link` (10-oct-2026)
+
+Un agente no puede pegar varios MB de base64 en una llamada. `create_upload_link {chat | task_id, name, content_type}` devuelve una URL de **un solo uso que vence en 15 minutos**; el agente sube los bytes crudos por stream, con los permisos del dueño del token:
+
+```bash
+curl -sS -X POST --data-binary @video.mp4 -H 'content-type: video/mp4' 'https://app.chaggu.com/api/mcp/uploads/TOKEN_ID/SECRETO'
+```
+
+- Chat (`chats:write`): un `video/*` va por la ruta de videos (hasta 150 MB, MP4/MOV/WebM, se reproduce en línea); otro archivo por la de archivos grandes (150 MB). La respuesta trae `attachment.id`, que se envía con `send_message`.
+- Tarea (`task_id`, `tasks:write`): el archivo se agrega a la tarea (máximo 20). Los videos quedan como archivo descargable.
+- El secreto solo se guarda como sha256 en `mcp_idempotency` (purga de 24 h). Un token revocado, vencido o de una cuenta desactivada invalida sus enlaces (404). Vencido: 410. Un reintento tras una subida exitosa devuelve el mismo adjunto sin volver a subir; una subida concurrente con el mismo enlace: 409.
+- nginx: `^/api/mcp/uploads/<uuid>/<secreto>$` anidada en `/api/`, 151 MB sin buffer.
 
 Pruebas: `apps/api/test/mcp-attachments.test.ts` (DM autorizado, PNG/PDF, asociación, permisos y concurrencia), `mcp-file-input.test.ts` (base64/tipos/tamaño) y `mcp-idempotency.test.ts` (transacciones, fallos y liberación de bloqueos). No requieren cambiar credenciales ni registros OAuth de Claude o ChatGPT.
 

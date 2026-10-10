@@ -21,6 +21,7 @@ import { getOrCreateDirect } from './workspaces.ts';
 import * as mailbox from './mailbox.ts';
 import * as issues from './issues.ts';
 import * as mcpAttachments from './mcp-attachments.ts';
+import * as mcpUploadLink from './mcp-upload-link.ts';
 import { MAX_BASE64_LENGTH } from './mcp-file-input.ts';
 import { idempotent, requestHash } from './mcp-idempotency.ts';
 import * as cal from './calendar.ts';
@@ -237,8 +238,8 @@ const scheduleFields = { send_at: scheduledAt, timezone: scheduledTimezone, idem
 const scheduleListFields = { status: scheduledStatus.optional().describe('Por defecto pending; all incluye el historial'), limit: z.number().int().min(1).max(100).optional() };
 const fileFields = {
   name: z.string().trim().min(1).max(200).describe('Nombre del archivo con extensión'),
-  content_type: z.string().trim().min(3).max(100).describe('MIME real: imagen, application/pdf, text/plain, text/csv, text/markdown, application/json, application/zip u application/octet-stream'),
-  data_base64: z.string().min(4).max(MAX_BASE64_LENGTH).describe('Bytes en base64 estándar, sin prefijo data:, espacios, URL ni ruta local; máximo 25 MiB decodificados'),
+  content_type: z.string().trim().min(3).max(100).describe('MIME real del archivo: imagen, video (video/mp4, video/quicktime, video/webm), application/pdf, texto, JSON, ZIP o el tipo real de cualquier otro archivo (p. ej. application/vnd.openxmlformats-officedocument.wordprocessingml.document)'),
+  data_base64: z.string().min(4).max(MAX_BASE64_LENGTH).describe('Bytes en base64 estándar, sin prefijo data:, espacios, URL ni ruta local; máximo 25 MiB decodificados. Para archivos que no caben en la llamada (videos, archivos de más de unos cientos de KB) usa create_upload_link'),
   idempotency_key: idempotencyKey,
 };
 
@@ -294,9 +295,27 @@ const tools: Tool[] = [
   },
   {
     name: 'upload_chat_attachment', scope: 'chats:write',
-    description: 'Sube una imagen o archivo (hasta 25 MiB) a un chat existente con mis permisos. Devuelve attachment.id pendiente: inclúyelo en send_message. Reintenta con la misma idempotency_key; no acepta URLs ni rutas locales.',
+    description: 'Sube una imagen, video o cualquier archivo (hasta 25 MiB, en base64) a un chat existente con mis permisos. Devuelve attachment.id pendiente: inclúyelo en send_message. Reintenta con la misma idempotency_key; no acepta URLs ni rutas locales. Si el archivo es grande o no cabe en la llamada, usa create_upload_link.',
     schema: z.object({ chat: z.string().min(1).max(200), ...fileFields }),
     run: async (userId, a, ctx) => mcpAttachments.uploadChat(ctx, findChat(await bootstrap(userId), a.chat).id, a),
+  },
+  {
+    name: 'create_upload_link', scope: 'chats:write',
+    description: 'Para videos y archivos grandes (hasta 150 MB) que no caben en base64: devuelve una URL de un solo uso (15 min) a la que subes los bytes crudos con curl (POST --data-binary @archivo), con mis permisos. Destino: un chat (chat) o una tarea (task_id, requiere tasks:write). En un chat la respuesta trae attachment.id: inclúyelo en send_message; los videos MP4/MOV/WebM se reproducen en línea. En una tarea el archivo queda agregado a ella.',
+    schema: z.object({
+      chat: z.string().min(1).max(200).optional().describe('Id o nombre del chat destino'),
+      task_id: z.string().uuid().optional().describe('Id de la tarea destino (en vez de chat)'),
+      name: z.string().trim().min(1).max(200).describe('Nombre del archivo con extensión'),
+      content_type: z.string().trim().min(3).max(100).describe('MIME real del archivo, p. ej. video/mp4 o application/pdf'),
+    }),
+    run: async (userId, a, ctx) => {
+      if (!!a.chat === !!a.task_id) throw badRequest('Indica chat o task_id (uno de los dos)');
+      if (a.task_id) {
+        if (!can(ctx, 'tasks:write')) throw new ApiError(403, 'forbidden_scope', 'Este token no tiene el permiso tasks:write. La persona lo cambia en chaggu › Tú › Conector para IAs.');
+        return mcpUploadLink.createLink(ctx, { issueId: a.task_id }, a.name, a.content_type);
+      }
+      return mcpUploadLink.createLink(ctx, { conversationId: findChat(await bootstrap(userId), a.chat).id }, a.name, a.content_type);
+    },
   },
   {
     name: 'send_message', scope: 'chats:write',
@@ -777,7 +796,7 @@ const tools: Tool[] = [
   },
   {
     name: 'upload_task_attachment', scope: 'tasks:write',
-    description: 'Sube y adjunta una imagen o archivo (hasta 25 MiB) a una tarea existente, conservando sus archivos actuales (máximo 20). Usa mis permisos, valida el tipo real y evita duplicados con idempotency_key. get_task verifica los adjuntos.',
+    description: 'Sube y adjunta una imagen, video o archivo (hasta 25 MiB, en base64; para archivos grandes usa create_upload_link con task_id) a una tarea existente, conservando sus archivos actuales (máximo 20). Usa mis permisos, valida el tipo real y evita duplicados con idempotency_key. get_task verifica los adjuntos.',
     schema: z.object({ id: z.string().uuid().describe('Id de la tarea'), ...fileFields }),
     run: async (_userId, a, ctx) => mcpAttachments.uploadTask(ctx, a.id, a),
   },

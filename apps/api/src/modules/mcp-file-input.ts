@@ -1,5 +1,6 @@
 import { MAX_ATTACHMENT_BYTES } from '@tiecoms/contracts';
 import { ApiError, badRequest } from '../errors.ts';
+import { sniffVideo } from './video-sniff.ts';
 
 export const MAX_BASE64_LENGTH = 4 * Math.ceil(MAX_ATTACHMENT_BYTES / 3);
 export const MCP_BODY_LIMIT = 36 * 1024 * 1024;
@@ -20,7 +21,7 @@ export function decodeFile(data: string): Buffer {
 export function validateFileType(body: Buffer, declared: string, sniffedImage: string | null, imageDimensions: { width: number; height: number } | null): string {
   const type = declared.toLowerCase().trim();
   if (!/^[a-z]+\/[a-z0-9.+-]+$/.test(type)) throw badRequest('content_type debe ser un tipo MIME sin parámetros');
-  const unsupported = () => new ApiError(415, 'unsupported_type', 'El contenido no coincide con el tipo admitido; usa una imagen válida, PDF, texto UTF-8, JSON, ZIP o application/octet-stream para otros archivos');
+  const unsupported = () => new ApiError(415, 'unsupported_type', 'El contenido no coincide con el tipo admitido; usa una imagen o un video válidos, PDF, texto UTF-8, JSON, ZIP o el MIME real del archivo');
   if (sniffedImage) {
     if (type !== sniffedImage && type !== 'application/octet-stream' && !(type === 'image/heif' && sniffedImage === 'image/heic')) throw unsupported();
     if (!imageDimensions || imageDimensions.width < 1 || imageDimensions.height < 1) throw unsupported();
@@ -44,6 +45,17 @@ export function validateFileType(body: Buffer, declared: string, sniffedImage: s
     if (body.length < 4 || body[0] !== 0x50 || body[1] !== 0x4b || ![0x0403, 0x0605, 0x0807].includes(body.readUInt16LE(2))) throw unsupported();
     return type;
   }
-  if (type !== 'application/octet-stream') throw unsupported();
+  // Videos: el contenedor real (MP4/MOV/WebM) manda; un video declarado que no lo es no se acepta.
+  const video = sniffVideo(body);
+  if (video || type.startsWith('video/')) {
+    if (!video || (type !== video && type !== 'application/octet-stream' && !type.startsWith('video/'))) throw unsupported();
+    return video;
+  }
+  // Cualquier otro archivo (Office, Illustrator, audio…) se acepta; los tipos que un navegador ejecutaría o pintaría
+  // como página (HTML, SVG, XML, JavaScript) siguen rechazados y el audio queda como descarga genérica.
+  if (type.startsWith('audio/')) return 'application/octet-stream';
+  if (type.startsWith('text/') || ACTIVE_TYPES.test(type) || !/^(application|font|model)\//.test(type)) throw unsupported();
   return type;
 }
+
+const ACTIVE_TYPES = /(html|[/+]xml$|javascript|ecmascript|svg)/;

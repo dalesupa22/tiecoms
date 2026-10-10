@@ -50,6 +50,19 @@ describe('MCP file types', () => {
     expect(() => validateFileType(binary, 'bad mime', null, null)).toThrow();
     expect(() => validateFileType(binary, 'image/svg+xml', null, null)).toThrow();
   });
+  it('accepts real videos and other real file types, never active web content', () => {
+    const mp4 = Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from('ftypisom'), Buffer.alloc(16)]);
+    expect(validateFileType(mp4, 'video/mp4', null, null)).toBe('video/mp4');
+    expect(validateFileType(mp4, 'application/octet-stream', null, null)).toBe('video/mp4');
+    expect(() => validateFileType(Buffer.from('not a video'), 'video/mp4', null, null)).toThrow(expect.objectContaining({ code: 'unsupported_type' }));
+    const docx = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    expect(validateFileType(Buffer.from([0x01, 0xff]), docx, null, null)).toBe(docx);
+    expect(validateFileType(Buffer.from([0x01, 0xff]), 'application/postscript', null, null)).toBe('application/postscript');
+    expect(validateFileType(Buffer.from([0x01, 0xff]), 'audio/mpeg', null, null)).toBe('application/octet-stream');
+    for (const t of ['application/xhtml+xml', 'application/javascript', 'application/xml', 'text/javascript', 'multipart/mixed']) {
+      expect(() => validateFileType(Buffer.from([0x01, 0xff]), t, null, null)).toThrow();
+    }
+  });
   it('requires the ZIP file signature', () => {
     expect(validateFileType(Buffer.from([0x50, 0x4b, 3, 4]), 'application/zip', null, null)).toBe('application/zip');
     expect(() => validateFileType(Buffer.from('not a zip'), 'application/zip', null, null)).toThrow();

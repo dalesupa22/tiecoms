@@ -63,6 +63,7 @@ import { MCP_BODY_LIMIT } from './modules/mcp-file-input.ts';
 import * as agentsDirectory from './modules/agents-directory.ts';
 import * as mcpOAuth from './modules/mcp-oauth.ts';
 import * as mcpWa from './modules/mcp-wa.ts';
+import * as mcpUploadLink from './modules/mcp-upload-link.ts';
 import * as reading from './modules/reading.ts';
 import { getOrCreateDirect } from './modules/workspaces.ts';
 import * as signatures from './modules/signatures.ts';
@@ -294,6 +295,24 @@ export async function buildHttp() {
   });
   app.get('/api/mcp', async (_req, reply) => reply.status(405).header('allow', 'POST').send({ error: { code: 'method_not_allowed', message: 'Usa POST (MCP Streamable HTTP)' } }));
   app.delete('/api/mcp', async (_req, reply) => reply.status(405).header('allow', 'POST').send());
+  // Enlace de subida del MCP (modules/mcp-upload-link.ts): bytes crudos por stream, autorizados por el secreto de la URL.
+  app.register(async (up) => {
+    up.removeAllContentTypeParsers();
+    up.addContentTypeParser('*', (_req, payload, done) => done(null, payload));
+    up.post<{ Params: { token: string; secret: string } }>('/api/mcp/uploads/:token/:secret', {
+      bodyLimit: Math.max(attachments.MAX_VIDEO_BYTES, attachments.MAX_LARGE_FILE_BYTES),
+      config: { rateLimit: { max: 20, timeWindow: '1 minute' } },
+    }, async (req, reply) => {
+      reply.header('cache-control', 'no-store');
+      const len = req.headers['content-length'] !== undefined ? Number(req.headers['content-length']) : null;
+      try {
+        return await mcpUploadLink.consume(req.params.token, req.params.secret, req.raw, Number.isFinite(len) ? len : null);
+      } catch (e) {
+        if (!req.raw.readableEnded) reply.header('connection', 'close');
+        throw e;
+      }
+    });
+  });
 
   // OAuth del conector: descubrimiento, registro dinámico, token y revocación (modules/mcp-oauth.ts).
   // Son públicos y los llaman las IAs desde sus servidores o desde la máquina de la persona.

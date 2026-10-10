@@ -102,6 +102,23 @@ describe('MCP attachments over HTTP in an authorized fixture DM', () => {
     bad(await tool(ana.mcp, 'send_message', { ...args, reply_to: messageId }), 'idempotency_mismatch');
   });
 
+  it('read_chat_attachment opens chat files for chat members only, with an optional signed download', async () => {
+    const img = await tool(beto.mcp, 'read_chat_attachment', { attachment_id: pngId });
+    expect(good(img).attachment).toMatchObject({ id: pngId, name: 'fixture.png', contentType: 'image/png' });
+    expect(good(img).messageId).toBe(messageId);
+    expect(img.content.find((x: any) => x.type === 'image')).toMatchObject({ mimeType: 'image/png', data: PNG.toString('base64') });
+    expect(good(img).download).toBeUndefined();
+    const pdf = good(await tool(beto.mcp, 'read_chat_attachment', { attachment_id: pdfId, download: true }));
+    expect(pdf.text).toContain('MCP attachment');
+    expect(pdf.download.expiresIn).toBe(900);
+    const dl = await fetch(pdf.download.url);
+    expect(dl.status).toBe(200);
+    expect(Buffer.from(await dl.arrayBuffer())).toEqual(PDF);
+    bad(await tool(outsider.mcp, 'read_chat_attachment', { attachment_id: pngId }));
+    bad(await tool(outsider.mcp, 'read_chat_attachment', { attachment_id: pdfId, download: true }));
+    bad(await tool(beto.mcp, 'read_chat_attachment', { attachment_id: randomUUID() }));
+  });
+
   it('deduplicates uploads concurrently and rejects reuse for different content or destination', async () => {
     const args = { chat, ...file('retry.png', PNG, 'image/png') };
     const got = await Promise.all(Array.from({ length: 4 }, () => tool(ana.mcp, 'upload_chat_attachment', args).then(good)));
@@ -203,6 +220,7 @@ describe('MCP attachments over HTTP in an authorized fixture DM', () => {
     bad(await tool(ana.mcp, 'upload_chat_attachment', { chat, ...file('too-large.png', oversized, 'image/png') }));
     const beforeMessages = (await pool.query('SELECT count(*)::int AS n FROM messages WHERE conversation_id=$1', [chat])).rows[0].n;
     bad(await tool(ana.mcp, 'send_message', { chat, attachment_ids: [pendingId] }));
+    bad(await tool(ana.mcp, 'read_chat_attachment', { attachment_id: pendingId }));
     expect((await pool.query('SELECT count(*)::int AS n FROM messages WHERE conversation_id=$1', [chat])).rows[0].n).toBe(beforeMessages);
     const { idempotency_key: _ignored, ...withoutKey } = base;
     bad(await tool(ana.mcp, 'upload_chat_attachment', withoutKey));
@@ -239,6 +257,7 @@ describe('MCP attachments over HTTP in an authorized fixture DM', () => {
     });
     expect(sent.status).toBe(201);
     bad(await tool(ana.mcp, 'upload_chat_attachment', args));
+    bad(await tool(beto.mcp, 'read_chat_attachment', { attachment_id: uploaded.attachment.id, download: true }));
   });
 
   it('respects history restrictions both with a receipt and after its retention window', async () => {

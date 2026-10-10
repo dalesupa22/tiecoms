@@ -71,6 +71,9 @@
   const os = /Windows/.test(ua) ? 'windows' : /Macintosh|Mac OS X/.test(ua) && !/iPhone|iPad/.test(ua) && navigator.maxTouchPoints < 2 ? 'mac' : null;
   const mine = os && grid?.querySelector(`[data-os="${os}"]`);
   if (mine && grid) { mine.classList.add('is-mine'); grid.prepend(mine); }
+  // En el celular, la tienda de quien visita va primero y resaltada.
+  const store = /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1) ? 'ios' : /Android/.test(ua) ? 'android' : null;
+  if (store) document.querySelectorAll(`[data-store="${store}"]`).forEach((a) => { a.classList.add('is-mine'); a.parentElement.prepend(a); });
   const mb = (n) => `${(n / 1048576).toFixed(1).replace('.', document.documentElement.lang === 'es' ? ',' : '.')} MB`;
   // Botón de arriba: descarga directa de la última versión para este sistema (o lleva a la sección).
   const top = document.querySelector('[data-download-top]');

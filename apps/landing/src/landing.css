@@ -67,3 +67,16 @@
 
 /* Conector MCP: el comando se puede copiar entero. */
 .mcp-code { display: block; margin: 8px 0 12px; padding: 10px 12px; border-radius: 10px; background: rgba(0,0,0,.06); font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-all; user-select: all; }
+/* Tiendas móviles (App Store y Google Play) */
+.store-buttons{display:flex;flex-wrap:wrap;gap:12px}
+.store-badge{display:inline-flex;align-items:center;gap:10px;min-height:52px;padding:0 20px 0 16px;border-radius:14px;background:var(--ink);color:#fff;transition:transform .25s,box-shadow .25s}
+.store-badge:hover{transform:translateY(-2px);box-shadow:0 10px 24px #15141218}
+.store-badge svg{width:24px;height:24px;flex:none}
+.store-badge span{display:grid;line-height:1.1;font-size:17px;font-weight:600;letter-spacing:-.01em}
+.store-badge small{font-size:10.5px;font-weight:400;opacity:.8;letter-spacing:.01em}
+.store-badge.is-mine{box-shadow:0 0 0 3px var(--orange)}
+.hero-stores{margin-top:26px}
+.mobile-stores{margin-top:18px;display:flex;align-items:center;justify-content:space-between;gap:24px;flex-wrap:wrap;padding:24px 28px;border-radius:var(--radius);background:var(--paper-2);border:1px solid var(--line)}
+.mobile-stores h3{margin:0 0 4px;font-size:22px;letter-spacing:-.01em}
+.mobile-stores p{margin:0;color:var(--muted)}
+@media (max-width:900px){.mobile-stores{padding:22px}}

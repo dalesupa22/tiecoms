@@ -8,8 +8,8 @@
     "      <a href=\"#descargar\">Download</a>\n"
   ],
   [
-    "<span class=\"eyebrow-dot eyebrow-dot-orange\"></span> Escritorio</p>",
-    "<span class=\"eyebrow-dot eyebrow-dot-orange\"></span> Desktop</p>"
+    "<span class=\"eyebrow-dot eyebrow-dot-orange\"></span> Descargas</p>",
+    "<span class=\"eyebrow-dot eyebrow-dot-orange\"></span> Downloads</p>"
   ],
   [
     "<h2 id=\"download-title\">chaggu en tu computador.<br><em>Rápido y liviano.</em></h2>",
@@ -274,5 +274,17 @@
   [
     "    <section class=\"download-section mcp-section\" id=\"mcp\" aria-labelledby=\"mcp-title\">\n      <div class=\"download-intro\"><p class=\"eyebrow\"><span class=\"eyebrow-dot eyebrow-dot-lilac\"></span> Conector MCP</p><h2 id=\"mcp-title\">Tu IA también<br><em>trabaja en chaggu.</em></h2><p class=\"section-lede\">chaggu tiene servidor MCP. Conecta Claude, Codex, ChatGPT o tu propio agente para leer tus chats, resumir lo pendiente, buscar y enviar mensajes en tu nombre, con tus mismos permisos.</p></div>\n      <div class=\"download-grid\">\n        <article class=\"download-card\"><h3>1. Crea tu token</h3><p>En la app, entra a <b>Tú › Conector para IAs</b> y toca «Crear token». Se muestra una sola vez y lo revocas cuando quieras.</p><a class=\"button button-dark\" href=\"https://app.chaggu.com/\">Abrir chaggu <span aria-hidden=\"true\">↗</span></a></article>\n        <article class=\"download-card\"><h3>2. Conéctalo</h3><p>Claude Code:</p><code class=\"mcp-code\">claude mcp add --transport http chaggu https://app.chaggu.com/api/mcp --header \"Authorization: Bearer TU_TOKEN\"</code><small class=\"download-meta\">Codex, Cursor y otras IAs: URL <b>https://app.chaggu.com/api/mcp</b> con el encabezado Authorization: Bearer.</small></article>\n        <article class=\"download-card\"><h3>3. Pídeselo</h3><p>«¿Qué tengo sin leer en chaggu?», «Respóndele a Laura que mañana entregamos», «Busca lo que dijimos del contrato».</p><small class=\"download-meta\">Herramientas: list_chats, read_messages, send_message, send_direct_message, search_messages, unread_summary, mark_read, list_people, whoami.</small></article>\n      </div>\n    </section>\n\n",
     "    <section class=\"download-section mcp-section\" id=\"mcp\" aria-labelledby=\"mcp-title\">\n      <div class=\"download-intro\"><p class=\"eyebrow\"><span class=\"eyebrow-dot eyebrow-dot-lilac\"></span> MCP connector</p><h2 id=\"mcp-title\">Your AI works<br><em>in chaggu too.</em></h2><p class=\"section-lede\">chaggu has an MCP server. Connect Claude, Codex, ChatGPT or your own agent to read your chats, summarize what is pending, search and send messages on your behalf, with your same permissions.</p></div>\n      <div class=\"download-grid\">\n        <article class=\"download-card\"><h3>1. Create your token</h3><p>In the app, go to <b>You › AI connector</b> and tap “Create token”. It is shown only once and you can revoke it anytime.</p><a class=\"button button-dark\" href=\"https://app.chaggu.com/\">Open chaggu <span aria-hidden=\"true\">↗</span></a></article>\n        <article class=\"download-card\"><h3>2. Connect it</h3><p>Claude Code:</p><code class=\"mcp-code\">claude mcp add --transport http chaggu https://app.chaggu.com/api/mcp --header \"Authorization: Bearer YOUR_TOKEN\"</code><small class=\"download-meta\">Codex, Cursor and other AIs: URL <b>https://app.chaggu.com/api/mcp</b> with the Authorization: Bearer header.</small></article>\n        <article class=\"download-card\"><h3>3. Just ask</h3><p>“What’s unread in chaggu?”, “Tell Laura we deliver tomorrow”, “Find what we said about the contract”.</p><small class=\"download-meta\">Tools: list_chats, read_messages, send_message, send_direct_message, search_messages, unread_summary, mark_read, list_people, whoami.</small></article>\n      </div>\n    </section>\n\n"
+  ],
+  [
+    "<small>Descárgala en el</small>App Store",
+    "<small>Download on the</small>App Store"
+  ],
+  [
+    "<small>Disponible en</small>Google Play",
+    "<small>Get it on</small>Google Play"
+  ],
+  [
+    "<h3>chaggu en tu celular</h3><p>Tus chats, tareas y llamadas contigo en iPhone y Android.</p>",
+    "<h3>chaggu on your phone</h3><p>Your chats, tasks and calls with you on iPhone and Android.</p>"
   ]
 ]

@@ -938,7 +938,7 @@ export function IssueDrawer({ id: startId, onClose }: { id: string; onClose: () 
       <div className="issue-q">
         <div className="issue-q-label">{taskText('Imágenes y documentos', 'Images and documents')} · {i.attachments?.length ?? 0}</div>
         <TaskAttachments files={i.attachments ?? []} disabled={uploading} onRemove={(fileId) => void update({ attachmentIds: (i.attachments ?? []).filter((a) => a.id !== fileId).map((a) => a.id) })} />
-        <div className="task-attachment-actions"><button className="btn small" disabled={uploading} onClick={() => uploadInput.current?.click()}>📎 {uploading ? taskText('Subiendo…', 'Uploading…') : taskText('Agregar archivo', 'Add file')}</button><span className="small muted">{taskText('Cada archivo comparte la privacidad de esta tarea · 25 MB por archivo.', 'Files share this task’s privacy · 25 MB per file.')}</span></div>
+        <div className="task-attachment-actions"><button className="btn small" disabled={uploading} onClick={() => uploadInput.current?.click()}>📎 {uploading ? taskText('Subiendo…', 'Uploading…') : taskText('Agregar archivo', 'Add file')}</button><span className="small muted">{taskText('Cada archivo comparte la privacidad de esta tarea · hasta 150 MB por archivo (Illustrator, PDF, ZIP…).', 'Files share this task’s privacy · up to 150 MB per file (Illustrator, PDF, ZIP…).')}</span></div>
         <input ref={uploadInput} type="file" multiple hidden onChange={(e) => void upload(e.target.files)} />
       </div>
       {!isPersonal(i) && i.createdBy === d.me.id && <div className="issue-q">

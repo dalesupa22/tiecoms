@@ -1,7 +1,7 @@
 import { Suspense, lazy, useEffect, useRef, useState } from 'react';
 import { createPortal, flushSync } from 'react-dom';
 import type { AttachmentDTO } from '@tiecoms/contracts';
-import { MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS_PER_MESSAGE } from '@tiecoms/contracts';
+import { MAX_ATTACHMENTS_PER_MESSAGE, MAX_LARGE_FILE_BYTES } from '@tiecoms/contracts';
 import { matchesWaPrivacy, waPathScope } from '@tiecoms/client-core';
 import { client, useClient } from '../app-client.ts';
 import { invalidateWaBlobCache } from '../wa-blob-cache.ts';
@@ -471,7 +471,7 @@ export function useDrafts(conversationId: string) {
     for (const file of list.slice(0, Math.max(0, room))) {
       // Los videos se comprimen antes de subir: el límite (150 MB) se revisa después de comprimir.
       if (isVideoFile(file)) { next.push({ key: `${Date.now()}-${Math.random()}`, file, preview: null, status: 'compressing', video: true, progress: 0 }); continue; }
-      if (file.size > MAX_ATTACHMENT_BYTES) { toast(t('att.tooBig', { name: file.name })); continue; }
+      if (file.size > MAX_LARGE_FILE_BYTES) { toast(t('att.tooBig', { name: file.name })); continue; }
       next.push({ key: `${Date.now()}-${Math.random()}`, file, preview: file.type.startsWith('image/') ? URL.createObjectURL(file) : null, status: 'uploading' });
     }
     setDrafts((ds) => [...ds, ...next]);

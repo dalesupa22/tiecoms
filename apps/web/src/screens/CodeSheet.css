@@ -23,6 +23,7 @@
 .code-sheet-msg { flex: 1; display: grid; place-items: center; padding: 24px; text-align: center; color: var(--muted); }
 .code-sheet-editor { flex: 1; min-height: 0; display: flex; }
 .code-sheet-editor[hidden] { display: none; }
+.code-sheet-preview { flex: 1; min-height: 0; width: 100%; border: 0; background: #fff; color-scheme: light; }
 .code-sheet-editor .cm-editor { flex: 1; min-width: 0; height: 100%; background: var(--code-bg); color: var(--ink); font-size: 13px; }
 .code-sheet-editor .cm-editor.cm-focused { outline: none; }
 .code-sheet-editor .cm-scroller { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace; line-height: 1.55; }

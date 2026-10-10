@@ -1,6 +1,6 @@
 import { io, type Socket } from 'socket.io-client';
 import {
-  CONTRACT_VERSION, SOCKET_EVENTS,
+  CONTRACT_VERSION, SOCKET_EVENTS, MAX_ATTACHMENT_BYTES, MAX_LARGE_FILE_BYTES,
   type AccountEvent, type AgentDTO, type AuthResult, type BootstrapDTO, type ConversationDTO, type ConversationEvent, type DeviceInfo,
   type AttachmentDTO, type MentionDTO, type MentionItemDTO, type CalendarEventDTO, type EventsPage, type ForwardedInfo, type InvitationPreviewDTO, type IssueDTO, type IssueVisibility, type IssueFieldValue, type TaskColumnDTO, type TicketIntakeDTO, type MeetingConnectionDTO, type MeetingDTO, type MeetingProvider, type IssueEventDTO, type MessageDTO, type OrgInvitationCreatedDTO, type OrgInvitationPreviewDTO, type PendingInvitationDTO, type Platform, type ReminderDTO, type Rsvp, type ScheduledMessageDTO, type SleepDTO,
   type CreateGroupRequest, type CreateGroupResultDTO, type InvitationCreatedDTO, type OversightDTO,
@@ -1785,6 +1785,7 @@ export class TieComsClient {
     return fresh;
   }
   uploadIssueAttachment(issueId: string, file: Blob, name: string) {
+    if (file.size > MAX_ATTACHMENT_BYTES) return this.uploadLargeFile(`/issues/${issueId}/files`, file, name);
     return this.request<AttachmentDTO>(`/issues/${issueId}/attachments`, { method: 'POST', body: file, headers: { 'content-type': 'application/octet-stream', 'x-file-name': encodeURIComponent(name), 'x-file-type': file.type || 'application/octet-stream' } });
   }
   async loadReminders() { const r = await this.request<{ reminders: ReminderDTO[] }>('/reminders'); this.set({ reminders: r.reminders }); return r.reminders; }
@@ -1837,8 +1838,17 @@ export class TieComsClient {
   }
 
   // ---------- Adjuntos ----------
-  /** Sube un archivo a una conversación (queda pendiente hasta que un mensaje lo use). ≤ 25 MB. */
+  /**
+   * Archivo de más de 25 MB (≤ MAX_LARGE_FILE_BYTES, p. ej. Illustrator) por la ruta de stream de un chat o una tarea.
+   * Más grande: error claro antes de subir (antes nginx cortaba con 413 y la pantalla se quedaba «Subiendo…»).
+   */
+  private uploadLargeFile(path: string, file: Blob, name: string) {
+    if (file.size > MAX_LARGE_FILE_BYTES) return Promise.reject(new ApiRequestError(413, 'too_large', `«${name}» pesa ${Math.round(file.size / 1048576)} MB; el máximo es ${MAX_LARGE_FILE_BYTES / 1048576} MB`));
+    return this.request<AttachmentDTO>(path, { method: 'POST', body: file, headers: { 'content-type': 'application/octet-stream', 'x-file-name': encodeURIComponent(name), 'x-file-type': file.type || 'application/octet-stream' } });
+  }
+  /** Sube un archivo a una conversación (queda pendiente hasta que un mensaje lo use). Más de 25 MB va por stream (≤ 150 MB). */
   uploadAttachment(conversationId: string, file: Blob, name: string, voice?: { durationMs: number; waveform?: number[]; aiConsent?: boolean }) {
+    if (!voice && file.size > MAX_ATTACHMENT_BYTES) return this.uploadLargeFile(`/conversations/${conversationId}/files`, file, name);
     return this.request<AttachmentDTO>(`/conversations/${conversationId}/attachments`, {
       method: 'POST', body: file,
       headers: {

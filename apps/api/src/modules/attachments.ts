@@ -7,7 +7,7 @@
 import { randomUUID } from 'node:crypto';
 import { Readable } from 'node:stream';
 import type { AttachmentDTO, AttachmentSummaryDTO, VideoPlayDTO } from '@tiecoms/contracts';
-import { MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS_PER_MESSAGE, MAX_VIDEO_BYTES, MAX_VOICE_MS, type VoiceTranscriptDTO } from '@tiecoms/contracts';
+import { MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS_PER_MESSAGE, MAX_LARGE_FILE_BYTES, MAX_VIDEO_BYTES, MAX_VOICE_MS, type VoiceTranscriptDTO } from '@tiecoms/contracts';
 import { transcriptionEnabled } from './voice-providers.ts';
 import { conversationAccess } from '../access.ts';
 import { loadVisible } from './issues.ts';
@@ -17,7 +17,7 @@ import { deleteObject, getObject, objectKey, presignDownload, putObject, putObje
 
 export const MAX_THUMB_BYTES = 512 * 1024;
 export const MAX_UPLOAD_BYTES = MAX_ATTACHMENT_BYTES;
-export { MAX_VIDEO_BYTES };
+export { MAX_VIDEO_BYTES, MAX_LARGE_FILE_BYTES };
 /** Validez de la URL prefirmada para reproducir o descargar un video (el reproductor la pide de nuevo si vence). */
 export const PLAY_URL_SECONDS = 3600;
 /** Por encima de esto, GET /attachments/:id sirve por stream desde S3 en vez de cargar el archivo en memoria. */
@@ -283,6 +283,59 @@ async function discard(stream: Readable, it?: AsyncIterator<Buffer>, max = 2 * 1
   } catch { /* el cliente cortó */ }
 }
 const tooBigVideo = () => new ApiError(413, 'too_large', 'El video pesa más de 150 MB');
+const tooBigFile = () => new ApiError(413, 'too_large', 'El archivo pesa más de 150 MB');
+
+/**
+ * Archivo grande por stream (MAX_LARGE_FILE_BYTES) a un chat o a una tarea: mismo camino que los videos, pero sin
+ * exigir formato. Las imágenes y videos se guardan como archivo genérico (aquí no hay miniatura ni reproducción);
+ * el resto conserva el tipo declarado si es válido. Queda pendiente como cualquier adjunto (el mensaje o el PATCH de
+ * la tarea lo vinculan).
+ */
+export async function uploadLargeFile(userId: string, target: { conversationId: string } | { issueId: string }, input: {
+  stream: Readable; length?: number | null; name?: string; type?: string;
+}) {
+  if (input.length != null && input.length > MAX_LARGE_FILE_BYTES) throw tooBigFile();
+  let conversationId: string | null, prefix: string;
+  try {
+    if ('issueId' in target) {
+      const issue = await loadVisible(pool, userId, target.issueId);
+      if (issue.visibility === 'all' && issue.conversationId) await conversationAccess(pool, userId, issue.conversationId, 'post', true);
+      conversationId = issue.conversationId; prefix = `task-attachments/${target.issueId}`;
+    } else {
+      await conversationAccess(pool, userId, target.conversationId, 'post');
+      conversationId = target.conversationId; prefix = `attachments/${target.conversationId}`;
+    }
+  } catch (e) { await discard(input.stream); throw e; }
+  const declared = String(input.type ?? '').toLowerCase().split(';')[0]!.trim();
+  const contentType = /^(image|video|audio)\//.test(declared) || !/^[a-z]+\/[\w.+-]+$/.test(declared) ? 'application/octet-stream' : declared;
+  const it = input.stream[Symbol.asyncIterator]() as AsyncIterator<Buffer>;
+  let total = 0, overflow = false;
+  async function* body() {
+    for (;;) {
+      const n = await it.next();
+      if (n.done) return;
+      total += n.value.length;
+      if (total > MAX_LARGE_FILE_BYTES) { overflow = true; throw tooBigFile(); }
+      yield n.value;
+    }
+  }
+  const id = randomUUID();
+  const key = objectKey(`${prefix}/${id}`);
+  try {
+    await putObjectStream(key, Readable.from(body(), { objectMode: false }), contentType);
+  } catch (e) {
+    if (overflow) throw tooBigFile();
+    throw e;
+  }
+  if (!total) { await deleteObject(key).catch(() => {}); throw badRequest('Falta el archivo'); }
+  const { rows } = await pool.query(
+    `INSERT INTO attachments (id, conversation_id, owner_id, name, content_type, size_bytes, s3_key)
+     VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+    [id, conversationId, userId, cleanName(input.name), contentType, total, key],
+  );
+  await readable(userId, id);
+  return toDTO(rows[0]);
+}
 
 /** URL prefirmada (1 h) para reproducir en streaming o descargar un video. Mismo acceso que GET /attachments/:id. */
 export async function playLink(userId: string, attachmentId: string, download: boolean): Promise<VideoPlayDTO> {

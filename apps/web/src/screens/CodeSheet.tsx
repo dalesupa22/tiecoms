@@ -24,6 +24,17 @@ import './CodeSheet.css';
 
 type Loaded = { text: string; language: string | null } | { error: string } | null;
 
+/** HTML que se puede ver renderizado («Vista», pedido de Danny 10-oct-2026: «poder visualizar html cuando manden un html»). */
+export function isHtmlFile(a: { contentType: string; name: string }) {
+  return /\.(html?|xhtml)$/i.test(a.name) || /^(text\/html|application\/xhtml\+xml)\b/i.test(a.contentType);
+}
+/**
+ * Lo que va al iframe de la vista. El iframe va con sandbox vacío (sin scripts, formularios, popups ni navegación de la
+ * página, y con origen opaco: no ve la sesión ni la API de Chaggu); además hereda el CSP de la app (imágenes externas
+ * no cargan). El meta repite el bloqueo de scripts por si un navegador viejo ignora el sandbox.
+ */
+const htmlPreviewDoc = (html: string) => `<meta http-equiv="Content-Security-Policy" content="script-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'">${html}`;
+
 /** Lenguaje por nombre de archivo; los que CodeMirror no conoce por extensión (.env, .log…) quedan como texto. */
 function languageFor(name: string) {
   return LanguageDescription.matchFilename(languages, name) ?? null;
@@ -40,6 +51,10 @@ export default function CodeSheet({ a, conversationId, onClose }: { a: Attachmen
   const [wrapped, setWrapped] = useState(() => /\.(md|markdown|txt|text|log|csv|tsv|rst)$/i.test(a.name));
   const [dirty, setDirty] = useState(false);
   const [sending, setSending] = useState(false);
+  const html = isHtmlFile(a);
+  // En HTML se abre en «Vista»; preview guarda el texto que se está mostrando (el editado, si lo hay).
+  const [preview, setPreview] = useState<string | null>(null);
+  const [showPreview, setShowPreview] = useState(html);
   const trigger = useRef(document.activeElement as HTMLElement | null);
 
   // Descarga autenticada y decodificación; si parece binario se ofrece solo descargar.
@@ -129,6 +144,8 @@ export default function CodeSheet({ a, conversationId, onClose }: { a: Attachmen
   };
 
   const ok = loaded && !('error' in loaded);
+  const previewing = !!ok && html && showPreview;
+  useEffect(() => { if (previewing) setPreview(text()); }, [previewing, loaded]);
   const lines = ok ? (view.current?.state.doc.lines ?? (loaded as { text: string }).text.split('\n').length) : 0;
   return createPortal(
     <div className="code-sheet" role="dialog" aria-modal="true" aria-label={a.name}>
@@ -137,7 +154,10 @@ export default function CodeSheet({ a, conversationId, onClose }: { a: Attachmen
           <b className="ellipsis">{a.name}{dirty && <span className="code-sheet-dirty" title={en ? 'Edited' : 'Editado'}> ●</span>}</b>
           <span className="small muted">{[ok ? (loaded as { language: string | null }).language ?? (en ? 'Plain text' : 'Texto') : null, ok ? `${lines} ${en ? 'lines' : 'líneas'}` : null, fileSize(a.sizeBytes)].filter(Boolean).join(' · ')}</span>
         </span>
-        {ok && <>
+        {ok && html && <button type="button" className={`btn small ${showPreview ? 'primary' : 'ghost'}`} aria-pressed={showPreview} onClick={() => setShowPreview((x) => !x)}
+          title={showPreview ? (en ? 'Show the HTML code' : 'Ver el código HTML') : (en ? 'Show the page as it looks' : 'Ver la página como se ve')}>
+          {showPreview ? (en ? '</> Code' : '</> Código') : (en ? '👁 Preview' : '👁 Vista')}</button>}
+        {ok && !previewing && <>
           <button type="button" className="btn small ghost" aria-pressed={wrapped} onClick={() => setWrapped((w) => !w)} title={en ? 'Wrap long lines' : 'Ajustar líneas largas'}>↩ {en ? 'Wrap' : 'Ajustar'}</button>
           <button type="button" className="btn small ghost" onClick={() => view.current && openSearchPanel(view.current)} title={en ? 'Find (⌘F)' : 'Buscar (⌘F)'}>⌕ {en ? 'Find' : 'Buscar'}</button>
           <button type="button" className={`btn small ${editing ? 'primary' : 'ghost'}`} aria-pressed={editing} onClick={() => setEditing((x) => !x)}>✎ {editing ? (en ? 'Editing' : 'Editando') : (en ? 'Edit' : 'Editar')}</button>
@@ -149,7 +169,8 @@ export default function CodeSheet({ a, conversationId, onClose }: { a: Attachmen
       </div>
       {!loaded && <div className="code-sheet-msg"><span className="pdf-spin" /> {en ? 'Opening…' : 'Abriendo…'}</div>}
       {loaded && 'error' in loaded && <div className="code-sheet-msg">{loaded.error}</div>}
-      <div ref={host} className="code-sheet-editor" hidden={!ok} />
+      {previewing && preview !== null && <iframe className="code-sheet-preview" title={a.name} sandbox="" referrerPolicy="no-referrer" srcDoc={htmlPreviewDoc(preview)} />}
+      <div ref={host} className="code-sheet-editor" hidden={!ok || previewing} />
     </div>,
     document.body,
   );

@@ -442,6 +442,23 @@ export async function buildHttp() {
           throw e;
         }
       });
+      const safeDecode = (v: string) => { try { return decodeURIComponent(v); } catch { return v; } };
+      // Archivos grandes (MAX_LARGE_FILE_BYTES, p. ej. Illustrator) a un chat o a una tarea: por stream, como los videos.
+      const largeFile = (target: (id: string) => { conversationId: string } | { issueId: string }) => async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+        const len = req.headers['content-length'] !== undefined ? Number(req.headers['content-length']) : null;
+        try {
+          return await attachments.uploadLargeFile(req.userId, target(z.uuid().parse(req.params.id)), {
+            stream: req.raw, length: Number.isFinite(len) ? len : null,
+            name: safeDecode(String(req.headers['x-file-name'] ?? 'archivo')), type: String(req.headers['x-file-type'] ?? 'application/octet-stream'),
+          });
+        } catch (e) {
+          if (!req.raw.readableEnded) reply.header('connection', 'close');
+          throw e;
+        }
+      };
+      const largeOpts = { bodyLimit: attachments.MAX_LARGE_FILE_BYTES, config: { rateLimit: { max: 20, timeWindow: '1 minute' } } };
+      vid.post<{ Params: { id: string } }>('/api/v1/conversations/:id/files', largeOpts, largeFile((conversationId) => ({ conversationId })));
+      vid.post<{ Params: { id: string } }>('/api/v1/issues/:id/files', largeOpts, largeFile((issueId) => ({ issueId })));
     });
     // URL prefirmada de S3 (1 h) para reproducir un video en streaming (?download=1: como descarga).
     priv.get<{ Params: { id: string }; Querystring: { download?: string } }>('/api/v1/attachments/:id/play', async (req, reply) => {

@@ -663,6 +663,12 @@ export const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 /** Videos (POST /conversations/:id/videos, subida por stream): la web y las apps los comprimen antes a H.264 720p. */
 export const MAX_VIDEO_BYTES = 150 * 1024 * 1024;
 export const MAX_ATTACHMENTS_PER_MESSAGE = 10;
+/**
+ * Archivos grandes (Illustrator, PSD, ZIP… de más de MAX_ATTACHMENT_BYTES): POST /conversations/:id/files y
+ * /issues/:id/files, subida por stream como los videos (sin quedar enteros en memoria ni en el disco del servidor).
+ * Reporte de Lorena 9-oct-2026: un .ai de 30 MB se quedaba «cargando».
+ */
+export const MAX_LARGE_FILE_BYTES = 150 * 1024 * 1024;
 
 export type ForwardSource = 'whatsapp' | 'slack' | 'email' | 'teams' | 'tiecoms' | 'other';
 /** Qué es el enlace (lo decide el servidor por dominio y ruta; 'link' si no se sabe). */

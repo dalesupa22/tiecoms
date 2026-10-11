@@ -38,7 +38,7 @@ Los temas no son hilos ni tareas:
 | DELETE | `/topics/:id` | Quita el tema. Sus mensajes quedan con `topicId: null` |
 | PUT | `/messages/:id/topic` | Pone `{ topicId }` o `{ topicId: null }` |
 
-`SendMessageInput.topicId` manda el mensaje directamente con ese tema. Cualquier cambio de temas emite el evento `topics.changed`, que lleva la lista completa. Etiquetar un mensaje emite `message.updated`.
+`SendMessageInput.topicId` manda el mensaje directamente con ese tema. El conector MCP también lee y escribe por tema (`list_topics`, `read_messages`/`send_message`/`send_direct_message` con `topic`; ver [MCP](MCP.md#temas-del-chat)). Cualquier cambio de temas emite el evento `topics.changed`, que lleva la lista completa. Etiquetar un mensaje emite `message.updated`.
 
 Los cambios de base de datos están en la migración `032_conversation_topics.sql`. Crea la tabla `conversation_topics`, agrega `messages.topic_id` y `messages.topic_by`, y agrega `issues.topic_id`. Una tarea lleva el tema del mensaje del que sale, o el filtro activo al crearla; en la lista, la ✕ se lo quita y el menú de la tarea lo cambia (`PATCH /issues/:id { topicId }`).
 

@@ -8,7 +8,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import type { BootstrapDTO, CalendarEventDTO, ConversationDTO, IssueDTO, MessageDTO } from '@tiecoms/contracts';
+import type { BootstrapDTO, CalendarEventDTO, ConversationDTO, IssueDTO, MessageDTO, TopicDTO } from '@tiecoms/contracts';
 import { IssueFieldsInput, TaskColumnInput, taskState, taskStateLabel } from '@tiecoms/contracts';
 import { pool, type Tx } from '../db.ts';
 import { conversationAccess } from '../access.ts';
@@ -17,6 +17,7 @@ import { randomToken, sha256 } from '../security.ts';
 import { bootstrap } from './bootstrap.ts';
 import { searchAll } from './chat-search.ts';
 import { listMessages, markRead, sendMessage } from './messages.ts';
+import { listTopics } from './topics.ts';
 import { getOrCreateDirect } from './workspaces.ts';
 import * as mailbox from './mailbox.ts';
 import * as issues from './issues.ts';
@@ -156,15 +157,48 @@ function chatView(b: BootstrapDTO, c: ConversationDTO) {
   };
 }
 
-function messageView(b: BootstrapDTO, m: MessageDTO) {
+/** Temas de los mensajes que ya se leyeron (docs/TEMAS.md): id → nombre y si está archivado. */
+type TopicNames = Map<string, { name: string; archived: boolean }>;
+
+async function topicNames(messages: MessageDTO[]): Promise<TopicNames> {
+  const ids = [...new Set(messages.map((m) => m.topicId).filter((x): x is string => !!x))];
+  if (!ids.length) return new Map();
+  const { rows } = await pool.query('SELECT id, name, archived_at FROM conversation_topics WHERE id = ANY($1::uuid[])', [ids]);
+  return new Map(rows.map((r) => [r.id as string, { name: r.name as string, archived: !!r.archived_at }]));
+}
+
+const topicView = (t: TopicDTO) => ({ id: t.id, name: t.name, color: t.color, archived: !!t.archivedAt });
+
+/**
+ * Tema de un chat por id o por nombre (sin tildes ni mayúsculas). Para escribir (`active`) tiene que estar activo,
+ * como en la app: un tema archivado no recibe mensajes nuevos.
+ */
+async function findTopic(userId: string, chatId: string, ref: string, active: boolean): Promise<TopicDTO> {
+  const topics = await listTopics(userId, chatId);
+  const names = () => topics.filter((t) => !t.archivedAt).map((t) => `«${t.name}» = ${t.id}`).join('; ') || 'ninguno';
+  const q = fold(ref.trim());
+  const exact = topics.filter((t) => t.id === ref || fold(t.name) === q);
+  const hits = exact.length ? exact : topics.filter((t) => fold(t.name).includes(q));
+  // Si un nombre coincide con uno activo y uno archivado, para escribir gana el activo.
+  const pick = hits.length > 1 && active ? hits.filter((t) => !t.archivedAt) : hits;
+  if (!pick.length) throw badRequest(`No hay un tema «${ref}» en este chat. Temas activos: ${names()}`);
+  if (pick.length > 1) throw badRequest(`Hay ${pick.length} temas que coinciden con «${ref}»; usa el id: ${pick.slice(0, 8).map((t) => `«${t.name}» = ${t.id}`).join('; ')}`);
+  const t = pick[0]!;
+  if (active && t.archivedAt) throw badRequest(`El tema «${t.name}» está archivado; restáuralo en chaggu o usa uno activo: ${names()}`);
+  return t;
+}
+
+function messageView(b: BootstrapDTO, m: MessageDTO, topics?: TopicNames) {
   const author = m.authorId === b.me.id ? `${b.me.name} (tú)` : (b.people.find((p) => p.id === m.authorId)?.name ?? 'Alguien');
   let text = m.body;
   if (m.kind === 'system') {
     try { const p = JSON.parse(m.body); text = `[aviso ${p.k ?? 'sistema'}] ${p.subject ?? p.title ?? p.text ?? ''}${p.callId ? ` (call_id ${p.callId}; transcripción con read_call_transcript)` : ''}`.trim(); } catch { text = `[aviso] ${m.body}`; }
   }
   const files = (m.attachments ?? []).map((a: any) => a.name ?? a.kind ?? 'adjunto');
+  const topic = m.topicId ? topics?.get(m.topicId) : undefined;
   return {
     id: m.id, seq: m.seq, at: (m as any).createdAt ?? null, author, text,
+    ...(m.topicId ? { topic: { id: m.topicId, name: topic?.name ?? null, ...(topic?.archived ? { archived: true } : {}) } } : {}),
     ...(files.length ? { attachments: files, attachment_details: m.attachments } : {}), ...(m.replyTo ? { replyTo: m.replyTo } : {}), ...((m as any).deletedAt ? { deleted: true } : {}),
   };
 }
@@ -276,21 +310,37 @@ const tools: Tool[] = [
     },
   },
   {
+    name: 'list_topics', readOnly: true, scope: 'chats:read',
+    description: 'Lista los temas de un chat (por id o nombre): las banderitas que etiquetan mensajes dentro del mismo chat. Devuelve id, nombre, color y si está archivado. Úsalos en read_messages (topic) para leer solo un tema y en send_message / send_direct_message (topic) para escribir dentro de él. Los mensajes sin tema son la vista «General».',
+    schema: z.object({ chat: z.string().min(1).max(200).describe('Id del chat o su nombre') }),
+    run: async (userId, a) => {
+      const b = await bootstrap(userId);
+      const c = findChat(b, a.chat);
+      const topics = await listTopics(userId, c.id);
+      return { chat: chatView(b, c), topics: topics.map(topicView) };
+    },
+  },
+  {
     name: 'read_messages', readOnly: true, scope: 'chats:read',
-    description: 'Lee los últimos mensajes de un chat (por id o nombre). attachments conserva los nombres y attachment_details incluye id, nombre, MIME, tamaño y URL de cada adjunto asociado. Para paginar hacia atrás usa before_seq con el seq más viejo recibido.',
+    description: 'Lee los últimos mensajes de un chat (por id o nombre). Con topic (id o nombre de list_topics) lee solo los de ese tema; cada mensaje con tema trae topic {id, name}. attachments conserva los nombres y attachment_details incluye id, nombre, MIME, tamaño y URL de cada adjunto asociado. Para paginar hacia atrás usa before_seq con el seq más viejo recibido.',
     schema: z.object({
       chat: z.string().min(1).max(200).describe('Id del chat o su nombre (p. ej. el nombre de la persona)'),
       limit: z.number().int().min(1).max(100).optional().describe('Cuántos mensajes (30 por defecto)'),
       before_seq: z.number().int().positive().optional(),
+      topic: z.string().trim().min(1).max(200).optional().describe('Id o nombre de un tema del chat (list_topics): solo los mensajes de ese tema'),
       mark_as_read: z.boolean().optional().describe('Marcar el chat como leído después de leerlo (por defecto no)'),
     }),
     run: async (userId, a) => {
       const b = await bootstrap(userId);
       const c = findChat(b, a.chat);
-      const page = await listMessages(userId, c.id, a.before_seq, a.limit ?? 30);
+      // Con tema solo se lee una parte del chat: marcar todo como leído escondería lo de los otros temas.
+      if (a.topic && a.mark_as_read) throw badRequest('mark_as_read no se puede usar con topic: lee el chat completo o márcalo con mark_read');
+      const topic = a.topic ? await findTopic(userId, c.id, a.topic, false) : null;
+      const page = await listMessages(userId, c.id, a.before_seq, a.limit ?? 30, topic?.id);
       const last = page.messages.at(-1);
       if (a.mark_as_read && last) await markRead(userId, c.id, last.seq);
-      return { chat: chatView(b, c), messages: page.messages.map((m) => messageView(b, m)), hasMore: page.hasMore };
+      const names = await topicNames(page.messages);
+      return { chat: chatView(b, c), ...(topic ? { topic: topicView(topic) } : {}), messages: page.messages.map((m) => messageView(b, m, names)), hasMore: page.hasMore };
     },
   },
   {
@@ -335,6 +385,7 @@ const tools: Tool[] = [
       attachment_ids: z.array(z.string().uuid()).min(1).max(10).optional(),
       idempotency_key: idempotencyKey.optional(),
       reply_to: z.string().uuid().optional().describe('Id del mensaje al que se responde'),
+      topic: z.string().trim().min(1).max(200).optional().describe('Id o nombre de un tema activo del chat (list_topics): el mensaje sale dentro de ese tema. Sin topic sale sin tema (General)'),
     }),
     run: async (userId, a, ctx) => {
       const b = await bootstrap(userId);
@@ -342,31 +393,39 @@ const tools: Tool[] = [
       const attachmentIds = a.attachment_ids ?? [];
       if (!a.text && !attachmentIds.length) throw badRequest('Incluye texto o al menos un adjunto');
       if (attachmentIds.length && !a.idempotency_key) throw badRequest('Los mensajes con adjuntos requieren idempotency_key');
-      const payload = { chatId: chat.id, body: a.text ?? '', attachmentIds, replyTo: a.reply_to ?? null };
+      const topic = a.topic ? await findTopic(userId, chat.id, a.topic, true) : null;
+      // topicId solo entra al payload si hay tema, así una llave reutilizada sin tema conserva su huella anterior.
+      const payload = { chatId: chat.id, body: a.text ?? '', attachmentIds, replyTo: a.reply_to ?? null, ...(topic ? { topicId: topic.id } : {}) };
       return idempotent(ctx, a.idempotency_key, 'send_message', payload,
         (c) => conversationAccess(c, userId, chat.id, 'post', true),
         async (c) => {
           const clientMessageId = a.idempotency_key ? `mcp-${requestHash('message-client', [ctx.tokenId, a.idempotency_key]).toString('base64url')}` : `mcp-${randomUUID()}`;
-          const out = await sendMessage(userId, chat.id, { clientMessageId, body: payload.body, attachmentIds, replyTo: payload.replyTo }, undefined, c);
+          const out = await sendMessage(userId, chat.id, { clientMessageId, body: payload.body, attachmentIds, replyTo: payload.replyTo, topicId: topic?.id ?? null }, undefined, c);
           await assertMessageAvailable(c, userId, chat.id, out.message.id);
-          return { sent: true, chat: chatName(b, chat), chatId: chat.id, messageId: out.message.id,
-            attachments: out.message.attachments ?? [], message: messageView(b, out.message) };
+          const names: TopicNames = topic ? new Map([[topic.id, { name: topic.name, archived: false }]]) : new Map();
+          return { sent: true, chat: chatName(b, chat), chatId: chat.id, messageId: out.message.id, ...(topic ? { topic: topicView(topic) } : {}),
+            attachments: out.message.attachments ?? [], message: messageView(b, out.message, names) };
         },
         (c, response) => assertMessageAvailable(c, userId, chat.id, response.messageId));
     },
   },
   {
     name: 'send_direct_message', scope: 'chats:write',
-    description: 'Envía un mensaje directo a una persona (por id o nombre). Crea el chat directo si no existe.',
-    schema: z.object({ person: z.string().min(1).max(200).describe('Id o nombre de la persona'), text: z.string().trim().min(1).max(8000) }),
+    description: 'Envía un mensaje directo a una persona (por id o nombre). Crea el chat directo si no existe. Con topic (id o nombre de un tema activo del directo, ver list_topics) sale dentro de ese tema.',
+    schema: z.object({
+      person: z.string().min(1).max(200).describe('Id o nombre de la persona'), text: z.string().trim().min(1).max(8000),
+      topic: z.string().trim().min(1).max(200).optional().describe('Id o nombre de un tema activo del chat directo'),
+    }),
     run: async (userId, a) => {
       const b = await bootstrap(userId);
       const p = findPerson(b, a.person);
       const conv: any = await getOrCreateDirect(userId, p.id);
       const convId: string = conv?.id ?? conv?.conversation?.id ?? conv?.conversationId;
       if (!convId) throw new ApiError(500, 'internal', 'No pude abrir el chat directo');
-      const out = await sendMessage(userId, convId, { clientMessageId: `mcp-${randomUUID()}`, body: a.text });
-      return { sent: true, to: p.name, chatId: convId, message: messageView(b, out.message) };
+      const topic = a.topic ? await findTopic(userId, convId, a.topic, true) : null;
+      const out = await sendMessage(userId, convId, { clientMessageId: `mcp-${randomUUID()}`, body: a.text, topicId: topic?.id ?? null });
+      const names: TopicNames = topic ? new Map([[topic.id, { name: topic.name, archived: false }]]) : new Map();
+      return { sent: true, to: p.name, chatId: convId, ...(topic ? { topic: topicView(topic) } : {}), message: messageView(b, out.message, names) };
     },
   },
   {
@@ -415,14 +474,15 @@ const tools: Tool[] = [
   },
   {
     name: 'search_messages', readOnly: true, scope: 'chats:read',
-    description: 'Busca en todos mis chats (texto, adjuntos, notas de voz, correos y WhatsApps compartidos). Admite from:Nombre.',
+    description: 'Busca en todos mis chats (texto, adjuntos, notas de voz, correos y WhatsApps compartidos). Admite from:Nombre. Cada resultado con tema trae message.topic {id, name}.',
     schema: z.object({ query: z.string().trim().min(2).max(120), limit: z.number().int().min(1).max(50).optional() }),
     run: async (userId, a) => {
       const [b, r] = await Promise.all([bootstrap(userId), searchAll(userId, { q: a.query, limit: a.limit ?? 20 })]);
+      const names = await topicNames(r.results.map((x) => x.message));
       return {
         results: r.results.map((x) => {
           const c = b.conversations.find((cc) => cc.id === x.message.conversationId);
-          return { chat: c ? chatName(b, c) : null, chatId: x.message.conversationId, snippet: x.snippet, message: messageView(b, x.message) };
+          return { chat: c ? chatName(b, c) : null, chatId: x.message.conversationId, snippet: x.snippet, message: messageView(b, x.message, names) };
         }),
         hasMore: r.hasMore,
       };
@@ -497,7 +557,9 @@ const tools: Tool[] = [
       const pending = b.conversations.filter((c) => c.unread > 0).slice(0, a.max_chats ?? 10);
       const chats = await Promise.all(pending.map(async (c) => {
         const page = await listMessages(userId, c.id, undefined, Math.min(Math.max(c.unread, 1), 10));
-        return { ...chatView(b, c), messages: page.messages.filter((m) => m.seq > c.lastReadSeq).map((m) => messageView(b, m)) };
+        const unread = page.messages.filter((m) => m.seq > c.lastReadSeq);
+        const names = await topicNames(unread);
+        return { ...chatView(b, c), messages: unread.map((m) => messageView(b, m, names)) };
       }));
       return { chats, totalUnreadChats: b.conversations.filter((c) => c.unread > 0).length };
     },
@@ -1039,6 +1101,7 @@ const VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
 const INSTRUCTIONS = [
   'chaggu es el chat entre equipos de distintas empresas, con WhatsApp, correo y tareas/tickets en un solo lugar. Todo se hace como la persona dueña del token: solo ves y escribes lo que ella puede, y solo los números o chats de WhatsApp que compartió con esta integración.',
   'Nunca envíes nada (chaggu, WhatsApp, correo, comentario de ticket) sin mostrar antes destinatario, canal, número y texto exacto y recibir un sí explícito. Si son varios mensajes, muéstralos todos juntos y pide un solo sí, o usa create_whatsapp_draft para que la persona los apruebe en chaggu.',
+  'TEMAS: un chat puede tener temas (banderitas que etiquetan mensajes dentro del mismo chat). list_topics los lista; read_messages con topic lee solo uno; send_message y send_direct_message con topic escriben dentro de un tema activo. Si la persona pide escribir «en el tema X», usa topic y muéstralo al confirmar el envío; sin topic el mensaje sale sin tema (General).',
   'En WhatsApp lee solo lo necesario para la tarea; no resumas ni repitas chats personales que no te pidieron.',
   'PROGRAMADOS: para «mañana a las 10 am» usa la fecha actual y la zona horaria IANA de la persona; whoami.server_time da el instante actual UTC, pero no indica su zona. No supongas la zona del servidor. Si faltan destinatario, texto o zona horaria, pide esos datos. Antes de schedule_message o schedule_whatsapp confirma canal, destinatario, cuenta/número emisor, texto y fecha/hora local exacta con su zona. send_at debe llevar offset o Z y timezone es obligatoria. Conserva el id del recibo para consultar con list_scheduled_messages/list_scheduled_whatsapp, editar con update_scheduled_message/update_scheduled_whatsapp o cancelar con cancel_scheduled_message/cancel_scheduled_whatsapp. Di «programado», nunca «enviado», mientras el estado no sea sent. Los permisos se revisan otra vez antes del envío; una revocación puede dejarlo fallido. Una solicitud de ejemplo sin destinatario o texto no autoriza crear un mensaje real.',
   'Encargos personales (p. ej. «escríbele a 3 ferreterías y pídeles cotización»): consigue los números (de la persona, de find_whatsapp_chat o buscando en la web), propón un mensaje corto y cordial que diga quién escribe y qué necesita, muestra la lista de números con el texto, y tras el sí usa send_whatsapp con phone e idempotency_key. Después revisa las respuestas con read_whatsapp (since) y resúmelas.',

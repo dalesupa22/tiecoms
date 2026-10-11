@@ -230,12 +230,13 @@ export async function sendMessage(userId: string, conversationId: string, input:
   }
 }
 
-export async function listMessages(userId: string, conversationId: string, before: number | undefined, limit: number) {
+/** `topicId` (opcional) deja solo los mensajes etiquetados con ese tema (docs/TEMAS.md); la app no lo usa. */
+export async function listMessages(userId: string, conversationId: string, before: number | undefined, limit: number, topicId?: string) {
   const a = await conversationAccess(pool, userId, conversationId, 'read');
   const { rows } = await pool.query(
-    `SELECT * FROM messages WHERE conversation_id = $1 AND seq > $2 AND ($3::bigint IS NULL OR seq < $3)
+    `SELECT * FROM messages WHERE conversation_id = $1 AND seq > $2 AND ($3::bigint IS NULL OR seq < $3) AND ($5::uuid IS NULL OR topic_id = $5)
       ORDER BY seq DESC LIMIT $4`,
-    [conversationId, a.historyFromSeq, before ?? null, limit],
+    [conversationId, a.historyFromSeq, before ?? null, limit, topicId ?? null],
   );
   const messages = rows.reverse().map((r) => forViewer(toMessageDTO(r), userId));
   return { messages, hasMore: rows.length === limit && (messages[0]?.seq ?? 0) > a.historyFromSeq + 1, lastEventSeq: a.lastEventSeq };

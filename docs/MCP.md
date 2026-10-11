@@ -7,7 +7,7 @@ Claude, Codex, ChatGPT y otras IAs leen y escriben en chaggu como la persona, co
 - **Token manual:** en la app, *Tú › Conector para IAs › Crear token* (o `POST /api/v1/me/mcp-tokens`). Empieza por `chgmcp_`,
   se muestra una vez, se guarda solo el hash (tabla `mcp_tokens`, migración 080) y se revoca en la misma pantalla.
 - **Herramientas:**
-  - Chats de chaggu: `whoami`, `list_chats`, `read_messages`, `read_chat_attachment`, `upload_chat_attachment`, `create_upload_link`, `send_message`, `send_direct_message`, `search_messages`, `unread_summary`, `mark_read`, `list_people`.
+  - Chats de chaggu: `whoami`, `list_chats`, `list_topics`, `read_messages`, `read_chat_attachment`, `upload_chat_attachment`, `create_upload_link`, `send_message`, `send_direct_message`, `search_messages`, `unread_summary`, `mark_read`, `list_people`.
   - Programados de texto: `schedule_message`, `list_scheduled_messages`, `update_scheduled_message`, `cancel_scheduled_message`; WhatsApp: `schedule_whatsapp`, `list_scheduled_whatsapp`, `update_scheduled_whatsapp`, `cancel_scheduled_whatsapp`. Persisten en el servidor; no requieren dejar la IA ni la app abiertas. Ver [Programados](PROGRAMADOS.md) para fechas, recibos, permisos y límites.
   - WhatsApp (ver «Privacidad de WhatsApp» abajo): `list_whatsapp_numbers`, `list_whatsapp_chats` (cursor, since, teléfono, quién habló de último; vista previa solo con `include_preview`), `read_whatsapp` (`fromMe`, `kind`, teléfono, transcripción de notas de voz; `since`/`before`/`kinds`), `find_whatsapp_chat` (por teléfono, también `@lid`), `get_whatsapp_group` (participantes), `search_whatsapp` (texto y transcripciones), `send_whatsapp` (a `chat` o a `phone` nuevo, con `idempotency_key`; devuelve `outboxId` y, si ya salió, `messageId` = id de WhatsApp de `read_whatsapp`), `create_whatsapp_draft` / `list_whatsapp_drafts` / `delete_whatsapp_draft` (por aprobar en WhatsApp › Por enviar), `set_whatsapp_webhook` / `get_whatsapp_webhook` / `delete_whatsapp_webhook`.
   - Correo (Gmail/Outlook propio): `list_emails`, `read_email`, `reply_email`.
@@ -22,6 +22,16 @@ Claude, Codex, ChatGPT y otras IAs leen y escriben en chaggu como la persona, co
 - Vencimiento (`expires_at`, 401 al vencer) y nombre de la app (`client_name`). Se eligen al crear el token en Tú › Conector para IAs o al aprobar en `/autorizar-ia` (la IA puede pedir scopes con `scope=`).
 - Bitácora `mcp_audit` (herramienta, objetivo, cantidad, error; sin contenido): `GET /api/v1/me/mcp-activity` y el resumen «Hoy: leyó 3 · envió 1» en cada token. Se guarda 90 días.
 - Errores de herramienta con código estable en `structuredContent.error.code`: `forbidden_scope`, `not_found`, `send_disabled`, `not_connected`, `integrations_disabled`, `invalid_phone`, `idempotency_mismatch`, `bad_request`.
+
+## Temas del chat
+
+Pedido de Danny (11-oct-2026, desde la sesión LAT004): escribir y leer dentro de un tema ([Temas](TEMAS.md)) de una conversación.
+
+- `list_topics {chat}` devuelve `{id, name, color, archived}` de cada tema. Requiere `chats:read` y que se pueda leer el chat.
+- `read_messages {chat, topic?}` con `topic` (id o nombre) trae solo los mensajes de ese tema, incluidos los de un tema archivado. No se puede combinar con `mark_as_read`, porque marcaría como leídos los mensajes de otros temas. Cada mensaje con tema trae `topic {id, name, archived?}`; sin tema (General) no trae el campo. Lo mismo vale para `search_messages` y `unread_summary`.
+- `send_message {…, topic?}` y `send_direct_message {…, topic?}` envían dentro de un tema **activo**, igual que escribir con el filtro del tema en la app: usan `SendMessageInput.topicId` y emiten los mismos eventos (`message.created` con `topicId`). El error es claro (`bad_request`) si el tema no existe en el chat (lista los activos), si está archivado o si el nombre coincide con varios temas (pide el id). El nombre se compara sin tildes ni mayúsculas. Un nombre exacto gana a uno parcial, y entre un activo y un archivado con el mismo nombre gana el activo.
+- Con `idempotency_key`, el tema forma parte de la huella: la misma llave con otro tema responde `idempotency_mismatch`.
+- Pruebas: `apps/api/test/mcp-topics.test.ts`.
 
 ## Mensajes programados (MCP 1.1.0)
 

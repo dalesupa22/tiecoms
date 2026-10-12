@@ -31,6 +31,7 @@ import * as reading from './reading.ts';
 import * as calls from './calls.ts';
 import { WA_KINDS, WA_WEBHOOK_EVENTS } from './mcp-consts.ts';
 import type { McpCtx } from './mcp-wa.ts';
+import { countHit } from '../memory-watch.ts';
 
 const PREFIX = 'chgmcp_';
 const MAX_TOKENS = 20;
@@ -1085,6 +1086,7 @@ async function handleOne(ctx: McpCtx, msg: any) {
     case 'tools/call': {
       const t = tools.find((x) => x.name === msg.params?.name);
       if (!t) return rpcError(msg.id, -32602, `Herramienta desconocida: ${msg.params?.name}`);
+      countHit(`mcp:${t.name}`);
       const fail = (code: string, message: string) => ({ jsonrpc: '2.0', id: msg.id, result: { content: [{ type: 'text', text: `[${code}] ${message}` }], structuredContent: { error: { code, message } }, isError: true } });
       if (t.scope && !can(ctx, t.scope)) {
         await audit(ctx, t.name, msg.params?.arguments, null, 'forbidden_scope');

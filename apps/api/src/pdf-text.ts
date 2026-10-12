@@ -1,44 +1,47 @@
-/** Texto de un PDF para gg: página por página, con un tope de caracteres y aviso explícito si se cortó. */
-// pdfjs se carga solo cuando gg lee un PDF y vive fuera del bundle principal (dist/pdfjs.js).
-// La ruta va en una variable para que esbuild no lo meta dentro de server.js / worker.js.
-async function load() {
-  const path = process.env.VITEST ? './pdfjs-entry.ts' : './pdfjs.js';
-  const m = await import(/* @vite-ignore */ path);
-  // En Node pdfjs usa un «worker falso» en el mismo hilo; dárselo evita que intente cargar un archivo aparte.
-  (globalThis as any).pdfjsWorker ??= m.worker;
-  return m.pdfjs as typeof import('pdfjs-dist/legacy/build/pdf.mjs');
+/**
+ * Texto de un PDF para gg y el MCP: página por página, con un tope de caracteres y aviso explícito si se cortó.
+ * Incidente 11/12-oct-2026: pdfjs abriendo un PDF pesado llenó el heap y tumbó el API entero (OOM). Ahora cada PDF
+ * se lee en un hilo aparte con su propio tope de memoria y de tiempo: si revienta, falla solo esa lectura.
+ */
+import { Worker } from 'node:worker_threads';
+import { extractPdfText, type PdfText } from './pdf-text-core.ts';
+
+export type { PdfText };
+
+const WORKER_HEAP_MB = Number(process.env.PDF_WORKER_HEAP_MB ?? 192);
+const WORKER_TIMEOUT_MS = Number(process.env.PDF_WORKER_TIMEOUT_MS ?? 45_000);
+const MAX_PARALLEL = 2;
+
+let running = 0;
+const queue: (() => void)[] = [];
+async function slot<T>(fn: () => Promise<T>): Promise<T> {
+  if (running >= MAX_PARALLEL) await new Promise<void>((r) => queue.push(r));
+  running++;
+  try { return await fn(); } finally { running--; queue.shift()?.(); }
 }
 
-export interface PdfText { text: string; pages: number; readPages: number; truncated: boolean }
+function inWorker(data: Uint8Array, maxChars: number, maxPages: number): Promise<PdfText> {
+  return new Promise((resolve, reject) => {
+    const copy = new Uint8Array(data);
+    const w = new Worker(new URL('./pdf-worker.js', import.meta.url), {
+      workerData: { data: copy, maxChars, maxPages }, transferList: [copy.buffer],
+      resourceLimits: { maxOldGenerationSizeMb: WORKER_HEAP_MB, maxYoungGenerationSizeMb: 32 },
+      stdout: true, stderr: true,
+    });
+    let done = false;
+    const finish = (fn: () => void) => { if (done) return; done = true; clearTimeout(timer); fn(); void w.terminate(); };
+    const timer = setTimeout(() => finish(() => reject(new Error('El PDF tardó demasiado en leerse'))), WORKER_TIMEOUT_MS);
+    w.once('message', (m: { ok: boolean; r?: PdfText; message?: string }) => finish(() => (m.ok ? resolve(m.r!) : reject(new Error(m.message)))));
+    w.once('error', (e: any) => finish(() => {
+      if (e?.code === 'ERR_WORKER_OUT_OF_MEMORY') console.error('[pdf] el PDF necesitó más memoria de la permitida; se descartó solo esa lectura');
+      reject(e);
+    }));
+    w.once('exit', (code) => finish(() => reject(new Error(`lector de PDF terminó (${code})`))));
+  });
+}
 
-export async function pdfText(data: Uint8Array, maxChars: number, maxPages = 200): Promise<PdfText> {
-  const pdfjs = await load();
-  const task = pdfjs.getDocument({ data: new Uint8Array(data), disableFontFace: true, useSystemFonts: false, verbosity: 0 });
-  try {
-    const doc = await task.promise;
-    const out: string[] = [];
-    let used = 0, readPages = 0, truncated = false;
-    for (let n = 1; n <= doc.numPages; n++) {
-      if (n > maxPages) { truncated = true; break; }
-      const page = await doc.getPage(n);
-      const content = await page.getTextContent();
-      let line = '';
-      const lines: string[] = [];
-      for (const item of content.items as any[]) {
-        if (typeof item.str !== 'string') continue;
-        line += item.str;
-        if (item.hasEOL) { lines.push(line); line = ''; } else if (item.str && !item.str.endsWith(' ')) line += ' ';
-      }
-      if (line.trim()) lines.push(line);
-      const pageText = `[Página ${n}]\n` + lines.map((l) => l.replace(/[ \t]+/g, ' ').trim()).filter(Boolean).join('\n');
-      if (used + pageText.length > maxChars) {
-        const room = maxChars - used;
-        if (room > 200) { out.push(pageText.slice(0, room)); readPages = n; }
-        truncated = true; break;
-      }
-      out.push(pageText); used += pageText.length + 1; readPages = n;
-      page.cleanup();
-    }
-    return { text: out.join('\n'), pages: doc.numPages, readPages, truncated };
-  } finally { await task.destroy(); }
+export function pdfText(data: Uint8Array, maxChars: number, maxPages = 200): Promise<PdfText> {
+  // Las pruebas corren sobre el TypeScript (no hay dist/pdf-worker.js): extracción directa.
+  if (process.env.VITEST) return extractPdfText(data, maxChars, maxPages);
+  return slot(() => inWorker(data, maxChars, maxPages));
 }

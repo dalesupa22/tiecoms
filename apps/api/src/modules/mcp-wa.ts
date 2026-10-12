@@ -280,17 +280,20 @@ export async function groupInfo(ctx: McpCtx, ref: string) {
 /** 11. Buscar en el texto (y las transcripciones) de los chats permitidos. */
 export async function search(ctx: McpCtx, q: { query: string; since?: string; limit: number }) {
   const { rows } = await pool.query(
-    `WITH ${logicalChatsCte()}, unique_messages AS (
-       SELECT DISTINCT ON (m.account_id, ac.logical_jid, m.id) m.*, ac.logical_jid
+    // Primero se filtra por fecha y texto y solo después se quitan duplicados de alias: antes se deduplicaba todo el
+    // historial (con m.*) y la consulta pasaba del statement_timeout en cuentas grandes (incidente 11/12-oct-2026).
+    `WITH ${logicalChatsCte()}, matches AS (
+       SELECT m.account_id, m.chat_jid, m.id, m.from_me, m.kind, m.body, m.sent_at, m.transcript->>'text' AS transcript, ac.logical_jid
        FROM wa_messages m JOIN allowed_chats ac ON ac.account_id = m.account_id AND ac.jid = m.chat_jid
-       WHERE wa_chat_visible(m.account_id, m.chat_jid)
-       ORDER BY m.account_id, ac.logical_jid, m.id, m.sent_at DESC, m.chat_jid
+       WHERE ($4::timestamptz IS NULL OR m.sent_at >= $4)
+         AND (tiecoms_fold(m.body) LIKE '%' || tiecoms_fold($3) || '%' OR tiecoms_fold(COALESCE(m.transcript->>'text', '')) LIKE '%' || tiecoms_fold($3) || '%')
+         AND wa_chat_visible(m.account_id, m.chat_jid)
+     ), unique_messages AS (
+       SELECT DISTINCT ON (account_id, logical_jid, id) * FROM matches
+       ORDER BY account_id, logical_jid, id, sent_at DESC, chat_jid
      )
-     SELECT m.account_id, c.jid AS chat_jid, m.id, m.from_me, m.kind, m.body, m.sent_at,
-       m.transcript->>'text' AS transcript, c.name, c.pn
+     SELECT m.account_id, c.jid AS chat_jid, m.id, m.from_me, m.kind, m.body, m.sent_at, m.transcript, c.name, c.pn
      FROM unique_messages m JOIN logical_chats c ON c.account_id = m.account_id AND c.logical_jid = m.logical_jid
-     WHERE ($4::timestamptz IS NULL OR m.sent_at >= $4)
-       AND (tiecoms_fold(m.body) LIKE '%' || tiecoms_fold($3) || '%' OR tiecoms_fold(COALESCE(m.transcript->>'text', '')) LIKE '%' || tiecoms_fold($3) || '%')
      ORDER BY m.sent_at DESC, m.id DESC, m.account_id, c.jid LIMIT $5`,
     [ctx.userId, ctx.waAccountIds, q.query, q.since ?? null, q.limit],
   );

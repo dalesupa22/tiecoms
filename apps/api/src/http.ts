@@ -80,6 +80,7 @@ import { deleteMessage, editMessage, listPins, markUnread, setPin } from './modu
 import { z } from 'zod';
 import { verifyAccess } from './security.ts';
 import { ByteLru } from './lru.ts';
+import { countHit } from './memory-watch.ts';
 
 const REFRESH_COOKIE = 'tc_rt';
 /** Fotos de perfil y miniaturas de enlaces en memoria (inmutables por id). */
@@ -115,6 +116,8 @@ export async function buildHttp() {
     maxAge: 600,
   });
   await app.register(rateLimit, { max: 600, timeWindow: '1 minute', keyGenerator: (r) => r.ip });
+  // Telemetría de memoria: peticiones por patrón de ruta (sin ids ni datos), ver memory-watch.ts.
+  app.addHook('onResponse', async (req) => { countHit(`${req.method} ${req.routeOptions?.url ?? 'sin-ruta'}`); });
 
   // Fotos de perfil: el cuerpo llega crudo (la imagen ya recortada en el cliente).
   // Archivos del árbol: siempre como octet-stream (el tipo real va en x-file-type), así un .json no se interpreta.

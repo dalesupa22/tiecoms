@@ -3,6 +3,7 @@ import { pool } from './db.ts';
 import { buildHttp } from './http.ts';
 import { migrate } from './migrate.ts';
 import { createRealtime } from './realtime.ts';
+import { startMemoryWatch } from './memory-watch.ts';
 
 // Un error inesperado se registra; el proceso sigue atendiendo en vez de caerse.
 process.on('unhandledRejection', (e: any) => console.error('[api] promesa sin manejar', e?.message ?? e));
@@ -15,7 +16,7 @@ async function main() {
   app.log.info({ instance: config.instanceId }, 'tiecoms api lista');
 
   let closing = false;
-  const shutdown = async (sig: string) => {
+  const shutdown = async (sig: string, code = 0) => {
     if (closing) return;
     closing = true;
     app.log.info({ sig }, 'cerrando de forma ordenada');
@@ -24,10 +25,12 @@ async function main() {
     await rt.close().catch(() => {});
     await app.close().catch(() => {});
     await pool.end().catch(() => {});
-    process.exit(0);
+    process.exit(code);
   };
   process.on('SIGTERM', () => void shutdown('SIGTERM'));
   process.on('SIGINT', () => void shutdown('SIGINT'));
+  // Antes de un «heap out of memory» se cierra ordenado y Docker lo vuelve a levantar (sale con 1 para que quede registrado).
+  startMemoryWatch(() => void shutdown('memoria', 1));
 }
 
 main().catch((e) => {

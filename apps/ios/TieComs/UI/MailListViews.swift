@@ -732,14 +732,29 @@ struct MailConnectNudge: View {
 
 // MARK: - WhatsApp: «Comentar en chaggu…»
 
+/// Lo que se lleva a un chat: uno o varios mensajes del mismo chat de WhatsApp, en el orden del chat.
+struct WaShareRequest: Identifiable {
+    let messages: [WaMessageDTO]
+    var id: String { messages.map(\.id).joined(separator: ",") }
+}
+
 struct WaShareSheet: View {
     @Environment(AppStore.self) private var store
     @Environment(\.dismiss) private var dismiss
     let chat: WaChatDTO
-    let message: WaMessageDTO
+    /// Uno o varios (con 2+ el servidor arma una sola tarjeta con todos).
+    let messages: [WaMessageDTO]
+    var onDone: () -> Void = {}
     @State private var picked: [String] = []
     @State private var comment = ""
     @State private var busy = false
+
+    init(chat: WaChatDTO, message: WaMessageDTO, onDone: @escaping () -> Void = {}) {
+        self.init(chat: chat, messages: [message], onDone: onDone)
+    }
+    init(chat: WaChatDTO, messages: [WaMessageDTO], onDone: @escaping () -> Void = {}) {
+        self.chat = chat; self.messages = messages; self.onDone = onDone
+    }
 
     var body: some View {
         NavigationStack {
@@ -749,11 +764,28 @@ struct WaShareSheet: View {
                         WaIcon(size: 22)
                         VStack(alignment: .leading, spacing: 4) {
                             Text((chat.isGroup ? "👥 " : "") + chat.name).font(.subheadline.weight(.bold))
-                            Text((message.fromMe ? L("common.youShort") : message.author ?? L("wa.someone")) + " · " + MailUI.date(message.sentAt))
-                                .font(.caption).foregroundStyle(Theme.textSecondary)
-                            HStack(spacing: 8) {
-                                Rectangle().fill(MailUI.waColor).frame(width: 3)
-                                Text(String(message.body.prefix(400))).font(.subheadline)
+                            if messages.count == 1, let message = messages.first {
+                                Text(who(message) + " · " + MailUI.date(message.sentAt))
+                                    .font(.caption).foregroundStyle(Theme.textSecondary)
+                                HStack(spacing: 8) {
+                                    Rectangle().fill(MailUI.waColor).frame(width: 3)
+                                    Text(String(message.body.prefix(400))).font(.subheadline)
+                                }
+                            } else {
+                                Text(L("wa.nMessages", ["n": messages.count])).font(.caption.weight(.semibold)).foregroundStyle(Theme.textSecondary)
+                                    .accessibilityIdentifier("wa.share.count")
+                                HStack(alignment: .top, spacing: 8) {
+                                    Rectangle().fill(MailUI.waColor).frame(width: 3)
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        ForEach(Array(messages.prefix(3).enumerated()), id: \.offset) { _, m in
+                                            (Text(who(m) + ": ").bold() + Text(preview(m)))
+                                                .font(.subheadline).lineLimit(2)
+                                        }
+                                        if messages.count > 3 {
+                                            Text(L("wa.andMore", ["n": messages.count - 3])).font(.caption).foregroundStyle(Theme.textSecondary)
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -768,12 +800,12 @@ struct WaShareSheet: View {
             .safeAreaInset(edge: .bottom) {
                 Button { share() } label: { Text(busy ? L("mail.sharing") : MailShareText.button(store, picked)).lineLimit(1).frame(maxWidth: .infinity) }
                     .buttonStyle(PrimaryButtonStyle())
-                    .disabled(picked.isEmpty || busy)
+                    .disabled(picked.isEmpty || busy || messages.isEmpty)
                     .padding(12)
                     .background(.bar)
                     .accessibilityIdentifier("wa.shareSend")
             }
-            .navigationTitle(L("wa.bringTitle"))
+            .navigationTitle(messages.count > 1 ? L("wa.bringTitleN", ["n": messages.count]) : L("wa.bringTitle"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button(L("common.cancel")) { dismiss() } }
@@ -783,18 +815,34 @@ struct WaShareSheet: View {
         .onChange(of: store.waPrivacy.token(chat.inboxKey)) { _, _ in picked = []; comment = ""; dismiss() }
     }
 
+    private func who(_ m: WaMessageDTO) -> String { m.fromMe ? L("common.youShort") : m.author ?? L("wa.someone") }
+
+    private func preview(_ m: WaMessageDTO) -> String {
+        let t = m.body.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !t.isEmpty { return String(t.prefix(120)) }
+        return m.media != nil ? "📎" : ""
+    }
+
     private func share() {
-        guard !picked.isEmpty else { return }
+        guard !picked.isEmpty, !messages.isEmpty else { return }
         busy = true
-        let ids = picked
+        let ids = picked, messageIds = messages.map(\.id)
         Task {
             defer { busy = false }
             do {
-                try await store.shareWhatsApp(accountId: chat.accountId, jid: chat.jid, messageId: message.id, conversationIds: ids, comment: comment)
+                try await store.shareWhatsApp(accountId: chat.accountId, jid: chat.jid, messageIds: messageIds, conversationIds: ids, comment: comment)
                 store.show(MailShareText.done(ids.count))
+                onDone()
                 dismiss()
-            } catch { store.show(L10n.errorText(error)) }
+            } catch { store.show(WaShareSheet.errorText(error)) }
         }
+    }
+
+    /// El texto del servidor tal cual (p. ej. «Máximo 10 fotos o archivos por envío» o el 409 `wa_media_pending`).
+    static func errorText(_ error: Error) -> String {
+        if let e = error as? ApiRequestError, !e.isNetwork, e.status >= 400, e.status < 500, e.status != 401,
+           !e.message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return e.message }
+        return L10n.errorText(error)
     }
 }
 

@@ -617,7 +617,7 @@ struct WaChatView: View {
     @State private var outbox: [(id: UUID, text: String)] = []
     @State private var confirmSend = false
     @State private var settings = false
-    @State private var sharing: WaMessageDTO?
+    @State private var sharing: WaShareRequest?
     // gg de este chat de WhatsApp (fuente wa:<cuenta>:<jid>).
     @State private var ggOpen = false
     @State private var ggQuotes: [GgQuote] = []
@@ -673,6 +673,11 @@ struct WaChatView: View {
                 Menu {
                     WaChatMenuItems(chat: chat) { up in patched(up) }
                     Divider()
+                    // «Seleccionar» siempre (no depende de gg): llevar varios mensajes juntos a un chat o preguntarle a gg.
+                    if canSelect && !(messages ?? []).isEmpty {
+                        Button { selecting = true; selected = [] } label: { Label(L("wa.select"), systemImage: "checkmark.circle") }
+                            .accessibilityIdentifier("wa.chat.select")
+                    }
                     if store.ggSide.available != false {
                         Button {
                             if ggPillHidden { GgPillPrefs.setHidden(false, source); ggPillRev += 1 }
@@ -689,7 +694,9 @@ struct WaChatView: View {
         }
         .safeAreaInset(edge: .bottom) {
             if selecting {
-                GgSelectionBar(count: selected.count, onCancel: { selecting = false; selected = [] }, onAsk: { suggesting = true })
+                GgSelectionBar(count: selected.count, onCancel: { selecting = false; selected = [] },
+                               onAsk: store.ggSide.available == true ? { suggesting = true } : nil,
+                               onBring: store.mailEnabled ? { bringSelected() } : nil)
             } else {
                 VStack(spacing: 0) {
                     if store.ggSide.available != false && !ggPillHidden {
@@ -715,7 +722,9 @@ struct WaChatView: View {
             Button(L("common.cancel"), role: .cancel) {}
         } message: { Text(L("wa.sendConfirm", ["name": account?.label ?? chat.accountLabel])) }
         .sheet(isPresented: $settings) { WaChatSettingsSheet(chat: $chat) { up in patched(up) } }
-        .sheet(item: $sharing) { m in WaShareSheet(chat: chat, message: m) }
+        .sheet(item: $sharing) { r in
+            WaShareSheet(chat: chat, messages: r.messages, onDone: { selecting = false; selected = [] })
+        }
         .sheet(isPresented: $ggOpen, onDismiss: { ggAsk = nil; runQueue() }) {
             GgSideSheet(source: source, chatTitle: chat.name, quotes: $ggQuotes, initialAsk: ggAsk) { ggQueue = [$0] }
         }
@@ -753,7 +762,7 @@ struct WaChatView: View {
                         .foregroundStyle(m.fromMe ? Color.white.opacity(0.8) : Theme.textSecondary)
                     // Como «⤴ Llevar a un chat» de la web.
                     if store.mailEnabled && !m.body.isEmpty && !selecting {
-                        Button { sharing = m } label: { Text("⤴ " + L("wa.bringShort")).font(.caption2.weight(.semibold)) }
+                        Button { sharing = WaShareRequest(messages: [m]) } label: { Text("⤴ " + L("wa.bringShort")).font(.caption2.weight(.semibold)) }
                             .buttonStyle(.borderless)
                             .foregroundStyle(m.fromMe ? .white : Theme.accentText)
                             .accessibilityIdentifier("wa.bringShort")
@@ -782,13 +791,16 @@ struct WaChatView: View {
                 Button { UIPasteboard.general.string = m.body; store.show(L("toast.copied")) } label: { Label(L("common.copy"), systemImage: "doc.on.doc") }
             }
             if store.mailEnabled && !m.body.isEmpty {
-                Button { sharing = m } label: { Label(L("wa.bring"), systemImage: "arrowshape.turn.up.right") }
+                Button { sharing = WaShareRequest(messages: [m]) } label: { Label(L("wa.bring"), systemImage: "arrowshape.turn.up.right") }
                     .accessibilityIdentifier("wa.bring")
             }
             if store.ggSide.available == true && !m.body.isEmpty {
                 Button { ggQuotes = [quote(m)]; ggOpen = true } label: { Label(L("ggs.ask"), systemImage: "sparkles") }
                     .accessibilityIdentifier("menu.askGg")
-                Button { selecting = true; selected = [m.id] } label: { Label(L("ggs.select"), systemImage: "checkmark.circle") }
+            }
+            // Empieza la selección con este mensaje (llevar varios juntos o preguntarle a gg).
+            if canSelect {
+                Button { selecting = true; selected = [m.id] } label: { Label(L("wa.select"), systemImage: "checkmark.circle") }
                     .accessibilityIdentifier("menu.select")
             }
         }
@@ -905,8 +917,23 @@ struct WaChatView: View {
     }
 
     private func toggle(_ id: String) {
-        if selected.contains(id) { selected.remove(id) } else { selected.insert(id) }
+        if selected.contains(id) { selected.remove(id) }
+        else if selected.count >= WaBundle.maxMessages { store.show(L("wa.selectMax", ["n": WaBundle.maxMessages])); return }
+        else { selected.insert(id) }
         Haptics.tap()
+    }
+
+    /// Se puede seleccionar si hay algo que hacer con la selección: llevarla a un chat o preguntarle a gg.
+    private var canSelect: Bool { store.mailEnabled || store.ggSide.available == true }
+
+    /// «Llevar a un chat (N)»: los elegidos en el orden del chat, juntos en una sola tarjeta.
+    private func bringSelected() {
+        let list = messages ?? []
+        let ids = WaBundle.ordered(selected, in: list.map(\.id))
+        let byId = Dictionary(list.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        let picked = ids.compactMap { byId[$0] }
+        guard !picked.isEmpty else { return }
+        sharing = WaShareRequest(messages: picked)
     }
 
     /// Lo que se eligió de gg, uno por uno: cada diálogo se abre al cerrar el anterior. Con «Responder desde chaggu» el

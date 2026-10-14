@@ -230,10 +230,10 @@ extension AppStore {
         return MailShareResult.decode(data).map { putMail($0) }
     }
 
-    func shareWhatsApp(accountId: String, jid: String, messageId: String, conversationIds: [String], comment: String) async throws {
-        var json: [String: Any] = ["accountId": accountId, "jid": jid, "messageId": messageId, "conversationIds": Array(conversationIds.prefix(10))]
-        let c = comment.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !c.isEmpty { json["comment"] = String(c.prefix(4000)) }
+    /// Llevar uno o varios mensajes de un chat de WhatsApp (hasta 50) a hasta 10 chats. Con 2+ el servidor arma UNA tarjeta
+    /// con `wa.items`. Errores con texto del servidor: 400 (más de 10 fotos o archivos) y 409 `wa_media_pending`.
+    func shareWhatsApp(accountId: String, jid: String, messageIds: [String], conversationIds: [String], comment: String) async throws {
+        let json = WaBundle.shareBody(accountId: accountId, jid: jid, messageIds: messageIds, conversationIds: conversationIds, comment: comment)
         let data = try await api.requestData("/whatsapp/share", method: "POST", json: json)
         for e in MailShareResult.decode(data) { putMail(e) }
     }

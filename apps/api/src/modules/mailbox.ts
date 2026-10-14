@@ -8,7 +8,9 @@ import type { z } from 'zod';
 import type {
   MailAddressDTO, MailAttachmentInfoDTO, MailConnectionDTO, MailListDTO, MailListItemDTO, MailListQuery, MailMessageDTO, MailProvider,
   ForwardSharedInput, MailReplyInput, MailTaskInput, MessageDTO, ShareMailInput, ShareWaInput, SharedMailCommentDTO, SharedMailDTO,
+  AttachmentDTO, WaSharedItemDTO,
 } from '@tiecoms/contracts';
+import { WA_SHARE_MAX_FILES } from '@tiecoms/contracts';
 import { conversationAccess } from '../access.ts';
 import { config } from '../config.ts';
 import { audit, pool, tx, type Db, type Tx } from '../db.ts';
@@ -1036,54 +1038,78 @@ export async function createTask(userId: string, id: string, input: z.infer<type
 }
 
 // ---------- WhatsApp: «Comentar en chaggu» ----------
+/**
+ * Llevar mensajes de WhatsApp a uno o varios chats (hasta 10). Con uno, la tarjeta de siempre; con varios (hasta 50,
+ * del mismo chat), una sola tarjeta con wa.items en orden de envío y sus archivos (hasta 10) en el mismo mensaje.
+ */
 export async function shareWhatsApp(userId: string, input: z.infer<typeof ShareWaInput>) {
   const acc = (await pool.query('SELECT id, kind, label FROM wa_accounts WHERE id = $1 AND user_id = $2 AND removed_at IS NULL', [input.accountId, userId])).rows[0];
   if (!acc) throw notFound('Cuenta de WhatsApp');
   await requireWaVisible(pool,input.accountId,input.jid);
-  const m = (await pool.query('SELECT * FROM wa_messages WHERE account_id = $1 AND chat_jid = $2 AND id = $3', [input.accountId, input.jid, input.messageId])).rows[0];
-  if (!m) throw notFound('Mensaje de WhatsApp');
+  const wanted = [...new Set(input.messageIds?.length ? input.messageIds : [input.messageId!])];
+  const rows = (await pool.query('SELECT * FROM wa_messages WHERE account_id = $1 AND chat_jid = $2 AND id = ANY($3::text[]) ORDER BY sent_at, id', [input.accountId, input.jid, wanted])).rows;
+  if (rows.length !== wanted.length) throw notFound('Mensaje de WhatsApp');
+  const bundle = rows.length > 1;
+  if (bundle && rows.filter((r) => r.media_state === 'ready' && r.media_info).length > WA_SHARE_MAX_FILES) throw badRequest(`Máximo ${WA_SHARE_MAX_FILES} fotos o archivos por envío`);
+  const m = rows[0];
   const chat = await ownChat(userId,input.accountId,input.jid);
   const me = (await pool.query('SELECT name FROM users WHERE id = $1', [userId])).rows[0]?.name ?? null;
   const targets = [...new Set(input.conversationIds ?? (input.conversationId ? [input.conversationId] : []))];
   for (const cid of targets) await conversationAccess(pool, userId, cid, 'post');
-  const author = m.from_me ? me : m.author_name ?? null;
-  const text = clip(String(m.body ?? ''), 2000);
+  const authorOf = (r: any): string | null => r.from_me ? me : r.author_name ?? null;
+  const textOf = (r: any) => clip(String(r.body ?? ''), 2000);
+  // Varios: «Autor: texto» por línea para búsquedas, vistas previas y clientes que no conocen wa.items.
+  const transcript = rows.map((r) => `${authorOf(r) ?? 'WhatsApp'}: ${flat(textOf(r)) || '📎'}`).join('\n');
+  const author = bundle ? clip([...new Set(rows.map(authorOf).filter(Boolean))].join(', '), 120) || null : authorOf(m);
+  const text = bundle ? clip(transcript, 20000) : textOf(m);
+  const fromMe = rows.every((r) => r.from_me);
+  const ids = rows.map((r) => r.id as string);
   const meta = { chatName: chat?.name ?? null, isGroup: !!chat?.is_group, accountKind: acc.kind, accountId: acc.id, jid: input.jid };
-  const matchesShare=(p:any)=>p.external_id===m.id && p.meta?.accountId===input.accountId && p.meta?.jid===input.jid && (p.comment ?? '')===(input.comment ?? '');
+  const matchesShare=(p:any)=>p.external_id===m.id && p.meta?.accountId===input.accountId && p.meta?.jid===input.jid && (p.comment ?? '')===(input.comment ?? '')
+    && (bundle ? (p.meta?.items ?? []).map((x:any)=>x.waMessageId).join('\n')===ids.join('\n') : !p.meta?.items);
   const messages: MessageDTO[] = [];
   const emails: SharedMailDTO[] = [];
   for (const cid of targets) {
     const prior=input.clientMessageId ? (await pool.query('SELECT id,external_id,message_id,meta,comment FROM shared_emails WHERE shared_by=$1 AND conversation_id=$2 AND share_client_id=$3',[userId,cid,input.clientMessageId])).rows[0] : null;
     if(prior) { if(!matchesShare(prior)) throw badRequest('La clave de compartir ya corresponde a otro mensaje'); const old=await pool.query('SELECT * FROM messages WHERE id=$1',[prior.message_id]);messages.push(toMessageDTO(old.rows[0]));emails.push(await getShared(userId,prior.id));continue; }
-    const copy=await prepareWaCopy(m);let retained=false;
-    try { await tx(async (c) => {
+    const copies: Awaited<ReturnType<typeof prepareWaCopy>>[] = [];let retained=false;
+    try { for (const r of rows) copies.push(await prepareWaCopy(r));
+      await tx(async (c) => {
       await c.query('SELECT id FROM users WHERE id=$1 FOR UPDATE',[userId]);
       if(!(await c.query('SELECT id FROM wa_accounts WHERE id=$1 AND user_id=$2 AND removed_at IS NULL FOR SHARE',[input.accountId,userId])).rowCount) throw notFound('Cuenta de WhatsApp');
       await requireWaVisible(c,input.accountId,input.jid);
       const a = await conversationAccess(c, userId, cid, 'post', true);
       if(input.clientMessageId) { const again=(await c.query('SELECT id,external_id,message_id,meta,comment FROM shared_emails WHERE shared_by=$1 AND conversation_id=$2 AND share_client_id=$3',[userId,cid,input.clientMessageId])).rows[0]; if(again) { if(!matchesShare(again)) throw badRequest('La clave de compartir ya corresponde a otro mensaje');messages.push(toMessageDTO((await c.query('SELECT * FROM messages WHERE id=$1',[again.message_id])).rows[0]));emails.push(await load(c,again.id,userId,true));return; } }
-      const attachments=await insertWaCopy(c,userId,cid,copy);
-      // Mismo registro que un correo compartido: hilo de comentarios y tarea. Solo guarda este mensaje.
+      const attachments: AttachmentDTO[] = [];
+      const items: WaSharedItemDTO[] = [];
+      for (let i = 0; i < rows.length; i++) {
+        const got = await insertWaCopy(c,userId,cid,copies[i]!);
+        attachments.push(...got);
+        items.push({ waMessageId: rows[i].id, author: authorOf(rows[i]), fromMe: !!rows[i].from_me, text: textOf(rows[i]), sentAt: iso(rows[i].sent_at), attachmentId: got[0]?.id ?? null });
+      }
+      const missingMedia = rows.some((r) => ['image','audio','video','document','sticker'].includes(r.kind) && !(r.media_state === 'ready' && r.media_info));
+      // Mismo registro que un correo compartido: hilo de comentarios y tarea. Solo guarda estos mensajes.
       const ins = await c.query(
         `INSERT INTO shared_emails (conversation_id, shared_by, provider, account_email, external_id, thread_id, direction, from_name, subject, snippet, body_text, sent_at, comment, meta,chaggu_attachments,media_status,share_client_id)
          VALUES ($1,$2,'whatsapp',NULL,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING id`,
-        [cid, userId, m.id, input.jid, m.from_me ? 'out' : 'in', author, clip(chat?.name ?? 'WhatsApp', 500), clip(flat(text), 300), text, m.sent_at, input.comment || null, JSON.stringify(meta),JSON.stringify(attachments),attachments.length ? 'ready' : ['image','audio','video','document','sticker'].includes(m.kind) ? 'unavailable' : null,input.clientMessageId ?? null],
+        [cid, userId, m.id, input.jid, fromMe ? 'out' : 'in', author, clip(chat?.name ?? 'WhatsApp', 500), clip(flat(text), 300), text, m.sent_at, input.comment || null,
+          JSON.stringify(bundle ? { ...meta, items } : meta),JSON.stringify(attachments),attachments.length ? 'ready' : missingMedia ? 'unavailable' : null,input.clientMessageId ?? null],
       );
       const id: string = ins.rows[0].id;
       const msg = await appendMessage(c, {
         conversationId: cid, authorId: userId, kind: 'system', attachments,
         body: sys('wa.shared', {
           emailId: id, accountId: acc.id, jid: input.jid, waMessageId: m.id, accountKind: acc.kind, chatName: chat?.name ?? null, isGroup: !!chat?.is_group,
-          author, fromMe: m.from_me, text, sentAt: iso(m.sent_at), ...(input.comment ? { comment: clip(input.comment, 4000) } : {}),
+          author, fromMe, text: bundle ? clip(transcript, 4000) : text, sentAt: iso(m.sent_at), ...(bundle ? { count: rows.length } : {}), ...(input.comment ? { comment: clip(input.comment, 4000) } : {}),
         }),
       });
       if(attachments.length) await linkToMessage(c,msg.id,attachments.map((a)=>a.id));
       await c.query('UPDATE shared_emails SET message_id = $2 WHERE id = $1', [id, msg.id]);
-      await audit(c, userId, 'wa.shared', { type: 'conversation', id: cid, workspaceId: a.workspaceId }, { chats: targets.length });
+      await audit(c, userId, 'wa.shared', { type: 'conversation', id: cid, workspaceId: a.workspaceId }, { chats: targets.length, messages: rows.length });
       messages.push(msg);
       emails.push(await publish(c, id));
       retained=true;
-    }); } finally { if(!retained) await discardWaCopy(copy); }
+    }); } finally { if(!retained) for (const copy of copies) await discardWaCopy(copy); }
   }
   return { message: messages[0]!, messages, emails };
 }

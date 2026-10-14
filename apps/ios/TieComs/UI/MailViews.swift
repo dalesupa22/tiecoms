@@ -218,18 +218,30 @@ struct MailCard: View {
                 WaIcon(size: 24)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(kind).font(.caption2.weight(.bold)).foregroundStyle(Theme.textSecondary)
-                    (Text(author).bold() + Text(" · " + MailUI.date(e.sentAt))).font(.caption).foregroundStyle(Theme.textSecondary)
+                    if let items = e.wa?.bundle {
+                        Text(L("wa.nMessages", ["n": items.count])).font(.caption.weight(.semibold)).foregroundStyle(Theme.textSecondary)
+                            .accessibilityIdentifier("waCard.count")
+                    } else {
+                        (Text(author).bold() + Text(" · " + MailUI.date(e.sentAt))).font(.caption).foregroundStyle(Theme.textSecondary)
+                    }
                 }
             }
-            Button { store.push(.mail(e.id, mode: "read")) } label: {
-                HStack(spacing: 8) {
-                    Rectangle().fill(MailUI.waColor).frame(width: 3)
-                    Text(e.snippet).font(.subheadline).foregroundStyle(Theme.textPrimary).multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
+            if let items = e.wa?.bundle {
+                // Varios mensajes llevados juntos: una sola tarjeta con la lista compacta (autor · hora y texto).
+                WaBundleList(email: e, items: items, mine: mine)
+            } else {
+                Button { store.push(.mail(e.id, mode: "read")) } label: {
+                    HStack(spacing: 8) {
+                        Rectangle().fill(MailUI.waColor).frame(width: 3)
+                        Text(e.snippet).font(.subheadline).foregroundStyle(Theme.textPrimary).multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
+                    }
                 }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("mailCard.subject")
             }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("mailCard.subject")
-            if !e.chagguAttachments.isEmpty {
+            if e.wa?.bundle != nil {
+                if e.chagguAttachments.isEmpty, let status = e.mediaStatus, status != "ready" { Text(L("wa.media.\(status)")).font(.caption).foregroundStyle(Theme.textSecondary) }
+            } else if !e.chagguAttachments.isEmpty {
                 AttachmentsBlock(attachments: e.chagguAttachments, mine: mine, messageId: e.messageId, conversationId: e.conversationId)
             } else if let status = e.mediaStatus, status != "ready" { Text(L("wa.media.\(status)")).font(.caption).foregroundStyle(Theme.textSecondary) }
             MailCardComments(email: e, canPost: canPost)
@@ -279,6 +291,65 @@ struct MailCard: View {
             defer { opening = nil }
             do { fileURL = try await store.mailAttachmentFile(e.id, a) } catch { store.show(L10n.errorText(error)) }
         }
+    }
+}
+
+/// Los mensajes de un WhatsApp llevado en paquete (`wa.items`): cada fila con autor (o «Tú») · hora, el texto y su
+/// adjunto si sigue en la tarjeta. Muestra los 8 primeros y «Ver los N» para desplegar el resto.
+struct WaBundleList: View {
+    @Environment(AppStore.self) private var store
+    let email: SharedMailDTO
+    let items: [WaSharedItemDTO]
+    let mine: Bool
+    @State private var expanded = false
+
+    var body: some View {
+        let shown = expanded ? items : Array(items.prefix(WaBundle.collapsedRows))
+        let loose = WaBundle.loose(items, email.chagguAttachments)
+        HStack(alignment: .top, spacing: 8) {
+            Rectangle().fill(MailUI.waColor).frame(width: 3)
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(Array(shown.enumerated()), id: \.offset) { i, item in row(item).accessibilityIdentifier("waCard.item.\(i)") }
+                if items.count > WaBundle.collapsedRows {
+                    Button { withAnimation(.easeInOut(duration: 0.2)) { expanded.toggle() } } label: {
+                        Text(expanded ? L("wa.seeLess") : L("wa.seeAll", ["n": items.count]))
+                            .font(.caption.weight(.semibold)).foregroundStyle(Theme.accentText)
+                    }
+                    .buttonStyle(.borderless)
+                    .accessibilityIdentifier("waCard.seeAll")
+                }
+                if !loose.isEmpty {
+                    AttachmentsBlock(attachments: loose, mine: mine, messageId: email.messageId, conversationId: email.conversationId)
+                }
+            }
+        }
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func row(_ item: WaSharedItemDTO) -> some View {
+        let who = item.fromMe ? L("a11y.you") : (item.author?.isEmpty == false ? item.author! : L("wa.someone"))
+        // Hoy: solo la hora; otro día: «3 oct, 9:00».
+        let when = item.sentAt.flatMap { ISODate.parse($0) }.map { d in
+            Calendar.current.isDateInToday(d)
+                ? d.formatted(Date.FormatStyle(date: .omitted, time: .shortened).locale(L10n.locale))
+                : d.formatted(Date.FormatStyle().day().month(.abbreviated).hour().minute().locale(L10n.locale))
+        }
+        return VStack(alignment: .leading, spacing: 2) {
+            (Text(who).bold().foregroundColor(item.fromMe ? Theme.textSecondary : PersonColor.text(who))
+                + Text(when.map { " · " + $0 } ?? "").foregroundColor(Theme.textSecondary))
+                .font(.caption)
+            if !item.text.isEmpty {
+                Text(item.text).font(.subheadline).foregroundStyle(Theme.textPrimary).multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let a = WaBundle.attachment(item, in: email.chagguAttachments) {
+                AttachmentsBlock(attachments: [a], mine: mine, messageId: email.messageId, conversationId: email.conversationId)
+                    .frame(maxWidth: 220, alignment: .leading)
+            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { store.push(.mail(email.id, mode: "read")) }
+        .accessibilityElement(children: .combine)
     }
 }
 

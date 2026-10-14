@@ -127,28 +127,77 @@ struct GgReplyBubbles: View {
     }
 }
 
-/// Barra de selección: «Cancelar · N seleccionados · ✨ Pedir a gg (N)».
+/// Barra de selección: «Cancelar · N seleccionados · ✨ Pedir a gg (N)». En WhatsApp suma «Llevar a un chat (N)» (principal)
+/// y gg solo aparece si está disponible (`onAsk` nil lo oculta).
 struct GgSelectionBar: View {
     let count: Int
     var onCancel: () -> Void
-    var onAsk: () -> Void
+    var onAsk: (() -> Void)?
+    var onBring: (() -> Void)? = nil
     var body: some View {
-        HStack(spacing: 10) {
-            Button(L("common.cancel"), action: onCancel).font(.subheadline).accessibilityIdentifier("gg.select.cancel")
-            Text(L("ggs.selected", ["n": count])).font(.footnote).foregroundStyle(Theme.textSecondary)
-            Spacer()
-            Button(action: onAsk) {
-                Text(L("ggs.askN", ["n": count])).font(.subheadline.weight(.semibold)).foregroundStyle(.white)
+        Group {
+            if onBring == nil {
+                HStack(spacing: 10) {
+                    cancel
+                    Text(L("ggs.selected", ["n": count])).font(.footnote).foregroundStyle(Theme.textSecondary)
+                    Spacer()
+                    if let onAsk { askButton(onAsk, primary: true) }
+                }
+            } else {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 8) {
+                        cancel
+                        Spacer(minLength: 4)
+                        if let onAsk { askButton(onAsk, primary: false) }
+                        bringButton
+                    }
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            cancel
+                            Spacer()
+                            Text(L("ggs.selected", ["n": count])).font(.footnote).foregroundStyle(Theme.textSecondary)
+                        }
+                        HStack(spacing: 8) {
+                            if let onAsk { askButton(onAsk, primary: false) }
+                            bringButton
+                        }
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 14).padding(.vertical, 10)
+        .background(Theme.surface.ignoresSafeArea(edges: .bottom))
+    }
+
+    private var cancel: some View {
+        Button(L("common.cancel"), action: onCancel).font(.subheadline).accessibilityIdentifier("gg.select.cancel")
+    }
+
+    private func askButton(_ action: @escaping () -> Void, primary: Bool) -> some View {
+        Button(action: action) {
+            Text(L("ggs.askN", ["n": count])).font(.subheadline.weight(.semibold)).lineLimit(1).fixedSize()
+                .foregroundStyle(primary ? .white : Theme.textPrimary)
+                .padding(.horizontal, 14).padding(.vertical, 9)
+                .background(Capsule().fill(primary ? Theme.ink : Theme.textSecondary.opacity(0.12)))
+        }
+        .buttonStyle(.plain)
+        .disabled(count == 0)
+        .opacity(count == 0 ? 0.5 : 1)
+        .accessibilityIdentifier("gg.select.ask")
+    }
+
+    @ViewBuilder private var bringButton: some View {
+        if let onBring {
+            Button(action: onBring) {
+                Text(L("wa.bringN", ["n": count])).font(.subheadline.weight(.semibold)).lineLimit(1).fixedSize().foregroundStyle(.white)
                     .padding(.horizontal, 14).padding(.vertical, 9)
                     .background(Capsule().fill(Theme.ink))
             }
             .buttonStyle(.plain)
             .disabled(count == 0)
             .opacity(count == 0 ? 0.5 : 1)
-            .accessibilityIdentifier("gg.select.ask")
+            .accessibilityIdentifier("wa.select.bring")
         }
-        .padding(.horizontal, 14).padding(.vertical, 10)
-        .background(Theme.surface.ignoresSafeArea(edges: .bottom))
     }
 }
 

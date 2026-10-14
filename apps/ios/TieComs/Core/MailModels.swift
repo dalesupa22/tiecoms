@@ -168,8 +168,11 @@ struct SharedWaInfo: Codable, Equatable, Sendable {
     var accountKind: String
     var accountId: String
     var jid: String
-    init(chatName: String?, isGroup: Bool, accountKind: String, accountId: String, jid: String) {
+    /// Varios mensajes llevados juntos (2+), en orden de envío. Sin `items` (o con uno) es la tarjeta de un solo mensaje.
+    var items: [WaSharedItemDTO]? = nil
+    init(chatName: String?, isGroup: Bool, accountKind: String, accountId: String, jid: String, items: [WaSharedItemDTO]? = nil) {
         self.chatName = chatName; self.isGroup = isGroup; self.accountKind = accountKind; self.accountId = accountId; self.jid = jid
+        self.items = items
     }
     init(from decoder: Decoder) throws {
         let c = try container(decoder)
@@ -178,6 +181,71 @@ struct SharedWaInfo: Codable, Equatable, Sendable {
         accountKind = c.v("accountKind", "personal")
         accountId = c.v("accountId", "")
         jid = c.v("jid", "")
+        let list: [WaSharedItemDTO] = c.lossyArray("items")
+        items = list.isEmpty ? nil : list
+    }
+
+    /// Los mensajes del paquete cuando son 2 o más (la tarjeta los muestra juntos); nil = tarjeta de un mensaje.
+    var bundle: [WaSharedItemDTO]? { (items?.count ?? 0) >= 2 ? items : nil }
+}
+
+/// Un mensaje dentro de un paquete de WhatsApp compartido (`wa.items`).
+struct WaSharedItemDTO: Codable, Equatable, Sendable {
+    var waMessageId: String
+    var author: String?
+    var fromMe: Bool
+    var text: String
+    /// ISO-8601.
+    var sentAt: String?
+    /// Id de un adjunto de `chagguAttachments` (si ya no está allí, se borró y no se dibuja).
+    var attachmentId: String?
+    init(waMessageId: String, author: String? = nil, fromMe: Bool = false, text: String = "", sentAt: String? = nil, attachmentId: String? = nil) {
+        self.waMessageId = waMessageId; self.author = author; self.fromMe = fromMe; self.text = text; self.sentAt = sentAt; self.attachmentId = attachmentId
+    }
+    init(from decoder: Decoder) throws {
+        let c = try container(decoder)
+        waMessageId = c.v("waMessageId", "")
+        author = c.o("author")
+        fromMe = c.v("fromMe", false)
+        text = c.v("text", "")
+        sentAt = c.o("sentAt")
+        attachmentId = c.o("attachmentId")
+    }
+}
+
+/// Selección de varios mensajes de un chat de WhatsApp para llevarlos juntos.
+enum WaBundle {
+    /// Máximo de mensajes por envío (contrato: messageIds 1…50).
+    static let maxMessages = 50
+    /// Filas visibles en la tarjeta antes de «Ver los N».
+    static let collapsedRows = 8
+
+    /// Los ids elegidos en el orden en que aparecen en el chat (el servidor igual los ordena por hora de envío).
+    static func ordered(_ selected: Set<String>, in chatOrder: [String]) -> [String] {
+        var seen = Set<String>()
+        return chatOrder.filter { selected.contains($0) && seen.insert($0).inserted }
+    }
+
+    /// Cuerpo de POST /whatsapp/share con `messageIds` (sin repetidos, hasta 50) y hasta 10 chats.
+    static func shareBody(accountId: String, jid: String, messageIds: [String], conversationIds: [String], comment: String) -> [String: Any] {
+        var seen = Set<String>()
+        let ids = messageIds.filter { !$0.isEmpty && seen.insert($0).inserted }.prefix(maxMessages)
+        var json: [String: Any] = ["accountId": accountId, "jid": jid, "messageIds": Array(ids), "conversationIds": Array(conversationIds.prefix(10))]
+        let c = comment.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !c.isEmpty { json["comment"] = String(c.prefix(4000)) }
+        return json
+    }
+
+    /// El adjunto de una fila, si sigue en la tarjeta.
+    static func attachment(_ item: WaSharedItemDTO, in attachments: [AttachmentDTO]) -> AttachmentDTO? {
+        guard let id = item.attachmentId else { return nil }
+        return attachments.first { $0.id == id }
+    }
+
+    /// Adjuntos de la tarjeta que ninguna fila nombra (se muestran debajo de la lista).
+    static func loose(_ items: [WaSharedItemDTO], _ attachments: [AttachmentDTO]) -> [AttachmentDTO] {
+        let named = Set(items.compactMap(\.attachmentId))
+        return attachments.filter { !named.contains($0.id) }
     }
 }
 
@@ -313,6 +381,8 @@ struct WaSharedPayload: Equatable, Sendable {
     /// Desde la 040 el mensaje compartido tiene registro propio (SharedMailDTO con hilo y tarea); los viejos no.
     var emailId: String? = nil
     var forwardedFrom: String? = nil
+    /// Mensajes llevados juntos (1 = un solo mensaje; con más, `text` es la transcripción).
+    var count: Int = 1
 }
 
 /// Franja de comentarios agrupados (`mail.comments`).
@@ -349,10 +419,11 @@ enum MailChatKind: Equatable {
         case "mail.reply_failed": return str("emailId").map { .replyFailed(emailId: $0) }
         case "wa.shared":
             guard let text = p["text"] as? String else { return nil }
+            let n: Int = (p["count"] as? NSNumber)?.intValue ?? Int(str("count") ?? "") ?? 1
             return .waShared(.init(accountId: str("accountId") ?? "", jid: str("jid") ?? "", waMessageId: str("waMessageId") ?? "",
                                    accountKind: str("accountKind") ?? "personal", chatName: str("chatName"), isGroup: (p["isGroup"] as? Bool) ?? false,
                                    author: str("author"), fromMe: (p["fromMe"] as? Bool) ?? false, text: text, sentAt: str("sentAt"), comment: str("comment"),
-                                   emailId: str("emailId"), forwardedFrom: str("forwardedFrom")))
+                                   emailId: str("emailId"), forwardedFrom: str("forwardedFrom"), count: max(1, n)))
         default: return nil
         }
     }

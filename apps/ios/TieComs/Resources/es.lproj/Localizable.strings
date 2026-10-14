@@ -2810,6 +2810,14 @@
 "wa.bring" = "Llevar a un chat…";
 "wa.bringShort" = "Llevar a un chat";
 "wa.bringTitle" = "Llevar un WhatsApp a un chat";
+"wa.bringN" = "Llevar a un chat ({n})";
+"wa.bringTitleN" = "Llevar {n} mensajes a un chat";
+"wa.select" = "Seleccionar";
+"wa.selectMax" = "Puedes llevar hasta {n} mensajes juntos";
+"wa.nMessages" = "{n} mensajes";
+"wa.andMore" = "y {n} más";
+"wa.seeAll" = "Ver los {n}";
+"wa.seeLess" = "Ver menos";
 "wa.cat.all" = "Todos";
 "wa.cat.amigos" = "Amigos";
 "wa.cat.clientes" = "Clientes";

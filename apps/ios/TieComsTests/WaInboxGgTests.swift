@@ -512,3 +512,81 @@ extension WaInboxGgTests {
         XCTAssertEqual(pins, [], "sin pines, la fila desaparece (como el servidor)")
     }
 }
+
+/// Llevar varios mensajes de WhatsApp juntos (POST /whatsapp/share con messageIds; tarjeta con wa.items).
+@MainActor
+final class WaBundleShareTests: XCTestCase {
+    func testItemsDecodeTolerantAndInOrder() throws {
+        let json = #"""
+        {"id":"e1","conversationId":"c1","sharedBy":"u1","provider":"whatsapp","snippet":"Ana: hola\nTú: listo",
+         "wa":{"chatName":"Obra","isGroup":true,"accountKind":"business","accountId":"a1","jid":"g@g.us","futuro":1,
+               "items":[{"waMessageId":"m1","author":"Ana","fromMe":false,"text":"hola","sentAt":"2026-10-14T10:00:00.000Z","extra":"x"},
+                        {"waMessageId":"m2","author":null,"fromMe":true,"text":"listo","sentAt":null,"attachmentId":"att1"},
+                        "roto"]},
+         "chagguAttachments":[{"id":"att1","name":"f.jpg","contentType":"image/jpeg","sizeBytes":10,"url":"/api/v1/attachments/att1"},
+                              {"id":"att9","name":"g.pdf","contentType":"application/pdf","sizeBytes":10,"url":"/api/v1/attachments/att9"}]}
+        """#
+        let e = try dec(SharedMailDTO.self, json)
+        let items = try XCTUnwrap(e.wa?.items)
+        XCTAssertEqual(items.map(\.waMessageId), ["m1", "m2"], "lo que no decodifica se descarta; el orden se respeta")
+        XCTAssertEqual(items[0].author, "Ana"); XCTAssertFalse(items[0].fromMe); XCTAssertEqual(items[0].sentAt, "2026-10-14T10:00:00.000Z")
+        XCTAssertNil(items[0].attachmentId)
+        XCTAssertTrue(items[1].fromMe); XCTAssertNil(items[1].author); XCTAssertNil(items[1].sentAt); XCTAssertEqual(items[1].attachmentId, "att1")
+        XCTAssertEqual(e.wa?.bundle?.count, 2)
+        XCTAssertEqual(WaBundle.attachment(items[1], in: e.chagguAttachments)?.id, "att1")
+        XCTAssertNil(WaBundle.attachment(items[0], in: e.chagguAttachments))
+        XCTAssertEqual(WaBundle.loose(items, e.chagguAttachments).map(\.id), ["att9"])
+        // Un adjunto borrado (ya no está en chagguAttachments) no se dibuja.
+        XCTAssertNil(WaBundle.attachment(WaSharedItemDTO(waMessageId: "m3", attachmentId: "gone"), in: e.chagguAttachments))
+    }
+
+    func testWithoutItemsOrSingleItemIsTheOldCard() throws {
+        let old = try dec(SharedMailDTO.self, #"{"id":"e1","provider":"whatsapp","wa":{"chatName":"X","accountId":"a","jid":"j"}}"#)
+        XCTAssertNil(old.wa?.items); XCTAssertNil(old.wa?.bundle)
+        let one = try dec(SharedMailDTO.self, #"{"id":"e1","provider":"whatsapp","wa":{"accountId":"a","jid":"j","items":[{"waMessageId":"m1","text":"hola"}]}}"#)
+        XCTAssertEqual(one.wa?.items?.count, 1); XCTAssertNil(one.wa?.bundle, "un solo mensaje: tarjeta de siempre")
+        let empty = try dec(SharedMailDTO.self, #"{"id":"e1","provider":"whatsapp","wa":{"accountId":"a","jid":"j","items":[]}}"#)
+        XCTAssertNil(empty.wa?.items)
+        let bad = try dec(SharedMailDTO.self, #"{"id":"e1","provider":"whatsapp","wa":{"accountId":"a","jid":"j","items":"x"}}"#)
+        XCTAssertNil(bad.wa?.items)
+        // Item mínimo: faltan campos → valores por defecto.
+        let item = try dec(WaSharedItemDTO.self, #"{"waMessageId":"m"}"#)
+        XCTAssertEqual(item, WaSharedItemDTO(waMessageId: "m", author: nil, fromMe: false, text: "", sentAt: nil, attachmentId: nil))
+    }
+
+    func testSharedMailRoundTripKeepsItems() throws {
+        let e = try dec(SharedMailDTO.self, #"{"id":"e1","provider":"whatsapp","wa":{"accountId":"a","jid":"j","items":[{"waMessageId":"m1","text":"a"},{"waMessageId":"m2","text":"b","fromMe":true}]}}"#)
+        let back = try JSONDecoder().decode(SharedMailDTO.self, from: JSONEncoder().encode(e))
+        XCTAssertEqual(back.wa?.items, e.wa?.items)
+    }
+
+    func testOrderedFollowsChatOrder() {
+        let chat = ["m1", "m2", "m3", "m4", "m5"]
+        XCTAssertEqual(WaBundle.ordered(["m4", "m1", "m3"], in: chat), ["m1", "m3", "m4"])
+        XCTAssertEqual(WaBundle.ordered(["zz", "m2"], in: chat), ["m2"], "lo que ya no está en el chat se ignora")
+        XCTAssertEqual(WaBundle.ordered(["m2"], in: ["m2", "m2"]), ["m2"])
+        XCTAssertEqual(WaBundle.ordered([], in: chat), [])
+    }
+
+    func testShareBodyUsesMessageIdsAndLimits() {
+        let ids = (1...60).map { "m\($0)" } + ["m1", ""]
+        let convs = (1...12).map { "c\($0)" }
+        let b = WaBundle.shareBody(accountId: "a1", jid: "g@g.us", messageIds: ids, conversationIds: convs, comment: "  ojo  ")
+        XCTAssertEqual(b["accountId"] as? String, "a1"); XCTAssertEqual(b["jid"] as? String, "g@g.us")
+        XCTAssertNil(b["messageId"], "el campo viejo no se manda")
+        let sent = b["messageIds"] as? [String]
+        XCTAssertEqual(sent?.count, 50); XCTAssertEqual(sent?.first, "m1"); XCTAssertEqual(Set(sent ?? []).count, 50)
+        XCTAssertEqual((b["conversationIds"] as? [String])?.count, 10)
+        XCTAssertEqual(b["comment"] as? String, "ojo")
+        let single = WaBundle.shareBody(accountId: "a", jid: "j", messageIds: ["m9"], conversationIds: ["c"], comment: " ")
+        XCTAssertEqual(single["messageIds"] as? [String], ["m9"]); XCTAssertNil(single["comment"])
+    }
+
+    func testSystemPayloadCount() {
+        let k = MailChatKind.parse(["k": "wa.shared", "text": "Ana: hola\nTú: listo", "count": 2, "author": "Ana, Tú", "emailId": "e1"])
+        guard case .waShared(let p)? = k else { return XCTFail("esperaba wa.shared") }
+        XCTAssertEqual(p.count, 2); XCTAssertEqual(p.author, "Ana, Tú")
+        guard case .waShared(let one)? = MailChatKind.parse(["k": "wa.shared", "text": "hola"]) else { return XCTFail() }
+        XCTAssertEqual(one.count, 1)
+    }
+}

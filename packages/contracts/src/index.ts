@@ -921,10 +921,17 @@ export const ShareMailInput = z.object({
 }).refine((x) => x.conversationId || x.conversationIds?.length, { message: 'Elige al menos un chat' });
 export type SharedMailStatus = 'pending' | 'scheduled' | 'replied';
 export interface SharedMailCommentDTO { id: string; emailId: string; authorId: string; body: string; createdAt: string }
+/**
+ * Un mensaje dentro de una tarjeta de WhatsApp con varios (SharedMailDTO.wa.items). attachmentId apunta a
+ * chagguAttachments (si ya no está ahí, se eliminó del chat: no se pinta).
+ */
+export interface WaSharedItemDTO { waMessageId: string; author: string | null; fromMe: boolean; text: string; sentAt: string | null; attachmentId: string | null }
 export interface SharedMailDTO {
   /** provider 'whatsapp': un mensaje de WhatsApp llevado al chat (sin responder desde chaggu; datos en wa). */
   id: string; conversationId: string; sharedBy: string; provider: MailProvider | 'whatsapp'; accountEmail: string | null;
-  wa?: { chatName: string | null; isGroup: boolean; accountKind: 'personal' | 'business'; accountId: string; jid: string } | null;
+  wa?: { chatName: string | null; isGroup: boolean; accountKind: 'personal' | 'business'; accountId: string; jid: string;
+    /** Varios mensajes llevados juntos (2 a 50, en orden de envío): una sola tarjeta. Ausente con uno solo y en clientes viejos. */
+    items?: WaSharedItemDTO[] } | null;
   direction: 'in' | 'out'; from: MailAddressDTO | null; to: MailAddressDTO[]; cc: MailAddressDTO[];
   /** body solo llega con full=true (GET /mail/shared/:id?full=1); en tarjetas y en vivo va ''. */
   subject: string; snippet: string; body: string; full?: boolean;
@@ -960,12 +967,22 @@ export const MailTaskInput = z.object({
 /** «Comentar en chaggu» desde un mensaje de WhatsApp. */
 /** Reenviar una tarjeta de correo o WhatsApp a otros chats: cada chat recibe su copia con hilo propio. */
 export const ForwardSharedInput = z.object({ conversationIds: z.array(z.uuid()).min(1).max(10), comment: z.string().trim().max(4000).optional() });
+/** Máximo de mensajes de WhatsApp que se llevan juntos en una tarjeta, y de archivos entre ellos. */
+export const WA_SHARE_MAX_MESSAGES = 50;
+export const WA_SHARE_MAX_FILES = 10;
+/**
+ * Llevar mensajes de WhatsApp a uno o varios chats. messageId (uno, clientes viejos) o messageIds (varios del
+ * mismo chat de WhatsApp, cualquier orden): con varios llega una sola tarjeta con wa.items en orden de envío.
+ */
 export const ShareWaInput = z.object({
   clientMessageId: z.string().min(1).max(64).optional(),
-  accountId: z.uuid(), jid: z.string().min(3).max(200), messageId: z.string().min(1).max(200),
+  accountId: z.uuid(), jid: z.string().min(3).max(200),
+  messageId: z.string().min(1).max(200).optional(),
+  messageIds: z.array(z.string().min(1).max(200)).min(1).max(WA_SHARE_MAX_MESSAGES).optional(),
   conversationId: z.uuid().optional(), conversationIds: z.array(z.uuid()).min(1).max(10).optional(),
   comment: z.string().trim().max(4000).optional(),
-}).refine((x) => x.conversationId || x.conversationIds?.length, { message: 'Elige al menos un chat' });
+}).refine((x) => x.conversationId || x.conversationIds?.length, { message: 'Elige al menos un chat' })
+  .refine((x) => x.messageId || x.messageIds?.length, { message: 'Elige al menos un mensaje', path: ['messageIds'] });
 
 /** side = conversación lateral: consulta privada desde un mensaje (chat multi que cuelga de su origen). */
 export type DeriveKind = 'same' | 'internal' | 'directive' | 'side';

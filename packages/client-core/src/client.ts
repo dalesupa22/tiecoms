@@ -1566,7 +1566,8 @@ export class TieComsClient {
     r.emails.forEach((e) => this.putMail(e));
     return r;
   }
-  async shareWhatsApp(input: { accountId: string; jid: string; messageId: string; conversationIds: string[]; comment?: string }) {
+  /** messageId (uno) o messageIds (varios del mismo chat: llegan en una sola tarjeta con wa.items). */
+  async shareWhatsApp(input: { accountId: string; jid: string; messageId?: string; messageIds?: string[]; conversationIds: string[]; comment?: string }) {
     const r = await this.request<{ message: MessageDTO; messages: MessageDTO[]; emails: import('@tiecoms/contracts').SharedMailDTO[] }>('/whatsapp/share', { method: 'POST', json: input });
     r.emails?.forEach((e) => this.putMail(e));
     return r;

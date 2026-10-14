@@ -339,7 +339,12 @@ function WaChatView({ accountId, jid, name, isGroup, gg, active = true }: { acco
           );
         })}
       </div>
-      {gg && <SelectionBar n={gg.selected.size} onAsk={gg.onSelectAsk} onClear={gg.onClear} />}
+      {gg && <SelectionBar n={gg.selected.size} onAsk={gg.onSelectAsk} onClear={gg.onClear}
+        // Varios mensajes a un chat en una sola tarjeta (pedido de Danny, 14-oct-2026), en el orden del chat.
+        {...(mailOn ? { forwardLabel: t('wa.bringN', { n: gg.selected.size }), onForward: () => {
+          const picked = (messages ?? []).filter((m) => gg.selected.has(m.id));
+          if (picked.length) openWaDialog({ accountId, jid }, (close) => <WaShareDialog accountId={accountId} jid={jid} chatName={name} isGroup={isGroup} messages={picked} onDone={gg.onClear} onClose={close} />);
+        } } : {})} />}
       {gg && last && !last.fromMe && <div className="row gg-compose-row"><span className="grow" /><ReplyForMe source={gg.source} host={gg.host} /></div>}
       {fileOver && <div className="flink-drop small" aria-hidden>🔗 {t('flink.dropHint')}</div>}
       <div className="flink-wrap" {...fileDrop}><WaReply accountId={accountId} jid={jid} onSent={() => { if (sentRefresh.current) clearTimeout(sentRefresh.current); sentRefresh.current = setTimeout(load, 1500); }} draft={gg?.draft} fileDraft={fileDraft} /></div>

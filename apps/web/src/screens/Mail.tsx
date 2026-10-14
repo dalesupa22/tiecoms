@@ -1,7 +1,7 @@
 import { AttachmentsView } from './Attachments.tsx';
 import { MailLiveReply } from './MailLiveReply.tsx';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { MailConnectionDTO, MailListItemDTO, MailMessageDTO, MailProvider, MessageDTO, SharedMailDTO, SharedMailCommentDTO } from '@tiecoms/contracts';
+import type { MailConnectionDTO, MailListItemDTO, MailMessageDTO, MailProvider, MessageDTO, SharedMailDTO, SharedMailCommentDTO, WaSharedItemDTO, AttachmentDTO } from '@tiecoms/contracts';
 import { client, useClient } from '../app-client.ts';
 import { errorText, locale, t } from '../i18n.ts';
 import { menuProps, openMenuAt, toast } from '../menu.tsx';
@@ -619,6 +619,28 @@ export function MailHtml({ html, maxHeight }: { html: string; maxHeight?: number
   );
 }
 
+/** Varios mensajes de WhatsApp en una sola tarjeta: autor · hora, texto y su archivo; los primeros 8 y «Ver los N». */
+const WA_ITEMS_SHOWN = 8;
+function WaItems({ items, files }: { items: WaSharedItemDTO[]; files: AttachmentDTO[] }) {
+  const [all, setAll] = useState(false);
+  const shown = all ? items : items.slice(0, WA_ITEMS_SHOWN);
+  return (
+    <div className="wa-items">
+      {shown.map((it) => {
+        const file = it.attachmentId ? files.find((f) => f.id === it.attachmentId) : undefined;
+        return (
+          <div key={it.waMessageId} className={`wa-item ${it.fromMe ? 'me' : ''}`}>
+            <div className="wa-item-meta"><b className="wa-item-who">{it.fromMe ? t('common.youShort') : it.author ?? t('wa.someone')}</b>{it.sentAt && <span className="muted"> · {new Date(it.sentAt).toLocaleTimeString(locale(), { hour: 'numeric', minute: '2-digit' })}</span>}</div>
+            {it.text && <div className="wa-item-text">{it.text}</div>}
+            {file && <AttachmentsView list={[file]} />}
+          </div>
+        );
+      })}
+      {items.length > WA_ITEMS_SHOWN && <button className="link-btn small" aria-expanded={all} onClick={() => setAll((v) => !v)}>{all ? `▴ ${t('wa.seeLess')}` : `▾ ${t('wa.seeAll', { n: items.length })}`}</button>}
+    </div>
+  );
+}
+
 export function MailCard({ emailId, banner, onIssue }: { emailId: string; banner?: React.ReactNode; onIssue?: (id: string) => void }) {
   const d = useClient((s) => s.data)!;
   const { email, missing } = useSharedMail(emailId);
@@ -645,11 +667,15 @@ export function MailCard({ emailId, banner, onIssue }: { emailId: string; banner
           <span className="src-ico wa"><WaIcon size={22} /></span>
           <div style={{ minWidth: 0 }}>
             <div className="mail-card-kind">WhatsApp{wa?.accountKind === 'business' ? ' Business' : ''} · {wa?.isGroup ? `👥 ${t('wa.groupShort')}` : ''}{wa?.chatName ?? email.subject}</div>
-            <div className="small muted ellipsis"><b>{author}</b> · {fmtDate(email.sentAt)}</div>
+            <div className="small muted ellipsis">{(wa?.items?.length ?? 0) > 1 ? <b>{t('wa.nMessages', { n: wa!.items!.length })}</b> : <b>{author}</b>} · {fmtDate(email.sentAt)}</div>
           </div>
         </div>
-        <button className="wa-quote link-quote" onClick={() => open('read')}>{email.snippet}</button>
-        {!!email.chagguAttachments?.length && <AttachmentsView list={email.chagguAttachments} />}
+        {(wa?.items?.length ?? 0) > 1
+          ? <WaItems items={wa!.items!} files={email.chagguAttachments ?? []} />
+          : <>
+            <button className="wa-quote link-quote" onClick={() => open('read')}>{email.snippet}</button>
+            {!!email.chagguAttachments?.length && <AttachmentsView list={email.chagguAttachments} />}
+          </>}
         {email.mediaStatus && email.mediaStatus !== 'ready' && <div className="small muted" role="status">{email.mediaStatus === 'pending' ? (locale().startsWith('en') ? 'Preparing attachment…' : 'Preparando adjunto…') : (locale().startsWith('en') ? 'Original attachment unavailable' : 'Adjunto original no disponible')}</div>}
         <CardComments email={email} canPost={!!conv?.canPost} />
         <div className="mail-card-foot">
@@ -1024,9 +1050,12 @@ export function WaSharedRow({ m, p, onIssue, actions }: { m: MessageDTO; p: WaSh
   );
 }
 
-/** Llevar un mensaje de WhatsApp a uno o varios chats, igual que un correo. */
-export function WaShareDialog({ accountId, jid, message, chatName, isGroup, onClose }: { accountId: string; jid: string; message: { id: string; body: string; author: string | null; fromMe: boolean; sentAt?: string }; chatName: string; isGroup?: boolean; onClose: () => void }) {
+type WaShareMsg = { id: string; body: string; author: string | null; fromMe: boolean; sentAt?: string };
+/** Llevar uno o varios mensajes de WhatsApp (del mismo chat, en su orden) a uno o varios chats, igual que un correo. Varios llegan en una sola tarjeta. */
+export function WaShareDialog({ accountId, jid, message, messages, chatName, isGroup, onClose, onDone }: { accountId: string; jid: string; message?: WaShareMsg; messages?: WaShareMsg[]; chatName: string; isGroup?: boolean; onClose: () => void; onDone?: () => void }) {
   const d = useClient((s) => s.data)!;
+  const list = messages ?? (message ? [message] : []);
+  const many = list.length > 1;
   const [picked, setPicked] = useState<string[]>([]);
   const [comment, setComment] = useState('');
   const [busy, setBusy] = useState(false);
@@ -1034,16 +1063,25 @@ export function WaShareDialog({ accountId, jid, message, chatName, isGroup, onCl
     if (!picked.length || busy) return;
     setBusy(true);
     try {
-      await client.shareWhatsApp({ accountId, jid, messageId: message.id, conversationIds: picked, comment: comment.trim() || undefined });
+      await client.shareWhatsApp({ accountId, jid, ...(many ? { messageIds: list.map((m) => m.id) } : { messageId: list[0]!.id }), conversationIds: picked, comment: comment.trim() || undefined });
       const first = picked[0]!;
       toast(picked.length > 1 ? t('mail.sharedMany', { n: picked.length }) : t('mail.shared'), { label: t('lin.open'), run: () => navigate(`/c/${first}`) });
+      onDone?.();
       onClose();
     } catch (e) { toast(errorText(e)); } finally { setBusy(false); }
   };
   return (
-    <Modal title={t('wa.bringTitle')} onClose={onClose}>
-      <div className="xcard mini"><div className="xcard-top"><span className="src-ico wa"><WaIcon size={20} /></span><div style={{ minWidth: 0 }}><b className="ellipsis" style={{ display: 'block' }}>{isGroup ? '👥 ' : ''}{chatName}</b><span className="small muted">{message.fromMe ? t('common.youShort') : message.author ?? t('wa.someone')}{message.sentAt ? ` · ${fmtDate(message.sentAt)}` : ''}</span></div></div>
-        <blockquote className="wa-quote">{message.body.slice(0, 400)}</blockquote></div>
+    <Modal title={many ? t('wa.bringTitleN', { n: list.length }) : t('wa.bringTitle')} onClose={onClose}>
+      {many ? (
+        <div className="xcard mini"><div className="xcard-top"><span className="src-ico wa"><WaIcon size={20} /></span><div style={{ minWidth: 0 }}><b className="ellipsis" style={{ display: 'block' }}>{isGroup ? '👥 ' : ''}{chatName}</b><span className="small muted">{t('wa.nMessages', { n: list.length })}</span></div></div>
+          <div className="wa-items is-preview">
+            {list.slice(0, 4).map((m) => <div key={m.id} className="wa-item"><b className="wa-item-who">{m.fromMe ? t('common.youShort') : m.author ?? t('wa.someone')}:</b> <span className="wa-item-text">{m.body.slice(0, 160) || '📎'}</span></div>)}
+            {list.length > 4 && <div className="small muted">+{list.length - 4}</div>}
+          </div></div>
+      ) : list[0] && (
+        <div className="xcard mini"><div className="xcard-top"><span className="src-ico wa"><WaIcon size={20} /></span><div style={{ minWidth: 0 }}><b className="ellipsis" style={{ display: 'block' }}>{isGroup ? '👥 ' : ''}{chatName}</b><span className="small muted">{list[0].fromMe ? t('common.youShort') : list[0].author ?? t('wa.someone')}{list[0].sentAt ? ` · ${fmtDate(list[0].sentAt)}` : ''}</span></div></div>
+          <blockquote className="wa-quote">{list[0].body.slice(0, 400)}</blockquote></div>
+      )}
       <ChatPicker picked={picked} setPicked={setPicked} />
       <textarea className="input" rows={2} maxLength={4000} placeholder={t('wa.commentPh')} value={comment} onChange={(e) => setComment(e.target.value)} />
       <WhoSees picked={picked} />

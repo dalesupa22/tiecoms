@@ -1676,6 +1676,16 @@ mark { background: var(--mark-bg); color: inherit; border-radius: 3px; padding: 
 .wa-card { border-left-color: #25d366; }
 .src-ico.wa { border-color: transparent; background: var(--green-bg); }
 .wa-quote { margin: 0; border-left: 3px solid #25d366; padding-left: 10px; font-size: 13.5px; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* Varios mensajes de WhatsApp en una sola tarjeta: una sola cita verde, cada mensaje con su autor y hora. */
+.wa-items { display: flex; flex-direction: column; gap: 8px; border-left: 3px solid #25d366; padding-left: 10px; font-size: 13.5px; }
+.wa-items.is-preview { gap: 4px; margin-top: 8px; }
+.wa-item { min-width: 0; }
+.wa-item-meta { font-size: 12px; }
+.wa-item.me .wa-item-who { color: #128c7e; }
+.wa-item-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.wa-items.is-preview .wa-item { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wa-items.is-preview .wa-item-text { white-space: nowrap; }
+.wa-items .link-btn { align-self: flex-start; }
 .wa-msg { cursor: context-menu; }
 @media (max-width: 860px) {
   .mail-drawer { width: 100%; border-left: 0; }

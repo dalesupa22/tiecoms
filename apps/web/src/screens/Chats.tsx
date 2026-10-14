@@ -64,6 +64,7 @@ export function NewChatDialog({ onClose }: { onClose: () => void }) {
     search.current?.focus();
   };
   const pickedOrgs = [...new Set([d.me.primaryOrgId, ...picked.map((id) => personById(d, id)?.orgId)].filter(Boolean) as string[])];
+  const pickedOthers = picked.filter((id) => id !== d.me.id);
 
   async function run(fn: () => Promise<void>) {
     setBusy(true); setError(null);
@@ -73,8 +74,10 @@ export function NewChatDialog({ onClose }: { onClose: () => void }) {
   const open = (p: PersonDTO) => run(() => openDirect(p.id));
   const openGroup = (c: ConversationDTO) => { onClose(); navigate(`/c/${c.id}`); };
   const create = () => run(async () => {
-    if (picked.length === 1) { await openDirect(picked[0]!); return; }
-    const r = await client.request<{ id: string; kind: string }>('/chats', { method: 'POST', json: { userIds: picked, ...(name.trim() ? { name: name.trim() } : {}) } });
+    // Marcarme a mí con otras personas no suma a nadie (ya estoy); solo a mí es «Tú», notas para ti.
+    const others = picked.filter((id) => id !== d.me.id);
+    if (others.length <= 1) { await openDirect(others[0] ?? d.me.id); return; }
+    const r = await client.request<{ id: string; kind: string }>('/chats', { method: 'POST', json: { userIds: others, ...(name.trim() ? { name: name.trim() } : {}) } });
     await client.loadBootstrap();
     openChat(r.id);
   });
@@ -96,7 +99,7 @@ export function NewChatDialog({ onClose }: { onClose: () => void }) {
     }
   };
   const isActive = (it: (typeof items)[number]) => searching && items[at] === it;
-  const first = picked.length === 1 ? personById(d, picked[0])?.name.split(' ')[0] ?? '' : '';
+  const first = pickedOthers.length === 1 ? personById(d, pickedOthers[0])?.name.split(' ')[0] ?? '' : pickedOthers.length ? '' : t('self.title');
 
   if (mode === 'space') {
     return (
@@ -122,7 +125,7 @@ export function NewChatDialog({ onClose }: { onClose: () => void }) {
           role="combobox" aria-expanded aria-controls="compose-list" onChange={(e) => setQ(e.target.value)} onKeyDown={onKey} disabled={busy} />
         {q && <button type="button" className="search-clear" onClick={() => setQ('')} aria-label={t('common.clear')}>×</button>}
       </div>
-      {picked.length > 1 && (
+      {pickedOthers.length > 1 && (
         <div className="compose-multi">
           <div className="row small muted" style={{ gap: 6, flexWrap: 'wrap' }}>
             {pickedOrgs.map((o) => <OrgMark key={o} org={orgById(d, o)} size={18} />)}
@@ -175,14 +178,15 @@ export function NewChatDialog({ onClose }: { onClose: () => void }) {
             {g.people.map((p) => {
               const it = items.find((x) => x.kind === 'person' && x.p.id === p.id)!;
               const on = picked.includes(p.id);
-              const line = roleLine(p) || (p.guest ? t('common.guest') : g.org?.name ?? '');
+              const me = p.id === d.me.id;
+              const line = me ? t('self.rowHint') : roleLine(p) || (p.guest ? t('common.guest') : g.org?.name ?? '');
               return (
                 <div key={p.id} role="option" aria-selected={on} data-active={isActive(it) || undefined} tabIndex={-1}
                   className={`person-row ${isActive(it) ? 'is-active' : ''} ${on ? 'on' : ''}`} onClick={() => toggle(p.id)} onDoubleClick={() => void open(p)}>
                   <span className={`compose-check ${on ? 'on' : ''}`} aria-hidden>{on ? '✓' : ''}</span>
                   <Avatar person={p} org={g.org} size={32} />
                   <span className="grow" style={{ minWidth: 0 }}>
-                    <b className="ellipsis" style={{ display: 'block' }}>{p.name}</b>
+                    <b className="ellipsis" style={{ display: 'block' }}>{p.name}{me && <span className="muted"> ({t('self.you')})</span>}</b>
                     {line && <span className="small muted ellipsis" style={{ display: 'block' }}>{line}</span>}
                   </span>
                   <button type="button" className="person-row-go" title={t('search.opensChat')} aria-label={`${t('search.opensChat')}: ${p.name}`}
@@ -198,7 +202,7 @@ export function NewChatDialog({ onClose }: { onClose: () => void }) {
         <button className="btn ghost small" style={{ marginRight: 'auto' }} onClick={() => setMode('space')}>{t('chat.mode.space')}</button>
         {picked.length ? (
           <button className="btn primary" disabled={busy} onClick={() => void create()}>
-            {picked.length > 1 ? t('chat.createGroup', { n: picked.length + 1 }) : t('compose.openWith', { name: first })}
+            {pickedOthers.length > 1 ? t('chat.createGroup', { n: pickedOthers.length + 1 }) : t('compose.openWith', { name: first })}
           </button>
         ) : (
           <button className="btn ghost" onClick={onClose}>{t('common.cancel')}</button>

@@ -37,16 +37,15 @@ const names: Namer = { title: (c) => c.kind === 'direct' ? d.people.find((p) => 
 const ids = (xs: { id: string }[]) => xs.map((x) => x.id);
 
 describe('búsqueda rápida', () => {
-  it('personas sin directo también salen; nunca yo ni los agentes', () => {
+  it('personas sin directo también salen; nunca los agentes', () => {
     expect(ids(searchPeople(d, 'mariana'))).toEqual(['mar']);
-    expect(searchPeople(d, 'ana').every((p) => p.id !== 'me')).toBe(true);
     expect(searchPeople(d, 'asist')).toEqual([]);
     expect(searchPeople(d, ' ')).toEqual([]);
   });
 
   it('por empresa y cargo, sin tildes; primero quien empieza con lo escrito', () => {
     // «ana»: Ánalía empieza con lo escrito (sin tildes) y va antes que Mariana, que solo lo contiene.
-    expect(ids(searchPeople(d, 'ana'))).toEqual(['ana2', 'mar']);
+    expect(ids(searchPeople(d, 'ana'))).toEqual(['me', 'ana2', 'mar']);
     expect(new Set(ids(searchPeople(d, 'ONGOING')))).toEqual(new Set(['bob', 'mar', 'ana2']));
     expect(ids(searchPeople(d, 'pagos'))).toEqual(['col']);
     expect(searchPeople(d, 'ongoing', ['bob'])).toHaveLength(2);
@@ -71,6 +70,24 @@ describe('búsqueda rápida', () => {
     expect(ids(quickSearch(d, 'mariana', names).people)).toEqual(['mar']);
   });
 
+  it('yo también salgo («Tú», notas para ti): por mi nombre o por «tú», «yo», «notas»', () => {
+    expect(ids(searchPeople(d, 'ruiz'))).toEqual(['me']);
+    for (const q of ['tú', 'Tu', 'yo', 'notas', 'you']) expect(ids(searchPeople(d, q))).toContain('me');
+    expect(searchPeople(d, 'ruiz', ['me'])).toEqual([]);
+    // Mi nombre no encuentra todos mis directos (estoy en todos).
+    expect(searchChats(d, 'ruiz', names)).toEqual([]);
+    expect(directWith(d, 'me')).toBeNull();
+    // Con «Tú» ya creado: sale en Chats y no se repite en Personas; directWith(yo) es «Tú», no otro directo.
+    const withSelf = { ...d, conversations: [...d.conversations, conv({ id: 'self', kind: 'direct', memberIds: ['me'] })] } as BootstrapDTO;
+    const r = quickSearch(withSelf, 'ruiz', names);
+    expect(ids(r.chats)).toEqual(['self']);
+    expect(r.people).toEqual([]);
+    expect(directWith(withSelf, 'me')?.id).toBe('self');
+    expect(directWith(withSelf, 'bob')?.id).toBe('d1');
+    // Con el directo de Bob encontrado, Bob no se repite pero yo sí puedo salir.
+    expect(ids(quickSearch(d, 'bob', names).people)).toEqual([]);
+  });
+
   it('directo existente y «Recientes» (el más reciente primero)', () => {
     expect(directWith(d, 'bob')?.id).toBe('d1');
     expect(directWith(d, 'mar')).toBeNull();
@@ -79,8 +96,11 @@ describe('búsqueda rápida', () => {
 
   it('personas por empresa: mi equipo primero', () => {
     expect(peopleByOrg(d, '').map((g) => g.orgId)).toEqual(['oA', 'oB']);
-    expect(ids(peopleByOrg(d, '')[0]!.people)).toEqual(['col']);
+    // Yo primero en mi equipo («Tú»).
+    expect(ids(peopleByOrg(d, '')[0]!.people)).toEqual(['me', 'col']);
     expect(peopleByOrg(d, 'mari').flatMap((g) => ids(g.people))).toEqual(['mar']);
+    expect(peopleByOrg(d, 'notas').flatMap((g) => ids(g.people))).toEqual(['me']);
+    expect(peopleByOrg(d, '', ['me']).flatMap((g) => ids(g.people))).not.toContain('me');
   });
 
   it('destinos de «Nuevo asunto»: sin terceros, sin solo lectura, sin hilos; el más reciente primero', () => {

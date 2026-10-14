@@ -248,7 +248,8 @@ export function WorkspaceScreen({ id }: { id: string }) {
 export function PeopleScreen() {
   const d = useClient((s) => s.data)!;
   const [q, setQ] = useState('');
-  const people = d.people.filter((p) => p.id !== d.me.id && (!q || `${p.name} ${p.title ?? ''} ${p.phone ?? ''} ${p.company ?? ''} ${orgById(d, p.orgId)?.name ?? ''}`.toLowerCase().includes(q.toLowerCase())));
+  // Yo también salgo: mi mensaje abre «Tú», notas para ti.
+  const people = d.people.filter((p) => (!q || `${p.name} ${p.title ?? ''} ${p.phone ?? ''} ${p.company ?? ''} ${orgById(d, p.orgId)?.name ?? ''}`.toLowerCase().includes(q.toLowerCase())));
   const byOrg = new Map<string, typeof people>();
   for (const p of people) { const k = p.kind === 'agent' ? 'agents' : p.orgId ?? 'guest'; byOrg.set(k, [...(byOrg.get(k) ?? []), p]); }
   return (
@@ -264,9 +265,9 @@ export function PeopleScreen() {
             {list.map((p) => (
               <div key={p.id} className="card conv-card" {...menuProps(() => personMenu(p))}>
                 <Avatar person={p} org={orgById(d, p.orgId)} size={36} />
-                <span className="grow" style={{ minWidth: 0 }}><b className="ellipsis" style={{ display: 'block' }}>{p.name}</b><span className="small muted ellipsis" style={{ display: 'block' }}>{[p.title, p.area].filter(Boolean).join(' · ')}{p.guest && p.guestUntil ? ` · ${t('people.until', { date: new Date(p.guestUntil).toLocaleDateString(locale(), { day: 'numeric', month: 'short' }) })}` : ''}</span></span>
+                <span className="grow" style={{ minWidth: 0 }}><b className="ellipsis" style={{ display: 'block' }}>{p.name}{p.id === d.me.id && <span className="muted"> ({t('self.you')})</span>}</b><span className="small muted ellipsis" style={{ display: 'block' }}>{[p.title, p.area].filter(Boolean).join(' · ')}{p.guest && p.guestUntil ? ` · ${t('people.until', { date: new Date(p.guestUntil).toLocaleDateString(locale(), { day: 'numeric', month: 'short' }) })}` : ''}</span></span>
                 <button className="btn small ghost" onClick={() => openPersonProfile(p)}>{getLang() === 'en' ? 'Profile' : 'Perfil'}</button>
-                {p.id !== d.me.id && <button className="btn small" onClick={() => client.openDirect(p.id).then((r) => navigate(`/c/${r.id}`)).catch((e) => toast(errorText(e)))}>✉ {t('people.sendMessage')}</button>}
+                {<button className="btn small" onClick={() => client.openDirect(p.id).then((r) => navigate(`/c/${r.id}`)).catch((e) => toast(errorText(e)))}>✉ {t('people.sendMessage')}</button>}
               </div>
             ))}
           </div>

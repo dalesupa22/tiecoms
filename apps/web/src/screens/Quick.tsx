@@ -58,11 +58,20 @@ export function QuickActions() {
 }
 
 // ---------- Abrir el directo con una persona ----------
-/** Clic en una persona (búsqueda, «Recientes», «Mensaje nuevo»): abre su directo y, si no existe, lo crea (idempotente). */
+/**
+ * Clic en una persona (búsqueda, «Recientes», «Mensaje nuevo»): abre su directo y, si no existe, lo crea (idempotente).
+ * Conmigo mismo es «Tú» (notas para ti): POST /me/notes, porque /chats no admite solo a uno mismo.
+ */
 export async function openDirect(personId: string) {
   const d = client.getState().data!;
   const existing = directWith(d, personId);
   if (existing) { openChat(existing.id); return; }
+  if (personId === d.me.id) {
+    const r = await client.request<{ id: string }>('/me/notes', { method: 'POST', json: {} });
+    if (!client.getState().data?.conversations.some((c) => c.id === r.id)) await client.loadBootstrap();
+    openChat(r.id);
+    return;
+  }
   const r = await client.request<{ id: string }>('/chats', { method: 'POST', json: { userIds: [personId] } });
   await client.loadBootstrap();
   openChat(r.id);
@@ -79,12 +88,13 @@ export const roleLine = (p: PersonDTO) => [p.title, p.area].filter(Boolean).join
 /** Persona con su foto, cargo o empresa y un globito (clic = abre el chat). */
 export function PersonRow({ d, p, active = false, onOpen }: { d: BootstrapDTO; p: PersonDTO; active?: boolean; onOpen: () => void }) {
   const org = orgById(d, p.orgId);
-  const line = [roleLine(p), org?.name ?? (p.guest ? t('common.guest') : '')].filter(Boolean).join(' · ');
+  const me = p.id === d.me.id;
+  const line = me ? t('self.rowHint') : [roleLine(p), org?.name ?? (p.guest ? t('common.guest') : '')].filter(Boolean).join(' · ');
   return (
     <button type="button" className={`person-row ${active ? 'is-active' : ''}`} onClick={onOpen} title={t('search.opensChat')} data-active={active || undefined}>
       <Avatar person={p} org={org} size={32} />
       <span className="grow" style={{ minWidth: 0 }}>
-        <b className="ellipsis" style={{ display: 'block' }}>{p.name}</b>
+        <b className="ellipsis" style={{ display: 'block' }}>{p.name}{me && <span className="muted"> ({t('self.you')})</span>}</b>
         {line && <span className="small muted ellipsis" style={{ display: 'block' }}>{line}</span>}
       </span>
       <span className="person-row-go" aria-hidden>💬</span>

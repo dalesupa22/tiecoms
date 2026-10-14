@@ -16,6 +16,20 @@ const orgOf = (d: BootstrapDTO, id: string | null | undefined): OrganizationDTO 
 const personOf = (d: BootstrapDTO, id: string | null | undefined) => d.people.find((p) => p.id === id) ?? null;
 const wsOf = (d: BootstrapDTO, c: ConversationDTO) => d.workspaces.find((w) => w.id === c.workspaceId) ?? null;
 
+/** «Tú» (notas para ti): directo cuyos miembros son solo yo. */
+const isSelfConv = (d: BootstrapDTO, c: ConversationDTO) => c.kind === 'direct' && c.memberIds.every((m) => m === d.me.id);
+/** Palabras con las que también me encuentro a mí («Tú», «notas para ti»), como en WhatsApp o Slack. */
+const SELF_WORDS = ['tu', 'yo', 'notas', 'conmigo', 'you', 'me', 'notes', 'self', 'myself'];
+/** Yo como persona (por si el directorio no me trae). */
+export const mePerson = (d: BootstrapDTO): PersonDTO => personOf(d, d.me.id)
+  ?? ({ id: d.me.id, name: d.me.name, kind: 'human', orgId: d.me.primaryOrgId ?? null, title: d.me.title ?? null, area: d.me.area ?? null, guest: false, guestUntil: null } as PersonDTO);
+/** ¿Lo escrito me nombra a mí? Mi nombre, cargo, área o empresa, o «tú», «yo», «notas»… */
+function matchesMe(d: BootstrapDTO, q: string) {
+  if (q.length >= 2 && SELF_WORDS.some((w) => w.startsWith(q))) return true;
+  const me = mePerson(d);
+  return [me.name, me.title, me.area, orgOf(d, me.orgId)?.name].some((x) => !!x && fold(x).includes(q));
+}
+
 /** Hilo de un chat (derivada que no es sidechat): vive en la barra de su chat, no en las listas. */
 export const isThread = (c: ConversationDTO) => !!c.parentId && c.deriveKind !== 'side';
 const isChat = (c: ConversationDTO) => c.kind === 'direct' || c.kind === 'multi';
@@ -73,19 +87,23 @@ export function recentPeopleIds(d: BootstrapDTO): string[] {
     .filter((id): id is string => !!id && personOf(d, id)?.kind === 'human' && !seen.has(id) && !!seen.add(id));
 }
 
-/** El directo que ya tengo con esa persona (si existe). */
+/** El directo que ya tengo con esa persona (si existe); conmigo mismo es «Tú». */
 export const directWith = (d: BootstrapDTO, personId: string) =>
-  d.conversations.find((c) => c.kind === 'direct' && c.memberIds.includes(personId) && !isThread(c)) ?? null;
+  d.conversations.find((c) => c.kind === 'direct' && !isThread(c) && (personId === d.me.id ? isSelfConv(d, c) : c.memberIds.includes(personId))) ?? null;
 
-/** Personas (humanas, sin mí) cuyo nombre, cargo, área o empresa coincide; primero quien empieza con lo escrito, luego con quien ya hablo. */
+/**
+ * Personas (humanas) cuyo nombre, cargo, área o empresa coincide; primero quien empieza con lo escrito, luego con quien ya hablo.
+ * Yo también salgo (abre «Tú», notas para ti) si me nombra lo escrito; si no, no estorbo.
+ */
 export function searchPeople(d: BootstrapDTO, query: string, exclude: Iterable<string> = []): PersonDTO[] {
   const q = fold(query.trim());
   if (!q) return [];
   const skip = new Set(exclude);
   const rank = new Map(recentPeopleIds(d).map((id, i) => [id, i]));
-  return d.people
+  const me = !skip.has(d.me.id) && matchesMe(d, q) ? [mePerson(d)] : [];
+  return [...me, ...d.people
     .filter((p) => p.kind === 'human' && p.id !== d.me.id && !skip.has(p.id))
-    .filter((p) => [p.name, p.title, p.area, orgOf(d, p.orgId)?.name].some((x) => !!x && fold(x).includes(q)))
+    .filter((p) => [p.name, p.title, p.area, orgOf(d, p.orgId)?.name].some((x) => !!x && fold(x).includes(q)))]
     .sort((a, b) => {
       // Ana antes que Mariana: empieza con lo escrito.
       const pa = fold(a.name).startsWith(q), pb = fold(b.name).startsWith(q);
@@ -109,30 +127,39 @@ export function searchGroups(d: BootstrapDTO, query: string, names: Namer): Conv
     .sort(compareConversations);
 }
 
-/** Directos y chats grupales (con sidechats, sin hilos) por título, subtítulo o nombre de quien participa. */
+/**
+ * Directos y chats grupales (con sidechats, sin hilos) por título, subtítulo o nombre de quien participa.
+ * Mi propio nombre no cuenta (estoy en todos); solo encuentra «Tú».
+ */
 export function searchChats(d: BootstrapDTO, query: string, names: Namer): ConversationDTO[] {
   const q = fold(query.trim());
   if (!q) return [];
   return d.conversations.filter((c) => isChat(c) && !isThread(c))
-    .filter((c) => [names.title(c), names.subtitle?.(c), ...c.memberIds.map((m) => personOf(d, m)?.name)].some((x) => !!x && fold(x).includes(q)))
+    .filter((c) => isSelfConv(d, c) ? matchesMe(d, q)
+      : [names.title(c), names.subtitle?.(c), ...c.memberIds.filter((m) => m !== d.me.id).map((m) => personOf(d, m)?.name)].some((x) => !!x && fold(x).includes(q)))
     .sort(compareConversations);
 }
 
 /** Todo junto: quien ya tiene su directo entre los chats encontrados sale una sola vez (en Chats). */
 export function quickSearch(d: BootstrapDTO, query: string, names: Namer): QuickResults {
   const chats = searchChats(d, query, names);
-  const inChats = chats.filter((c) => c.kind === 'direct').flatMap((c) => c.memberIds);
+  const inChats = chats.filter((c) => c.kind === 'direct').flatMap((c) => isSelfConv(d, c) ? [d.me.id] : c.memberIds.filter((m) => m !== d.me.id));
   return { people: searchPeople(d, query, inChats), groups: searchGroups(d, query, names), chats };
 }
 export const isEmptyResults = (r: QuickResults) => !r.people.length && !r.groups.length && !r.chats.length;
 
-/** Personas agrupadas por empresa para «Mensaje nuevo»: mi equipo primero, luego por nombre, al final terceros. */
+/**
+ * Personas agrupadas por empresa para «Mensaje nuevo»: mi equipo primero, luego por nombre, al final terceros.
+ * Yo voy primero en mi equipo («Tú», notas para ti) y salgo al buscar mi nombre o «tú», «yo», «notas».
+ */
 export function peopleByOrg(d: BootstrapDTO, query: string, exclude: Iterable<string> = []) {
   const q = fold(query.trim());
-  const skip = new Set([d.me.id, ...exclude]);
-  const people = d.people.filter((p) => p.kind === 'human' && !skip.has(p.id))
+  const skip = new Set(exclude);
+  const me = !skip.has(d.me.id) && (!q || matchesMe(d, q)) ? [mePerson(d)] : [];
+  skip.add(d.me.id);
+  const people = [...me, ...d.people.filter((p) => p.kind === 'human' && !skip.has(p.id))
     .filter((p) => !q || [p.name, p.title, p.area, orgOf(d, p.orgId)?.name].some((x) => !!x && fold(x).includes(q)))
-    .sort(byName);
+    .sort(byName)];
   const groups = new Map<string, PersonDTO[]>();
   for (const p of people) {
     const k = p.orgId && orgOf(d, p.orgId) ? p.orgId : 'guests';

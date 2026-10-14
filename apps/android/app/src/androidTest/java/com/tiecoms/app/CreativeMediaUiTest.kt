@@ -110,7 +110,8 @@ class CreativeMediaUiTest {
         assertEquals("GIF frames really change", setOf("red", "blue"), colors)
         assertFalse("A closed one-view message must not fetch its content", requests.any { it.first.requestUrl!!.encodedPath.contains("/hidden/") })
         compose.onNodeWithTag("composer").performTextInput("draft retained")
-        compose.onNodeWithTag("creativeButton").performClick()
+        // 1.7.17: escribiendo, GIF vive en el «＋» (la caja ocupa todo el ancho).
+        compose.onNodeWithTag("attach").performClick(); compose.onNodeWithTag("plusGif").performClick()
         compose.onNodeWithTag("creativePicker").assertExists()
         compose.waitUntil(10_000) { compose.onAllNodesWithTag("creative-g1").fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithTag("creative-g1").performClick()
@@ -121,7 +122,8 @@ class CreativeMediaUiTest {
         compose.onNodeWithTag("composer").assertTextContains("draft retained")
         assertEquals(0, messagePosts())
         assertFalse(requests.any { it.first.method == "POST" && it.first.requestUrl!!.encodedPath.endsWith("/gifs") })
-        compose.onNodeWithTag("viewOnce").performClick()
+        compose.onNodeWithTag("attach").performClick(); compose.onNodeWithTag("plusViewOnce").performClick()
+        compose.onNodeWithTag("viewOnceOn").assertExists()
         compose.onNodeWithTag("send").performTouchInput { click(); click() }
         compose.waitUntil(10_000) { messagePosts() == 1 }
         assertEquals("Two taps import a GIF only once", 1, requests.count { it.first.method == "POST" && it.first.requestUrl!!.encodedPath.endsWith("/gifs") })

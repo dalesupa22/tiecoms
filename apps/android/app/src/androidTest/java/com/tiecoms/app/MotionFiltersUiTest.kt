@@ -110,7 +110,8 @@ class MotionFiltersUiTest {
         back(); click("back"); waitTag("conv-motion-qa")
         click("conv-motion-qa"); waitTag("composer")
         compose.onNodeWithTag("composer").assertTextContains("editado", substring = true)
-        compose.onNodeWithTag("creativeButton").assertExists(); compose.onNodeWithTag("viewOnce").assertExists()
+        // Con borrador la caja ocupa todo el ancho: GIF y «una vista» quedan en el «＋».
+        compose.onNodeWithTag("attach").assertExists(); compose.onNodeWithTag("send").assertExists()
         assertFalse(requests.any { it.method == "POST" && (it.requestUrl!!.encodedPath.endsWith("/messages") || it.requestUrl!!.encodedPath.endsWith("/join")) })
     }
     @Test fun todoPersonAndStatusIntersectIncludingChildrenFromSecondPage() {

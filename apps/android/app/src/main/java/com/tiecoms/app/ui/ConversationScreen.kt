@@ -37,6 +37,7 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Info
@@ -1359,6 +1360,10 @@ private fun Composer(
         }
     }
     var picker by remember { mutableStateOf(false) }
+    // «Programar envío» desde el «＋» (el 🕒 ya no va en la barra): lo abre el estado `scheduling`, declarado más abajo.
+    var scheduleFromPlus by remember { mutableStateOf(false) }
+    // Escribiendo (con foco o con texto): la caja ocupa todo el ancho, como en WhatsApp; ⤓ y GIF quedan en el «＋».
+    var composerFocused by remember { mutableStateOf(false) }
     // Notas de voz (SPEC-v4 §F): mantener pulsado el micrófono cuando el compositor está vacío.
     val voiceOwner = remember(client, id) { client.myId }
     val voiceKey = remember(client, id) { client.baseUrl + ":" + voiceOwner + ":" + id }
@@ -1471,12 +1476,18 @@ private fun Composer(
                 .onFailure { container.toast(ctx.getString(R.string.motion_share_unavailable)) }
         }) else null,
         // 1.7.13: la ✨ ya no va suelta en la barra (la entrada a gg abajo es la píldora); «Responder por mí» vive en el «＋».
-        onGgReply = onGgSpark?.let { f -> { picker = false; f() } })
+        onGgReply = onGgSpark?.let { f -> { picker = false; f() } },
+        onGif = if (editing == null && com.tiecoms.app.core.CreativeMedia.available(client.meta(id)?.kind)) ({ picker = false; creativePicker = true }) else null,
+        onBring = if (editing == null) ({ picker = false; onBring() }) else null,
+        onSchedule = if (canSchedule && editing == null && files.isEmpty() && gif == null && text.isNotBlank() && uploading == null) ({ picker = false; scheduleFromPlus = true }) else null,
+        viewOnce = viewOnce, onViewOnce = if (editing == null) ({ picker = false; viewOnce = !viewOnce }) else null)
     // Un hilo o sidechat abierto al lado recibe el cursor.
     val focus = remember { androidx.compose.ui.focus.FocusRequester() }
     LaunchedEffect(id, autoFocus) { if (autoFocus) { delay(300); runCatching { focus.requestFocus() } } }
     val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
     val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+    // GIF desde el «＋»: igual que el botón de antes, baja el teclado al abrir el selector.
+    LaunchedEffect(creativePicker) { if (creativePicker) { focusManager.clearFocus(); keyboard?.hide() } }
     LaunchedEffect(focusSignal) { if (focusSignal > 0) { withFrameNanos { }; runCatching { focus.requestFocus() }; keyboard?.show() } }
     // Borrador de gg (contrato 1-oct-2026): cae en la caja para editarlo; NUNCA se envía solo.
     val ggPending by GgDrafts.pending.collectAsStateWithLifecycle()
@@ -1560,6 +1571,7 @@ private fun Composer(
     var editText by rememberSaveable(editing?.id) { mutableStateOf(editing?.let { it.displayBody ?: it.body } ?: "") }
     // Programar: solo texto (con menciones y respuesta); los adjuntos y las notas de voz salen al momento.
     var scheduling by remember { mutableStateOf(false) }
+    LaunchedEffect(scheduleFromPlus) { if (scheduleFromPlus) { scheduleFromPlus = false; scheduling = true } }
     val snackbar = LocalSnackbar.current
     val view = LocalView.current
     val schedulable = canSchedule && editing == null && files.isEmpty() && gif == null && text.isNotBlank() && uploading == null
@@ -1618,8 +1630,9 @@ private fun Composer(
                 if (editing != null) { editMents = adjust(editText, editSel, editMents); editText = next; editSel = selection }
                 else { ments = adjust(text, sel, ments); text = next; sel = selection }
             }
-            if (viewOnce && editing == null) Text("① " + stringResource(R.string.vo_next), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp).testTag("viewOnceOn"))
+            // Tocar el aviso apaga «una vista» (el ① ya no va dentro de la caja, donde se tocaba sin querer).
+            if (viewOnce && editing == null) Text("① " + stringResource(R.string.vo_next) + " · ✕", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.clickable { viewOnce = false }.padding(horizontal = 16.dp, vertical = 6.dp).semantics { contentDescription = ctx.getString(R.string.vo_toggle_off) }.testTag("viewOnceOn"))
             if (editing == null && files.isNotEmpty()) PendingFiles(files, uploading, onRemove = { f -> if (uploading == null) { files = files - f; memeSources = memeSources - f.path; java.io.File(f.path).delete() } })
             if (editing == null) gif?.let { item ->
                 Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp).testTag("pendingGif"), verticalAlignment = Alignment.CenterVertically) {
@@ -1635,16 +1648,18 @@ private fun Composer(
                 onRetry = { if (draft.aiConsent != null) uploadVoice(draft.result, draft.aiConsent) else { com.tiecoms.app.platform.VoiceDrafts.take(voiceKey); pendingVoice = draft.result } },
                 onDelete = { com.tiecoms.app.platform.VoiceDrafts.discard(voiceKey); container.toast(ctx.getString(R.string.voice_cancelled)) })
             attError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp).testTag("attError")) }
-            Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp), verticalAlignment = Alignment.Bottom) {
+            // Como WhatsApp: al escribir solo quedan «＋», la caja (todo el ancho) y ➤.
+            val typing = composerFocused || text.isNotEmpty() || editing != null
+            Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 8.dp), verticalAlignment = Alignment.Bottom) {
                 val bringLabel = stringResource(R.string.imp_action)
                 val attachLabel = stringResource(R.string.bar_plus)
-                if (editing == null) IconButton(onClick = { picker = true }, enabled = uploading == null, modifier = Modifier.size(48.dp).semantics { contentDescription = attachLabel }.testTag("attach")) {
+                if (editing == null) IconButton(onClick = { picker = true }, enabled = uploading == null, modifier = Modifier.size(44.dp).semantics { contentDescription = attachLabel }.testTag("attach")) {
                     Icon(Icons.Filled.Add, null)
                 }
-                if (editing == null) IconButton(onClick = onBring, modifier = Modifier.size(48.dp).semantics { contentDescription = bringLabel }.testTag("bring")) {
+                if (editing == null && !typing) IconButton(onClick = onBring, modifier = Modifier.size(44.dp).semantics { contentDescription = bringLabel }.testTag("bring")) {
                     Text("⤓", style = MaterialTheme.typography.titleLarge)
                 }
-                if (editing == null && com.tiecoms.app.core.CreativeMedia.available(client.meta(id)?.kind)) IconButton(onClick = { focusManager.clearFocus(); keyboard?.hide(); creativePicker = true }, enabled = uploading == null && !rec.recording,
+                if (editing == null && !typing && com.tiecoms.app.core.CreativeMedia.available(client.meta(id)?.kind)) IconButton(onClick = { focusManager.clearFocus(); keyboard?.hide(); creativePicker = true }, enabled = uploading == null && !rec.recording,
                     modifier = Modifier.size(40.dp).testTag("creativeButton").semantics { contentDescription = ctx.getString(R.string.creative_title) }) {
                     Text("GIF", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
                 }
@@ -1671,12 +1686,11 @@ private fun Composer(
                     visualTransformation = MentionHighlight(if (editing != null) editMents else ments, MaterialTheme.colorScheme.primary),
                     placeholder = { Text(placeholderOverride ?: stringResource(R.string.placeholder, title), maxLines = 1, overflow = TextOverflow.Ellipsis) },
                     maxLines = 6, shape = RoundedCornerShape(24.dp),
-                    trailingIcon = if (editing == null) ({ ViewOnceToggle(viewOnce) { viewOnce = !viewOnce } }) else null,
                     keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
                     colors = OutlinedTextFieldDefaults.colors(unfocusedContainerColor = MaterialTheme.colorScheme.surface, focusedContainerColor = MaterialTheme.colorScheme.surface),
-                    modifier = Modifier.weight(1f).focusRequester(focus).testTag("composer"),
+                    modifier = Modifier.weight(1f).focusRequester(focus).onFocusChanged { composerFocused = it.isFocused }.testTag("composer"),
                 ) }
-                Spacer(Modifier.width(8.dp))
+                Spacer(Modifier.width(6.dp))
                 if (editing != null) {
                     FilledIconButton(onClick = { onSaveEdit(editing, editText, editMents) }, enabled = editText.isNotBlank(), modifier = Modifier.size(52.dp).testTag("saveEdit"),
                         colors = IconButtonDefaults.filledIconButtonColors(containerColor = MaterialTheme.colorScheme.primary)) { Icon(Icons.Filled.Check, stringResource(R.string.edit_save)) }
@@ -1697,12 +1711,7 @@ private fun Composer(
                             onCancel = { recorder.cancel(); container.toast(ctx.getString(R.string.voice_cancelled)) }, onLock = { locked = true }, onDrag = { gesture = it },
                         )
                     } else if (!rec.recording) {
-                        if (schedulable) {
-                            IconButton(onClick = { scheduling = true }, modifier = Modifier.size(48.dp).testTag("schedButton")) {
-                                Text("🕒", style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { contentDescription = ctx.getString(R.string.sched_button) })
-                            }
-                            Spacer(Modifier.width(4.dp))
-                        }
+                        // 🕒 ya no va aquí (le quitaba espacio al texto): «Programar envío» está en el «＋» y en la pulsación larga de ➤.
                         val enabled = uploading == null && (text.isNotBlank() || files.isNotEmpty() || gif != null)
                         val sendLabel = stringResource(R.string.send)
                         val schedLabel = stringResource(R.string.sched_button)

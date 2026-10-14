@@ -82,11 +82,14 @@ class ProgramadosUiTest {
             compose.onNodeWithTag("conv-$conv").performTouchInput { click(androidx.compose.ui.geometry.Offset(width * 0.3f, height * 0.3f)) }
             compose.waitUntilAtLeastOneExists(hasTestTag("composer"), 15_000)
 
-            // 🕒 aparece solo con texto.
-            assertFalse(exists("schedButton"))
+            // 1.7.17: «Programar envío» está en el «＋» (solo con texto) y en la pulsación larga de ➤.
+            compose.onNodeWithTag("attach").performClick()
+            assertFalse(exists("plusSchedule"))
+            androidx.test.uiautomator.UiDevice.getInstance(ins).pressBack()
             compose.onNodeWithTag("composer").performTextInput("Recordemos la demo del lunes")
-            compose.waitUntilAtLeastOneExists(hasTestTag("schedButton"), 5_000)
-            compose.onNodeWithTag("schedButton").performClick()
+            compose.onNodeWithTag("attach").performClick()
+            compose.waitUntilAtLeastOneExists(hasTestTag("plusSchedule"), 5_000)
+            compose.onNodeWithTag("plusSchedule").performClick()
             compose.waitUntilAtLeastOneExists(hasTestTag("sched-TOMORROW_MORNING"), 5_000)
             shot("01-menu")
             compose.onNodeWithTag("sched-TOMORROW_MORNING").performClick()

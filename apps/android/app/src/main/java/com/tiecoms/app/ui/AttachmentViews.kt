@@ -338,7 +338,13 @@ fun AttachPicker(open: Boolean, onDismiss: () -> Unit, onPicked: (List<android.n
                  onMail: (() -> Unit)? = null, onWhatsApp: (() -> Unit)? = null,
                  onWhatsAppShare: (() -> Unit)? = null,
                  /** 1.7.13: «✨ Responder por mí» de gg (antes una ✨ suelta en la barra de escribir). */
-                 onGgReply: (() -> Unit)? = null) {
+                 onGgReply: (() -> Unit)? = null,
+                 /**
+                  * 1.7.17: lo que antes iba suelto en la barra de escribir y le quitaba espacio al texto (Josué, 14-oct-2026:
+                  * «para escribir me toca copiar el texto en otro chat y pegarlo»): GIF, Traer, Programar y Una vista.
+                  */
+                 onGif: (() -> Unit)? = null, onBring: (() -> Unit)? = null, onSchedule: (() -> Unit)? = null,
+                 viewOnce: Boolean? = null, onViewOnce: (() -> Unit)? = null) {
     val ctx = LocalContext.current
     // Saveable: si el sistema recrea la actividad mientras la cámara está abierta, la foto no se pierde.
     var cameraUri by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<android.net.Uri?>(null) }
@@ -369,6 +375,11 @@ fun AttachPicker(open: Boolean, onDismiss: () -> Unit, onPicked: (List<android.n
             runCatching { camera.launch(uri) }.onFailure { container.toast(ctx.getString(R.string.att_camera_unavailable)) }
         } },
         SheetItem(ctx.getString(R.string.att_files_pick), "📎", tag = "attFiles") { docs.launch(arrayOf("*/*")) },
+    ) + listOfNotNull(
+        onGif?.let { SheetItem(ctx.getString(R.string.creative_title), "GIF", tag = "plusGif", onClick = it) },
+        onSchedule?.let { SheetItem(ctx.getString(R.string.sched_button), "🕒", tag = "plusSchedule", onClick = it) },
+        onViewOnce?.let { SheetItem(ctx.getString(if (viewOnce == true) R.string.vo_toggle_off else R.string.vo_toggle_on), "①", tag = "plusViewOnce", onClick = it) },
+        onBring?.let { SheetItem(ctx.getString(R.string.imp_action), "⤓", tag = "plusBring", onClick = it) },
     ) + (if (onMeetNow != null || onMeetSchedule != null) listOf(null) else emptyList()) + listOfNotNull(
         onMeetNow?.let { SheetItem(ctx.getString(R.string.meet_now), "", tag = "plusMeetNow", onClick = it) },
         onMeetSchedule?.let { SheetItem(ctx.getString(R.string.meet_schedule), "", tag = "plusMeetSchedule", onClick = it) },

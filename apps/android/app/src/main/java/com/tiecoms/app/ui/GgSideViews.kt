@@ -1,5 +1,7 @@
 package com.tiecoms.app.ui
 
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.ui.draw.clip
 
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -591,15 +593,22 @@ fun GgQuickReplies(model: GgSideModel?, onUse: (String) -> Unit) {
     }
 }
 
-/** Flotante «✨ Pedir a gg (N)» con la selección, y «Cancelar selección». */
+/**
+ * Barra de la selección: «Cancelar», «✨ Pedir a gg (N)» (si gg está) y, en WhatsApp, «Llevar a un chat (N)» como acción principal.
+ * Con las tres juntas hace scroll horizontal para no cortarse en pantallas angostas.
+ */
 @Composable
-fun GgSelectionBar(count: Int, onAsk: () -> Unit, onCancel: () -> Unit, modifier: Modifier = Modifier) {
-    Row(modifier.testTag("ggSelectionBar"), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Surface(onClick = onCancel, shape = RoundedCornerShape(50), color = MaterialTheme.colorScheme.surfaceContainerHighest, shadowElevation = 3.dp) {
+fun GgSelectionBar(count: Int, onAsk: (() -> Unit)?, onCancel: () -> Unit, modifier: Modifier = Modifier, onBring: (() -> Unit)? = null) {
+    Row(modifier.horizontalScroll(rememberScrollState()).testTag("ggSelectionBar"), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Surface(onClick = onCancel, shape = RoundedCornerShape(50), color = MaterialTheme.colorScheme.surfaceContainerHighest, shadowElevation = 3.dp, modifier = Modifier.testTag("selectionCancel")) {
             Text(stringResource(R.string.ggs_cancel_select), style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp))
         }
-        Surface(onClick = onAsk, enabled = count > 0, shape = RoundedCornerShape(50), color = GgInk, contentColor = Color.White, shadowElevation = 4.dp, modifier = Modifier.testTag("ggAskSelected")) {
+        if (onAsk != null) Surface(onClick = onAsk, enabled = count > 0, shape = RoundedCornerShape(50), color = if (onBring != null) MaterialTheme.colorScheme.surfaceContainerHighest else GgInk,
+            contentColor = if (onBring != null) MaterialTheme.colorScheme.onSurface else Color.White, shadowElevation = if (onBring != null) 3.dp else 4.dp, modifier = Modifier.testTag("ggAskSelected")) {
             Text(stringResource(R.string.ggs_ask_n, count), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp))
+        }
+        if (onBring != null) Surface(onClick = onBring, enabled = count > 0, shape = RoundedCornerShape(50), color = Color(0xFF075E54), contentColor = Color.White, shadowElevation = 4.dp, modifier = Modifier.testTag("waBringSelected")) {
+            Text(stringResource(R.string.wa_bring_n, count), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp))
         }
     }
 }

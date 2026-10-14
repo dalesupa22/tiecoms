@@ -13,6 +13,8 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -382,6 +384,7 @@ private fun WaMailCard(e: SharedMailDTO, data: BootstrapDTO, canPost: Boolean, m
     val nav = LocalMailNav.current
     var task by remember(e.id) { mutableStateOf(false) }
     val w = e.wa
+    val bundle = com.tiecoms.app.core.WaBundle.items(e)
     val mine = e.sharedBy == data.me.id
     val author = if (e.out) (if (mine) stringResource(R.string.common_you_short) else Names.person(data, e.sharedBy)?.name?.substringBefore(' ') ?: "")
         else e.from?.name?.takeIf { it.isNotBlank() } ?: stringResource(R.string.web_wa_someone)
@@ -396,16 +399,21 @@ private fun WaMailCard(e: SharedMailDTO, data: BootstrapDTO, canPost: Boolean, m
                     Text("WhatsApp" + (if (w?.accountKind == "business") " Business" else "") + " · " + (if (w?.isGroup == true) "👥 " + stringResource(R.string.web_wa_groupShort) else "") +
                         (w?.chatName ?: e.subject), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.testTag("waKind"))
-                    Text(androidx.compose.ui.text.buildAnnotatedString {
+                    if (bundle != null) Text(stringResource(R.string.wa_n_messages, bundle.size), style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.testTag("waCount"))
+                    else Text(androidx.compose.ui.text.buildAnnotatedString {
                         pushStyle(androidx.compose.ui.text.SpanStyle(fontWeight = FontWeight.Bold)); append(author); pop(); append(" · " + mailDate(e.sentAt))
                     }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
-            Row(Modifier.fillMaxWidth().height(androidx.compose.foundation.layout.IntrinsicSize.Min).clickable { nav.openMail(e.id, "read") }.testTag("mailCardTitle-${e.id}")) {
-                Box(Modifier.width(3.dp).fillMaxHeight().background(WaGreen, RoundedCornerShape(2.dp)))
-                Text(e.snippet, style = MaterialTheme.typography.bodyMedium, maxLines = 6, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 8.dp).weight(1f).testTag("waQuote"))
+            if (bundle != null) WaBundleRows(e, bundle, Modifier.testTag("mailCardTitle-${e.id}")) { nav.openMail(e.id, "read") }
+            else {
+                Row(Modifier.fillMaxWidth().height(androidx.compose.foundation.layout.IntrinsicSize.Min).clickable { nav.openMail(e.id, "read") }.testTag("mailCardTitle-${e.id}")) {
+                    Box(Modifier.width(3.dp).fillMaxHeight().background(WaGreen, RoundedCornerShape(2.dp)))
+                    Text(e.snippet, style = MaterialTheme.typography.bodyMedium, maxLines = 6, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 8.dp).weight(1f).testTag("waQuote"))
+                }
+                CanonicalAttachments(e.chagguAttachments, e.mediaStatus)
             }
-            CanonicalAttachments(e.chagguAttachments, e.mediaStatus)
             MailCardComments(e, data, canPost) { nav.openMail(e.id, "comments") }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.End)) {
                 val pad = ButtonDefaults.TextButtonContentPadding
@@ -483,7 +491,7 @@ internal fun WaSharedRow(m: MessageDTO, b: MailSystem.Body, data: BootstrapDTO, 
                             (w.chatName?.let { " · " + (if (w.isGroup) stringResource(R.string.web_wa_groupShort) else "") + it } ?: ""),
                             style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.testTag("waKind"))
-                        Text((if (w.fromMe) stringResource(R.string.common_you_short) else w.author ?: stringResource(R.string.web_wa_someone)) +
+                        Text(if (b.count > 1) stringResource(R.string.wa_n_messages, b.count) else (if (w.fromMe) stringResource(R.string.common_you_short) else w.author ?: stringResource(R.string.web_wa_someone)) +
                             (w.sentAt?.let { " · " + mailDate(it) } ?: ""), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
@@ -496,5 +504,60 @@ internal fun WaSharedRow(m: MessageDTO, b: MailSystem.Body, data: BootstrapDTO, 
                 }
             }
         }
+    }
+}
+
+/**
+ * Varios mensajes de WhatsApp en una sola tarjeta: filas compactas «autor · hora», el texto y su foto o archivo
+ * (si sigue en chagguAttachments). Las primeras 8 y «Ver los N»; con [all] se ven todas (vista de lectura).
+ */
+@Composable
+internal fun WaBundleRows(e: SharedMailDTO, items: List<com.tiecoms.app.core.WaSharedItemDTO>, modifier: Modifier = Modifier, all: Boolean = false, onOpen: (() -> Unit)? = null) {
+    val ctx = LocalContext.current
+    val client = LocalClient.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    var expanded by androidx.compose.runtime.saveable.rememberSaveable(e.id) { mutableStateOf(all) }
+    var viewer by remember(e.id) { mutableStateOf<Int?>(null) }
+    val media = remember(e.id, e.chagguAttachments) { e.chagguAttachments.filter { it.isImage || it.isVideo } }
+    val you = stringResource(R.string.common_you_short)
+    val someone = stringResource(R.string.web_wa_someone)
+    Column(modifier.fillMaxWidth().testTag("waBundle"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        com.tiecoms.app.core.WaBundle.visible(items, expanded || all).forEachIndexed { i, it ->
+            val att = com.tiecoms.app.core.WaBundle.attachment(it, e)
+            Row(Modifier.fillMaxWidth().height(androidx.compose.foundation.layout.IntrinsicSize.Min)
+                .then(if (onOpen != null) Modifier.clickable(onClick = onOpen) else Modifier).testTag("waBundleRow-$i")) {
+                Box(Modifier.width(3.dp).fillMaxHeight().background(WaGreen, RoundedCornerShape(2.dp)))
+                Column(Modifier.padding(start = 8.dp).weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(androidx.compose.ui.text.buildAnnotatedString {
+                        pushStyle(androidx.compose.ui.text.SpanStyle(fontWeight = FontWeight.Bold)); append(if (it.fromMe) you else it.author?.takeIf { a -> a.isNotBlank() } ?: someone); pop()
+                        it.sentAt?.let { t -> shortDateTime(t).takeIf { x -> x.isNotEmpty() } }?.let { t -> append(" · $t") }
+                    }, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    if (it.text.isNotBlank()) Text(it.text, style = MaterialTheme.typography.bodyMedium, maxLines = if (all) Int.MAX_VALUE else 6, overflow = TextOverflow.Ellipsis)
+                    if (att != null) {
+                        if (att.isImage || att.isVideo) WaBundleThumb(att) { viewer = media.indexOfFirst { m -> m.id == att.id }.takeIf { x -> x >= 0 } }
+                        else FileChip("📎 " + att.name, "waBundleFile-${att.id}") { scope.launch { openAttachment(ctx, client, att) } }
+                    }
+                }
+            }
+        }
+        if (!all && items.size > com.tiecoms.app.core.WaBundle.SHOWN) TextButton(onClick = { expanded = !expanded }, modifier = Modifier.heightIn(min = 36.dp).testTag("waBundleToggle")) {
+            Text(if (expanded) stringResource(R.string.wa_see_less) else stringResource(R.string.wa_see_all_n, items.size), style = MaterialTheme.typography.labelMedium)
+        }
+        val loose = remember(e.id, e.chagguAttachments, items) { com.tiecoms.app.core.WaBundle.loose(e, items) }
+        if (loose.isNotEmpty()) CanonicalAttachments(loose, null)
+        else if (e.mediaStatus != null && e.mediaStatus != "ready" && e.chagguAttachments.isEmpty() && items.any { it.attachmentId != null }) CanonicalAttachments(emptyList(), e.mediaStatus)
+    }
+    viewer?.let { MediaViewer(media, it) { viewer = null } }
+}
+
+@Composable
+private fun WaBundleThumb(a: com.tiecoms.app.core.AttachmentDTO, onClick: () -> Unit) {
+    val img = rememberAttachmentImage(a, full = false, px = 240)
+    Box(Modifier.size(72.dp).background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp)).clickable(onClick = onClick).testTag("waBundleThumb-${a.id}"),
+        contentAlignment = Alignment.Center) {
+        if (img != null) androidx.compose.foundation.Image(img, a.name, contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+            modifier = Modifier.size(72.dp).clip(RoundedCornerShape(8.dp)))
+        else Text(if (a.isVideo) "🎬" else "🖼", style = MaterialTheme.typography.titleMedium)
+        if (a.isVideo && img != null) Text("▶", color = Color.White, style = MaterialTheme.typography.titleMedium)
     }
 }

@@ -223,7 +223,14 @@ fun MailDetailScreen(id: String, mode: String, onBack: () -> Unit, onOpenIssue: 
                     }
                     MailMeta(e.from, e.to, e.cc, e.sentAt, e.provider)
                     val design = html?.takeIf { !asText && orig == null && !e.isWhatsApp }
-                    if (design != null) Surface(color = Color.White, shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth()) {
+                    val bundle = com.tiecoms.app.core.WaBundle.items(e)
+                    if (bundle != null) Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(12.dp)) {
+                            Text(stringResource(R.string.wa_n_messages, bundle.size), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 6.dp))
+                            WaBundleRows(e, bundle, Modifier.testTag("mailBody"), all = true)
+                        }
+                    } else if (design != null) Surface(color = Color.White, shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth()) {
                         MailHtmlView(design, client.baseUrl)
                     } else Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth()) {
                         val tagBody = Modifier.padding(12.dp).testTag(if (e.full) "mailBody" else "mailBodyLoading")
@@ -238,7 +245,7 @@ fun MailDetailScreen(id: String, mode: String, onBack: () -> Unit, onOpenIssue: 
                         if (html != null && orig == null && !e.isWhatsApp) TextButton(onClick = { asText = !asText }, modifier = Modifier.testTag("mailAsText")) {
                             Text(stringResource(if (asText) R.string.web_mail_asDesign else R.string.web_mail_asText))
                         }
-                        val textShown = design == null
+                        val textShown = design == null && bundle == null
                         if (textShown && e.full && orig == null && e.body.length > 400) TextButton(onClick = { bodyOpen = !bodyOpen }) { Text(stringResource(if (bodyOpen) R.string.web_mail_less else R.string.web_mail_moreBody)) }
                         if (textShown && e.full && e.trimmed && orig == null) TextButton(enabled = !origBusy, onClick = {
                             origBusy = true
@@ -998,9 +1005,10 @@ fun ForwardCardSheet(emailId: String, onClose: () -> Unit, onDone: (String) -> U
     }
 }
 
-// ---------- WhatsApp: «Comentar en chaggu…» ----------
+// ---------- WhatsApp: «Comentar en chaggu…» / «Llevar a un chat (N)» ----------
+/** Uno o varios mensajes del mismo chat (en el orden del chat). Con varios, el servidor arma una sola tarjeta. */
 @Composable
-fun WaShareSheet(c: WaChatDTO, message: WaMessageDTO, onClose: () -> Unit, onDone: (String) -> Unit) {
+fun WaShareSheet(c: WaChatDTO, messages: List<WaMessageDTO>, onClose: () -> Unit, onDone: (String) -> Unit) {
     val ctx = LocalContext.current
     val client = LocalClient.current
     val container = LocalContainer.current
@@ -1008,24 +1016,33 @@ fun WaShareSheet(c: WaChatDTO, message: WaMessageDTO, onClose: () -> Unit, onDon
     val source = com.tiecoms.app.core.WaInbox.key(c)
     val epoch = remember(source) { state.waPrivacy.token(source) }
     val permitted = state.waPrivacy.allows(source) && epoch == state.waPrivacy.token(source)
-    LaunchedEffect(permitted) { if (!permitted) onClose() }
-    if (!permitted) return
+    LaunchedEffect(permitted) { if (!permitted || messages.isEmpty()) onClose() }
+    if (!permitted || messages.isEmpty()) return
     val data = state.data ?: return
     var picked by rememberSaveable { mutableStateOf(listOf<String>()) }
     var comment by rememberSaveable { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
-    FormSheet(stringResource(R.string.web_wa_bringTitle), onClose, tag = "waShare") {
+    // Un id por hoja: si la red corta y se reintenta, el servidor no duplica la tarjeta.
+    val clientMessageId = rememberSaveable { java.util.UUID.randomUUID().toString() }
+    val many = messages.size > 1
+    val message = messages.first()
+    FormSheet(if (many) stringResource(R.string.wa_bring_title_n, messages.size) else stringResource(R.string.web_wa_bringTitle), onClose, tag = "waShare") {
         Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     WaIcon(20.dp); Spacer(Modifier.width(8.dp))
                     Column {
                         Text((if (c.isGroup) "👥 " else "") + c.name, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(if (message.fromMe) stringResource(R.string.common_you_short) else message.author ?: stringResource(R.string.web_wa_someone), style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(if (many) stringResource(R.string.wa_n_messages, messages.size)
+                            else if (message.fromMe) stringResource(R.string.common_you_short) else message.author ?: stringResource(R.string.web_wa_someone),
+                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.testTag("waShareCount"))
                     }
                 }
-                Text(message.body.take(400), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.background(WaGreen.copy(alpha = 0.08f), RoundedCornerShape(6.dp)).padding(8.dp))
+                val you = stringResource(R.string.common_you_short)
+                val someone = stringResource(R.string.web_wa_someone)
+                val preview = if (many) remember(messages) { com.tiecoms.app.core.WaBundle.preview(messages, you, someone) } else message.body.take(400)
+                Text(preview + (if (many && messages.size > 3) "\n…" else ""), style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.background(WaGreen.copy(alpha = 0.08f), RoundedCornerShape(6.dp)).padding(8.dp).testTag("waSharePreview"))
             }
         }
         MultiChatPicker(data, picked) { picked = it }
@@ -1034,13 +1051,20 @@ fun WaShareSheet(c: WaChatDTO, message: WaMessageDTO, onClose: () -> Unit, onDon
         WhoSees(data, picked)
         DialogButtons(onClose, if (busy) stringResource(R.string.web_mail_sharing) else shareLabel(data, picked), enabled = picked.isNotEmpty() && !busy, confirmTag = "waShareConfirm") {
             val targets = picked
+            val ids = messages.map { it.id }
             busy = true
             container.scope.launch {
-                runCatching { client.shareWhatsApp(c.accountId, c.jid, message.id, targets, comment) }
+                runCatching { client.shareWhatsApp(c.accountId, c.jid, ids, targets, comment, clientMessageId) }
                     .onSuccess { container.toast(if (targets.size > 1) ctx.getString(R.string.web_mail_sharedMany, targets.size.toString()) else ctx.getString(R.string.web_mail_shared)); onDone(targets.first()) }
-                    .onFailure { container.toast(errorText(ctx, it)) }
+                    .onFailure { container.toast(waShareError(ctx, it)) }
                 busy = false
             }
         }
     }
+}
+
+/** El API explica en palabras por qué no se pudo (más de 10 fotos o archivos, medios aún bajando): se muestra tal cual. */
+internal fun waShareError(ctx: android.content.Context, e: Throwable): String {
+    val msg = (e as? com.tiecoms.app.core.ApiException)?.takeIf { it.status in 400..499 && it.status != 401 && it.status != 413 }?.message
+    return msg?.takeIf { it.isNotBlank() && !it.startsWith("HTTP ") } ?: errorText(ctx, e)
 }

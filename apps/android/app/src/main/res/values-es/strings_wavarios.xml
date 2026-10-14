@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Varios mensajes de WhatsApp llevados juntos a un chat, en una sola tarjeta. -->
+<resources>
+    <string name="wa_bring_n">Llevar a un chat (%1$d)</string>
+    <string name="wa_bring_title_n">Llevar %1$d mensajes de WhatsApp a un chat</string>
+    <string name="wa_n_messages">%1$d mensajes</string>
+    <string name="wa_see_all_n">Ver los %1$d</string>
+    <string name="wa_see_less">Ver menos</string>
+    <string name="wa_select_max">Máximo %1$d mensajes por envío</string>
+</resources>

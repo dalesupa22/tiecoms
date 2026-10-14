@@ -2490,12 +2490,10 @@ class TieComsClient(
         }, SharedMailsPage.serializer()).emails.map { putMail(it) }
     }
     /** «Comentar en chaggu…» desde un mensaje de WhatsApp (solo el dueño de la cuenta). */
-    suspend fun shareWhatsApp(accountId: String, jid: String, messageId: String, conversationIds: List<String>, comment: String?): WaShareResult = withContext(dispatcher) {
-        req("POST", "/whatsapp/share", buildJsonObject {
-            put("accountId", JsonPrimitive(accountId)); put("jid", JsonPrimitive(jid)); put("messageId", JsonPrimitive(messageId))
-            put("conversationIds", kotlinx.serialization.json.JsonArray(conversationIds.map { JsonPrimitive(it) }))
-            comment?.takeIf { it.isNotBlank() }?.let { put("comment", JsonPrimitive(it.trim())) }
-        }, WaShareResult.serializer()).also { r -> r.emails.forEach { putMail(it) } }
+    suspend fun shareWhatsApp(accountId: String, jid: String, messageIds: List<String>, conversationIds: List<String>, comment: String?, clientMessageId: String? = null): WaShareResult = withContext(dispatcher) {
+        // Con 2 o más el servidor arma una sola tarjeta (wa.items) en orden de envío.
+        req("POST", "/whatsapp/share", WaBundle.shareBody(accountId, jid, messageIds, conversationIds, comment, clientMessageId),
+            WaShareResult.serializer()).also { r -> r.emails.forEach { putMail(it) } }
     }
 
     /** Reenviar la tarjeta de un correo o WhatsApp a otros chats (hasta 10): cada uno recibe su copia con hilo propio. */

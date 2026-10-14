@@ -178,7 +178,12 @@ data class SharedMailDTO(
     val out: Boolean get() = direction == "out"
     val isWhatsApp: Boolean get() = provider == "whatsapp"
 }
-@Serializable data class SharedWaMetaDTO(val chatName: String? = null, val isGroup: Boolean = false, val accountKind: String = "personal", val accountId: String = "", val jid: String = "")
+@Serializable data class SharedWaMetaDTO(val chatName: String? = null, val isGroup: Boolean = false, val accountKind: String = "personal", val accountId: String = "", val jid: String = "",
+    /** Varios mensajes llevados juntos (2 a 50, en orden de envío): una sola tarjeta. Ausente con uno solo y en servidores viejos. */
+    val items: List<WaSharedItemDTO> = emptyList())
+/** Un mensaje dentro de una tarjeta de WhatsApp con varios; attachmentId apunta a chagguAttachments (si no está, se borró). */
+@Serializable data class WaSharedItemDTO(val waMessageId: String = "", val author: String? = null, val fromMe: Boolean = false, val text: String = "",
+    val sentAt: String? = null, val attachmentId: String? = null)
 @Serializable data class SharedMailsPage(val emails: List<SharedMailDTO> = emptyList())
 @Serializable data class MailCommentsPage(val comments: List<SharedMailCommentDTO> = emptyList())
 @Serializable data class MailCommentResult(val comment: SharedMailCommentDTO = SharedMailCommentDTO(), val email: SharedMailDTO = SharedMailDTO())

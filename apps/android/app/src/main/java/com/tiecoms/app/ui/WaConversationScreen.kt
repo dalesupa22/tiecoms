@@ -136,10 +136,21 @@ fun WaConversationScreen(key: String, onBack: () -> Unit, onOpenConversation: (S
     var menu by remember { mutableStateOf(false) }
     var settingsOpen by remember { mutableStateOf(false) }
     var waMenu by remember { mutableStateOf<WaMessageDTO?>(null) }
-    var waShare by remember { mutableStateOf<WaMessageDTO?>(null) }
+    var waShare by remember { mutableStateOf<List<WaMessageDTO>?>(null) }
     val gg = rememberGgSide(com.tiecoms.app.core.GgSide.whatsapp(c.accountId, c.jid), enabled = !client.ggSideMissing)
     var selecting by remember(key) { mutableStateOf(false) }
     val selected = remember(key) { mutableStateListOf<String>() }
+    // «Seleccionar» ya no depende de gg: sirve para llevar varios mensajes juntos a un chat (con el correo prendido).
+    val ggOn = gg != null && gg.available != false
+    val canSelect = data.mailEnabled || ggOn
+    fun startSelect(first: String?) { selecting = true; if (first != null && first !in selected) selected.add(first) }
+    fun stopSelect() { selecting = false; selected.clear() }
+    fun toggle(id: String) {
+        if (id in selected) selected.remove(id)
+        else if (selected.size >= com.tiecoms.app.core.WaBundle.MAX_MESSAGES) container.toast(ctx.getString(R.string.wa_select_max, com.tiecoms.app.core.WaBundle.MAX_MESSAGES))
+        else selected.add(id)
+    }
+    androidx.activity.compose.BackHandler(enabled = selecting) { stopSelect() }
     LaunchedEffect(gg?.open) { if (gg?.open == false) { selecting = false; selected.clear(); gg.quoted.clear() } }
     var suggestFor by remember { mutableStateOf<List<String>?>(null) }
     var queue by remember { mutableStateOf(listOf<com.tiecoms.app.core.GgSuggestion>()) }
@@ -175,6 +186,7 @@ fun WaConversationScreen(key: String, onBack: () -> Unit, onOpenConversation: (S
                             extra = listOfNotNull(
                                 // 1.7.13: gg desde ⋯ (vuelve a mostrar la píldora de abajo si la escondí en este chat).
                                 gg?.takeIf { it.available != false }?.let { g -> SheetItem(ctx.getString(R.string.ggs_ask_about).removePrefix("✨").trim(), "✨", tag = "waMenuGgOpen") { g.reopenFromMenu(ctx) } },
+                                if (canSelect && !selecting && !messages.isNullOrEmpty()) SheetItem(ctx.getString(R.string.ggs_select), "☑", tag = "waMenuSelect") { startSelect(null) } else null,
                                 SheetItem(ctx.getString(R.string.wa_chat_settings), "⚙", tag = "waChatSettings") { settingsOpen = true })), { menu = false })
                     }
                 },
@@ -193,11 +205,11 @@ fun WaConversationScreen(key: String, onBack: () -> Unit, onOpenConversation: (S
                     else -> LazyColumn(Modifier.fillMaxSize().testTag("waMessages"), reverseLayout = true, contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         items(list.asReversed(), key = { it.id }) { m ->
-                            GgSelectable(selecting, m.id in selected, onToggle = { if (m.id in selected) selected.remove(m.id) else selected.add(m.id) }) {
+                            GgSelectable(selecting, m.id in selected, onToggle = { toggle(m.id) }) {
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = if (m.fromMe) Arrangement.End else Arrangement.Start) {
                                     // Pulsación larga: «Comentar en chaggu…» (con el correo prendido), «✨ Preguntar a gg» y «Seleccionar».
                                     Surface(shape = RoundedCornerShape(12.dp), color = if (m.fromMe) Color(0xFFDCF8C6) else MaterialTheme.colorScheme.surfaceContainerHigh,
-                                        modifier = Modifier.widthIn(max = 320.dp).then(if (data.mailEnabled || gg != null) Modifier.combinedClickable(onClick = {}, onLongClick = { waMenu = m }) else Modifier).testTag("waMsg-${m.id}")) {
+                                        modifier = Modifier.widthIn(max = 320.dp).then(if (canSelect) Modifier.combinedClickable(onClick = {}, onLongClick = { waMenu = m }) else Modifier).testTag("waMsg-${m.id}")) {
                                         Column(Modifier.padding(8.dp)) {
                                             if (!m.fromMe && c.isGroup && m.author != null) Text(m.author, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
                                             CanonicalAttachments(listOfNotNull(m.media?.attachment), m.media?.status)
@@ -211,10 +223,17 @@ fun WaConversationScreen(key: String, onBack: () -> Unit, onOpenConversation: (S
                     }
                 }
             }
-            if (gg != null && gg.available != false) Column(Modifier.padding(horizontal = 8.dp)) {
+            // Seleccionando: «Llevar a un chat (N)» (principal), «Pedir a gg (N)» si gg está, y «Cancelar».
+            if (selecting) GgSelectionBar(selected.size, onAsk = if (ggOn) ({ suggestFor = messages?.let { l -> com.tiecoms.app.core.WaBundle.orderByChat(selected, l) } ?: selected.toList() }) else null,
+                onCancel = { stopSelect() }, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                onBring = if (data.mailEnabled) ({
+                    val l = messages.orEmpty()
+                    val byId = l.associateBy { it.id }
+                    waShare = com.tiecoms.app.core.WaBundle.orderByChat(selected, l).mapNotNull { byId[it] }.takeIf { it.isNotEmpty() }
+                }) else null)
+            if (gg != null && gg.available != false && !selecting) Column(Modifier.padding(horizontal = 8.dp)) {
                 // gg abajo (1.7.13): la píldora con su ✕ y, a la derecha, «Responder por mí» si lo último es del otro.
-                if (selecting) GgSelectionBar(selected.size, onAsk = { suggestFor = selected.toList() }, onCancel = { selecting = false; selected.clear() })
-                else GgAskPill(gg) {
+                GgAskPill(gg) {
                     if (messages?.lastOrNull()?.fromMe == false) TextButton(onClick = { gg.loadQuick() }, modifier = Modifier.testTag("waGgSpark")) { Text(stringResource(R.string.ggs_reply_for_me), maxLines = 1) }
                 }
                 GgQuickReplies(gg) { t -> useDraft(t) }
@@ -259,11 +278,11 @@ fun WaConversationScreen(key: String, onBack: () -> Unit, onOpenConversation: (S
         else Text(stringResource(R.string.wa_link_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
     waMenu?.let { m -> ActionSheet(null, listOfNotNull(
-        if (data.mailEnabled) SheetItem(ctx.getString(R.string.web_wa_bring), "⤴", tag = "waCommentIn") { waMenu = null; waShare = m } else null,
+        if (data.mailEnabled) SheetItem(ctx.getString(R.string.web_wa_bring), "⤴", tag = "waCommentIn") { waMenu = null; waShare = listOf(m) } else null,
         if (gg != null && gg.available != false) SheetItem(ctx.getString(R.string.ggs_ask_about).removePrefix("✨").trim(), "✨", tag = "waAskGg") {
             waMenu = null; gg.quote(com.tiecoms.app.core.GgQuotedDTO(m.id, if (m.fromMe) ctx.getString(R.string.ggs_you) else m.author ?: c.name, excerpt(m.body, 200))); gg.show()
         } else null,
-        if (gg != null && gg.available != false) SheetItem(ctx.getString(R.string.ggs_select), "☑", tag = "waSelect") { waMenu = null; selecting = true; if (m.id !in selected) selected.add(m.id) } else null,
+        if (canSelect) SheetItem(ctx.getString(R.string.ggs_select), "☑", tag = "waSelect") { waMenu = null; startSelect(m.id) } else null,
     ), onDismiss = { waMenu = null }) }
     gg?.let { g ->
         GgSideSheet(g, onUseDraft = { t -> useDraft(t) },
@@ -292,5 +311,7 @@ fun WaConversationScreen(key: String, onBack: () -> Unit, onOpenConversation: (S
         else if (head.kind == "task" || head.kind == "reminder") NewIssueDialog(linked?.id, null, head.param("title") ?: head.title, onClose = { queue = queue.drop(1) }, onCreated = {},
             defaultDue = com.tiecoms.app.core.GgSide.dueDate(head.param("due")))
     }
-    waShare?.let { m -> WaShareSheet(c, m, onClose = { waShare = null }, onDone = { cid -> waShare = null; onOpenConversation(cid) }) }
+    waShare?.let { list ->
+        WaShareSheet(c, list, onClose = { waShare = null }, onDone = { cid -> waShare = null; stopSelect(); onOpenConversation(cid) })
+    }
 }

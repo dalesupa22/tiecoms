@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Several WhatsApp messages brought to a chat together, as one card. -->
+<resources>
+    <string name="wa_bring_n">Bring to a chat (%1$d)</string>
+    <string name="wa_bring_title_n">Bring %1$d WhatsApp messages to a chat</string>
+    <string name="wa_n_messages">%1$d messages</string>
+    <string name="wa_see_all_n">See all %1$d</string>
+    <string name="wa_see_less">Show less</string>
+    <string name="wa_select_max">Up to %1$d messages per send</string>
+</resources>

@@ -34,7 +34,7 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun ComposerActionSheet(title: String, actions: List<SheetItem?>, onDismiss: () -> Unit) {
     val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val order = listOf("attPhotos", "attCamera", "attFiles", "plusWhatsApp", "plusMail", "plusMeetNow", "plusMeetSchedule", "plusEvent", "plusIssue", "plusTask", "plusGgReply", "plusWhatsAppShare")
+    val order = listOf("attPhotos", "attCamera", "attFiles", "plusGif", "plusSchedule", "plusViewOnce", "plusBring", "plusWhatsApp", "plusMail", "plusMeetNow", "plusMeetSchedule", "plusEvent", "plusIssue", "plusTask", "plusGgReply", "plusWhatsAppShare")
     val displayed = actions.filterNotNull().sortedBy { action -> order.indexOf(action.tag).let { if (it < 0) order.size else it } }
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheet, modifier = Modifier.testTag("actionSheet")) {
         Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = 16.dp)) {
@@ -50,6 +50,8 @@ fun ComposerActionSheet(title: String, actions: List<SheetItem?>, onDismiss: () 
                         "attCamera" -> Color(0xFF655CD4)
                         "plusEvent", "plusMeetSchedule" -> Color(0xFFCF427A)
                         "plusGgReply" -> Color(0xFFE24B29)
+                        "plusGif", "plusViewOnce" -> Color(0xFFE24B29)
+                        "plusSchedule" -> Color(0xFF655CD4)
                         "plusTask", "plusIssue" -> Color(0xFFB57812)
                         else -> Color(0xFF288A91)
                     }
@@ -62,6 +64,10 @@ fun ComposerActionSheet(title: String, actions: List<SheetItem?>, onDismiss: () 
                         "plusMail" -> Icons.Outlined.MailOutline
                         "plusTask", "plusIssue" -> Icons.Outlined.TaskAlt
                         "plusGgReply" -> Icons.Outlined.AutoAwesome
+                        "plusGif" -> Icons.Outlined.Gif
+                        "plusSchedule" -> Icons.Outlined.Schedule
+                        "plusViewOnce" -> Icons.Outlined.LooksOne
+                        "plusBring" -> Icons.Outlined.Download
                         else -> Icons.AutoMirrored.Outlined.Chat
                     }
                     val interaction = remember { MutableInteractionSource() }

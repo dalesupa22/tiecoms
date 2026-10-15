@@ -96,6 +96,26 @@ class CreativeMediaUiTest {
     }
     @After fun close() { if (::client.isInitialized) client.close(); server.shutdown() }
 
+    /** Josué (14-oct-2026): la caja de escribir quedaba de ~50 dp. Al escribir debe ocupar casi todo el ancho, como WhatsApp. */
+    @Test fun composerUsesFullWidthWhileTyping() {
+        open()
+        shot("composer-idle")
+        compose.onNodeWithTag("composer").performClick()
+        compose.onNodeWithTag("composer").performTextInput("Para escribir me tocaba copiar el texto en otro chat y pegarlo; ahora la caja ocupa todo el ancho")
+        compose.waitForIdle()
+        val field = compose.onNodeWithTag("composer").fetchSemanticsNode().boundsInRoot.width
+        val screen = compose.onRoot().fetchSemanticsNode().boundsInRoot.width
+        assertTrue("composer $field of $screen", field >= screen * 0.65f)
+        assertFalse(compose.onAllNodesWithTag("bring").fetchSemanticsNodes().isNotEmpty())
+        assertFalse(compose.onAllNodesWithTag("creativeButton").fetchSemanticsNodes().isNotEmpty())
+        assertFalse(compose.onAllNodesWithTag("viewOnce").fetchSemanticsNodes().isNotEmpty())
+        shot("composer-typing")
+        compose.onNodeWithTag("attach").performClick()
+        compose.waitUntil(5_000) { compose.onAllNodesWithTag("plusGif").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithTag("plusViewOnce").assertExists(); compose.onNodeWithTag("plusBring").assertExists()
+        shot("composer-plus")
+    }
+
     @Test fun gifAnimatesAndStagesWithoutSending() {
         open()
         compose.waitUntil(10_000) { requests.any { it.first.requestUrl!!.encodedPath == "/api/v1/attachments/visible/content" } }

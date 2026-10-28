@@ -72,10 +72,18 @@ export async function unreadMentionsCount(c: Tx, userId: string, conversationId:
   return rows[0]?.n ?? 0;
 }
 
-/** Bandeja «Menciones»: las más recientes primero, solo de conversaciones que puedo leer y dentro de mi historial. */
-export async function listMentions(userId: string, before: string | undefined, limit: number): Promise<{ mentions: MentionItemDTO[]; hasMore: boolean }> {
+/**
+ * Bandeja «Menciones»: las más recientes primero, solo de conversaciones que puedo leer y dentro de mi historial.
+ * answered = ya escribí en esa conversación después de la mención (o le respondí citándola).
+ * q busca sin tildes en el texto, en quién escribió y en el nombre del grupo; pending deja solo las sin responder.
+ */
+export async function listMentions(userId: string, before: string | undefined, limit: number, opts: { q?: string; pending?: boolean } = {}): Promise<{ mentions: MentionItemDTO[]; hasMore: boolean }> {
+  const q = opts.q?.trim() ? `%${opts.q.trim().replace(/[\\%_]/g, (x) => `\\${x}`)}%` : null;
   const { rows } = await pool.query(
-    `SELECT mm.is_all, mm.created_at AS mentioned_at, m.*, GREATEST(COALESCE(rc.last_read_seq, 0), cm.history_from_seq) AS read_from
+    `SELECT * FROM (
+      SELECT mm.is_all, mm.created_at AS mentioned_at, m.*, GREATEST(COALESCE(rc.last_read_seq, 0), cm.history_from_seq) AS read_from,
+             EXISTS (SELECT 1 FROM messages r WHERE r.conversation_id = m.conversation_id AND r.author_id = $1 AND r.deleted_at IS NULL
+                      AND (r.seq > m.seq OR r.reply_to = m.id)) AS answered
        FROM message_mentions mm
        JOIN messages m ON m.id = mm.message_id AND m.deleted_at IS NULL
        JOIN conversations c ON c.id = mm.conversation_id AND c.archived_at IS NULL
@@ -84,14 +92,18 @@ export async function listMentions(userId: string, before: string | undefined, l
        LEFT JOIN read_cursors rc ON rc.conversation_id = c.id AND rc.user_id = $1
       WHERE mm.user_id = $1 AND ($2::timestamptz IS NULL OR mm.created_at < $2)
         AND (c.workspace_id IS NULL OR (wm.user_id IS NOT NULL AND wm.revoked_at IS NULL AND (wm.expires_at IS NULL OR wm.expires_at > now())))
-      ORDER BY mm.created_at DESC LIMIT $3`,
-    [userId, before ?? null, limit + 1],
+        AND ($4::text IS NULL OR tiecoms_fold(m.body) LIKE tiecoms_fold($4) OR tiecoms_fold(c.name) LIKE tiecoms_fold($4)
+             OR EXISTS (SELECT 1 FROM users u WHERE u.id = m.author_id AND tiecoms_fold(u.name) LIKE tiecoms_fold($4)))
+     ) x
+     WHERE NOT ($5::boolean AND x.answered)
+     ORDER BY x.mentioned_at DESC LIMIT $3`,
+    [userId, before ?? null, limit + 1, q, !!opts.pending],
   );
   const page = rows.slice(0, limit);
   return {
     mentions: page.map((r) => ({
       message: toMessageDTO(r), conversationId: r.conversation_id, all: r.is_all, read: Number(r.seq) <= Number(r.read_from),
-      createdAt: new Date(r.mentioned_at).toISOString(),
+      answered: !!r.answered, createdAt: new Date(r.mentioned_at).toISOString(),
     })),
     hasMore: rows.length > limit,
   };

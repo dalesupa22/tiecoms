@@ -437,6 +437,35 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
     prevHeight.current = el.scrollHeight;
     prevFirst.current = first;
   }, [rows.length]);
+  // Pegado abajo: si el alto cambia sin que cambie el número de filas (el mensaje enviado se confirma, carga una
+  // imagen o una vista previa, la caja de escribir crece o encoge), el último mensaje quedaba tapado o la vista «se
+  // devolvía». Mientras esté abajo se vuelve a bajar; solo un gesto de la persona (rueda, toque, arrastre, teclas) lo suelta.
+  const userScrollAt = useRef(0);
+  useEffect(() => {
+    const el = scroller.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const mark = () => { userScrollAt.current = Date.now(); };
+    const key = (e: globalThis.KeyboardEvent) => {
+      if (['PageUp', 'PageDown', 'Home', 'End', 'ArrowUp', 'ArrowDown', ' '].includes(e.key) && !(e.target as HTMLElement | null)?.closest?.('textarea, input, [contenteditable]')) mark();
+    };
+    const pin = () => { if (atBottom.current && !placing.current && el.scrollHeight - el.scrollTop - el.clientHeight > 1) el.scrollTop = el.scrollHeight; };
+    const ro = new ResizeObserver(pin);
+    const watched = new Set<Element>();
+    const watch = () => { for (const c of Array.from(el.children)) if (!watched.has(c)) { watched.add(c); ro.observe(c); } };
+    ro.observe(el);
+    watch();
+    const mo = new MutationObserver(() => { watch(); pin(); });
+    mo.observe(el, { childList: true });
+    el.addEventListener('wheel', mark, { passive: true });
+    el.addEventListener('touchmove', mark, { passive: true });
+    el.addEventListener('pointerdown', mark);
+    addEventListener('keydown', key);
+    return () => {
+      ro.disconnect(); mo.disconnect();
+      el.removeEventListener('wheel', mark); el.removeEventListener('touchmove', mark); el.removeEventListener('pointerdown', mark);
+      removeEventListener('keydown', key);
+    };
+  }, [id, !!conv, !!local?.loaded]);
   // Salto pendiente a un mensaje: se centra en cuanto está pintado (tras cambiar de tema el mensaje aparece en otro render).
   useLayoutEffect(() => {
     const seq = scrollToSeq.current;
@@ -508,7 +537,9 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
     const el = scroller.current;
     if (!el || !el.getClientRects().length || el.closest('[hidden]')) return;
     if (new URLSearchParams(location.search).has('provider')) return;
-    const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
+    let dist = el.scrollHeight - el.scrollTop - el.clientHeight;
+    // Un scroll que no hizo la persona (anclaje del navegador, contenido que creció) no suelta el «pegado abajo».
+    if (dist >= 60 && atBottom.current && !placing.current && Date.now() - userScrollAt.current > 800) { el.scrollTop = el.scrollHeight; dist = 0; }
     const bottom = dist < 60;
     if (!placing.current) {
       if (bottom) awaySeq.current = null;

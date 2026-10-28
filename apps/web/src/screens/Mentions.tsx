@@ -1,5 +1,5 @@
 import { RichText } from './RichText.tsx';
-import { useEffect, useMemo, useState, type KeyboardEvent, type RefObject } from 'react';
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
 import type { BootstrapDTO, ConversationDTO, MentionDTO, MentionItemDTO, MessageDTO, MessageRefDTO, PersonDTO } from '@tiecoms/contracts';
 import { ggRanges, segmentBody } from '../chat17.ts';
 import { openRef } from './Chat17.tsx';
@@ -225,35 +225,144 @@ export function MessageText({ d, body, mentions, refs }: { d: BootstrapDTO; body
 export const mentionsMe = (d: BootstrapDTO, m: MessageDTO) => m.authorId !== d.me.id && (m.mentions ?? []).some((x) => x.userId === d.me.id || x.userId === 'all');
 
 // ---------- Bandeja ----------
+/** Dónde me escribieron: grupo, chat individual, múltiple o sidechat (para saber a dónde va la respuesta). */
+export function mentionPlace(d: BootstrapDTO, conv: ConversationDTO | undefined): { kind: 'direct' | 'multi' | 'group' | 'side' | 'internal'; label: string; title: string } {
+  if (!conv) return { kind: 'group', label: t('mention.wGroup'), title: '' };
+  const title = conversationTitle(d, conv);
+  if (conv.deriveKind === 'side') return { kind: 'side', label: t('mention.wSide'), title };
+  if (conv.kind === 'direct') return { kind: 'direct', label: t('mention.wDirect'), title };
+  if (conv.kind === 'multi') return { kind: 'multi', label: t('mention.wMulti'), title };
+  if (conv.kind === 'internal') return { kind: 'internal', label: t('mention.wInternal'), title };
+  return { kind: 'group', label: t('mention.wGroup'), title };
+}
+
+/** Texto de la tarjeta sin botones dentro (la tarjeta entera abre el chat): menciones en negrita, la mía resaltada. */
+function MentionPreview({ d, m }: { d: BootstrapDTO; m: MessageDTO }) {
+  if (!m.mentions?.length) return <>{m.body}</>;
+  return <>{segmentBody(m.body, m.mentions, m.refs).map((sg, i) => sg.kind !== 'mention' ? <span key={i}>{sg.text}</span>
+    : <b key={i} className={`mention ${sg.mention.userId === d.me.id || sg.mention.userId === 'all' ? 'is-me' : ''}`}>{sg.text}</b>)}</>;
+}
+
+const PENDING_KEY = 'tiecoms:mentions:pending';
+const storedPending = () => { try { return localStorage.getItem(PENDING_KEY) !== '0'; } catch { return true; } };
+
+/**
+ * Bandeja «Menciones»: todas las veces que me nombraron (grupos, individuales, múltiples y sidechats) en un solo
+ * lugar, con buscador y filtro «Sin responder». Cada una dice dónde fue y se responde ahí mismo: la respuesta sale
+ * en esa conversación (y en su tema), citando el mensaje, sin tener que abrir el chat.
+ */
 export function MentionsInbox() {
   const d = useClient((s) => s.data)!;
   const [items, setItems] = useState<MentionItemDTO[] | null>(null);
   const [more, setMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const load = (before?: string) => client.listMentions(before).then((r) => { setItems((x) => (before ? [...(x ?? []), ...r.mentions] : r.mentions)); setMore(r.hasMore); }).catch((e) => setError(errorText(e)));
+  const [pending, setPendingState] = useState(storedPending);
+  const [query, setQuery] = useState('');
+  const [q, setQ] = useState('');
+  const [open, setOpen] = useState<string | null>(null);
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  // Respondidas en esta sesión: siguen a la vista con «✓ Respondida» hasta recargar (no saltan de golpe).
+  const [done, setDone] = useState<Set<string>>(() => new Set());
+  const setPending = (v: boolean) => { setPendingState(v); try { localStorage.setItem(PENDING_KEY, v ? '1' : '0'); } catch {} };
+  useEffect(() => { const h = setTimeout(() => setQ(query.trim()), 250); return () => clearTimeout(h); }, [query]);
+  const gen = useRef(0);
+  const load = (before?: string) => {
+    const my = before ? gen.current : ++gen.current;
+    return client.listMentions(before, 50, { q, pending }).then((r) => {
+      if (my !== gen.current) return;
+      setError(null);
+      setItems((x) => (before ? [...(x ?? []), ...r.mentions] : r.mentions)); setMore(r.hasMore);
+    }).catch((e) => { if (my === gen.current) setError(errorText(e)); });
+  };
   const unread = d.conversations.reduce((n, c) => n + (c.unreadMentions ?? 0), 0);
-  useEffect(() => { void load(); }, [unread]);
-  if (error) return <div className="error" style={{ padding: 10 }}>{error}</div>;
-  if (!items) return <div className="hint" style={{ padding: 10 }}>{t('common.loading')}</div>;
-  if (!items.length) return <div className="home-empty">{t('mention.empty')}</div>;
-  return (
-    <div className="mention-inbox">
-      {items.map((it) => {
-        const conv = d.conversations.find((c) => c.id === it.conversationId);
-        const author = personById(d, it.message.authorId);
-        const text = [it.message.attachments?.length ? attachmentSummaryText({ count: it.message.attachments.length, images: 0, videos: 0, files: it.message.attachments.length, firstName: it.message.attachments[0]!.name }) : '', it.message.body].filter(Boolean).join(' · ');
-        return (
-          <button key={`${it.message.id}`} className={`mention-item ${it.read ? '' : 'unread'}`} onClick={() => navigate(`/c/${it.conversationId}?m=${it.message.seq}`)}>
-            <Avatar person={author} org={orgById(d, author?.orgId)} size={26} />
-            <span className="grow" style={{ minWidth: 0 }}>
-              <span className="row small" style={{ gap: 4 }}><b className="ellipsis grow">{author?.name}{conv ? <span className="muted"> · {t('mention.inConv', { name: conversationTitle(d, conv) })}</span> : null}</b><span className="muted">{timeLabel(it.createdAt)}</span></span>
-              <span className="small ellipsis" style={{ display: 'block' }}>{it.all ? `${t('mention.allLabel')} · ` : ''}{text}</span>
-            </span>
-          </button>
-        );
-      })}
-      {more && <button className="btn ghost small" onClick={() => void load(items.at(-1)!.createdAt)}>{t('mention.loadMore')}</button>}
+  useEffect(() => { void load(); }, [unread, q, pending]);
+  useEffect(() => { setDone(new Set()); }, [q, pending]);
+
+  const send = (it: MentionItemDTO, place: string) => {
+    const text = (drafts[it.message.id] ?? '').trim();
+    if (!text) return;
+    void client.send(it.conversationId, text, it.message.id, null, it.message.topicId ? { topicId: it.message.topicId } : {});
+    client.markRead(it.conversationId, it.message.seq);
+    setDrafts((x) => { const n = { ...x }; delete n[it.message.id]; return n; });
+    setDone((x) => new Set(x).add(it.message.id));
+    // Al responder, se abre la siguiente pendiente para seguir de corrido.
+    const list = items ?? [];
+    const next = list.slice(list.findIndex((x) => x.message.id === it.message.id) + 1).find((x) => !x.answered && !done.has(x.message.id));
+    setOpen(next && d.conversations.find((c) => c.id === next.conversationId)?.canPost ? next.message.id : null);
+    toast(t('mention.sent', { place }));
+  };
+
+  const head = (
+    <div className="mention-head">
+      <input type="search" className="mention-search" value={query} placeholder={t('mention.search')} aria-label={t('mention.search')}
+        onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => { if (e.key === 'Escape' && query) { e.preventDefault(); setQuery(''); } }} />
+      <div className="mention-seg" role="group">
+        <button type="button" aria-pressed={pending} className={pending ? 'on' : ''} onClick={() => setPending(true)}>{t('mention.fPending')}</button>
+        <button type="button" aria-pressed={!pending} className={!pending ? 'on' : ''} onClick={() => setPending(false)}>{t('mention.fAll')}</button>
+      </div>
     </div>
+  );
+  if (error && !items) return <>{head}<div className="error" style={{ padding: 10 }}>{error}</div></>;
+  if (!items) return <>{head}<div className="hint" style={{ padding: 10 }}>{t('common.loading')}</div></>;
+  if (!items.length) return <>{head}<div className="home-empty">{q ? t('mention.noResults') : pending ? t('mention.allDone') : t('mention.empty')}</div></>;
+  return (
+    <>
+      {head}
+      <div className="mention-inbox">
+        {items.map((it) => {
+          const conv = d.conversations.find((c) => c.id === it.conversationId);
+          const author = personById(d, it.message.authorId);
+          const place = mentionPlace(d, conv);
+          const where = place.kind === 'direct' ? place.label : `${place.label} · ${place.title}`;
+          const answered = it.answered || done.has(it.message.id);
+          const isOpen = open === it.message.id;
+          const canPost = !!conv?.canPost;
+          const files = it.message.attachments?.length ? attachmentSummaryText({ count: it.message.attachments.length, images: 0, videos: 0, files: it.message.attachments.length, firstName: it.message.attachments[0]!.name }) : '';
+          const goTo = () => navigate(`/c/${it.conversationId}?m=${it.message.seq}`);
+          return (
+            <div key={it.message.id} className={`mention-item ${it.read ? '' : 'unread'} ${answered ? 'answered' : ''} ${isOpen ? 'is-open' : ''}`}>
+              <div className="mention-where">
+                <span className={`mention-kind k-${place.kind}`}>{place.kind === 'direct' ? '👤' : place.kind === 'multi' ? '👥' : place.kind === 'side' ? '💬' : place.kind === 'internal' ? '◌' : '#'}</span>
+                <span className="grow ellipsis" title={where}>{place.kind === 'direct' ? <><b>{place.label}</b></> : <><span className="muted">{place.label} · </span><b>{place.title}</b></>}</span>
+                <span className="muted">{timeLabel(it.createdAt)}</span>
+              </div>
+              <button type="button" className="mention-body" onClick={goTo} title={t('mention.open')}>
+                <Avatar person={author} org={orgById(d, author?.orgId)} size={26} />
+                <span className="grow" style={{ minWidth: 0 }}>
+                  <b className="small" style={{ display: 'block' }}>{author?.name}{it.all ? <span className="muted"> · {t('mention.allLabel')}</span> : null}</b>
+                  <span className="mention-text small">{files ? `${files} · ` : ''}<MentionPreview d={d} m={it.message} /></span>
+                </span>
+              </button>
+              {isOpen && canPost ? (
+                <div className="mention-reply">
+                  <textarea autoFocus rows={2} value={drafts[it.message.id] ?? ''} placeholder={t('mention.replyHere', { place: place.kind === 'direct' ? place.title : place.title || place.label })}
+                    onChange={(e) => setDrafts((x) => ({ ...x, [it.message.id]: e.target.value }))}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send(it, place.title || place.label); }
+                      if (e.key === 'Escape') { e.preventDefault(); setOpen(null); }
+                    }} />
+                  <div className="row mention-actions">
+                    <span className="grow hint small">{t('mention.enterHint')}</span>
+                    <button type="button" className="btn ghost small" onClick={() => setOpen(null)}>{t('mention.cancel')}</button>
+                    <button type="button" className="btn small primary" disabled={!(drafts[it.message.id] ?? '').trim()} onClick={() => send(it, place.title || place.label)}>{t('mention.send')}</button>
+                  </div>
+                </div>
+              ) : (
+                <div className="row mention-actions">
+                  {answered ? <span className="mention-done">✓ {t('mention.answered')}</span> : null}
+                  <span className="grow" />
+                  {!it.read && !answered && <button type="button" className="btn ghost small" onClick={() => { client.markRead(it.conversationId, it.message.seq); setItems((x) => x?.map((y) => (y.message.id === it.message.id ? { ...y, read: true } : y)) ?? null); }} title={t('mention.markRead')}>✓ {t('mention.readShort')}</button>}
+                  <button type="button" className="btn ghost small" onClick={goTo} title={t('mention.open')}>{t('mention.openShort')} ›</button>
+                  {canPost ? <button type="button" className="btn small primary" onClick={() => setOpen(it.message.id)}>↩ {t('mention.reply')}</button>
+                    : <span className="hint small">{t('mention.cantPost')}</span>}
+                </div>
+              )}
+            </div>
+          );
+        })}
+        {more && <button className="btn ghost small" onClick={() => void load(items.at(-1)!.createdAt)}>{t('mention.loadMore')}</button>}
+      </div>
+    </>
   );
 }
 

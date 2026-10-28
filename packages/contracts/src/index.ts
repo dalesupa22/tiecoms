@@ -469,6 +469,8 @@ export interface MentionItemDTO {
   /** true si fue @todos y no una mención directa. */
   all: boolean;
   read: boolean;
+  /** Ya escribí en esa conversación después de la mención (o la respondí citándola). Servidor anterior: ausente. */
+  answered?: boolean;
   createdAt: string;
 }
 

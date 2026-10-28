@@ -1573,8 +1573,9 @@ export class TieComsClient {
     return r;
   }
   /** Bandeja «Menciones»: más recientes primero; before = createdAt del último que ya tienes. */
-  listMentions(before?: string, limit = 50) {
-    return this.request<{ mentions: MentionItemDTO[]; hasMore: boolean }>(`/mentions?limit=${limit}${before ? `&before=${encodeURIComponent(before)}` : ''}`);
+  listMentions(before?: string, limit = 50, opts: { q?: string; pending?: boolean } = {}) {
+    const extra = `${opts.q?.trim() ? `&q=${encodeURIComponent(opts.q.trim())}` : ''}${opts.pending ? '&pending=1' : ''}`;
+    return this.request<{ mentions: MentionItemDTO[]; hasMore: boolean }>(`/mentions?limit=${limit}${before ? `&before=${encodeURIComponent(before)}` : ''}${extra}`);
   }
   async deleteMessage(id: string) { const m = await this.request<MessageDTO>(`/messages/${id}`, { method: 'DELETE' }); this.upsertLocal(m); }
   async setMessagePinned(m: MessageDTO, pinned: boolean) {

@@ -664,9 +664,11 @@ export async function buildHttp() {
     priv.get('/api/v1/search/messages', { config: { rateLimit: { max: 60, timeWindow: '1 minute' } } }, async (req) => searchAll(req.userId, GlobalSearchQuery.parse(req.query)));
     priv.post<{ Params: { id: string } }>('/api/v1/messages/:id/open', async (req) => openViewOnce(req.userId, z.uuid().parse(req.params.id)));
     // Bandeja «Menciones»: before = createdAt del último que ya tienes.
-    priv.get<{ Querystring: { before?: string; limit?: string } }>('/api/v1/mentions', async (req) => {
-      const q = z.object({ before: z.iso.datetime().optional(), limit: z.coerce.number().int().min(1).max(100).default(50) }).parse(req.query);
-      return mentions.listMentions(req.userId, q.before, q.limit);
+    // q = buscar (texto, autor o grupo); pending=1 = solo las que aún no respondo.
+    priv.get<{ Querystring: { before?: string; limit?: string; q?: string; pending?: string } }>('/api/v1/mentions', async (req) => {
+      const q = z.object({ before: z.iso.datetime().optional(), limit: z.coerce.number().int().min(1).max(100).default(50),
+        q: z.string().max(100).optional(), pending: z.enum(['1', 'true', '0', 'false']).optional() }).parse(req.query);
+      return mentions.listMentions(req.userId, q.before, q.limit, { q: q.q, pending: q.pending === '1' || q.pending === 'true' });
     });
     priv.delete<{ Params: { id: string } }>('/api/v1/messages/:id', async (req) => deleteMessage(req.userId, req.params.id));
     priv.post<{ Params: { id: string } }>('/api/v1/messages/:id/pin', async (req) => setPin(req.userId, req.params.id, true));

@@ -31,6 +31,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -275,47 +276,133 @@ fun PersonCardSheet(personId: String, onClose: () -> Unit, onDirect: (String) ->
     }
 }
 
-/** Bandeja «Menciones»: mis menciones recientes con autor, conversación y hora; tocar abre el mensaje. */
+/**
+ * Bandeja «Menciones»: todas las veces que me nombraron (grupos, individuales, múltiples y sidechats) en un solo
+ * lugar, con buscador y «Sin responder / Todas». Cada una dice dónde fue y se responde ahí mismo: la respuesta sale
+ * en esa conversación y en su tema, citando el mensaje. Tocar el mensaje abre el chat en ese punto.
+ */
 @Composable
 fun MentionsInboxScreen(onBack: () -> Unit, onOpen: (String, Long) -> Unit) {
     val ctx = LocalContext.current
     val client = LocalClient.current
     val scope = rememberCoroutineScope()
     val data = client.state.collectAsStateWithLifecycle().value.data ?: return
+    val prefs = remember { ctx.getSharedPreferences("mentions_inbox", android.content.Context.MODE_PRIVATE) }
     var items by remember { mutableStateOf(listOf<MentionItemDTO>()) }
     var more by remember { mutableStateOf(false) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
+    var pending by remember { mutableStateOf(prefs.getBoolean("pending", true)) }
+    var query by remember { mutableStateOf("") }
+    var open by remember { mutableStateOf<String?>(null) }
+    val drafts = remember { androidx.compose.runtime.mutableStateMapOf<String, String>() }
+    // Respondidas en esta visita: siguen a la vista con «✓ Respondida» (no saltan de golpe).
+    val done = remember { androidx.compose.runtime.mutableStateListOf<String>() }
+    var gen by remember { mutableStateOf(0) }
     suspend fun load(before: String?) {
+        val my = if (before == null) ++gen else gen
         loading = true
-        runCatching { client.loadMentions(before) }.onSuccess { p -> items = items + p.mentions; more = p.hasMore }.onFailure { error = errorText(ctx, it) }
-        loading = false
+        runCatching { client.loadMentions(before, query = query, pending = pending) }
+            .onSuccess { p -> if (my == gen) { items = if (before == null) p.mentions else items + p.mentions; more = p.hasMore; error = null } }
+            .onFailure { if (my == gen) error = errorText(ctx, it) }
+        if (my == gen) loading = false
     }
-    LaunchedEffect(Unit) { load(null) }
+    LaunchedEffect(pending, query) {
+        if (query.isNotEmpty()) kotlinx.coroutines.delay(300)
+        done.clear(); load(null)
+    }
+    fun send(it: MentionItemDTO) {
+        val text = drafts[it.message.id]?.trim().orEmpty()
+        if (text.isEmpty()) return
+        client.send(it.conversationId, text, replyTo = it.message.id, topicId = it.message.topicId)
+        scope.launch { runCatching { client.markRead(it.conversationId, it.message.seq) } }
+        drafts.remove(it.message.id); done.add(it.message.id)
+        val idx = items.indexOfFirst { x -> x.message.id == it.message.id }
+        val next = items.drop(idx + 1).firstOrNull { x -> !x.answered && x.message.id !in done && data.conversations.firstOrNull { c -> c.id == x.conversationId }?.canPost == true }
+        open = next?.message?.id
+        android.widget.Toast.makeText(ctx, ctx.getString(R.string.mention_sent), android.widget.Toast.LENGTH_SHORT).show()
+    }
     SimpleScaffold(title = stringResource(R.string.mention_inbox), onBack = onBack) {
-        ErrorText(error)
-        LazyColumn(Modifier.fillMaxSize().testTag("mentionsInbox")) {
-            if (!loading && items.isEmpty()) item { EmptyNote(stringResource(R.string.mention_empty)) }
-            items(items, key = { it.message.id }) { it ->
-                val m = it.message
-                val conv = data.conversations.firstOrNull { c -> c.id == it.conversationId }
-                Row(Modifier.fillMaxWidth().clickable { onOpen(it.conversationId, m.seq) }.background(if (!it.read) Color(0x14E8710A) else Color.Transparent)
-                    .padding(horizontal = 16.dp, vertical = 10.dp).testTag("mentionItem-${m.id}"), verticalAlignment = Alignment.Top) {
-                    AuthorAvatar(Names.person(data, m.authorId), m.authorId, 36.dp); Spacer(Modifier.width(10.dp))
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(Names.person(data, m.authorId)?.name ?: "", fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
-                            conv?.let { c -> Text(" " + stringResource(R.string.mention_in_conv, titleOf(ctx, c, data)), style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false)) }
-                            Text(" · " + timeText(it.createdAt), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Column(Modifier.fillMaxSize()) {
+            androidx.compose.material3.OutlinedTextField(value = query, onValueChange = { query = it }, singleLine = true,
+                placeholder = { Text(stringResource(R.string.mention_search)) }, shape = RoundedCornerShape(14.dp),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).testTag("mentionsSearch"))
+            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                androidx.compose.material3.FilterChip(selected = pending, onClick = { pending = true; prefs.edit().putBoolean("pending", true).apply() },
+                    label = { Text(stringResource(R.string.mention_f_pending)) }, modifier = Modifier.testTag("mentionsPending"))
+                androidx.compose.material3.FilterChip(selected = !pending, onClick = { pending = false; prefs.edit().putBoolean("pending", false).apply() },
+                    label = { Text(stringResource(R.string.mention_f_all)) }, modifier = Modifier.testTag("mentionsAll"))
+            }
+            ErrorText(error)
+            LazyColumn(Modifier.fillMaxSize().testTag("mentionsInbox"), contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 24.dp)) {
+                if (!loading && items.isEmpty()) item {
+                    EmptyNote(stringResource(if (query.isNotBlank()) R.string.mention_no_results else if (pending) R.string.mention_all_done else R.string.mention_empty))
+                }
+                items(items, key = { it.message.id }) { it ->
+                    val m = it.message
+                    val conv = data.conversations.firstOrNull { c -> c.id == it.conversationId }
+                    val answered = it.answered || m.id in done
+                    val isOpen = open == m.id
+                    val (ico, kindLabel) = when {
+                        conv?.deriveKind == "side" -> "💬" to stringResource(R.string.mention_w_side)
+                        conv?.kind == "direct" -> "👤" to stringResource(R.string.mention_w_direct)
+                        conv?.kind == "multi" -> "👥" to stringResource(R.string.mention_w_multi)
+                        conv?.kind == "internal" -> "◌" to stringResource(R.string.mention_w_internal)
+                        else -> "#" to stringResource(R.string.mention_w_group)
+                    }
+                    val title = conv?.let { c -> titleOf(ctx, c, data) }.orEmpty()
+                    Surface(shape = RoundedCornerShape(14.dp), tonalElevation = if (!it.read && !answered) 2.dp else 0.dp,
+                        color = if (!it.read && !answered) Color(0x14E8710A) else MaterialTheme.colorScheme.surface,
+                        border = androidx.compose.foundation.BorderStroke(1.dp, if (isOpen) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant),
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 5.dp).testTag("mentionItem-${m.id}")) {
+                        Column(Modifier.padding(horizontal = 12.dp, vertical = 9.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            // Dónde fue: así se sabe a dónde va la respuesta.
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(ico, style = MaterialTheme.typography.labelMedium, modifier = Modifier.width(22.dp))
+                                Text(if (conv?.kind == "direct") kindLabel else "$kindLabel · $title", style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                                Text(timeText(it.createdAt), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Row(Modifier.fillMaxWidth().clickable { onOpen(it.conversationId, m.seq) }, verticalAlignment = Alignment.Top) {
+                                AuthorAvatar(Names.person(data, m.authorId), m.authorId, 30.dp); Spacer(Modifier.width(8.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text((Names.person(data, m.authorId)?.name ?: "") + if (it.all) " · @" + stringResource(R.string.mention_all_short) else "",
+                                        fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    MessageText(m.body, m.mentions, MaterialTheme.colorScheme.onSurface, data, onPerson = {}, interactive = false)
+                                }
+                            }
+                            if (isOpen && conv?.canPost == true) {
+                                val fr = remember { androidx.compose.ui.focus.FocusRequester() }
+                                LaunchedEffect(Unit) { runCatching { fr.requestFocus() } }
+                                androidx.compose.material3.OutlinedTextField(value = drafts[m.id].orEmpty(), onValueChange = { v -> drafts[m.id] = v },
+                                    placeholder = { Text(stringResource(R.string.mention_reply_in, title.ifEmpty { kindLabel }), maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                    maxLines = 5, shape = RoundedCornerShape(14.dp),
+                                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(capitalization = androidx.compose.ui.text.input.KeyboardCapitalization.Sentences),
+                                    modifier = Modifier.fillMaxWidth().focusRequester(fr).testTag("mentionReply-${m.id}"))
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
+                                    TextButton(onClick = { open = null }) { Text(stringResource(R.string.mention_cancel)) }
+                                    androidx.compose.material3.Button(onClick = { send(it) }, enabled = drafts[m.id].orEmpty().isNotBlank(),
+                                        modifier = Modifier.testTag("mentionSend-${m.id}")) { Text(stringResource(R.string.mention_send)) }
+                                }
+                            } else {
+                                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                    if (answered) Text("✓ " + stringResource(R.string.mention_answered), style = MaterialTheme.typography.labelMedium,
+                                        color = Color(0xFF15803D), fontWeight = FontWeight.SemiBold)
+                                    Spacer(Modifier.weight(1f))
+                                    TextButton(onClick = { onOpen(it.conversationId, m.seq) }) { Text(stringResource(R.string.mention_open)) }
+                                    if (conv?.canPost == true) {
+                                        if (answered) androidx.compose.material3.OutlinedButton(onClick = { open = m.id }, modifier = Modifier.testTag("mentionReplyBtn-${m.id}")) { Text("↩ " + stringResource(R.string.mention_reply)) }
+                                        else androidx.compose.material3.Button(onClick = { open = m.id }, modifier = Modifier.testTag("mentionReplyBtn-${m.id}")) { Text("↩ " + stringResource(R.string.mention_reply)) }
+                                    } else Text(stringResource(R.string.mention_cant_post), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            }
                         }
-                        MessageText(m.body, m.mentions, MaterialTheme.colorScheme.onSurface, data, onPerson = {}, interactive = false)
                     }
                 }
-            }
-            if (more) item {
-                TextButton(onClick = { scope.launch { load(items.lastOrNull()?.createdAt) } }, enabled = !loading, modifier = Modifier.fillMaxWidth().testTag("mentionsMore")) {
-                    Text(stringResource(R.string.mention_load_more))
+                if (more) item {
+                    TextButton(onClick = { scope.launch { load(items.lastOrNull()?.createdAt) } }, enabled = !loading, modifier = Modifier.fillMaxWidth().testTag("mentionsMore")) {
+                        Text(stringResource(R.string.mention_load_more))
+                    }
                 }
             }
         }

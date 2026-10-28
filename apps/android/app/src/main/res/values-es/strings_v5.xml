@@ -54,4 +54,24 @@
     <string name="mention_load_more">Ver más</string>
     <string name="mention_in_conv">en %1$s</string>
     <string name="mention_all_label">@todos</string>
+    <!-- CH026: responder menciones desde la bandeja -->
+    <string name="mention_search">Buscar en mis menciones</string>
+    <string name="mention_f_pending">Sin responder</string>
+    <string name="mention_f_all">Todas</string>
+    <string name="mention_reply">Responder</string>
+    <string name="mention_reply_in">Responder en %1$s…</string>
+    <string name="mention_send">Enviar</string>
+    <string name="mention_cancel">Cancelar</string>
+    <string name="mention_open">Abrir</string>
+    <string name="mention_answered">Respondida</string>
+    <string name="mention_sent">Respuesta enviada</string>
+    <string name="mention_cant_post">No puedes escribir aquí</string>
+    <string name="mention_all_done">¡Todo respondido! No tienes menciones pendientes.</string>
+    <string name="mention_no_results">Ninguna mención coincide.</string>
+    <string name="mention_w_direct">Chat individual</string>
+    <string name="mention_w_multi">Chat múltiple</string>
+    <string name="mention_w_group">Grupo</string>
+    <string name="mention_w_side">Sidechat</string>
+    <string name="mention_w_internal">Solo tu empresa</string>
+    <string name="mention_all_short">todos</string>
 </resources>

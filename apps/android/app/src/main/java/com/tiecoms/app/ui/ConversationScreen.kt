@@ -1322,11 +1322,18 @@ private fun Composer(
     var text by remember(id, draftOwner) { mutableStateOf(restored.body) }
     // Menciones con @ (SPEC-v4 §H): tokens sobre el texto (UTF-16) y el cursor para el buscador.
     var ments by remember(id, draftOwner) { mutableStateOf(restored.mentions) }
-    var sel by remember(id) { mutableStateOf(androidx.compose.ui.text.TextRange(0)) }
+    // El cursor arranca al final del borrador restaurado (antes quedaba al inicio y lo escrito salía delante).
+    var sel by remember(id, draftOwner) { mutableStateOf(androidx.compose.ui.text.TextRange(restored.body.length)) }
+    // Composición del teclado (la palabra que Gboard/Samsung están armando, subrayada). Hay que devolverla en cada
+    // TextFieldValue: sin ella el teclado perdía el hilo en cada letra (letras repetidas o comidas, autocorrector que
+    // reemplazaba mal, cursor que saltaba) y la gente terminaba escribiendo en otra app y pegando. Solo vale para el
+    // mismo texto que la produjo: si el texto cambió por código (enviar, mención, borrar token), va sin composición.
+    var comp by remember(id, draftOwner) { mutableStateOf<Pair<String, androidx.compose.ui.text.TextRange>?>(null) }
     var editMents by remember(editing?.id) { mutableStateOf(editing?.let { it.mentions + com.tiecoms.app.core.Refs.tokens(it) }.orEmpty()) }
     // ① Una sola vista (tanda 1.7) para el próximo mensaje: texto, fotos o nota de voz.
     var viewOnce by remember(id, draftOwner) { mutableStateOf(restored.viewOnce) }
     var editSel by remember(editing?.id) { mutableStateOf(androidx.compose.ui.text.TextRange(editing?.body?.length ?: 0)) }
+    var editComp by remember(editing?.id) { mutableStateOf<Pair<String, androidx.compose.ui.text.TextRange>?>(null) }
     // Adjuntos elegidos (copiados a caché) antes de enviar; se suben al pulsar Enviar (SPEC-v4).
     var files by remember(id, draftOwner) { mutableStateOf(restored.files) }
     var creativePicker by remember(id) { mutableStateOf(false) }
@@ -1665,7 +1672,8 @@ private fun Composer(
                 }
                 if (rec.recording) RecordingBar(rec, locked, gesture, onDelete = { recorder.cancel(); locked = false; container.toast(ctx.getString(R.string.voice_cancelled)) }, onSend = { sendVoice() }, modifier = Modifier.weight(1f))
                 else RichPasteScope(enabled = editing == null && uploading == null, onImages = { uris, done -> add(uris, done) }) { OutlinedTextField(
-                    value = if (editing != null) androidx.compose.ui.text.input.TextFieldValue(editText, editSel) else androidx.compose.ui.text.input.TextFieldValue(text, sel),
+                    value = if (editing != null) androidx.compose.ui.text.input.TextFieldValue(editText, editSel, editComp?.takeIf { it.first == editText }?.second)
+                        else androidx.compose.ui.text.input.TextFieldValue(text, sel, comp?.takeIf { it.first == text }?.second),
                     onValueChange = { raw ->
                         // 1.7.1: «Pegar» con una imagen en el portapapeles llega como un marcador: se quita y se adjunta.
                         val (clean, cur, pasted) = PasteImages.strip(raw.text, raw.selection.start)
@@ -1677,9 +1685,11 @@ private fun Composer(
                         if (editing != null) {
                             val (t, m, c) = com.tiecoms.app.core.Mentions.edit(editText, v.text, editMents, v.selection.start)
                             editText = t; editMents = m; editSel = if (t != v.text) androidx.compose.ui.text.TextRange(c) else v.selection
+                            editComp = if (t == v.text) v.composition?.let { t to it } else null
                         } else {
                             val (t, m, c) = com.tiecoms.app.core.Mentions.edit(text, v.text, ments, v.selection.start)
                             text = t; ments = m; sel = if (t != v.text) androidx.compose.ui.text.TextRange(c) else v.selection
+                            comp = if (t == v.text) v.composition?.let { t to it } else null
                             if (t.isNotBlank()) client.typing(id)
                         }
                     },

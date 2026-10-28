@@ -412,7 +412,8 @@ data class SendResult(val message: MessageDTO? = null, val duplicate: Boolean = 
 
 /** Bandeja de menciones: GET /api/v1/mentions?before&limit. */
 @Serializable
-data class MentionItemDTO(val message: MessageDTO = MessageDTO(), val conversationId: String = "", val all: Boolean = false, val read: Boolean = false, val createdAt: String = "")
+/** answered: ya escribí en esa conversación después de la mención (o la respondí citándola); servidor anterior: false. */
+data class MentionItemDTO(val message: MessageDTO = MessageDTO(), val conversationId: String = "", val all: Boolean = false, val read: Boolean = false, val answered: Boolean = false, val createdAt: String = "")
 @Serializable
 data class MentionsPage(val mentions: List<MentionItemDTO> = emptyList(), val hasMore: Boolean = false)
 

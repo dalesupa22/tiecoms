@@ -1513,8 +1513,9 @@ class TieComsClient(
     }
 
     /** Bandeja «Menciones»: mis menciones recientes; para paginar, before = createdAt de la última. */
-    suspend fun loadMentions(before: String? = null, limit: Int = 30): MentionsPage = withContext(dispatcher) {
-        req("GET", "/mentions" + q("before" to before, "limit" to limit.toString()), null, MentionsPage.serializer())
+    /** query: busca en el texto, quién escribió y el grupo; pending: solo las que aún no respondo. */
+    suspend fun loadMentions(before: String? = null, limit: Int = 30, query: String? = null, pending: Boolean = false): MentionsPage = withContext(dispatcher) {
+        req("GET", "/mentions" + q("before" to before, "limit" to limit.toString(), "q" to query?.trim()?.takeIf { it.isNotEmpty() }, "pending" to (if (pending) "1" else null)), null, MentionsPage.serializer())
     }
     suspend fun deleteMessage(id: String): MessageDTO = withContext(dispatcher) {
         req("DELETE", "/messages/$id", null, MessageDTO.serializer()).also { upsertLocal(it) }

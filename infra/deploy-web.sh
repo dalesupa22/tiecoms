@@ -13,6 +13,7 @@ VITE_API_ORIGIN='' VITE_BASE='/' npm -w @tiecoms/web run -s build -- --outDir "$
 test "$(git rev-parse HEAD)" = "$SOURCE_COMMIT" && test -z "$(git status --porcelain)" || { echo 'Source changed during build; refusing upload.' >&2; exit 1; }
 printf '%s\n' "$SOURCE_COMMIT" > "$STAGE/COMMIT"
 cp "$STAGE/app/index.html" "$STAGE/index.expected.html"
+chmod -R a+rX "$STAGE"  # umask 077 → archivos 600 → 403 en nginx
 COPYFILE_DISABLE=1 tar --no-xattrs -C "$STAGE" -czf "$STAGE/$REL.tgz" app COMMIT index.expected.html
 test "$(git rev-parse HEAD)" = "$SOURCE_COMMIT" && test -z "$(git status --porcelain)" || { echo 'Source changed during packaging; refusing upload.' >&2; exit 1; }
 scp -q "$STAGE/$REL.tgz" "$HOST:/tmp/chaggu-web-$REL.tgz"

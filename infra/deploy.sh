@@ -31,6 +31,8 @@ cp infra/Dockerfile.api infra/compose.yml infra/tiecoms-cert.sh "$STAGE/$REL/"
 # serve after the first privacy migration, including during health-check rollback.
 touch "$STAGE/$REL/WA_PRIVACY_V1"
 cp -R infra/nginx "$STAGE/$REL/nginx"
+# Un checkout con umask 077 deja archivos 600 y nginx responde 403 (sw.js, iconos: 28-oct-2026).
+chmod -R a+rX "$STAGE/$REL"
 COPYFILE_DISABLE=1 tar --no-xattrs -C "$STAGE" -czf "$STAGE/$REL.tgz" "$REL"
 
 echo "▸ subiendo artefacto ($(du -h "$STAGE/$REL.tgz" | cut -f1))"

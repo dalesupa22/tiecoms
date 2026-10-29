@@ -13,7 +13,7 @@ Lo común va en `desktop` y se fusiona a las dos.
 ## Publicar una versión
 
 1. Sube `version` en `apps/desktop/src-tauri/tauri.conf.json` y en `Cargo.toml` (rama `desktop`) y fusiona a `desktop-mac` y `desktop-windows`.
-2. **Mac:** `npm run build:mac` (sin firmar) o `bash apps/desktop/scripts/release-mac.sh` (firmado y notarizado).
+2. **Mac:** `bash apps/desktop/scripts/release-mac.sh` (firmado y notarizado, necesita el Developer ID en el Llavero) o, sin Developer ID, el workflow manual `.github/workflows/desktop-mac.yml` (universal con firma ad-hoc; en `latest.json` va `"signed": false` y la landing explica «Abrir igualmente»).
 3. **Windows:** `git push origin desktop-windows`. Al terminar el workflow, el release `desktop-v<versión>` tiene los instaladores.
 4. Sube los archivos a `/opt/tiecoms/downloads/` en el servidor. Van con nombre fijo (`chaggu-mac.dmg`, `chaggu-windows.exe`, `chaggu-windows.msi`) y con copia versionada (`chaggu-<v>-mac.dmg`…). Actualiza `latest.json` con `{ version, date, mac, windows, windowsMsi }` y, en cada archivo, `{ file, size, sha256 }`.
 5. `www.chaggu.com/descargas/` los sirve (`infra/nginx/tiecoms.conf`). La sección «Descarga chaggu» de la landing (`#descargar`) resalta el sistema de quien visita y muestra versión y peso desde `latest.json`.

@@ -20,8 +20,8 @@
     "System notifications, calls with screen sharing, GIFs and memes in your chats, and up to four chats open at once. Under 20 MB and it starts in a second."
   ],
   [
-    "<p>macOS 12 o posterior. Apple Silicon e Intel. Firmada y notarizada.</p>",
-    "<p>macOS 12 or later. Apple Silicon and Intel. Signed and notarized.</p>"
+    "<p>macOS 12 o posterior. Apple Silicon e Intel.</p>",
+    "<p>macOS 12 or later. Apple Silicon and Intel.</p>"
   ],
   [
     "Descargar para Mac <span aria-hidden=\"true\">↓</span>",
@@ -56,8 +56,8 @@
     "Open chaggu <span aria-hidden=\"true\">↗</span></a><small class=\"download-meta\">Also on iPhone and Android.</small>"
   ],
   [
-    "<summary>Instalación y avisos del sistema</summary><p><b>Mac:</b> abre el archivo, arrastra chaggu a Aplicaciones y ábrela. La descarga está firmada y cuenta con notarización de Apple.</p><p><b>Windows:</b> si aparece «Windows protegió tu PC», toca «Más información» y luego «Ejecutar de todos modos».</p><p>La firma de Windows está pendiente de validación por Microsoft.</p>",
-    "<summary>Installation and system warnings</summary><p><b>Mac:</b> open the file, drag chaggu to Applications and open it. The download is signed and has Apple notarization.</p><p><b>Windows:</b> if «Windows protected your PC» appears, click «More info» and then «Run anyway».</p><p>Windows signing is awaiting validation by Microsoft.</p>"
+    "<summary>Instalación y avisos del sistema</summary><p><b>Mac:</b> abre el archivo, arrastra chaggu a Aplicaciones y ábrela. Esta versión aún no lleva la firma de Apple: la primera vez macOS dice que no puede verificar al desarrollador. Cierra el aviso, ve a Ajustes del Sistema → Privacidad y seguridad y toca «Abrir igualmente». Solo se hace una vez.</p><p><b>Windows:</b> si aparece «Windows protegió tu PC», toca «Más información» y luego «Ejecutar de todos modos».</p><p>La firma de Windows está pendiente de validación por Microsoft.</p>",
+    "<summary>Installation and system warnings</summary><p><b>Mac:</b> open the file, drag chaggu to Applications and open it. This version is not yet signed by Apple: the first time, macOS says it cannot verify the developer. Close the warning, go to System Settings → Privacy & Security and click «Open Anyway». You only do this once.</p><p><b>Windows:</b> if «Windows protected your PC» appears, click «More info» and then «Run anyway».</p><p>Windows signing is awaiting validation by Microsoft.</p>"
   ],
   [
     "<a class=\"text-link lang-link\" href=\"/en/\" hreflang=\"en\" lang=\"en\" aria-label=\"English version\">EN</a>",

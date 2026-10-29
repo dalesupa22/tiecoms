@@ -1,0 +1,42 @@
+# Chaggu para Mac sin Developer ID: .dmg universal (Apple Silicon e Intel) con firma ad-hoc, a mano.
+# La primera vez macOS pide «Abrir igualmente» en Privacidad y seguridad. Con el certificado Developer ID
+# el camino firmado y notarizado sigue siendo apps/desktop/scripts/release-mac.sh (docs/ESCRITORIO.md).
+name: desktop-mac
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - uses: dtolnay/rust-toolchain@stable
+        with: { targets: 'aarch64-apple-darwin,x86_64-apple-darwin' }
+      - uses: swatinem/rust-cache@v2
+        with: { workspaces: apps/desktop/src-tauri }
+      - run: npm ci --ignore-scripts
+      - name: Compilar .dmg universal (firma ad-hoc)
+        working-directory: apps/desktop
+        env:
+          CI: 'true'
+          APPLE_SIGNING_IDENTITY: '-'
+        run: npx tauri build --target universal-apple-darwin --bundles app,dmg
+      - name: Verificar
+        working-directory: apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle
+        run: |
+          APP="macos/chaggu.app"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          lipo -archs "$APP/Contents/MacOS/"* 
+          ls -la dmg/
+          shasum -a 256 dmg/*.dmg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: chaggu-mac
+          path: apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+          if-no-files-found: error

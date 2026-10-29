@@ -4,6 +4,9 @@
 name: desktop-mac
 on:
   workflow_dispatch:
+  # La rama por defecto del repo es main: para lanzarlo desde principal se empuja a esta rama.
+  push:
+    branches: [desktop-mac-unsigned]
 
 permissions:
   contents: read

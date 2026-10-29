@@ -613,19 +613,33 @@ export async function listMail(userId: string, q: z.infer<typeof MailListQuery>,
 }
 /**
  * Sin leer para el riel de la web: suma de Gmail y Outlook conectados (cada uno hasta UNREAD_CAP).
- * Un proveedor caído o por reconectar cuenta 0 y no rompe al otro. Se guarda 60 s en memoria.
+ * Un proveedor caído o por reconectar cuenta 0 y no rompe al otro. Se guarda 60 s en memoria; pasado eso
+ * (hasta 15 min) se responde al instante con el último número y se pide el nuevo por detrás, para que el
+ * riel no espere a Gmail/Outlook (~200 ms) en cada consulta. Una sola consulta al proveedor por persona a la vez.
  */
 const unreadCache = new Map<string, { at: number; n: number }>();
+const unreadLoading = new Map<string, Promise<number>>();
+function loadUnread(userId: string): Promise<number> {
+  const running = unreadLoading.get(userId);
+  if (running) return running;
+  const p = (async () => {
+    const { rows } = await pool.query("SELECT provider FROM mail_connections WHERE user_id = $1 AND status = 'active'", [userId]);
+    const each = await Promise.all(rows.map((r) => withProvider(userId, r.provider as MailProvider, (at) => PROVIDERS[r.provider as MailProvider].unread(at)).catch(() => 0)));
+    const n = each.reduce((a, b) => a + b, 0);
+    if (unreadCache.size > 5000) unreadCache.clear();
+    unreadCache.set(userId, { at: Date.now(), n });
+    return n;
+  })().finally(() => unreadLoading.delete(userId));
+  unreadLoading.set(userId, p);
+  return p;
+}
 export async function unreadCount(userId: string): Promise<{ unread: number }> {
   if (!mailEnabled()) return { unread: 0 };
   const hit = unreadCache.get(userId);
-  if (hit && Date.now() - hit.at < 60_000) return { unread: hit.n };
-  const { rows } = await pool.query("SELECT provider FROM mail_connections WHERE user_id = $1 AND status = 'active'", [userId]);
-  const each = await Promise.all(rows.map((r) => withProvider(userId, r.provider as MailProvider, (at) => PROVIDERS[r.provider as MailProvider].unread(at)).catch(() => 0)));
-  const n = each.reduce((a, b) => a + b, 0);
-  if (unreadCache.size > 5000) unreadCache.clear();
-  unreadCache.set(userId, { at: Date.now(), n });
-  return { unread: n };
+  const age = hit ? Date.now() - hit.at : Infinity;
+  if (hit && age < 60_000) return { unread: hit.n };
+  if (hit && age < 15 * 60_000) { loadUnread(userId).catch(() => {}); return { unread: hit.n }; }
+  return { unread: await loadUnread(userId) };
 }
 /** El correo completo, en vivo; se guarda unos minutos en memoria (vista previa → compartir no pide dos veces). */
 async function fullMail(userId: string, provider: MailProvider, id: string): Promise<Full> {

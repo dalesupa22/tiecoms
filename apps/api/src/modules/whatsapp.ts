@@ -174,25 +174,36 @@ export async function listChats(userId: string, q: { accountId?: string; categor
     } catch { throw badRequest('Cursor de WhatsApp inválido para estos filtros'); }
   }
 
-  const { rows } = await pool.query(
-    `SELECT c.*, COALESCE(c.name, ct.name) AS name, ct.pn, a.label AS account_label, a.kind AS account_kind, a.status AS account_status
-       FROM wa_chats c JOIN wa_accounts a ON a.id = c.account_id
-       LEFT JOIN LATERAL ${whoSql('c.account_id', 'c.jid')} ct ON true
-      WHERE a.user_id = $1 AND a.removed_at IS NULL AND ${visibleWaChatSql()}
+  // Sin búsqueda, el orden no depende del nombre: se pagina primero y solo se buscan nombres (whoSql) para esa página.
+  // Antes se calculaban para los ~5.000 chats de la cuenta en cada carga de la lista (~90 ms).
+  const search = q.search?.trim() || null;
+  const filters = `a.user_id = $1 AND a.removed_at IS NULL AND ${visibleWaChatSql()}
         AND ($2::uuid IS NULL OR c.account_id = $2)
         AND ($3::text IS NULL OR c.category = $3)
         AND ($4::boolean IS NULL OR c.is_group = $4)
-        AND ($5::text IS NULL OR COALESCE(c.name, ct.name) ILIKE '%' || $5 || '%')
         AND c.hidden = $6
         AND c.jid NOT LIKE '%@broadcast' AND c.jid NOT LIKE '%@newsletter'
       AND ($8::boolean IS NULL OR c.pinned<$8 OR (c.pinned=$8 AND (
           ($9::timestamptz IS NOT NULL AND (c.last_message_at<$9 OR c.last_message_at IS NULL)) OR
-          (c.last_message_at IS NOT DISTINCT FROM $9::timestamptz AND (c.account_id,c.jid)>($10::uuid,$11::text)))))
-      ORDER BY c.pinned DESC, c.last_message_at DESC NULLS LAST, c.account_id ASC, c.jid ASC
-      LIMIT $7`,
-    [userId, q.accountId ?? null, q.category ?? null, q.groups ?? null, q.search?.trim() || null, q.hidden ?? false, q.limit+1, cursor?.p ?? null, cursor?.t ?? null, cursor?.a ?? null, cursor?.j ?? null],
-  );
-  const { rows: counts } = await pool.query(
+          (c.last_message_at IS NOT DISTINCT FROM $9::timestamptz AND (c.account_id,c.jid)>($10::uuid,$11::text)))))`;
+  const order = (t: string) => `${t}.pinned DESC, ${t}.last_message_at DESC NULLS LAST, ${t}.account_id ASC, ${t}.jid ASC`;
+  // La lista y los contadores por categoría van en paralelo (dos conexiones del pool).
+  const [{ rows }, { rows: counts }] = await Promise.all([pool.query(
+    search
+      ? `SELECT c.*, COALESCE(c.name, ct.name) AS name, ct.pn, a.label AS account_label, a.kind AS account_kind, a.status AS account_status
+           FROM wa_chats c JOIN wa_accounts a ON a.id = c.account_id
+           LEFT JOIN LATERAL ${whoSql('c.account_id', 'c.jid')} ct ON true
+          WHERE ${filters} AND COALESCE(c.name, ct.name) ILIKE '%' || $5 || '%'
+          ORDER BY ${order('c')} LIMIT $7`
+      : `SELECT p.*, COALESCE(p.name, ct.name) AS name, ct.pn
+           FROM (SELECT c.*, a.label AS account_label, a.kind AS account_kind, a.status AS account_status
+                   FROM wa_chats c JOIN wa_accounts a ON a.id = c.account_id
+                  WHERE ${filters} AND $5::text IS NULL
+                  ORDER BY ${order('c')} LIMIT $7) p
+           LEFT JOIN LATERAL ${whoSql('p.account_id', 'p.jid')} ct ON true
+          ORDER BY ${order('p')}`,
+    [userId, q.accountId ?? null, q.category ?? null, q.groups ?? null, search, q.hidden ?? false, q.limit+1, cursor?.p ?? null, cursor?.t ?? null, cursor?.a ?? null, cursor?.j ?? null],
+  ), pool.query(
     `SELECT c.category, count(*)::int AS n, sum(CASE WHEN c.unread > 0 THEN 1 ELSE 0 END)::int AS unread
        FROM wa_chats c JOIN wa_accounts a ON a.id = c.account_id
       WHERE a.user_id = $1 AND a.removed_at IS NULL AND ${visibleWaChatSql()} AND NOT c.hidden AND ($2::uuid IS NULL OR c.account_id = $2)
@@ -200,7 +211,7 @@ export async function listChats(userId: string, q: { accountId?: string; categor
         AND c.jid NOT LIKE '%@broadcast' AND c.jid NOT LIKE '%@newsletter'
       GROUP BY c.category`,
     [userId, q.accountId ?? null, q.groups ?? null],
-  );
+  )]);
   const hasMore=rows.length>q.limit;
   const page=rows.slice(0,q.limit), last=page.at(-1);
   const raw=last ? Buffer.from(JSON.stringify({p:last.pinned,t:last.last_message_at ? new Date(last.last_message_at).toISOString() : null,a:last.account_id,j:last.jid})).toString('base64url') : '';

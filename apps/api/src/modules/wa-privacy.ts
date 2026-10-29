@@ -3,13 +3,21 @@ import {lockWaLease,WaLeaseLost} from './wa-lease.ts';
 import { enqueueOutbox, pool, tx, type Tx } from '../db.ts';
 import { notFound } from '../errors.ts';
 
-/** List queries keep the account gate on the account row, avoiding one scan per chat. */
+/**
+ * List queries keep the account gate on the account row, avoiding one scan per chat.
+ * A chat is hidden if it or its LID/number twin is locked. The twin checks are two equality anti-joins
+ * (index on pkey and wa_jid_alias_pn): the old OR join compared every alias with every locked chat (~55 ms per list).
+ * The "twin is the chat itself" case is already covered by wa_locked IS NOT TRUE.
+ */
 export function visibleWaChatSql(chat='c',account='a') {
   return `wa_account_visible(${account}.id) AND NOT ${chat}.privacy_only AND ${chat}.wa_locked IS NOT TRUE AND NOT EXISTS (
     SELECT 1 FROM wa_jid_alias privacy_alias JOIN wa_chats privacy_lock
-      ON privacy_lock.account_id=privacy_alias.account_id AND (privacy_lock.jid=privacy_alias.lid OR privacy_lock.jid=privacy_alias.pn)
-    WHERE privacy_alias.account_id=${chat}.account_id AND (privacy_alias.lid=${chat}.jid OR privacy_alias.pn=${chat}.jid)
-      AND privacy_lock.wa_locked IS TRUE)`;
+      ON privacy_lock.account_id=privacy_alias.account_id AND privacy_lock.jid=privacy_alias.lid
+    WHERE privacy_alias.account_id=${chat}.account_id AND privacy_alias.pn=${chat}.jid AND privacy_lock.wa_locked IS TRUE)
+  AND NOT EXISTS (
+    SELECT 1 FROM wa_jid_alias privacy_alias JOIN wa_chats privacy_lock
+      ON privacy_lock.account_id=privacy_alias.account_id AND privacy_lock.jid=privacy_alias.pn
+    WHERE privacy_alias.account_id=${chat}.account_id AND privacy_alias.lid=${chat}.jid AND privacy_lock.wa_locked IS TRUE)`;
 }
 
 export async function requireWaVisible(db: typeof pool | Tx, accountId: string, jid: string) {

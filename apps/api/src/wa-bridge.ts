@@ -20,6 +20,7 @@ import { hostname } from 'node:os';
 import pino from 'pino';
 import makeWASocket, { Browsers, DisconnectReason, fetchLatestWaWebVersion, jidNormalizedUser, makeCacheableSignalKeyStore } from 'baileys';
 import { pool,tx } from './db.ts';
+import { startWatchdog } from './watchdog.ts';
 import {
   bridgeToTieComs, chatFromWa, dbAuthState, groupRow, msgRow, notifyOwner, organizeAccount, setStatus as persistStatus, skipJid, storeMessages, tsOf,
   upsertChats, upsertContacts, storeGroupMembers, type ChatRow, type MsgRow, type Session,
@@ -424,8 +425,10 @@ let wake: (() => void) | null = null;
 let leaseHeartbeat: ReturnType<typeof startWaLeaseHeartbeat<Session>> | null=null;
 let shutdown:Promise<void>|null=null;
 
+let watchdog: ReturnType<typeof startWatchdog> | null = null;
 function requestStop() {
   stop=true;
+  watchdog?.stop();
   leaseHeartbeat?.stop();
   if(!shutdown) {
     const active=[...sessions.values()];
@@ -443,8 +446,12 @@ async function main() {
   listener.on('notification', () => wake?.());
   leaseHeartbeat=startWaLeaseHeartbeat(()=>[...sessions.values()].filter(s=>!s.leasePaused),BRIDGE_ID,LEASE_SECONDS,stopLocal);
   console.log(`[wa] puente ${BRIDGE_ID} iniciado`);
+  // Si un tick queda colgado (p. ej. una consulta sin respuesta tras caerse la BD), sale y Docker lo reinicia.
+  // 10 min: una vuelta puede enviar hasta 20 mensajes y cada envío a WhatsApp puede tardar.
+  if (!stop) watchdog = startWatchdog('wa', Number(process.env.WATCHDOG_STALL_MS ?? 600_000));
   while (!stop) {
     try { await tick(); } catch (e: any) { console.error('[wa] error en ciclo', e?.message); }
+    watchdog?.beat();
     if(stop) break;
     await new Promise<void>((r) => { wake = r; setTimeout(r, 5000); });
     wake = null;

@@ -32,6 +32,7 @@ import { deliverWebhook as deliverMcpWebhook, queueSharedVoiceNotes, transcribeW
 import { pushWaDrafts } from './modules/push.ts';
 import { previewItem as previewReading, scanWaReading } from './modules/reading.ts';
 import { reapCalls, summarizeCall } from './modules/calls.ts';
+import { startWatchdog } from './watchdog.ts';
 
 const WORKER_ID = `${hostname()}:${process.pid}`;
 const LEASE_SECONDS = 120;
@@ -227,6 +228,8 @@ async function loop() {
       console.error('[worker] error en ciclo', e.message);
       await new Promise((r) => setTimeout(r, 3000));
     }
+    // Una vuelta completa (con o sin error) cuenta como vivo; el carril lento puede tardar minutos y no se vigila.
+    watchdog?.beat();
   }
 }
 
@@ -242,12 +245,15 @@ async function slowLoop() {
   }
 }
 
-process.on('SIGTERM', () => { stop = true; });
-process.on('SIGINT', () => { stop = true; });
+let watchdog: ReturnType<typeof startWatchdog> | null = null;
+process.on('SIGTERM', () => { stop = true; watchdog?.stop(); });
+process.on('SIGINT', () => { stop = true; watchdog?.stop(); });
 console.log(`[worker] ${WORKER_ID} iniciado`);
 // Igual que el API: aplica migraciones pendientes antes de trabajar (evita consultas a columnas que aún no existen).
 void (async () => {
   if (process.env.MIGRATE_ON_START !== 'false') await migrate().catch((e) => console.error('[worker] migraciones', e?.message));
+  // Después de migrar: una migración larga no es un ciclo congelado.
+  if (!stop) watchdog = startWatchdog('worker');
   await Promise.all([loop(), slowLoop()]);
   await pool.end();
 })();

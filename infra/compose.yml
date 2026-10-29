@@ -54,7 +54,14 @@ services:
     environment:
       INSTANCE_ID: worker-1
       DB_POOL_MAX: "5"
-    healthcheck: { disable: true }
+    healthcheck:
+      # Latido del ciclo (src/watchdog.ts): sin vueltas en 2 min se ve «unhealthy»; a los 5 min el proceso sale solo.
+      # find y no node: un segundo node dentro de un límite de 256M cada 30 s pesa.
+      test: ["CMD-SHELL", "find /tmp/worker.alive -mmin -2 | grep -q ."]
+      interval: 30s
+      timeout: 5s
+      retries: 2
+      start_period: 120s
     deploy:
       resources:
         limits: { cpus: "0.5", memory: 256M, pids: 64 }
@@ -67,7 +74,14 @@ services:
       INSTANCE_ID: wa-1
       DB_POOL_MAX: "4"
     stop_grace_period: 15s
-    healthcheck: { disable: true }
+    healthcheck:
+      # Latido del ciclo (src/watchdog.ts): sin vueltas en 2 min se ve «unhealthy»; a los 5 min el proceso sale solo.
+      # find y no node: un segundo node dentro de un límite de 256M cada 30 s pesa.
+      test: ["CMD-SHELL", "find /tmp/wa.alive -mmin -6 | grep -q ."]
+      interval: 30s
+      timeout: 5s
+      retries: 2
+      start_period: 120s
     deploy:
       resources:
         limits: { cpus: "0.75", memory: 512M, pids: 128 }

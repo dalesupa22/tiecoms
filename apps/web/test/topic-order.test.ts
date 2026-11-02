@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { TOPIC_ALL, filterForEntry, filterForMessage, orderTopicsForDock, topicUnreadCounts } from '../src/topic-order.ts';
+import { TOPIC_ALL, filterForEntry, filterForMessage, firstPendingIn, nextTopicWithPending, orderTopicsForDock, pendingInView, topicUnreadCounts } from '../src/topic-order.ts';
 
 const tp = (id: string, position: number, archivedAt: string | null = null) => ({ id, position, archivedAt });
 // Orden guardado (arrastre): C, A, D, B. Llegan desordenados a propósito.
@@ -62,5 +62,36 @@ describe('en qué tema abre el chat', () => {
     expect(filterForEntry(ms, 3, 'danny', active)).toBe('A');
     expect(filterForEntry(ms, 4, 'danny', active)).toBeNull();
     expect(filterForEntry(ms, 5, 'danny', active)).toBeNull();
+  });
+});
+
+describe('CH028: pendientes en la vista y siguiente tema', () => {
+  const dock = [tp('C', 0), tp('A', 1), tp('D', 2)];
+  it('la píldora cuenta solo lo del tema que veo; «Todo» suma todo', () => {
+    const u = { A: 9, D: 80, '': 3 };
+    expect(pendingInView(u, 'A')).toBe(9);
+    expect(pendingInView(u, 'C')).toBe(0);
+    expect(pendingInView(u, '')).toBe(3);
+    expect(pendingInView(u, TOPIC_ALL)).toBe(92);
+  });
+  it('al día aquí: el siguiente tema con pendientes en el orden de la fila, «General» al final', () => {
+    expect(nextTopicWithPending(dock, { D: 4, C: 2 }, 'A')).toEqual({ id: 'C', n: 2 });
+    expect(nextTopicWithPending(dock, { D: 4, '': 9 }, 'A')).toEqual({ id: 'D', n: 4 });
+    expect(nextTopicWithPending(dock, { C: 2 }, 'A')).toEqual({ id: 'C', n: 2 });
+    expect(nextTopicWithPending(dock, { '': 5 }, 'D')).toEqual({ id: '', n: 5 });
+    expect(nextTopicWithPending(dock, { A: 1 }, '')).toEqual({ id: 'A', n: 1 });
+  });
+  it('sin sugerencia si aún hay pendientes aquí, si veo «Todo» o si no queda nada', () => {
+    expect(nextTopicWithPending(dock, { A: 1, D: 4 }, 'A')).toBeNull();
+    expect(nextTopicWithPending(dock, { D: 4 }, TOPIC_ALL)).toBeNull();
+    expect(nextTopicWithPending(dock, {}, 'A')).toBeNull();
+  });
+  it('primer pendiente de un tema, sin contar lo ya visto ni lo mío', () => {
+    const active = new Set(['A', 'B']);
+    const ms = [msg(2, 'A', 'danny'), msg(3, 'B'), msg(4, 'A'), msg(5, 'A'), msg(6, null)];
+    expect(firstPendingIn(ms, 1, 'danny', active, 'A')).toBe(4);
+    expect(firstPendingIn(ms, 1, 'danny', active, 'A', new Set([4]))).toBe(5);
+    expect(firstPendingIn(ms, 1, 'danny', active, '')).toBe(6);
+    expect(firstPendingIn(ms, 6, 'danny', active, 'A')).toBeNull();
   });
 });

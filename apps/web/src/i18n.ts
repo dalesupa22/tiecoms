@@ -166,7 +166,7 @@ const es = {
   'update.web': 'Hay una versión nueva de chaggu.', 'update.reload': 'Recargar',
   'update.desktop': 'Actualización disponible · chaggu {v} para escritorio.', 'update.download': 'Descargar',
   // Temas (docs/TEMAS.md)
-  'topic.unreadN': '{n} sin leer', 'topic.all': 'Todo', 'topic.general': 'General', 'topic.generalHint': 'Solo los mensajes sin tema', 'topic.allHint': 'Todos los mensajes, con y sin tema', 'topic.new': 'Nuevo', 'topic.newFree': 'Nuevo · {n} libre', 'topic.newFreeN': 'Nuevo · {n} libres', 'topic.archivedN': 'Archivados {n}',
+  'topic.unreadN': '{n} sin leer', 'topic.nextPending': '✓ Al día aquí · Siguiente: {name} ({n}) →', 'topic.all': 'Todo', 'topic.general': 'General', 'topic.generalHint': 'Solo los mensajes sin tema', 'topic.allHint': 'Todos los mensajes, con y sin tema', 'topic.new': 'Nuevo', 'topic.newFree': 'Nuevo · {n} libre', 'topic.newFreeN': 'Nuevo · {n} libres', 'topic.archivedN': 'Archivados {n}',
   'topic.bar': 'Temas del chat', 'topic.newTitle': 'Nuevo tema', 'topic.namePh': 'Finanzas', 'topic.left': 'Quedan {n} de {max}.', 'topic.create': 'Crear',
   'topic.full': 'Ya hay {max} temas', 'topic.fullHint': 'Archiva los que ya no uses: mantén presionada su banderita (o clic derecho).',
   'topic.rename': 'Renombrar', 'topic.renameTitle': 'Renombrar tema', 'topic.color': 'Cambiar color', 'topic.archive': 'Archivar', 'topic.archiveHint': 'Sale de la fila. Sus mensajes quedan con etiqueta gris.',
@@ -673,14 +673,14 @@ const es = {
   // Barra de arriba: ✎ Mensaje nuevo · ＋ Crear, y búsqueda de personas, grupos y chats (docs/GRUPOS.md)
   'quick.create': 'Crear', 'issue.where': 'Grupo o chat', 'compose.multi': 'Chat con varias personas', 'compose.tip': 'Toca una o varias personas. El 💬 abre su chat directo.', 'compose.addMore': 'Agregar a alguien más…', 'compose.tipSearch': 'Toca o pulsa Enter para marcar y sigue buscando. El 💬 abre su chat directo.', 'compose.openWith': 'Abrir chat con {name}',
   'compose.multiHint': 'Elige a 2 o más personas. Pueden ser de tu equipo o de otras empresas.', 'compose.recent': 'Recientes',
-  'compose.search': 'Buscar persona, empresa o grupo', 'search.people': 'Personas', 'search.groups': 'Grupos', 'search.chats': 'Chats',
+  'compose.search': 'Buscar persona, chat, grupo o empresa', 'search.people': 'Personas', 'search.groups': 'Grupos', 'search.chats': 'Chats',
   'search.opensChat': 'Abre el chat', 'search.none': 'Nada coincide con «{q}».', 'common.clear': 'Borrar', 'grp.foldMenu': 'Plegar y desplegar',
   'dm.search': 'Buscar personas, grupos o chats', 'grp.search': 'Buscar grupos, empresas o personas',
   // Bandeja ordenada, Lista/Árbol y chats largos (docs/GRUPOS.md, 27-sep-2026)
   'inbox.list': 'Lista', 'inbox.tree': 'Árbol', 'inbox.view': 'Vista de grupos', 'inbox.pinned': 'Fijados', 'inbox.recent': 'Recientes',
   'inbox.tab.all': 'Todo', 'inbox.tab.groups': 'Grupos', 'inbox.tab.dms': 'DMs', 'inbox.tabs': 'Bandeja', 'inbox.filters': 'Filtros',
   'inbox.fUnread': 'Sin leer', 'inbox.fMentions': 'Menciones', 'inbox.nothing': 'Nada por aquí.', 'inbox.internal': 'Solo tu empresa',
-  'chat.newMessages': '{n} mensajes nuevos', 'chat.newMessagesOne': '1 mensaje nuevo', 'chat.newAbove': '↑ {n} nuevos',
+  'chat.newMessages': '{n} mensajes nuevos', 'chat.newHere': 'Nuevos', 'chat.newMessagesOne': '1 mensaje nuevo', 'chat.newAbove': '↑ {n} nuevos',
   'chat.jumpLatest': 'Ir al final', 'chat.jumpNew': 'Ir a los mensajes nuevos', 'chat.jumpMention': 'Ir a la mención',
   // Invitar desde «Agregar al grupo» (docs/GRUPOS.md, 28-sep-2026)
   'add.search': 'Nombre o correo', 'add.searchEmail': 'Escribe el correo de la persona', 'add.addN': 'Agregar ({n})',
@@ -1237,7 +1237,7 @@ const en: Record<Key, string> = {
   'update.web': 'A new version of chaggu is available.', 'update.reload': 'Reload',
   'update.desktop': 'Update available · chaggu {v} for desktop.', 'update.download': 'Download',
   // Topics (docs/TEMAS.md)
-  'topic.unreadN': '{n} unread', 'topic.all': 'All', 'topic.general': 'General', 'topic.generalHint': 'Only messages without a topic', 'topic.allHint': 'Every message, with or without a topic', 'topic.new': 'New', 'topic.newFree': 'New · {n} left', 'topic.newFreeN': 'New · {n} left', 'topic.archivedN': 'Archived {n}',
+  'topic.unreadN': '{n} unread', 'topic.nextPending': '✓ All caught up here · Next: {name} ({n}) →', 'topic.all': 'All', 'topic.general': 'General', 'topic.generalHint': 'Only messages without a topic', 'topic.allHint': 'Every message, with or without a topic', 'topic.new': 'New', 'topic.newFree': 'New · {n} left', 'topic.newFreeN': 'New · {n} left', 'topic.archivedN': 'Archived {n}',
   'topic.bar': 'Chat topics', 'topic.newTitle': 'New topic', 'topic.namePh': 'Finance', 'topic.left': '{n} of {max} left.', 'topic.create': 'Create',
   'topic.full': 'There are already {max} topics', 'topic.fullHint': 'Archive the ones you no longer use: long-press its flag (or right-click).',
   'topic.rename': 'Rename', 'topic.renameTitle': 'Rename topic', 'topic.color': 'Change color', 'topic.archive': 'Archive', 'topic.archiveHint': 'Leaves the row. Its messages keep a gray tag.',
@@ -1722,13 +1722,13 @@ const en: Record<Key, string> = {
   // Top bar: ✎ New message · ＋ Create, and search for people, groups and chats (docs/GRUPOS.md)
   'quick.create': 'Create', 'issue.where': 'Group or chat', 'compose.multi': 'Chat with several people', 'compose.tip': 'Tap one or more people. 💬 opens their direct chat.', 'compose.addMore': 'Add someone else…', 'compose.tipSearch': 'Tap or press Enter to pick, then keep searching. 💬 opens their direct chat.', 'compose.openWith': 'Open chat with {name}',
   'compose.multiHint': 'Pick 2 or more people. They can be on your team or at other companies.', 'compose.recent': 'Recent',
-  'compose.search': 'Search a person, company or group', 'search.people': 'People', 'search.groups': 'Groups', 'search.chats': 'Chats',
+  'compose.search': 'Search a person, chat, group or company', 'search.people': 'People', 'search.groups': 'Groups', 'search.chats': 'Chats',
   'search.opensChat': 'Opens the chat', 'search.none': 'Nothing matches “{q}”.', 'common.clear': 'Clear', 'grp.foldMenu': 'Collapse and expand',
   'dm.search': 'Search people, groups or chats', 'grp.search': 'Search groups, companies or people',
   'inbox.list': 'List', 'inbox.tree': 'Tree', 'inbox.view': 'Groups view', 'inbox.pinned': 'Pinned', 'inbox.recent': 'Recent',
   'inbox.tab.all': 'All', 'inbox.tab.groups': 'Groups', 'inbox.tab.dms': 'DMs', 'inbox.tabs': 'Inbox', 'inbox.filters': 'Filters',
   'inbox.fUnread': 'Unread', 'inbox.fMentions': 'Mentions', 'inbox.nothing': 'Nothing here.', 'inbox.internal': 'Your company only',
-  'chat.newMessages': '{n} new messages', 'chat.newMessagesOne': '1 new message', 'chat.newAbove': '↑ {n} new',
+  'chat.newMessages': '{n} new messages', 'chat.newHere': 'New', 'chat.newMessagesOne': '1 new message', 'chat.newAbove': '↑ {n} new',
   'chat.jumpLatest': 'Jump to latest', 'chat.jumpNew': 'Jump to new messages', 'chat.jumpMention': 'Jump to mention',
   // Invite from «Add to group» (docs/GRUPOS.md, 28-sep-2026)
   'add.search': 'Name or email', 'add.searchEmail': "Type the person's email", 'add.addN': 'Add ({n})',

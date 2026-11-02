@@ -64,3 +64,30 @@ export function filterForEntry(messages: readonly TopicMessage[], readFrom: numb
   const first = messages.find((m) => countsAsUnread(m, readFrom, meId));
   return first?.topicId && activeIds.has(first.topicId) ? first.topicId : null;
 }
+
+/**
+ * Pendientes en lo que estoy viendo (CH028, «↑ N nuevos» que no bajaba): «Todo» (o un chat sin temas) suma todos;
+ * un tema, solo los suyos; «General» ('') los sin tema. `unread` viene de topicUnreadCounts sin lo ya visto.
+ */
+export function pendingInView(unread: Readonly<Record<string, number>>, view: string): number {
+  if (view === TOPIC_ALL) return Object.values(unread).reduce((a, b) => a + b, 0);
+  return unread[view] ?? 0;
+}
+
+/**
+ * «Ponerme al día» tema por tema (CH028: «cuando una conversación tiene muchos temas y muchos sin leer me pierdo»).
+ * Estoy al día en el tema que veo y quedan pendientes en otros: el siguiente con algo para mí, en el orden de la fila
+ * («General» al final). null si no queda nada o si veo «Todo».
+ */
+export function nextTopicWithPending<T extends OrderTopic>(dock: readonly T[], unread: Readonly<Record<string, number>>, view: string): { id: string; n: number } | null {
+  if (view === TOPIC_ALL || (unread[view] ?? 0) > 0) return null;
+  // La fila ya pone primero los temas con pendientes (orderTopicsForDock): el primero de ellos; «General» al final.
+  const id = [...dock.map((x) => x.id), ''].find((k) => k !== view && (unread[k] ?? 0) > 0);
+  return id == null ? null : { id, n: unread[id]! };
+}
+
+/** Primer pendiente de ese tema ('' = sin tema) entre los mensajes cargados, sin contar los ya vistos. */
+export function firstPendingIn(messages: readonly TopicMessage[], readFrom: number, meId: string | null | undefined, activeIds: ReadonlySet<string>, key: string, seen: ReadonlySet<number> = new Set()): number | null {
+  const m = messages.find((x) => !seen.has(x.seq) && countsAsUnread(x, readFrom, meId) && (x.topicId && activeIds.has(x.topicId) ? x.topicId : '') === key);
+  return m?.seq ?? null;
+}

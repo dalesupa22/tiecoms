@@ -5,7 +5,7 @@ import { LONG_TEXT_LIMIT, textFile } from '../rich-text.ts';
 import { usePersonalPreferences, chatAppearanceStyle } from '../personal-prefs.ts';
 import { PersonalChatDialog } from './PersonalChats.tsx';
 import { isTaskActivity } from '../chat-activity.ts';
-import { TOPIC_ALL, filterForEntry, filterForMessage, topicUnreadCounts } from '../topic-order.ts';
+import { TOPIC_ALL, filterForEntry, filterForMessage, firstPendingIn, nextTopicWithPending, orderTopicsForDock, pendingInView, topicUnreadCounts } from '../topic-order.ts';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import type { AttachmentDTO, BootstrapDTO, ConversationDTO, IssueDTO, MessageDTO } from '@tiecoms/contracts';
 import type { PendingMessage } from '@tiecoms/client-core';
@@ -72,14 +72,8 @@ type Row =
 
 const draftKey = (id: string) => `tiecoms:draft:${id}`;
 const excerpt = (s: string, n = 90) => s.replace(/\s+/g, ' ').trim().slice(0, n);
-/** Mensajes vistos por delante del cursor de lectura, por persona y chat (solo en memoria, se podan al avanzar el cursor). */
-const seenAhead = new Map<string, Set<number>>();
-function seenAheadFor(id: string): Set<number> {
-  const key = `${client.getState().data?.me.id ?? ''}:${id}`;
-  let s = seenAhead.get(key);
-  if (!s) seenAhead.set(key, (s = new Set()));
-  return s;
-}
+/** Mensajes vistos por delante del cursor de lectura, por persona y chat: viven en el cliente (la lista los descuenta). */
+const seenAheadFor = (id: string): Set<number> => client.seenAhead(id);
 
 /** Panel dentro de la vista en paralelo (Split.tsx): activo = el del URL; count = cuántos hay abiertos. */
 export interface PaneProps { size?: PaneSizing; active: boolean; count: number; onClose: () => void; onOnly: () => void; pinned?: boolean; onPin?: () => void; onTint?: (anchor: HTMLElement) => void; onCollapse?: () => void }
@@ -424,6 +418,11 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
     const msgs = local?.messages ?? [];
     return topicUnreadCounts(seen.size ? msgs.filter((m) => !seen.has(m.seq)) : msgs, readNow, d?.me.id, activeTopicIds);
   }, [local?.messages, readNow, activeTopicIds, seenTick]);
+  // CH028: lo pendiente en lo que veo (la píldora «↑ N nuevos» ya no cuenta los otros temas) y el siguiente tema con pendientes.
+  const topicView = !activeTopicIds.size || showAll ? TOPIC_ALL : activeFilter ?? '';
+  const pendingHere = pendingInView(topicUnread, topicView);
+  const nextTopic = useMemo(() => (embedded || !activeTopicIds.size ? null : nextTopicWithPending(orderTopicsForDock(topics, topicUnread), topicUnread, topicView)),
+    [embedded, activeTopicIds, topics, topicUnread, topicView]);
 
   // Mantiene la vista abajo al llegar mensajes, y la posición al cargar historial antiguo.
   useLayoutEffect(() => {
@@ -577,6 +576,7 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
       }
       if (visibleRead.current.size !== seenBefore) setSeenTick((n) => n + 1);
       client.markRead(id, observedRead.current);
+      if (visibleRead.current.size !== seenBefore || visibleRead.current.size) client.refreshSeenAhead(id);
     }
   }
   const pendingMentionsRef = useRef<number[]>([]);
@@ -629,6 +629,14 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
     const seq = pendingMentions[0];
     if (seq == null) return;
     jumpTo(seq);
+  };
+  /** «Siguiente: Tema (n) →»: cambia al tema y deja a la vista su primer pendiente. */
+  const goNextTopic = () => {
+    if (!nextTopic) return;
+    const seq = firstPendingIn(local?.messages ?? [], readNow, d.me.id, activeTopicIds, nextTopic.id, visibleRead.current);
+    if (nextTopic.id && seq != null) { jumpTo(seq); return; }
+    setTopicFilter(nextTopic.id || null);
+    if (seq != null) setTimeout(() => document.getElementById(`msg-${id}-${seq}`)?.scrollIntoView({ block: 'center' }), 60);
   };
   const jumpToNewLine = () => {
     input.current?.blur();
@@ -1018,8 +1026,13 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
         {placementFailed && <div className="error" role="alert">{t('chat.unreadLoadFailed')} <button className="link-btn" disabled={local?.loading} onClick={() => void retryUnreadHistory()}>{t('chat.retryUnread')}</button></div>}
         <div className="msgs-wrap">
         {/* El número es el de ahora (no el de al abrir): baja al leer y la píldora se va cuando no queda nada. */}
-        {nav.lineAbove && entry && newLine != null && conv.unread > 0 && (
-          <button className="jump-new" onClick={jumpToNewLine} aria-label={t('chat.jumpNew')} title={t('chat.jumpNew')}>{t('chat.newAbove', { n: conv.unread })}</button>
+        {nav.lineAbove && entry && newLine != null && pendingHere > 0 && (
+          <button className="jump-new" onClick={jumpToNewLine} aria-label={t('chat.jumpNew')} title={t('chat.jumpNew')}>{t('chat.newAbove', { n: pendingHere })}</button>
+        )}
+        {nextTopic && !(nav.lineAbove && pendingHere > 0) && (
+          <button className="jump-new jump-next-topic" onClick={goNextTopic} data-testid="next-topic">
+            {t('topic.nextPending', { name: nextTopic.id ? topicById.get(nextTopic.id)?.name ?? '' : t('topic.general'), n: nextTopic.n })}
+          </button>
         )}
         <div className="msgs" style={chatAppearanceStyle(personalChat)} data-background={personalChat.background ?? 'default'} data-conv-id={id} ref={scroller} onScroll={onScroll} role="log" aria-live="polite">
           {local?.loading && !local.loaded && <div className="msg-sys">{t('common.loading')}</div>}
@@ -1030,7 +1043,8 @@ export function ConversationScreen({ id, embedded, pane, search }: { id: string;
           {activeFilter && local?.loaded && !rows.some((r) => r.kind === 'msg' || r.kind === 'links') && <div className="topic-empty">{t('topic.empty', { name: topicById.get(activeFilter)!.name })}</div>}
           {rows.map((r) => {
             if (r.kind === 'day') return <div key={r.key} className="day">{r.label}</div>;
-            if (r.kind === 'new') return <div key={r.key} id={`new-${id}`} className="new-line" role="separator">{entry && entry.unread === 1 ? t('chat.newMessagesOne') : t('chat.newMessages', { n: entry?.unread ?? 0 })}</div>;
+            // Con un tema o «General» elegido, el número del chat entero no corresponde a lo que se ve (CH028): solo «Nuevos».
+            if (r.kind === 'new') return <div key={r.key} id={`new-${id}`} className="new-line" role="separator">{topicView !== TOPIC_ALL ? t('chat.newHere') : entry && entry.unread === 1 ? t('chat.newMessagesOne') : t('chat.newMessages', { n: entry?.unread ?? 0 })}</div>;
             if (r.kind === 'links') return <LinkGroup key={r.key} d={d} msgs={r.msgs} menuFor={messageMenu} onExpand={() => setExpandedGroups((g) => new Set(g).add(r.key))} />;
             if (r.kind === 'pending') return <PendingRow key={r.key} p={r.p} />;
             const m = r.m;

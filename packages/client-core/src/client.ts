@@ -254,6 +254,34 @@ export class TieComsClient {
     this.set({ conversations: { ...this.state.conversations, [id]: next } });
     if (next.loaded && (patch.messages || patch.lastEventSeq !== undefined)) { this.dirtyConvs.add(id); this.schedulePersist(); }
   }
+  /**
+   * Mensajes que ya vi por delante del cursor de lectura (CH028). El servidor guarda un solo «leído hasta N» por
+   * chat: si leo un tema y en medio quedan mensajes de otros temas sin ver, el cursor no puede avanzar y la lista
+   * seguía mostrando todos como no leídos. Aquí se descuentan los ya vistos; se podan al avanzar el cursor.
+   * Solo en memoria y por sesión: al recargar vuelve a contar lo que diga el servidor.
+   */
+  private seenAheadByConv = new Map<string, Set<number>>();
+  seenAhead(id: string): Set<number> {
+    const key = `${this.state.data?.me.id ?? ''}:${id}`;
+    let s = this.seenAheadByConv.get(key);
+    if (!s) this.seenAheadByConv.set(key, (s = new Set()));
+    return s;
+  }
+  /** No leídos de un chat con su cursor, sin contar lo ya visto por delante de él. */
+  private unreadAfter(id: string, lastMessageSeq: number, lastReadSeq: number, historyFromSeq: number) {
+    const from = Math.max(lastReadSeq, historyFromSeq);
+    let seen = 0;
+    for (const s of this.seenAheadByConv.get(`${this.state.data?.me.id ?? ''}:${id}`) ?? []) if (s > from && s <= lastMessageSeq) seen++;
+    return Math.max(0, lastMessageSeq - from - seen);
+  }
+  /** Tras ver mensajes por delante del cursor: la lista, las pestañas y el título bajan ya. */
+  refreshSeenAhead(id: string) {
+    const c = this.state.data?.conversations.find((x) => x.id === id);
+    if (!c) return;
+    const unread = this.unreadAfter(id, c.lastMessageSeq, c.lastReadSeq, c.historyFromSeq);
+    if (unread !== c.unread) this.patchConversationMeta(id, { unread });
+  }
+
   private patchConversationMeta(id: string, patch: Partial<ConversationDTO>) {
     const d = this.state.data;
     if (!d) return;
@@ -656,7 +684,12 @@ export class TieComsClient {
         if (!newer || (newer.readRevision ?? 0) <= (c.readRevision ?? 0)) return c;
         return { ...c, lastReadSeq: newer.lastReadSeq, readRevision: newer.readRevision,
           unreadMentions: newer.unreadMentions,
-          unread: Math.max(0, c.lastMessageSeq - Math.max(newer.lastReadSeq, c.historyFromSeq)) };
+          unread: this.unreadAfter(c.id, c.lastMessageSeq, newer.lastReadSeq, c.historyFromSeq) };
+      });
+      // Lo ya visto por delante del cursor sigue sin contar tras un bootstrap de la misma sesión.
+      data.conversations = data.conversations.map((c) => {
+        const unread = Math.min(c.unread, this.unreadAfter(c.id, c.lastMessageSeq, c.lastReadSeq, c.historyFromSeq));
+        return unread === c.unread ? c : { ...c, unread };
       });
     }
     this.lastBootstrapAt = Date.now();
@@ -836,7 +869,7 @@ export class TieComsClient {
       ...(m.kind === 'text' ? { lastHumanPreview: humanPreviewOf(m) } : {}),
       // La pestaña «Enlaces» suma los enlaces nuevos sin esperar otro bootstrap.
       ...(m.kind === 'text' && c.linkCount !== undefined ? { linkCount: c.linkCount + new Set(m.body.match(/\bhttps?:\/\/[^\s<>"'`]+/gi) ?? []).size } : {}),
-      unread: Math.max(0, m.seq - Math.max(lastReadSeq, c.historyFromSeq)),
+      unread: this.unreadAfter(c.id, m.seq, lastReadSeq, c.historyFromSeq),
     };
     // Un solo cambio de estado: actualiza la fila y reordena para que la conversación con actividad suba.
     const d = this.state.data!;
@@ -1077,7 +1110,7 @@ export class TieComsClient {
     const generation = this.sessionGeneration;
     // Optimista: los contadores (lista, pestañas, temas, dock) bajan ya, no 400 ms + red después; al cambiar de chat
     // no se quedan con el número viejo. Sin tocar readRevision: la confirmación del servidor (o un bootstrap si falla) manda.
-    this.patchConversationMeta(id, { lastReadSeq: seq, unread: Math.max(0, c.lastMessageSeq - Math.max(seq, c.historyFromSeq)), ...(seq >= c.lastMessageSeq ? { unreadMentions: 0 } : {}) });
+    this.patchConversationMeta(id, { lastReadSeq: seq, unread: this.unreadAfter(id, c.lastMessageSeq, seq, c.historyFromSeq), ...(seq >= c.lastMessageSeq ? { unreadMentions: 0 } : {}) });
     clearTimeout(this.readTimers.get(id));
     this.readTimers.set(id, setTimeout(() => {
       this.readTimers.delete(id);
@@ -1386,7 +1419,7 @@ export class TieComsClient {
     const lastReadSeq = readRevision!==undefined ? seq : Math.max(c.lastReadSeq,seq);
     // unreadMentions viene del servidor (≥ 2026-10-07): la «@» se quita al leer la mención aunque haya más mensajes.
     const mentions = unreadMentions !== undefined ? { unreadMentions } : lastReadSeq >= c.lastMessageSeq ? { unreadMentions: 0 } : {};
-    this.patchConversationMeta(id, { ...(readRevision!==undefined ? {readRevision} : {}), lastReadSeq, unread: Math.max(0, c.lastMessageSeq - Math.max(lastReadSeq, c.historyFromSeq)), ...mentions });
+    this.patchConversationMeta(id, { ...(readRevision!==undefined ? {readRevision} : {}), lastReadSeq, unread: this.unreadAfter(id, c.lastMessageSeq, lastReadSeq, c.historyFromSeq), ...mentions });
   }
   private patchPreviewIfLast(m: MessageDTO) {
     const c = this.state.data?.conversations.find((x) => x.id === m.conversationId);

@@ -8,8 +8,8 @@ import { groupWorkspaces } from './Shell.tsx';
 import { CreateGroupDialog } from './Groups.tsx';
 import { navigate } from '../router.ts';
 import { directOtherId, Avatar, ConvAvatar, Modal, OrgMark, conversationTitle, orgById, personById } from '../ui.tsx';
-import { companyLine, destinationLabel, peopleByOrg, recentPeopleIds, searchGroups } from '../quick-search.ts';
-import { openChat, openDirect } from './Quick.tsx';
+import { companyLine, destinationLabel, peopleByOrg, recentPeopleIds, searchChats, searchGroups } from '../quick-search.ts';
+import { namerFor, openChat, openDirect } from './Quick.tsx';
 import { Formatted } from '../fmt.tsx';
 
 // ---------- Enlaces clicables en el texto ----------
@@ -46,11 +46,16 @@ export function NewChatDialog({ onClose }: { onClose: () => void }) {
   const list = useRef<HTMLDivElement>(null);
   const search = useRef<HTMLInputElement>(null);
   const searching = !!q.trim();
-  const orgs = useMemo(() => peopleByOrg(d, q), [d, q]);
+  // CH028: al buscar salen también los chats que ya tengo (directos, «Tú», chats de varias personas y sidechats),
+  // no solo personas y grupos. Quien ya tiene su directo entre ellos no se repite en Personas.
+  const chats = useMemo(() => (picked.length || !searching ? [] : searchChats(d, q, namerFor(d)).slice(0, 8)), [d, q, picked.length, searching]);
+  const inChats = useMemo(() => chats.filter((c) => c.kind === 'direct').flatMap((c) => c.memberIds.every((m) => m === d.me.id) ? [d.me.id] : c.memberIds.filter((m) => m !== d.me.id)), [chats, d.me.id]);
+  const orgs = useMemo(() => peopleByOrg(d, q, inChats), [d, q, inChats]);
   const groups = useMemo(() => (picked.length || !searching ? [] : searchGroups(d, q, { title: (c) => conversationTitle(d, c) }).slice(0, 6)), [d, q, picked.length, searching]);
   const recents = useMemo(() => recentPeopleIds(d).slice(0, 8).map((id) => personById(d, id)).filter((p): p is PersonDTO => !!p), [d]);
   // Lo que se recorre con el teclado: grupos encontrados y luego personas, en el orden en que se ven.
-  const items: ({ kind: 'group'; c: ConversationDTO } | { kind: 'person'; p: PersonDTO })[] = [
+  const items: ({ kind: 'chat' | 'group'; c: ConversationDTO } | { kind: 'person'; p: PersonDTO })[] = [
+    ...chats.map((c) => ({ kind: 'chat' as const, c })),
     ...groups.map((c) => ({ kind: 'group' as const, c })),
     ...orgs.flatMap((g) => g.people.map((p) => ({ kind: 'person' as const, p }))),
   ];
@@ -83,7 +88,7 @@ export function NewChatDialog({ onClose }: { onClose: () => void }) {
   });
   const choose = (it: (typeof items)[number] | undefined) => {
     if (!it || busy) return;
-    if (it.kind === 'group') openGroup(it.c);
+    if (it.kind !== 'person') openGroup(it.c);
     else toggle(it.p.id);
   };
   const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
@@ -153,6 +158,26 @@ export function NewChatDialog({ onClose }: { onClose: () => void }) {
             </div>
           </section>
         )}
+        {chats.length > 0 && (
+          <section>
+            <div className="picker-org">{t('search.chats')}</div>
+            {items.filter((x) => x.kind === 'chat').map((it) => {
+              const c = (it as { c: ConversationDTO }).c;
+              const title = conversationTitle(d, c);
+              const line = companyLine(d, c, title);
+              return (
+                <button key={c.id} type="button" role="option" aria-selected={isActive(it)} data-active={isActive(it) || undefined} data-testid={`compose-chat-${c.id}`}
+                  className={`person-row ${isActive(it) ? 'is-active' : ''}`} onClick={() => openGroup(c)}>
+                  <span className="compose-group-ico"><ConvAvatar c={c} size={26} /></span>
+                  <span className="grow" style={{ minWidth: 0 }}>
+                    <b className="ellipsis" style={{ display: 'block' }}>{title}</b>
+                    {line && <span className="conv-org ellipsis" style={{ display: 'block' }}>{line}</span>}
+                  </span>
+                </button>
+              );
+            })}
+          </section>
+        )}
         {groups.length > 0 && (
           <section>
             <div className="picker-org">{t('search.groups')}</div>
@@ -171,7 +196,7 @@ export function NewChatDialog({ onClose }: { onClose: () => void }) {
             })}
           </section>
         )}
-        {orgs.length === 0 && groups.length === 0 && <div className="hint" style={{ padding: 12 }}>{t('chat.nobody')}</div>}
+        {orgs.length === 0 && groups.length === 0 && chats.length === 0 && <div className="hint" style={{ padding: 12 }}>{t('chat.nobody')}</div>}
         {orgs.map((g) => (
           <section key={g.orgId}>
             <div className="picker-org"><OrgMark org={g.org} size={20} /><span>{g.org?.name ?? t('common.guests')}</span>{g.isMine && <span className="tag">{t('chat.myTeam')}</span>}</div>

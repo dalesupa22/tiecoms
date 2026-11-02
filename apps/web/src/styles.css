@@ -1092,6 +1092,7 @@ select.link-act { appearance: none; padding-right: 10px; }
 .jump-btn.is-mention { color: var(--badge-ink); font-size: 17px; }
 .jump-btn .pill { position: absolute; top: -6px; right: -6px; }
 .jump-new { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 5; border: 0; border-radius: 99px; padding: 6px 14px; background: var(--accent-fill); color: #fff; font-weight: 700; font-size: 12.5px; box-shadow: 0 4px 14px rgba(0, 0, 0, .16); cursor: pointer; white-space: nowrap; }
+.jump-next-topic { background: var(--surface); color: var(--ink); border: 1px solid var(--line); font-weight: 600; }
 
 /* ---------- Silenciar chats, «No molestar» y sonido (28-sep-2026) ---------- */
 .me-avatar { position: relative; display: inline-flex; flex: none; }

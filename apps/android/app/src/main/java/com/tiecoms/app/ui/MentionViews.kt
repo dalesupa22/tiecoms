@@ -259,10 +259,11 @@ fun RefPicker(query: String, data: BootstrapDTO, currentId: String, onPick: (Str
     }
 }
 
-/** Tarjeta de la persona al tocar una mención: Enviar mensaje. */
+/** Tarjeta de la persona al tocar una mención o a quien escribió en un grupo: Enviar mensaje (su directo). */
 @Composable
 fun PersonCardSheet(personId: String, onClose: () -> Unit, onDirect: (String) -> Unit) {
-    val data = LocalClient.current.state.collectAsStateWithLifecycle().value.data ?: return
+    val state = LocalClient.current.state.collectAsStateWithLifecycle().value
+    val data = state.data ?: return
     val p = Names.person(data, personId) ?: return
     FormSheet(p.name, onClose, tag = "personCard") {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -272,7 +273,7 @@ fun PersonCardSheet(personId: String, onClose: () -> Unit, onDirect: (String) ->
                 Text(listOfNotNull(Names.roleLine(p).ifBlank { null }, Names.org(data, p.orgId)?.name).joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
-        if (p.id != data.me.id) DialogButtons(onClose, stringResource(R.string.person_send_message), confirmTag = "personDirect") { onClose(); onDirect(p.id) }
+        if (p.id != data.me.id && p.id !in state.blockedUserIds) DialogButtons(onClose, stringResource(R.string.person_send_message), confirmTag = "personDirect") { onClose(); onDirect(p.id) }
     }
 }
 

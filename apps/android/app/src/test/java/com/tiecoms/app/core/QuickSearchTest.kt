@@ -40,21 +40,38 @@ class QuickSearchTest {
     )
     private val title: (ConversationDTO) -> String = { Names.conversationTitle(it, d, "Interno", "Conversación") }
 
-    @Test fun `personas sin directo tambien salen, nunca yo ni agentes`() {
+    @Test fun `personas sin directo tambien salen, nunca agentes`() {
         assertEquals("sin directo también sale", listOf("mar"), QuickSearch.people(d, "mariana").map { it.id })
-        assertTrue("nunca yo", QuickSearch.people(d, "ana").none { it.id == "me" })
+        assertTrue("yo no estorbo si no me nombran", QuickSearch.people(d, "mariana").none { it.id == "me" })
         assertTrue("los agentes no son personas a las que escribir", QuickSearch.people(d, "asist").isEmpty())
         assertTrue("sin texto, nada", QuickSearch.people(d, " ").isEmpty())
     }
 
     @Test fun `personas por empresa y cargo, primero quien empieza con lo escrito`() {
-        // «ana»: Ánalía empieza con lo escrito (sin tildes) y va antes que Mariana, que solo lo contiene.
-        assertEquals(listOf("ana2", "mar"), QuickSearch.people(d, "ana").map { it.id })
+        // «ana»: yo (Ana Ruiz) primero; Ánalía empieza con lo escrito (sin tildes) y va antes que Mariana, que solo lo contiene.
+        assertEquals(listOf("me", "ana2", "mar"), QuickSearch.people(d, "ana").map { it.id })
         assertEquals("por empresa", setOf("bob", "mar", "ana2"), QuickSearch.people(d, "ongoing").map { it.id }.toSet())
         assertEquals("por cargo", listOf("col"), QuickSearch.people(d, "pagos").map { it.id })
         assertEquals(2, QuickSearch.people(d, "ongoing", exclude = setOf("bob")).size)
         // Mismo prefijo: primero con quien tengo directo (Bob), luego por nombre.
         assertEquals(listOf("bob", "ana2", "mar"), QuickSearch.people(d, "ongoing").map { it.id })
+    }
+
+    @Test fun `me busco y me encuentro, tocarme abre Tu`() {
+        assertEquals("por mi nombre", "me", QuickSearch.people(d, "ruiz").firstOrNull()?.id)
+        for (w in listOf("yo", "tú", "notas", "conmigo", "me", "self")) assertEquals(w, "me", QuickSearch.people(d, w).firstOrNull()?.id)
+        assertEquals("por mi empresa", "me", QuickSearch.people(d, "xertify").firstOrNull()?.id)
+        assertTrue("salvo si me excluyen", QuickSearch.people(d, "ruiz", exclude = setOf("me")).isEmpty())
+        // Sin «Tú» todavía: no confundo cualquier directo con el mío (se crea con POST /me/notes).
+        assertNull(QuickSearch.direct(d, "me"))
+        val self = c("self", null, "direct", null, listOf("me"), "2026-09-27T11:00:00Z")
+        val withSelf = d.copy(conversations = d.conversations + self)
+        assertEquals("self", QuickSearch.direct(withSelf, "me")?.id)
+        val t: (ConversationDTO) -> String = { Names.conversationTitle(it, withSelf, "Interno", "Conversación") }
+        assertEquals("mi nombre solo encuentra «Tú», no todos mis chats", listOf("self"), QuickSearch.chats(withSelf, "ruiz", t, nowMs = 0).map { it.id })
+        assertEquals(listOf("self"), QuickSearch.chats(withSelf, "notas", t, nowMs = 0).map { it.id })
+        // Si «Tú» ya salió entre los chats, no me repito en «Personas».
+        assertEquals(setOf("me"), QuickSearch.directPeople(withSelf, listOf(self)))
     }
 
     @Test fun `grupos por nombre o empresa, sin hilos`() {
@@ -70,7 +87,7 @@ class QuickSearchTest {
         assertEquals("d1", QuickSearch.direct(d, "bob")?.id)
         assertNull(QuickSearch.direct(d, "mar"))
         assertEquals("el directo más reciente primero", listOf("col", "bob"), QuickSearch.recentPeopleIds(d))
-        assertEquals(setOf("me", "bob", "col"), QuickSearch.directPeople(d.conversations.filter { it.id == "d1" || it.id == "d2" || it.id == "m1" }))
+        assertEquals("yo no cuento (estoy en todos)", setOf("bob", "col"), QuickSearch.directPeople(d, d.conversations.filter { it.id == "d1" || it.id == "d2" || it.id == "m1" }))
     }
 
     @Test fun `destinos de nuevo asunto sin terceros, solo lectura ni hilos`() {

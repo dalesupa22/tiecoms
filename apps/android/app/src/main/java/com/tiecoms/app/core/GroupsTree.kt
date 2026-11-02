@@ -163,10 +163,15 @@ object GroupsTree {
         issues.filter { it.conversationId == conversationId && isActive(it) && (it.parentIssueId == null || issues.none { p -> p.id == it.parentIssueId && p.conversationId == conversationId }) }
             .sortedWith(compareBy<IssueDTO> { it.dueDate == null }.thenBy { it.dueDate ?: "" }.thenByDescending { it.createdAt }.thenBy { it.id })
 
+    /**
+     * Título, vista previa o nombre de quien participa. Mi propio nombre no cuenta (estoy en todos los chats): con él,
+     * «tú», «yo» o «notas» solo sale «Tú», mis notas (como en la web e iOS).
+     */
     private fun matchesText(d: BootstrapDTO, c: ConversationDTO, q: String, title: (ConversationDTO) -> String): Boolean {
         if (title(c).lowercase().contains(q)) return true
         if (c.lastMessagePreview?.lowercase()?.contains(q) == true) return true
-        return c.memberIds.any { id -> Names.person(d, id)?.name?.lowercase()?.contains(q) == true }
+        if (Gg.isSelfChat(c, d)) return QuickSearch.matchesMe(d, QuickSearch.fold(q))
+        return c.memberIds.any { id -> id != d.me.id && Names.person(d, id)?.name?.lowercase()?.contains(q) == true }
     }
 
     /** [tree]: pendientes del árbol (ReadTree.all); sin él, solo los no leídos propios. */

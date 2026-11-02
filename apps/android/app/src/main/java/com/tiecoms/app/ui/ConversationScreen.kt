@@ -1099,7 +1099,7 @@ fun ConversationScreen(
         // Hilo: «✓ Resolver y dejar el resultado» deja el resumen en este chat.
         else ReturnDialog(sideMeta, title, onClose = { sideReturn = false }, onReturned = { _, seq -> sideOpen = null; seq?.let { jumpTo(it) } })
     }
-    personCard?.let { pid -> PersonCardSheet(pid, onClose = { personCard = null }, onDirect = { uid -> act { val cid = client.createChat(listOf(uid), null).id; kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { onOpenConversation(cid, null) } } }) }
+    personCard?.let { pid -> PersonCardSheet(pid, onClose = { personCard = null }, onDirect = { uid -> act { val cid = openDirect(client, data, uid); kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { onOpenConversation(cid, null) } } }) }
     sideStart?.let { m -> SideStartSheet(meta, m, onClose = { sideStart = null; sidePreselect = emptyList() }, onStarted = { sid -> sideOpen = sid }, preselect = sidePreselect) }
 
     // ---------- gg de este chat: hoja, sugerencias de varios mensajes y su cola de diálogos ----------
@@ -1918,11 +1918,13 @@ internal fun MessageBubble(
         horizontalAlignment = if (item.mine) Alignment.End else Alignment.Start,
     ) {
         val avatarGap = if (showAvatars && !item.mine) 34.dp else 0.dp
+        // En un grupo, tocar el nombre o la foto de quien escribió abre su tarjeta con «Enviar mensaje» (su directo).
+        val tapAuthor = if (showAvatars && !item.mine && author != null) Modifier.clickable(onClickLabel = stringResource(R.string.person_send_message)) { onPerson(m.authorId) } else Modifier
         if (!item.mine && item.showAuthor) {
             Row(Modifier.padding(start = 12.dp + avatarGap, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(authorName, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold,
                     color = if (showAvatars) personColor(m.authorId) else MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false).testTag("author-${m.seq}"))
+                    modifier = Modifier.weight(1f, fill = false).then(tapAuthor).testTag("author-${m.seq}"))
                 Text(buildString { orgName?.let { append(" · "); append(it) }; if (pinnedHere) append("  📌") },
                     style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
@@ -1932,7 +1934,7 @@ internal fun MessageBubble(
         val fg = if (item.mine) chat.onMine else chat.onOther
         Row(verticalAlignment = Alignment.Bottom) {
         if (showAvatars && !item.mine) {
-            if (item.showAuthor) AuthorAvatar(author, m.authorId, 28.dp, Modifier.testTag("avatar-${m.seq}")) else Spacer(Modifier.width(28.dp))
+            if (item.showAuthor) AuthorAvatar(author, m.authorId, 28.dp, Modifier.clip(CircleShape).then(tapAuthor).testTag("avatar-${m.seq}")) else Spacer(Modifier.width(28.dp))
             Spacer(Modifier.width(6.dp))
         }
         var swipe by remember(m.id) { androidx.compose.runtime.mutableFloatStateOf(0f) }

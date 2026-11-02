@@ -151,6 +151,15 @@ class CallManager(private val app: Application, private val container: AppContai
                 }
             }
         }
+        // CH028: historial del teléfono. Activa cuando conecta el audio; anotada al terminar (PhoneLog).
+        scope.launch {
+            var prev: String? = null
+            _view.map { v -> v?.takeIf { it.guest == null }?.let { it.call.id to (it.phase == Phase.LIVE) } }.distinctUntilChanged().collect { cur ->
+                if (prev != null && prev != cur?.first) PhoneLog.ended(prev!!)
+                if (cur != null && cur.second) PhoneLog.live(cur.first)
+                prev = cur?.first
+            }
+        }
         // Estado que llega por el socket (quién está, si transcribe) sin tocar la conexión; terminada → se cierra.
         scope.launch {
             container.client.flatMapLatest { it.state }.map { it.calls }.distinctUntilChanged().collect { calls ->
@@ -173,16 +182,23 @@ class CallManager(private val app: Application, private val container: AppContai
         val v = _view.value
         if (v != null && v.call.conversationId == conversationId) { patch { copy(expanded = true) }; return@withLock }
         if (v != null) hangUpLocked()
-        connect(client.startCall(conversationId, kind), camera = kind == "video")
+        val j = client.startCall(conversationId, kind)
+        PhoneLog.outgoing(app, j.call.id, container.conversationName(j.call.conversationId), j.call.isVideo)
+        connect(j, camera = kind == "video")
     }
 
     /** Entrar desde el aviso «te están llamando», la franja «Unirse» o el historial. */
     suspend fun join(callId: String, camera: Boolean) = lock.withLock {
+        // La que sonaba se anota como entrante contestada; entrar a una en curso (franja, historial), como saliente.
+        val wasRinging = PhoneLog.isRinging(callId)
+        if (wasRinging) PhoneLog.answered(callId)
         dismissRing()
         val v = _view.value
         if (v?.call?.id == callId) { patch { copy(expanded = true) }; return@withLock }
         if (v != null) hangUpLocked()
-        connect(client.joinCall(callId), camera)
+        val j = try { client.joinCall(callId) } catch (e: Exception) { PhoneLog.ended(callId); throw e }
+        if (!wasRinging) PhoneLog.outgoing(app, j.call.id, container.conversationName(j.call.conversationId), j.call.isVideo)
+        connect(j, camera)
     }
 
     /** «Pasar aquí»: entra desde este dispositivo y, ya conectado, saca a mis otros dispositivos de la llamada. */
@@ -202,12 +218,14 @@ class CallManager(private val app: Application, private val container: AppContai
     /** «Ahora no»: deja de sonar aquí y en mis otros dispositivos (POST /calls/:id/decline). */
     fun decline(callId: String? = _ringing.value?.call?.id) {
         callId ?: return
+        PhoneLog.notAnswered(callId, android.telecom.DisconnectCause.REJECTED)
         if (_ringing.value?.call?.id == callId) dismissRing() else CallService.cancelIncoming(app, callId)
         scope.launch { runCatching { client.declineCall(callId) } }
     }
 
     /** `call.answered` / `call.declined` en otro dispositivo mío: aquí deja de sonar y se quita el aviso. */
     fun onElsewhere(callId: String) {
+        PhoneLog.notAnswered(callId, android.telecom.DisconnectCause.ANSWERED_ELSEWHERE)
         if (_ringing.value?.call?.id == callId) dismissRing()
         CallService.cancelIncoming(app, callId)
     }
@@ -333,6 +351,7 @@ class CallManager(private val app: Application, private val container: AppContai
             av.listAudioDevices().firstOrNull { routeOf(it.type) == r }?.let { av.chooseAudioDevice(it) }
         }
         patch { copy(route = r, speaker = r == Calls171.Route.SPEAKER) }
+        _view.value?.let { if (it.guest == null) PhoneLog.route(it.call.id, r) }
     }
 
     private fun routeOf(t: MediaDeviceType): Calls171.Route? = when (t) {
@@ -455,6 +474,7 @@ class CallManager(private val app: Application, private val container: AppContai
         ringJob?.cancel()
         // Deja de sonar a los 45 s si nadie contesta.
         ringJob = scope.launch { delay(Calls.RING_MS); dismissRing() }
+        PhoneLog.incoming(app, call.id, title ?: callerName, call.isVideo)
         if (container.foreground) startRingtone()
         else CallService.notifyIncoming(app, call, callerName, title)
     }
@@ -464,7 +484,11 @@ class CallManager(private val app: Application, private val container: AppContai
         _ringing.value = null
         ringJob?.cancel(); ringJob = null
         stopRingtone()
-        if (r != null) CallService.cancelIncoming(app, r.call.id)
+        if (r != null) {
+            // Si la contesté aquí, PhoneLog no hace nada; si no, queda como perdida en el historial del teléfono.
+            PhoneLog.notAnswered(r.call.id, android.telecom.DisconnectCause.MISSED)
+            CallService.cancelIncoming(app, r.call.id)
+        }
     }
 
     /** Mi tono de llamada (docs/SONIDOS.md) en bucle: un ciclo de 2,2 s repetido. No depende del interruptor de sonidos de mensaje. */

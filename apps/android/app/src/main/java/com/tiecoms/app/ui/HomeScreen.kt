@@ -516,7 +516,7 @@ fun DmsScreen(onOpen: (String) -> Unit, onNewMessage: () -> Unit, onDetails: (St
                         }
                     }
                     if (lastPinned >= 0 && lastPinned == list.lastIndex) items(mainPins, key = { "mp:" + it.key }) { p -> Box(Modifier.animateItem()) { MailPinRow(p, indent = 16.dp, iconSize = 44.dp) } }
-                    if (searching) quickSearchSections(data, quickResults, hidePeople = QuickSearch.directPeople(list), internalFallback, convFallback,
+                    if (searching) quickSearchSections(data, quickResults, hidePeople = QuickSearch.directPeople(data, list), internalFallback, convFallback,
                         onPerson = { p -> openPerson(p) }, onConv = onOpen)
                     item { Spacer(Modifier.heightIn(min = 24.dp)) }
                 }

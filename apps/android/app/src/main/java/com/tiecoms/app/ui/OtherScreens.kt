@@ -180,6 +180,17 @@ fun DetailsScreen(
                     }
                 }
             }
+            // CH028: participantes arriba (antes iban al fondo, tras agenda y asuntos): tocar el título del chat los muestra a la vista.
+            item { SectionHeader("${stringResource(R.string.participants)} · ${members.size}", Modifier.padding(horizontal = 16.dp, vertical = 8.dp).padding(top = 8.dp).semantics { heading() }) }
+            items(members, key = { it.id }) { PersonRow(it, data, onDirect = if (it.id != data.me.id && meta.kind != "direct" && it.id !in state.blockedUserIds) ({
+                scope.launch { runCatching { client.openDirect(it.id) }.onSuccess(onOpenConversation).onFailure { e -> container.toast(errorText(ctx, e)) } }
+            }) else null, blocked = it.id in state.blockedUserIds, onReport = { reportUser = it.id }, onBlock = { blockUser = it },
+                admin = GroupAdmins.isAdmin(meta, it.id), actions = GroupAdmins.actionsFor(meta, it, data.me.id), onAction = { a -> adminAction = a to it }) }
+            if (guests.isNotEmpty()) {
+                item { SectionHeader("${stringResource(R.string.guests)} · ${guests.size}", Modifier.padding(horizontal = 16.dp, vertical = 8.dp).semantics { heading() }) }
+                items(guests, key = { it.id }) { PersonRow(it, data, onDirect = null, blocked = it.id in state.blockedUserIds, onReport = { reportUser = it.id }, onBlock = { blockUser = it },
+                    admin = GroupAdmins.isAdmin(meta, it.id), actions = GroupAdmins.actionsFor(meta, it, data.me.id), onAction = { a -> adminAction = a to it }) }
+            }
             // SPEC-silencio §2: interruptor «Silenciar» con el tiempo restante.
             item(key = "mute") { HorizontalDivider(); MuteSwitchRow(meta); HorizontalDivider(); ChatSoundRow(meta); HorizontalDivider(); Spacer(Modifier.height(8.dp)) }
             if (canWork) {
@@ -199,16 +210,6 @@ fun DetailsScreen(
                     if (issues.isEmpty()) Text(stringResource(R.string.issue_no_issues), Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 items(issues, key = { "i" + it.id }) { Box(Modifier.padding(horizontal = 16.dp)) { IssueRow(it, data, showWhere = false, onOpen = onOpenIssue) } }
-            }
-            item { SectionHeader("${stringResource(R.string.participants)} · ${members.size}", Modifier.padding(horizontal = 16.dp, vertical = 8.dp).padding(top = 8.dp).semantics { heading() }) }
-            items(members, key = { it.id }) { PersonRow(it, data, onDirect = if (it.id != data.me.id && meta.kind != "direct" && it.id !in state.blockedUserIds) ({
-                scope.launch { runCatching { client.openDirect(it.id) }.onSuccess(onOpenConversation).onFailure { e -> container.toast(errorText(ctx, e)) } }
-            }) else null, blocked = it.id in state.blockedUserIds, onReport = { reportUser = it.id }, onBlock = { blockUser = it },
-                admin = GroupAdmins.isAdmin(meta, it.id), actions = GroupAdmins.actionsFor(meta, it, data.me.id), onAction = { a -> adminAction = a to it }) }
-            if (guests.isNotEmpty()) {
-                item { SectionHeader("${stringResource(R.string.guests)} · ${guests.size}", Modifier.padding(horizontal = 16.dp, vertical = 8.dp).semantics { heading() }) }
-                items(guests, key = { it.id }) { PersonRow(it, data, onDirect = null, blocked = it.id in state.blockedUserIds, onReport = { reportUser = it.id }, onBlock = { blockUser = it },
-                    admin = GroupAdmins.isAdmin(meta, it.id), actions = GroupAdmins.actionsFor(meta, it, data.me.id), onAction = { a -> adminAction = a to it }) }
             }
         }
         adminAction?.let { (action, person) ->

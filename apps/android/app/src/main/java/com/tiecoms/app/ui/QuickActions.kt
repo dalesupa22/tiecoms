@@ -101,11 +101,13 @@ fun QuickActions(nav: QuickNav) {
 }
 
 /**
- * Toque en una persona (búsqueda, «Recientes», «Mensaje nuevo»): su directo; si no existe, se crea
- * (POST /chats {userIds:[id]}, idempotente con una persona). Devuelve el id de la conversación.
+ * Toque en una persona (búsqueda, «Recientes», «Mensaje nuevo», autor en un grupo): su directo; si no existe, se crea
+ * (POST /chats {userIds:[id]}, idempotente con una persona). Conmigo mismo es «Tú» (notas para ti): POST /me/notes,
+ * porque /chats no admite solo a uno mismo. Devuelve el id de la conversación.
  */
 suspend fun openDirect(client: TieComsClient, data: BootstrapDTO, personId: String): String =
-    QuickSearch.direct(data, personId)?.id ?: client.createChat(listOf(personId), null).id
+    QuickSearch.direct(data, personId)?.id
+        ?: if (personId == data.me.id) client.notesChatId() else client.createChat(listOf(personId), null).id
 
 // ---------- Resultados de búsqueda en las pestañas ----------
 
@@ -117,7 +119,7 @@ fun LazyListScope.quickSearchSections(
     data: BootstrapDTO, results: QuickSearch.Results, hidePeople: Set<String>,
     internalFallback: String, convFallback: String, onPerson: (PersonDTO) -> Unit, onConv: (String) -> Unit,
 ) {
-    val people = results.people.filter { it.id !in hidePeople && it.id !in QuickSearch.directPeople(results.chats) }.take(8)
+    val people = results.people.filter { it.id !in hidePeople && it.id !in QuickSearch.directPeople(data, results.chats) }.take(8)
     if (people.isNotEmpty()) {
         item(key = "qs:people") { QuickHeader(R.string.search_people) }
         items(people, key = { "qs:p:" + it.id }) { p -> PersonPickRow(p, data, on = null, tag = "search.person.${p.id}") { onPerson(p) } }

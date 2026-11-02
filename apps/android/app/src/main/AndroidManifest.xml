@@ -19,6 +19,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
     <!-- Aviso de llamada entrante a pantalla completa (app de llamadas; en Android 14+ el sistema puede negarlo). -->
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <!-- CH028: las llamadas de Chaggu salen en el historial del teléfono (Telecom «self-managed», como WhatsApp). -->
+    <uses-permission android:name="android.permission.MANAGE_OWN_CALLS" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.camera.front" android:required="false" />
 
@@ -198,6 +200,16 @@
             android:name=".platform.CallService"
             android:exported="false"
             android:foregroundServiceType="microphone|camera" />
+
+        <!-- CH028: Telecom crea aquí la llamada que se anota en el historial del teléfono (platform/PhoneLog.kt). -->
+        <service
+            android:name=".platform.PhoneLogService"
+            android:exported="true"
+            android:permission="android.permission.BIND_TELECOM_CONNECTION_SERVICE">
+            <intent-filter>
+                <action android:name="android.telecom.ConnectionService" />
+            </intent-filter>
+        </service>
 
         <!-- «Ahora no» del aviso de llamada entrante. -->
         <receiver

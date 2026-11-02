@@ -47,6 +47,20 @@ struct ConversationDetailsView: View {
                         .padding(.vertical, 4)
                         .accessibilityElement(children: .combine)
                     }
+                    // CH028: los participantes a la vista, justo debajo del grupo (antes de silencio, foto y agenda);
+                    // tocar a alguien abre su ficha con «Enviar mensaje».
+                    Section(L("details.participants", ["n": regular.count])) {
+                        if c.kind == .multi {
+                            Button { adding = true } label: { Label(L("dlg.addToGroup"), systemImage: "person.badge.plus") }
+                                .accessibilityIdentifier("details.addPeople")
+                        }
+                        ForEach(regular) { p in PersonRow(d: d, p: p, isMe: p.id == d.me.id, conv: c) }
+                    }
+                    if !guests.isEmpty {
+                        Section(L("common.guests")) {
+                            ForEach(guests) { p in PersonRow(d: d, p: p, isMe: p.id == d.me.id, conv: c) }
+                        }
+                    }
                     MuteSection(conv: c)
                     ChatSoundRow(conv: c)
                     if Self.canChangePhoto(c) {
@@ -68,18 +82,6 @@ struct ConversationDetailsView: View {
                         } footer: { Text(L("grp.adminsCanRead")).accessibilityIdentifier("details.oversightNote") }
                     }
                     ConversationAgendaSection(conversationId: c.id)
-                    Section(L("details.participants", ["n": regular.count])) {
-                        if c.kind == .multi {
-                            Button { adding = true } label: { Label(L("dlg.addToGroup"), systemImage: "person.badge.plus") }
-                                .accessibilityIdentifier("details.addPeople")
-                        }
-                        ForEach(regular) { p in PersonRow(d: d, p: p, isMe: p.id == d.me.id, conv: c) }
-                    }
-                    if !guests.isEmpty {
-                        Section(L("common.guests")) {
-                            ForEach(guests) { p in PersonRow(d: d, p: p, isMe: p.id == d.me.id, conv: c) }
-                        }
-                    }
                     if c.kind == .multi {
                         Section {
                             Button(L("chat.leave"), role: .destructive) { confirmLeave = true }
@@ -243,12 +245,16 @@ struct ConversationAgendaSection: View {
 
 private struct PersonRow: View {
     @Environment(AppStore.self) private var store
+    /// El directo que ya existe con esa persona o uno nuevo (mismo camino que «Mensaje nuevo»).
     private func message() {
         Task {
-            do { let r = try await store.createChat(userIds: [p.id], name: nil); store.navigate(to: .conversation(r.id)) }
+            do { try await store.openDirect(with: p.id) }
             catch { store.show(L10n.errorText(error)) }
         }
     }
+    private var canMessage: Bool { !isMe && PersonCardSheet.canMessage(p, me: d.me.id, blocked: store.blockedUserIds) }
+    /// Tocar la fila abre la ficha de la persona («Enviar mensaje»).
+    @State private var card = false
     @State private var report = false
     @State private var confirmBlock = false
     /// Acción de admin pendiente de confirmar (docs/ADMINS-INTEGRACIONES.md §1).
@@ -311,16 +317,20 @@ private struct PersonRow: View {
                 }
             }
             Spacer(minLength: 4)
-            if !isMe && p.kind == "human" && !store.blockedUserIds.contains(p.id) {
+            if canMessage {
                 Button { message() } label: { Image(systemName: "message").font(.body.weight(.semibold)) }
                     .buttonStyle(.borderless)
                     .accessibilityLabel("\(L("people.sendMessage")), \(p.name)")
                     .accessibilityIdentifier("person.message.\(p.id)")
             }
         }
+        .contentShape(Rectangle())
+        .onTapGesture { card = true }
         .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("person.row.\(p.id)")
+        .sheet(isPresented: $card) { PersonCardSheet(personId: p.id).presentationDetents([.height(300)]) }
         .contextMenu {
-            if !isMe && p.kind == "human" {
+            if canMessage {
                 Button { message() } label: { Label(L("people.sendMessage"), systemImage: "message") }
             }
             if !adminActions.isEmpty {

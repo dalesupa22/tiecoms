@@ -344,13 +344,22 @@ struct SidePanel: View {
             threadHeader(d, c)
         } else if let d = store.data, let c = store.meta(sideId) {
             HStack(spacing: 10) {
-                StackedAvatars(d: d, c: c, size: 28)
-                    .frame(width: 28 + CGFloat(max(0, min(3, Naming.others(d, c).count) - 1)) * 15, alignment: .leading)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(L("side.title")).font(.headline)
-                    Label(L("side.privateN", ["n": c.memberIds.count]), systemImage: "lock.fill")
-                        .font(.caption).foregroundStyle(Theme.sideText)
+                // CH028: tocar el título abre los detalles del sidechat (participantes arriba).
+                NavigationLink(value: Route.details(sideId)) {
+                    HStack(spacing: 10) {
+                        StackedAvatars(d: d, c: c, size: 28)
+                            .frame(width: 28 + CGFloat(max(0, min(3, Naming.others(d, c).count) - 1)) * 15, alignment: .leading)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(L("side.title")).font(.headline).foregroundStyle(Theme.textPrimary)
+                            Label(L("side.privateN", ["n": c.memberIds.count]), systemImage: "lock.fill")
+                                .font(.caption).foregroundStyle(Theme.sideText)
+                        }
+                    }
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+                .accessibilityHint(L("chat.details"))
+                .accessibilityIdentifier("side.header")
                 Spacer()
                 Menu {
                     Button { adding = true } label: { Label(L("side.addPerson"), systemImage: "person.badge.plus") }
@@ -385,13 +394,22 @@ struct SidePanel: View {
     private func threadHeader(_ d: BootstrapDTO, _ c: ConversationDTO) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
-                Image(systemName: "bubble.left.and.bubble.right.fill").font(.system(size: 14, weight: .semibold)).foregroundStyle(Theme.accentText)
-                    .frame(width: 32, height: 32).background(Circle().fill(Theme.orange.opacity(0.14))).accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(ChatThreads.title(d, c)).font(.headline).lineLimit(1)
-                    Text("\(c.deriveKind == "internal" ? L("lin.kind.internal") : L("bar.public")) · \(L("bar.peopleN", ["n": c.memberIds.count]))")
-                        .font(.caption).foregroundStyle(Theme.textSecondary).lineLimit(1)
+                // CH028: tocar el título abre los detalles del hilo (participantes arriba).
+                NavigationLink(value: Route.details(sideId)) {
+                    HStack(spacing: 10) {
+                        Image(systemName: "bubble.left.and.bubble.right.fill").font(.system(size: 14, weight: .semibold)).foregroundStyle(Theme.accentText)
+                            .frame(width: 32, height: 32).background(Circle().fill(Theme.orange.opacity(0.14))).accessibilityHidden(true)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(ChatThreads.title(d, c)).font(.headline).lineLimit(1).foregroundStyle(Theme.textPrimary)
+                            Text("\(c.deriveKind == "internal" ? L("lin.kind.internal") : L("bar.public")) · \(L("bar.peopleN", ["n": c.memberIds.count]))")
+                                .font(.caption).foregroundStyle(Theme.textSecondary).lineLimit(1)
+                        }
+                    }
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+                .accessibilityHint(L("chat.details"))
+                .accessibilityIdentifier("thread.header")
                 Spacer()
                 Menu {
                     MuteMenu(conv: c)

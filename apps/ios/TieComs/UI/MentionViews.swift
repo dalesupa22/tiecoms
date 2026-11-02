@@ -85,12 +85,17 @@ struct MentionPicker: View {
     }
 }
 
-/// Ficha de una persona mencionada: enviar mensaje directo.
+/// Ficha de una persona (mencionada, autor de un mensaje o participante de un grupo): «Enviar mensaje» abre su directo.
 struct PersonCardSheet: View {
     @Environment(AppStore.self) private var store
     @Environment(\.dismiss) private var dismiss
     let personId: String
     @State private var busy = false
+
+    /// «Enviar mensaje» solo para otra persona humana que no bloqueé (ni a mí, ni a gg u otros agentes).
+    static func canMessage(_ p: PersonDTO, me: String, blocked: Set<String>) -> Bool {
+        p.id != me && p.kind == "human" && !blocked.contains(p.id)
+    }
 
     var body: some View {
         if let d = store.data, let p = Naming.person(d, personId) {
@@ -99,15 +104,12 @@ struct PersonCardSheet: View {
                 Text(p.name).font(.title3.weight(.bold))
                 let line = [Naming.roleLine(p), Naming.org(d, p.orgId)?.name ?? ""].filter { !$0.isEmpty }.joined(separator: " · ")
                 if !line.isEmpty { Text(line).font(.subheadline).foregroundStyle(Theme.textSecondary) }
-                if p.id != d.me.id {
+                if Self.canMessage(p, me: d.me.id, blocked: store.blockedUserIds) {
                     Button {
                         busy = true
                         Task {
-                            do {
-                                let r = try await store.createChat(userIds: [p.id], name: nil)
-                                dismiss()
-                                store.navigate(to: .conversation(r.id))
-                            } catch { store.show(L10n.errorText(error)) }
+                            // El directo que ya existe (QuickSearch.direct) o uno nuevo (POST /chats), como «Mensaje nuevo».
+                            do { dismiss(); try await store.openDirect(with: p.id) } catch { store.show(L10n.errorText(error)) }
                             busy = false
                         }
                     } label: {

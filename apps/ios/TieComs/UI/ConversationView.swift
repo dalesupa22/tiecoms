@@ -1281,6 +1281,7 @@ struct ConversationView: View {
                 time: L10n.clock(m.createdAt) + (m.editedAt != nil && m.deletedAt == nil ? " " + L("msg.edited") : ""),
                 mine: mine,
                 author: mine || !showAuthor ? nil : Naming.authorLine(d, m.authorId),
+                authorId: mine ? nil : m.authorId,
                 status: nil, italic: m.deletedAt != nil,
                 quote: m.replyTo == nil ? nil : (quoted.map { q in (Naming.person(d, q.authorId)?.name ?? "", q.deletedAt != nil ? L("chat.deleted") : excerpt(MailText.quoteText(kind: q.kind, body: q.body))) } ?? ("", L("reply.quoteMissing"))),
                 forwardedLabel: m.forwarded.map { forwardedLabel(d, $0, mine: mine, authorName: author?.name) },
@@ -2078,6 +2079,8 @@ struct MessageBubble: View {
     var time: String
     var mine: Bool
     var author: (name: String, org: String?)?
+    /// Id del autor: tocar su nombre o su foto abre su ficha («Enviar mensaje»), como tocar una mención.
+    var authorId: String? = nil
     var status: Status?
     var italic: Bool
     var quote: (author: String, text: String)? = nil
@@ -2116,6 +2119,11 @@ struct MessageBubble: View {
             case .person(let name, let photo, let id, let agent):
                 Avatar(name: name, org: nil, isAgent: agent, size: 28, photo: photo, fill: PersonColor.fill(id))
                     .padding(.top, author != nil ? 16 : 0)
+                    .contentShape(Rectangle())
+                    .onTapGesture { openPerson(id) }
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityLabel(name)
+                    .accessibilityIdentifier("msg.authorPhoto.\(id)")
             }
             VStack(alignment: mine ? .trailing : .leading, spacing: 3) {
                 if let author {
@@ -2125,6 +2133,9 @@ struct MessageBubble: View {
                     }
                     .lineLimit(1)
                     .padding(.horizontal, 4)
+                    .contentShape(Rectangle())
+                    .onTapGesture { if let authorId { openPerson(authorId) } }
+                    .accessibilityIdentifier("msg.author.\(authorId ?? "")")
                 }
                 VStack(alignment: .leading, spacing: 6) {
                     if let forwardedLabel {
@@ -2235,6 +2246,11 @@ struct MessageBubble: View {
                 }
             }
         }
+    }
+
+    /// La ficha de la persona (la abre el chat que maneja `chaggu-mention://`, igual que al tocar una mención).
+    private func openPerson(_ id: String) {
+        if let u = URL(string: "chaggu-mention://\(id)") { openURL(u) }
     }
 
     /// Muy largo y sin búsqueda activa (con búsqueda se ve entero para que se vea lo resaltado).

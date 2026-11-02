@@ -418,6 +418,9 @@ final class PushTokenSync {
     func setEnabled(_ value: Bool) {
         if enabled != value { enabled = value; dirty = true }
     }
+    var isEnabled: Bool { enabled }
+    /// Tras un DELETE confirmado (CH029: borra también el token VoIP de la sesión, que se vuelve a mandar).
+    var afterUnregister: (() -> Void)?
 
     /// Vuelve a mandar el mismo token (p. ej. cambió el idioma: el servidor arma los avisos en ese `lang`).
     func resendToken() {
@@ -462,7 +465,7 @@ final class PushTokenSync {
                 guard active, generation == currentGeneration else { continue }
                 switch operation {
                 case .register(let token): registeredToken = token; registeredLang = lang
-                case .unregister: registeredToken = nil; registeredLang = nil; serverCleared = true
+                case .unregister: registeredToken = nil; registeredLang = nil; serverCleared = true; afterUnregister?()
                 }
             } catch {
                 NSLog("[Chaggu] registro push pendiente; se reintentará al volver o recuperar la red")

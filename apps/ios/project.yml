@@ -16,8 +16,8 @@ settings:
     DEVELOPMENT_TEAM: B76US7H3L3
     CODE_SIGN_STYLE: Automatic
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "1.7.19"
-    CURRENT_PROJECT_VERSION: "60"
+    MARKETING_VERSION: "1.7.20"
+    CURRENT_PROJECT_VERSION: "61"
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     ENABLE_USER_SCRIPT_SANDBOXING: YES
     LOCALIZATION_PREFERS_STRING_CATALOGS: NO
@@ -80,9 +80,9 @@ targets:
             CFBundleURLSchemes: [chaggu]
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
-        # audio: una llamada en curso sigue sonando con la app en segundo plano. CallKit (CH028, Recientes de Teléfono)
-        # no necesita `voip` sin PushKit; ese modo solo hará falta cuando lleguen los push VoIP.
-        UIBackgroundModes: [audio]
+        # audio: una llamada en curso sigue sonando con la app en segundo plano.
+        # voip (CH029): push de PushKit para que una llamada entrante timbre con CallKit con la app cerrada (VoipPush.swift).
+        UIBackgroundModes: [audio, voip]
   TieComsShare:
     type: app-extension
     platform: iOS

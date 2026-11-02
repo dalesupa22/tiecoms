@@ -411,9 +411,15 @@ final class AppStore {
         L10n.choice = choice
         languageRevision += 1
         pushTokenSync.resendToken()
-        Task { await pushTokenSync.synchronize() }
+        voipTokenSync.resendToken()
+        Task { await synchronizePushTokens() }
     }
     @ObservationIgnored let pushTokenSync: PushTokenSync
+    /// CH029: token de PushKit (llamadas entrantes con CallKit). Sigue al de avisos: mismas condiciones y sesión;
+    /// no tiene DELETE propio (el DELETE /push/token del de avisos borra los dos).
+    @ObservationIgnored let voipTokenSync: PushTokenSync
+    /// start() ya corrió alguna vez (status empieza en .loading antes de arrancar).
+    @ObservationIgnored private(set) var startedOnce = false
     @ObservationIgnored var pushSigningOut = false
     /// Pantalla previa al permiso de notificaciones.
     var showPushPrompt = false
@@ -444,10 +450,16 @@ final class AppStore {
                 try await api.requestData("/push/token", method: "DELETE")
             }
         }
+        voipTokenSync = PushTokenSync { operation in
+            guard case .register(let token) = operation else { return }
+            try await api.requestData("/push/token", method: "PUT",
+                                      json: ["provider": "apns_voip", "token": token, "environment": PushEnvironment.current, "lang": L10n.lang])
+        }
         socket = SocketIOClient(baseURL: baseURL)
         self.outbox = outbox
         self.feedback = feedback
         api.onSignedOut = { [weak self] in self?.handleSignedOut() }
+        pushTokenSync.afterUnregister = { [weak self] in self?.voipTokenSync.resendToken() }
         api.waPrivacyCheck = { [weak self] source in guard let self else { throw CancellationError() }; return try self.requireWaSource(source) }
         api.waPrivacyDenied = { [weak self] source in self?.denyWaSource(source) }
         socket.tokenProvider = { [weak self] in await self?.api.freshAccessToken() }
@@ -475,6 +487,7 @@ final class AppStore {
 
     /// Arranque: intenta reanudar la sesión guardada en el Keychain.
     func start() async {
+        startedOnce = true
         status = .loading
         guard api.hasStoredSession else { appleIdentitySecrets.set(nil); status = .anonymous; return }
         await verifyAppleCredential()
@@ -633,6 +646,7 @@ final class AppStore {
         status = .ready
         pushSigningOut = false
         pushTokenSync.startSession()
+        voipTokenSync.startSession()
         showSignup = false
         signupOrgToken = nil
         socket.connect()
@@ -690,6 +704,7 @@ final class AppStore {
         Prefs.lastUserId = nil
         pushSigningOut = true
         pushTokenSync.endSession()
+        voipTokenSync.endSession()
         PushRegistration.unregister()
         ShareTargets.clear()
         Donations.deleteAll()
@@ -927,7 +942,7 @@ final class AppStore {
             // Contesté en otro dispositivo (si es este mismo, no hace nada).
             if key != CallRules.deviceKey { callCenter.stopRinging(callId: callId) }
         case .callDeclined(let callId):
-            callCenter.stopRinging(callId: callId)
+            callCenter.stopRinging(callId: callId, declined: true)
         case .callProcessing(let callId, let userId, let segId):
             callCenter.onTranscriptEvent(callId: callId, userId: userId, segId: segId, segments: nil)
         case .callTranscript(let callId, let userId, let segId, let segments, _):

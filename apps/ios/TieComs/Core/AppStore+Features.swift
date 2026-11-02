@@ -515,14 +515,42 @@ extension AppStore {
         pushTokenSync.receive(hex)
         guard status == .ready, !pushSigningOut else { return }
         pushTokenSync.setEnabled(Prefs.notificationsEnabled && AppFeedback.shared.authorized)
+        await synchronizePushTokens()
+    }
+
+    /// CH029: PUT /push/token {provider:'apns_voip'} con el token de PushKit (llamadas que timbran con CallKit).
+    func registerVoipToken(_ hex: String) async {
+        voipTokenSync.receive(hex)
+        guard status == .ready, !pushSigningOut else { return }
+        await synchronizePushTokens()
+    }
+
+    /// Primero el de avisos (un DELETE suyo borra también el VoIP); luego el VoIP, con sus mismas condiciones.
+    func synchronizePushTokens() async {
         await pushTokenSync.synchronize()
+        if let t = VoipPush.shared.token { voipTokenSync.receive(t) }
+        voipTokenSync.setEnabled(pushTokenSync.isEnabled && VoipPush.shared.token != nil)
+        await voipTokenSync.synchronize()
+    }
+
+    /// Sesión lista para una llamada que llegó con la app cerrada (push VoIP): arranca si hace falta o espera al arranque
+    /// en curso. false si no hay sesión.
+    func ensureSession() async -> Bool {
+        if status == .ready { return true }
+        if startedOnce && status == .loading {
+            for _ in 0..<80 where status == .loading { try? await Task.sleep(nanoseconds: 250_000_000) }
+            return status == .ready
+        }
+        await start()
+        return status == .ready
     }
 
     func unregisterPush() async {
         PushRegistration.unregister()
         pushTokenSync.setEnabled(false)
+        voipTokenSync.setEnabled(false)
         guard api.accessToken != nil else { return }
-        await pushTokenSync.synchronize()
+        await synchronizePushTokens()
     }
 
     /// Se llama al entrar, volver a primer plano y recuperar conectividad. No muestra el permiso.
@@ -538,7 +566,7 @@ extension AppStore {
         } else {
             PushRegistration.unregister()
         }
-        await pushTokenSync.synchronize()
+        await synchronizePushTokens()
     }
 
     /// Aplica OFF inmediatamente, incluso si todavía se está enviando el token anterior.
@@ -547,6 +575,7 @@ extension AppStore {
         Prefs.notificationsEnabled = enabled
         if !enabled {
             pushTokenSync.setEnabled(false)
+            voipTokenSync.setEnabled(false)
             PushRegistration.unregister()
         }
         return Task {

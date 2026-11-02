@@ -68,16 +68,21 @@ export function closePushConnections() {
   sessions.clear();
 }
 
-export async function sendApns(token: string, environment: 'sandbox' | 'production', payload: object, opts: { collapseId?: string } = {}): Promise<PushResult> {
+/**
+ * `voip` (CH029): push de PushKit para una llamada entrante. Va al tópico «<bundle>.voip», con tipo voip y vence a
+ * los 40 s (después ya no tiene sentido que timbre). La app tiene que reportarlo a CallKit al recibirlo.
+ */
+export async function sendApns(token: string, environment: 'sandbox' | 'production', payload: object, opts: { collapseId?: string; voip?: boolean } = {}): Promise<PushResult> {
   const cfg = apnsConfig();
   if (!cfg) return { ok: false, invalidToken: false, error: 'apns_not_configured' };
   const body = JSON.stringify(payload);
-  const exec = (topic = cfg.bundleId) => new Promise<{ status: number; body: string }>((resolve, reject) => {
+  const voip = !!opts.voip;
+  const exec = (bundle = cfg.bundleId) => new Promise<{ status: number; body: string }>((resolve, reject) => {
     const req = h2(apnsHost(environment)).request({
       ':method': 'POST', ':path': `/3/device/${encodeURIComponent(token)}`,
       authorization: `bearer ${apnsToken(cfg)}`,
-      'apns-topic': topic, 'apns-push-type': 'alert', 'apns-priority': '10',
-      'apns-expiration': String(Math.floor(Date.now() / 1000) + 86_400),
+      'apns-topic': voip ? `${bundle}.voip` : bundle, 'apns-push-type': voip ? 'voip' : 'alert', 'apns-priority': '10',
+      'apns-expiration': String(Math.floor(Date.now() / 1000) + (voip ? 40 : 86_400)),
       ...(opts.collapseId ? { 'apns-collapse-id': opts.collapseId.slice(0, 64) } : {}),
       'content-type': 'application/json', 'content-length': Buffer.byteLength(body),
     });

@@ -38,7 +38,15 @@ struct TieComsApp: App {
         VoicePlayer.shared.canUseAudio = { [weak s] in s?.callCenter.inCall != true }
         ChoiceSoundPlayer.shared.canUseAudio = { [weak s] in s?.callCenter.inCall != true }
         // Llamadas en «Recientes» de Teléfono (CallKit), salvo en China y en pruebas unitarias.
-        if CallKitRules.enabled() { s.callCenter.installSystemCalls(CallKitBridge()) }
+        if CallKitRules.enabled() {
+            let bridge = CallKitBridge()
+            s.callCenter.installSystemCalls(bridge)
+            // CH029: llamadas entrantes por push VoIP que timbran con la pantalla del sistema (también con la app cerrada).
+            // Cada push se reporta a CallKit en el acto (regla de iOS).
+            VoipPush.shared.onIncoming = { push, _ in bridge.reportIncomingPush(push) }
+            VoipPush.shared.onToken = { [weak s] hex in Task { await s?.registerVoipToken(hex) } }
+            VoipPush.shared.start()
+        }
         _store = State(initialValue: s)
         _updates = State(initialValue: AppUpdateChecker(baseURL: base))
         // «Abierta» exige mensajes cargados: un chat vacío por un 502 no calla sus avisos.
@@ -51,7 +59,7 @@ struct TieComsApp: App {
         AppFeedback.shared.onOpenConversation = { [weak s] id in s?.handle(.conversation(id)) }
         AppFeedback.shared.onAnswerCall = { [weak s] callId in s?.answerCallFromPush(callId) }
         AppFeedback.shared.onDeclineCall = { [weak s] callId in
-            s?.callCenter.stopRinging(callId: callId)
+            s?.callCenter.stopRinging(callId: callId, declined: true)
             Task { try? await s?.declineCallRequest(callId) }
         }
         AppFeedback.shared.onOpenSide = { [weak s] origin, side in s?.openSide(origin: origin, side: side) }

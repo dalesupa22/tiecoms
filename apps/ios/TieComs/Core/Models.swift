@@ -615,6 +615,8 @@ struct CallDTO: Codable, Equatable, Identifiable, Sendable {
     var invited: [Invited] = []
     /// Invitados por enlace que están dentro (sin cuenta; en Chime son «guest:{id}»).
     var guests: [CallGuestDTO] = []
+    /// CH029: a quién le está sonando el teléfono ahora (lo confirmó su dispositivo): «Sonando…» en vez de «Llamando…».
+    var ringingUserIds: [String] = []
     /// Título de la conversación (GET /calls/active).
     var title: String?
 
@@ -637,6 +639,7 @@ struct CallDTO: Codable, Equatable, Identifiable, Sendable {
         myDevices = c.lossyArray("myDevices")
         invited = c.lossyArray("invited")
         guests = c.lossyArray("guests")
+        ringingUserIds = c.v("ringingUserIds", [])
         title = c.o("title")
     }
 

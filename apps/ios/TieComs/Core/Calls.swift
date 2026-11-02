@@ -1,5 +1,6 @@
 import AVFoundation
 import AudioToolbox
+import CallKit
 import Foundation
 import Observation
 import UIKit
@@ -426,6 +427,24 @@ enum CallRules {
     }
 
     /// Una llamada terminada no pisa a otra más nueva que ya esté en curso (putCall de client-core).
+    /// Sola en la llamada (CH029, como WhatsApp): «Sonando…» si el teléfono de alguien confirmó que suena, «Llamando…»
+    /// si la empecé yo; si no, «Esperando a que alguien entre…» (entré a una que quedó sola).
+    static func waitingKey(_ call: CallDTO, me: String) -> String {
+        if call.ringingUserIds.contains(where: { $0 != me }) { return "call.ringingOut" }
+        return call.startedBy == me ? "call.calling" : "call.waiting"
+    }
+
+    /// Cada cuánto se pregunta si sigue la llamada que suena en el sistema (CH029).
+    static let incomingCheckSeconds: UInt64 = 3
+
+    /// La llamada que suena en el sistema debe terminar: ya no hay llamada en curso (o es otra), terminó, o ya estoy
+    /// dentro desde otro dispositivo. nil = sigue sonando. `call` es la de la conversación (GET /conversations/:id/call).
+    static func incomingEnd(_ call: CallDTO?, callId: String, me: String?) -> CXCallEndedReason? {
+        guard let call, call.id == callId, call.endedAt == nil else { return .remoteEnded }
+        if let me, call.activeUserIds.contains(me) { return .answeredElsewhere }
+        return nil
+    }
+
     static func merge(_ current: CallDTO?, _ incoming: CallDTO) -> CallDTO? {
         if incoming.endedAt != nil, let current, current.id != incoming.id { return current }
         return incoming.endedAt == nil ? incoming : nil
@@ -641,12 +660,21 @@ final class CallCenter: CallMediaDelegate {
 
     /// Entrar desde el aviso o la franja «Unirse». `incoming`: contesté una llamada que me sonaba (Recientes: entrante).
     /// `callerName`: quien llama (si no conozco el chat, es el nombre que ve el sistema).
-    func join(_ callId: String, camera: Bool, incoming: Bool = false, callerName: String? = nil) async throws {
-        if view?.call.id == callId, view?.phase != .ended { expanded = true; return }
+    /// `systemCall` (CH029): la llamada ya la contesté en la pantalla del sistema (push VoIP); no se vuelve a registrar.
+    func join(_ callId: String, camera: Bool, incoming: Bool = false, callerName: String? = nil, systemCall: UUID? = nil) async throws {
+        if view?.call.id == callId, view?.phase != .ended {
+            expanded = true
+            if let systemCall { systemCalls?.end(systemCall, cause: .remote) }
+            return
+        }
         if view != nil { await hangUp() }
         guard let store else { return }
-        let j = try await store.joinCallRequest(callId)
-        await connect(j, camera: camera, direction: incoming ? .incoming : .outgoing, name: callerName)
+        let j: CallJoinDTO
+        do { j = try await store.joinCallRequest(callId) } catch {
+            if let systemCall { systemCalls?.end(systemCall, cause: .failed) }
+            throw error
+        }
+        await connect(j, camera: camera, direction: incoming ? .incoming : .outgoing, name: callerName, systemCall: systemCall)
     }
 
     /// Entrar con el enlace /llamada/<token> (con o sin sesión). La vista ya preguntó si había otra llamada.
@@ -669,7 +697,7 @@ final class CallCenter: CallMediaDelegate {
         return CallKitRules.handleName(fallback)
     }
 
-    private func connect(_ j: CallJoinDTO, camera: Bool, direction: Direction, name: String? = nil) async {
+    private func connect(_ j: CallJoinDTO, camera: Bool, direction: Direction, name: String? = nil, systemCall: UUID? = nil) async {
         leaving = false
         outbox = []
         bound = [:]
@@ -681,12 +709,20 @@ final class CallCenter: CallMediaDelegate {
         let m = makeMedia(j)
         media = m
         m.delegate = self
+        if m is NullCallMedia, let uuid = systemCall { systemCallId = uuid }
         do {
             var callKitAudio = false
             if !(m is NullCallMedia) {
                 guard await Self.microphoneAllowed() else { throw CallMediaError.microphone }
                 // CallKit: la llamada queda en Recientes y el sistema activa el audio. Si algo falla, como antes.
-                if let sys = systemCalls {
+                if let sys = systemCalls, let uuid = systemCall {
+                    // Contestada en la pantalla del sistema: ya existe; el audio llega con didActivate.
+                    systemCallId = uuid
+                    systemOutgoing = false
+                    callKitAudio = await sys.waitForAudio()
+                    guard media === m else { return }
+                    if !callKitAudio { NSLog("[Chaggu] CallKit no activó el audio a tiempo: la app lo activa") }
+                } else if let sys = systemCalls {
                     let label = guest != nil ? CallKitRules.handleName(name) : systemName(j.call, fallback: name)
                     let uuid = await sys.begin(outgoing: direction == .outgoing, name: label, video: camera || j.call.isVideo)
                     guard media === m else {
@@ -748,6 +784,49 @@ final class CallCenter: CallMediaDelegate {
     func systemMuted(_ uuid: UUID, _ muted: Bool) {
         guard systemCallId == uuid, let v = view, v.muted != muted else { return }
         media?.setMuted(muted)
+    }
+
+    // MARK: Entrante por push VoIP (CH029)
+
+    /// La llamada que llegó por push ya suena en la pantalla del sistema: el aviso propio de la app se calla, quien
+    /// llama ve «Sonando…» y, mientras suene, se vigila si cuelgan o contesto en otro dispositivo.
+    func systemIncomingRinging(_ push: VoipCallPush) {
+        if ringing?.call.id == push.callId { dismissRing() }
+        if view?.call.id == push.callId, inCall { systemCalls?.endIncoming(push.callId, reason: .answeredElsewhere); return }
+        Task { @MainActor [weak self] in
+            guard let store = self?.store, await store.ensureSession() else { return }
+            try? await store.ringingCallRequest(push.callId)
+            // Con la app cerrada el socket puede tardar: se pregunta cada pocos segundos mientras suene.
+            while let self, self.systemCalls?.hasIncoming(push.callId) == true {
+                if let r = try? await store.activeCallRequest(push.conversationId) {
+                    if let reason = CallRules.incomingEnd(r, callId: push.callId, me: store.me?.id) {
+                        self.systemCalls?.endIncoming(push.callId, reason: reason)
+                        return
+                    }
+                }
+                try? await Task.sleep(nanoseconds: CallRules.incomingCheckSeconds * 1_000_000_000)
+            }
+        }
+    }
+
+    /// Contesté en la pantalla del sistema: se entra a la llamada (arrancando la sesión si la app estaba cerrada).
+    func systemAnswered(_ uuid: UUID, _ push: VoipCallPush) {
+        if ringing?.call.id == push.callId { dismissRing() }
+        Task { @MainActor [weak self] in
+            guard let self, let store = self.store else { return }
+            guard await store.ensureSession() else { self.systemCalls?.end(uuid, cause: .failed); return }
+            do { try await self.join(push.callId, camera: false, incoming: true, callerName: push.displayName, systemCall: uuid) }
+            catch { store.show(L10n.errorText(error)) }
+        }
+    }
+
+    /// Colgué en la pantalla del sistema mientras sonaba: rechazar (deja de sonar en mis otros dispositivos).
+    func systemDeclined(_ push: VoipCallPush) {
+        if ringing?.call.id == push.callId { dismissRing() }
+        Task { @MainActor [weak self] in
+            guard let store = self?.store, await store.ensureSession() else { return }
+            try? await store.declineCallRequest(push.callId)
+        }
     }
 
     /// El sistema reinició el proveedor (providerDidReset): la llamada ya no existe para él.
@@ -951,13 +1030,20 @@ final class CallCenter: CallMediaDelegate {
             if v != view { view = v }
         }
         if let r = ringing, r.call.id == c.id, c.endedAt != nil || (store?.me.map { c.activeUserIds.contains($0.id) } ?? false) { dismissRing() }
+        if systemCalls?.hasIncoming(c.id) == true, let reason = CallRules.incomingEnd(c, callId: c.id, me: store?.me?.id) {
+            systemCalls?.endIncoming(c.id, reason: reason)
+        }
     }
 
     // MARK: Llamada entrante
 
     func showIncoming(_ call: CallDTO, callerName: String, title: String?) {
         guard view?.call.id != call.id, call.endedAt == nil else { return }
+        // Ya suena en la pantalla del sistema (llegó por push VoIP): no se duplica el aviso.
+        if systemCalls?.hasIncoming(call.id) == true { return }
         ringing = IncomingCall(call: call, callerName: callerName, title: title)
+        // Quien llama ve «Sonando…» (CH029).
+        if let store { Task { try? await store.ringingCallRequest(call.id) } }
         ringTask?.cancel()
         ringTask = Task { @MainActor [weak self] in
             // Suena y vibra hasta 45 s o hasta que se conteste, se rechace o termine.
@@ -978,8 +1064,9 @@ final class CallCenter: CallMediaDelegate {
     }
 
     /// Otro dispositivo mío contestó o rechazó (call.answered / call.declined): deja de sonar y quita el aviso.
-    func stopRinging(callId: String) {
+    func stopRinging(callId: String, declined: Bool = false) {
         if ringing?.call.id == callId { dismissRing() }
+        systemCalls?.endIncoming(callId, reason: declined ? .declinedElsewhere : .answeredElsewhere)
         CallPushCleanup.remove(callId: callId)
     }
 
@@ -1223,6 +1310,17 @@ extension AppStore {
     /// «Ahora no»: deja de sonar en todos mis dispositivos (los demás no se enteran).
     func declineCallRequest(_ callId: String) async throws {
         try await api.requestData("/calls/\(callId)/decline", method: "POST", json: [:])
+    }
+
+    /// CH029: mi teléfono está sonando (aviso de la app o pantalla del sistema): quien llama ve «Sonando…».
+    func ringingCallRequest(_ callId: String) async throws {
+        try await api.requestData("/calls/\(callId)/ringing", method: "POST", json: [:])
+    }
+
+    /// La llamada en curso de una conversación (nil si no hay), sin tocar el estado local.
+    func activeCallRequest(_ conversationId: String) async throws -> CallDTO? {
+        let r: CallResult = try await api.request("/conversations/\(conversationId)/call")
+        return r.call
     }
 
     /// Llegó el número de perdidas sin ver (bootstrap o calls.missed). Con la pestaña Llamadas abierta se marca vista otra vez.

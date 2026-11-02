@@ -38,6 +38,13 @@ APNs (tema `com.tiecoms.app`, `apns-push-type: alert`, prioridad 10, `apns-colla
 FCM: **mensaje de datos** (sin `notification`), `android.priority: high`, `collapse_key` = conversación. `data` (todo texto):
 `type, title, subtitle, body, badge, threadId, category, conversationId, messageId, authorId, authorName, authorAvatarUrl` (y `reminderId`/`eventId`).
 
+### Push VoIP de llamada (CH029)
+
+`provider: 'apns_voip'` en `PUT /push/token`: token de PushKit del iPhone. Solo se usa para la llamada entrante: payload sin
+`aps` = `{ type:'call', callId, conversationId, kind, callerName, subtitle }`, cabeceras `apns-push-type: voip`,
+`apns-topic: <bundle>.voip`, prioridad 10, vence a los 40 s. La misma llave .p8 sirve (autenticación por token). Ver
+docs/LLAMADAS.md › Timbre como WhatsApp.
+
 ## Lo que debe crear Danny
 
 ### 1. Llave APNs (iOS)

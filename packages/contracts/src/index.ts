@@ -153,6 +153,11 @@ export interface CallDTO {
    * esa llamada. Los clientes muestran «Llamando…» y, pasados 45 s sin entrar, «No contestó» con «Volver a llamar».
    */
   invited?: { userId: string; at: string; joined: boolean }[];
+  /**
+   * CH029: personas a las que les está sonando el teléfono (su dispositivo lo confirmó con POST /calls/:id/ringing)
+   * y que aún no entran ni rechazaron. Quien llama ve «Sonando…» en vez de «Llamando…». Clientes viejos lo ignoran.
+   */
+  ringingUserIds?: string[];
   /** Invitados por enlace que están dentro ahora (sin cuenta). En Chime su externalUserId es "guest:{id}". */
   guests?: CallGuestDTO[];
   /** Llamada de una sala (reunión por enlace, docs/LLAMADAS.md › Salas): vive en el chat «Tú» de su dueño. */
@@ -1738,7 +1743,8 @@ export const EventsQuery = z.object({
 // ---------- Notificaciones push ----------
 /** Token del dispositivo de ESTA sesión (reemplaza el anterior). sandbox = compilación Debug de Xcode. */
 export const PushTokenInput = z.object({
-  provider: z.enum(['apns', 'fcm']),
+  /** apns_voip (CH029): token de PushKit del iPhone, solo para el push de llamada entrante (timbra con CallKit). */
+  provider: z.enum(['apns', 'fcm', 'apns_voip']),
   token: z.string().trim().min(8).max(4096),
   environment: z.enum(['sandbox', 'production']).default('production'),
   /** Idioma de los textos que arma el servidor (recordatorios, reuniones). Por defecto, Accept-Language. */

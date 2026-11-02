@@ -15,15 +15,21 @@ import UIKit
 //   ejecutar la acción y Chime arranca con callKitEnabled = true cuando llega provider(_:didActivate:). Si CallKit falla o
 //   no activa el audio a tiempo, la llamada sigue como antes de CH028 (la app activa la sesión y Chime con callKitEnabled = false).
 // - Desactivado en China (regla de App Store) y en pruebas unitarias: todo queda como antes.
-// - Sin PushKit: con la app cerrada no aparece la pantalla nativa de llamada entrante (el push de siempre sigue sonando);
-//   las perdidas/rechazadas no van a Recientes (registrarlas exigiría hacer sonar la interfaz del sistema).
+// - CH029, con PushKit (VoipPush.swift): una llamada entrante llega por push VoIP y timbra con la pantalla del sistema
+//   (reportIncomingPush, con el tono elegido en la app), con la app cerrada o el teléfono bloqueado. Contestar
+//   (CXAnswerCallAction) entra a la llamada de chaggu; colgar antes de contestar (CXEndCallAction) la rechaza. Si
+//   cuelga quien llama, contesto en otro dispositivo o pasan 45 s, se termina en el sistema (perdida en Recientes).
 
 /// Reglas puras (las usan el puente y las pruebas).
 enum CallKitRules {
     /// Espera máxima a que CallKit active el audio antes de seguir como sin CallKit.
     static let audioActivationTimeout: TimeInterval = 4
-    /// Timbre de CallKit: silencio (la app ya hace sonar su propio tono, ver RingTone).
+    /// Timbre de CallKit al contestar desde el aviso de la app: silencio (la app ya hizo sonar su propio tono, ver RingTone).
     static let silentRingtone = "callkit_silence.wav"
+    /// Timbre de una llamada que llega por push VoIP: el tono elegido en la app (el mismo que usa el aviso, ring_*.caf).
+    static func pushRingtone(_ sharedFile: String?) -> String { "\(sharedFile ?? ChatSounds.ringFile(nil)).caf" }
+    /// Cuánto suena en el sistema una llamada que llegó por push (igual que el aviso de la app).
+    static let incomingRingSeconds: TimeInterval = TimeInterval(CallRules.ringSeconds)
 
     /// App Store: CallKit no se puede usar en China continental. Tampoco en pruebas unitarias.
     static func enabled(region: String? = Locale.current.region?.identifier, unitTests: Bool = AppConfig.isRunningUnitTests) -> Bool {
@@ -57,17 +63,24 @@ final class CallKitBridge: NSObject {
     private var audioWaiters: [UUID: CheckedContinuation<Bool, Never>] = [:]
     /// Llamada a la que pertenece la espera (la categoría se pone para esta).
     private var pendingVideo = false
+    /// CH029: llamadas que llegaron por push VoIP y están sonando en el sistema (aún sin contestar).
+    private var incoming: [UUID: VoipCallPush] = [:]
+    private var incomingTimeouts: [UUID: Task<Void, Never>] = [:]
 
-    override init() {
+    private static func configuration(ringtone: String) -> CXProviderConfiguration {
         let config = CXProviderConfiguration()
         config.supportsVideo = true
         config.maximumCallGroups = 1
         config.maximumCallsPerCallGroup = 1
         config.supportedHandleTypes = [.generic]
         config.includesCallsInRecents = true
-        config.ringtoneSound = CallKitRules.silentRingtone
+        config.ringtoneSound = ringtone
         if let icon = UIImage(named: "CallKitIcon")?.pngData() { config.iconTemplateImageData = icon }
-        provider = CXProvider(configuration: config)
+        return config
+    }
+
+    override init() {
+        provider = CXProvider(configuration: Self.configuration(ringtone: CallKitRules.silentRingtone))
         super.init()
         // Cola nil = principal: los métodos del delegado llegan en el hilo principal.
         provider.setDelegate(self, queue: nil)
@@ -79,6 +92,8 @@ final class CallKitBridge: NSObject {
     /// Devuelve el UUID de CallKit, o nil si el sistema no la aceptó (la llamada sigue sin CallKit).
     func begin(outgoing: Bool, name: String, video: Bool) async -> UUID? {
         let uuid = UUID()
+        // Contestar desde el aviso de la app: sin timbre del sistema (la app ya sonó).
+        if incoming.isEmpty { provider.configuration = Self.configuration(ringtone: CallKitRules.silentRingtone) }
         audioActive = false
         pendingVideo = video
         let handle = CXHandle(type: .generic, value: CallKitRules.handleName(name))
@@ -161,6 +176,69 @@ final class CallKitBridge: NSObject {
         }
     }
 
+    // MARK: Entrante por push VoIP (CH029)
+
+    /// Reporta al sistema el push VoIP recibido (obligatorio en cada uno). Si no es una llamada válida, se reporta y se
+    /// termina en el acto. La pantalla de llamada suena con el tono de la app.
+    func reportIncomingPush(_ push: VoipCallPush?) {
+        provider.configuration = Self.configuration(ringtone: CallKitRules.pushRingtone(L10n.defaults.string(forKey: PushPayload.ringtoneKey)))
+        let update = CXCallUpdate()
+        update.supportsHolding = false
+        update.supportsGrouping = false
+        update.supportsUngrouping = false
+        update.supportsDTMF = false
+        guard let push else {
+            let uuid = UUID()
+            update.remoteHandle = CXHandle(type: .generic, value: "chaggu")
+            provider.reportNewIncomingCall(with: uuid, update: update) { [provider] _ in
+                provider.reportCall(with: uuid, endedAt: Date(), reason: .failed)
+            }
+            return
+        }
+        let uuid = push.systemId
+        update.remoteHandle = CXHandle(type: .generic, value: push.displayName)
+        update.localizedCallerName = push.displayName
+        update.hasVideo = push.video
+        let isNew = incoming[uuid] == nil
+        incoming[uuid] = push
+        provider.reportNewIncomingCall(with: uuid, update: update) { error in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if let error {
+                    // Ya estaba sonando (dos push de la misma llamada) no es un problema; otro error sí.
+                    if (error as? CXErrorCodeIncomingCallError)?.code == .callUUIDAlreadyExists { return }
+                    NSLog("[Chaggu] CallKit: no se pudo mostrar la llamada entrante: \(error.localizedDescription)")
+                    self.forgetIncoming(uuid)
+                    return
+                }
+                guard isNew else { return }
+                self.incomingTimeouts[uuid] = Task { @MainActor [weak self] in
+                    try? await Task.sleep(nanoseconds: UInt64(CallKitRules.incomingRingSeconds * 1_000_000_000))
+                    guard !Task.isCancelled, let self, self.incoming[uuid] != nil else { return }
+                    self.forgetIncoming(uuid)
+                    self.provider.reportCall(with: uuid, endedAt: Date(), reason: .unanswered)
+                }
+                self.center?.systemIncomingRinging(push)
+            }
+        }
+    }
+
+    /// La llamada que suena en el sistema por un push (sin contestar todavía).
+    func hasIncoming(_ callId: String) -> Bool { incoming.values.contains { $0.callId == callId } }
+
+    /// Deja de sonar en el sistema: colgó quien llama, contesté o rechacé en otro dispositivo, o ya estoy dentro.
+    func endIncoming(_ callId: String, reason: CXCallEndedReason) {
+        for (uuid, p) in incoming where p.callId == callId {
+            forgetIncoming(uuid)
+            provider.reportCall(with: uuid, endedAt: Date(), reason: reason)
+        }
+    }
+
+    private func forgetIncoming(_ uuid: UUID) {
+        incoming[uuid] = nil
+        incomingTimeouts.removeValue(forKey: uuid)?.cancel()
+    }
+
     // MARK: Delegado (en el hilo principal)
 
     fileprivate func didActivate() {
@@ -199,13 +277,33 @@ extension CallKitBridge: CXProviderDelegate {
     }
 
     nonisolated func provider(_ provider: CXProvider, perform action: CXAnswerCallAction) {
-        main { _ = try? CallCenter.configureAudioCategory(video: self.pendingVideo) }
+        let id = action.callUUID
+        main {
+            // Contesté en la pantalla del sistema una llamada que llegó por push: se entra a la de chaggu.
+            if let push = self.incoming[id] {
+                self.forgetIncoming(id)
+                self.pendingVideo = push.video
+                self.audioActive = false
+                _ = try? CallCenter.configureAudioCategory(video: push.video)
+                self.center?.systemAnswered(id, push)
+            } else {
+                _ = try? CallCenter.configureAudioCategory(video: self.pendingVideo)
+            }
+        }
         action.fulfill()
     }
 
     nonisolated func provider(_ provider: CXProvider, perform action: CXEndCallAction) {
         let id = action.callUUID
-        main { self.center?.systemEnded(id) }
+        main {
+            // Colgar mientras suena (sin contestar) = rechazar.
+            if let push = self.incoming[id] {
+                self.forgetIncoming(id)
+                self.center?.systemDeclined(push)
+            } else {
+                self.center?.systemEnded(id)
+            }
+        }
         action.fulfill()
     }
 

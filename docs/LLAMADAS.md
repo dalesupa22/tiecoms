@@ -121,6 +121,24 @@ Pedido de Danny: las llamadas funcionan como los huddles de Slack. Por ahora sol
 - No sale con «No molestar» ni en modo sueño.
 - Las apps muestran Contestar / Ahora no y entran con `/calls/:id/join`.
 
+## Timbre como WhatsApp en iPhone y «Llamando…/Sonando…» (CH029, 2-nov-2026, migración 113)
+
+Pedido de Danny (nota del 2-nov con fotos): llamó a Alicia y en su iPhone solo apareció un aviso «Notification»; no timbró.
+
+- **Push VoIP (PushKit)**: iOS 1.7.20 registra además un token VoIP por sesión (`PUT /push/token {provider:'apns_voip'}`, con
+  las mismas condiciones que el de avisos; el `DELETE /push/token` borra los dos). `pushCall` le manda a esa sesión un push
+  `apns-push-type: voip` al tópico `com.chaggu.app.voip` (vence a los 40 s) **en vez** del aviso normal; Android y los iPhone
+  sin token VoIP siguen con el aviso de siempre. No molestar y modo sueño se respetan igual.
+- **iPhone** (`VoipPush.swift`, `CallKitBridge.reportIncomingPush`): cada push VoIP se reporta a CallKit en el acto (regla de
+  iOS 13+). Suena la pantalla de llamada del sistema con el tono elegido en la app, también bloqueado o con la app cerrada.
+  Contestar entra a la llamada (arranca la sesión si hace falta); colgar mientras suena = rechazar. Deja de sonar si cuelga
+  quien llama, contesto en otro dispositivo o a los 45 s (queda «perdida» en Recientes). Con la app abierta no se duplica el
+  aviso propio.
+- **«Sonando…»**: el dispositivo al que le suena confirma con `POST /calls/:id/ringing` (iOS con CallKit o con el aviso de la
+  app, web/escritorio con su aviso). `call_ringees.reached_at` y `CallDTO.ringingUserIds` (sin quien ya entró o rechazó).
+  Quien llama ve «Llamando…» hasta la confirmación y luego «Sonando…» (antes: «Esperando a que alguien entre…»). Android
+  todavía no confirma: con Android del otro lado se queda en «Llamando…».
+
 ## Varios dispositivos, altavoz y llamadas en curso (1.7.1, 29-sep-2026)
 
 Pedido de Danny. César lo llamó, contestó en el iPhone y el PC siguió sonando.

@@ -194,7 +194,11 @@ async function callDTO(db: Db, id: string, viewerId?: string): Promise<CallDTO> 
               WHERE u.id IN (SELECT p.user_id FROM call_participants p WHERE p.call_id = c.id UNION SELECT i.user_id FROM call_invites i WHERE i.call_id = c.id
                              UNION SELECT g.user_id FROM call_rings g WHERE g.call_id = c.id)) AS names,
             (SELECT jsonb_agg(jsonb_build_object('id', q.id, 'name', q.name) ORDER BY q.joined_at) FROM call_guests q
-              WHERE q.call_id = c.id AND q.left_at IS NULL) AS guests
+              WHERE q.call_id = c.id AND q.left_at IS NULL) AS guests,
+            ARRAY(SELECT r.user_id FROM call_ringees r WHERE r.call_id = c.id AND c.ended_at IS NULL AND r.reached_at IS NOT NULL
+                     AND r.declined_at IS NULL
+                     AND NOT EXISTS (SELECT 1 FROM call_participants p WHERE p.call_id = c.id AND p.user_id = r.user_id AND p.left_at IS NULL)
+                   ORDER BY r.reached_at) AS ringing
        FROM calls c WHERE c.id = $1`,
     [id, viewerId ?? null],
   );
@@ -206,6 +210,7 @@ async function callDTO(db: Db, id: string, viewerId?: string): Promise<CallDTO> 
     activeUserIds: r.active, transcribing: r.transcribing, hasTranscript: r.has_transcript,
     ...(r.invited?.length ? { invitedUserIds: r.invited } : {}), names: r.names ?? {},
     ...(r.rings?.length ? { invited: r.rings } : {}),
+    ...(r.ringing?.length ? { ringingUserIds: r.ringing } : {}),
     ...(viewerId ? { myDevices: r.my_devices ?? [] } : {}),
     ...(r.guests?.length ? { guests: r.guests } : {}),
     ...(r.room_id ? { roomId: r.room_id } : {}),
@@ -423,7 +428,7 @@ async function markRung(c: Tx, callId: string, userIds: string[]) {
   if (!userIds.length) return;
   await c.query(
     `INSERT INTO call_ringees (call_id, user_id) SELECT $1, unnest($2::uuid[])
-     ON CONFLICT (call_id, user_id) DO UPDATE SET rung_at = now(), declined_at = NULL`,
+     ON CONFLICT (call_id, user_id) DO UPDATE SET rung_at = now(), declined_at = NULL, reached_at = NULL`,
     [callId, userIds],
   );
 }
@@ -499,13 +504,32 @@ export async function leave(userId: string, callId: string, deviceKey: string = 
   return { call: await callDTO(pool, callId, userId) };
 }
 
+/**
+ * POST /calls/:id/ringing (CH029): mi teléfono está sonando (CallKit lo mostró o la app tiene el aviso en pantalla).
+ * Quien llama pasa de «Llamando…» a «Sonando…» (CallDTO.ringingUserIds). Solo cuenta si me sonó esta llamada.
+ */
+export async function ringing(userId: string, callId: string) {
+  const call = await callFor(pool, userId, callId, 'read');
+  if (call.ended_at) return { ok: true };
+  await tx(async (c) => {
+    const r = await c.query(
+      'UPDATE call_ringees SET reached_at = now() WHERE call_id = $1 AND user_id = $2 AND reached_at IS NULL AND declined_at IS NULL',
+      [callId, userId],
+    );
+    if (r.rowCount) await publish(c, call.conversation_id, callId);
+  });
+  return { ok: true };
+}
+
 /** Rechazar en un dispositivo: todos los míos dejan de sonar. Para los demás no cambia nada. */
 export async function decline(userId: string, callId: string) {
   const call = await callFor(pool, userId, callId, 'read');
   await tx(async (c) => {
     // Rechazada no es perdida.
-    await c.query('UPDATE call_ringees SET declined_at = now() WHERE call_id = $1 AND user_id = $2', [callId, userId]);
+    const r = await c.query('UPDATE call_ringees SET declined_at = now() WHERE call_id = $1 AND user_id = $2 RETURNING reached_at', [callId, userId]);
     await enqueueOutbox(c, 'account.event', { userIds: [userId], event: { type: 'call.declined', callId, conversationId: call.conversation_id } });
+    // Quien llama veía «Sonando…» por mí: deja de verlo.
+    if (r.rows[0]?.reached_at && !call.ended_at) await publish(c, call.conversation_id, callId);
   });
   return { ok: true };
 }

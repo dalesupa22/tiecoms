@@ -62,6 +62,8 @@ export function showIncomingCall(call: CallDTO, callerName: string, title: strin
   if (currentCall()?.call.id === call.id) return;
   ringing = { call, callerName, title };
   ringListeners.forEach((l) => l());
+  // Quien llama ve «Sonando…» (CH029).
+  void client.ringingCall(call.id).catch(() => {});
   startRingtone(client.getState().data?.me.ringtone);
   flashTitle(`${call.kind === 'video' ? '🎥' : '📞'} ${t('call.incomingFrom', { name: callerName })}`);
   if (ringTimer) clearTimeout(ringTimer);
@@ -298,6 +300,15 @@ export function CallDock() {
   );
 }
 
+/**
+ * Sola en la llamada (CH029, como WhatsApp): «Sonando…» si el teléfono de alguien confirmó que suena, «Llamando…» si
+ * la empecé yo, si no «Esperando a que alguien entre…» (salas, o entré a una que quedó sola).
+ */
+export function waitingKey(call: CallDTO, meId: string): 'call.ringingOut' | 'call.calling' | 'call.waiting' {
+  if ((call.ringingUserIds ?? []).some((id) => id !== meId)) return 'call.ringingOut';
+  return call.startedBy === meId && !call.roomId ? 'call.calling' : 'call.waiting';
+}
+
 /** Contenido de la llamada: pantallas, recuadros, subtítulos y botones (en el panel o en la ventana flotante). */
 function CallPanel({ v, d, compact, nameOf, pip, chat }: { v: CallView; d: ClientData; compact: boolean; nameOf: (id: string) => string; pip?: boolean; chat?: { open: boolean; toggle: () => void } }) {
   const people = callPeople(v.call);
@@ -334,7 +345,7 @@ function CallPanel({ v, d, compact, nameOf, pip, chat }: { v: CallView; d: Clien
               <Avatar person={personById(d, id) ?? ({ id, name: nameOf(id) } as any)} size={44} /><span className="small ellipsis">{nameOf(id)}</span>
               {(id === d.me.id ? v.muted : v.mutedUsers.includes(id)) && <span className="call-badge" title={t('call.personMuted')} aria-label={t('call.personMuted')}>🔇</span>}
             </div>))}
-            {others.length === 0 && <div className="small muted">{t('call.waiting')}</div>}
+            {others.length === 0 && <div className="small muted" role="status">{t(waitingKey(v.call, d.me.id))}</div>}
           </div>}
       {!pip && pending.length > 0 && <InvitedList call={v.call} pending={pending} />}
       {v.call.transcribing && v.captions.length > 0 && (

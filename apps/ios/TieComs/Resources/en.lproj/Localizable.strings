@@ -446,6 +446,8 @@
 "call.unmute" = "Unmute microphone";
 "call.video" = "Video call";
 "call.waiting" = "Waiting for someone to join…";
+"call.calling" = "Calling…";
+"call.ringingOut" = "Ringing…";
 "call.you" = "You";
 "calls.activeNow" = "Live now";
 "calls.callBack" = "Call again";

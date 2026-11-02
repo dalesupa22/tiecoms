@@ -485,7 +485,8 @@ struct CallScreen: View {
                     }
                 }
                 if inside.filter({ $0 != ctx.me }).isEmpty && invited.isEmpty {
-                    Text(L("call.waiting")).font(.subheadline).foregroundStyle(.white.opacity(0.7))
+                    Text(L(v.isGuest ? "call.waiting" : CallRules.waitingKey(v.call, me: ctx.me))).font(.subheadline).foregroundStyle(.white.opacity(0.7))
+                        .accessibilityIdentifier("call.waiting")
                 }
                 Spacer()
             }

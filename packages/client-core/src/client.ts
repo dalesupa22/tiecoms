@@ -952,6 +952,8 @@ export class TieComsClient {
   }
   /** Rechazar en este dispositivo: todos los míos dejan de sonar (call.declined). */
   declineCall(callId: string) { return this.request<{ ok: true }>(`/calls/${callId}/decline`, { method: 'POST', json: {} }); }
+  /** CH029: mi aviso de llamada entrante está sonando; quien llama pasa de «Llamando…» a «Sonando…». */
+  ringingCall(callId: string) { return this.request<{ ok: true }>(`/calls/${callId}/ringing`, { method: 'POST', json: {} }); }
   async loadCall(conversationId: string) {
     const r = await this.request<{ call: CallDTO | null }>(`/conversations/${conversationId}/call`);
     this.set({ calls: { ...this.state.calls, [conversationId]: r.call } });

@@ -12,12 +12,17 @@ import { summarize, summaryText } from './attachments.ts';
 
 type Lang = 'es' | 'en';
 
-export async function registerToken(sessionId: string, input: { provider: 'apns' | 'fcm'; token: string; environment: 'sandbox' | 'production'; lang?: Lang }, acceptLanguage?: string) {
+export async function registerToken(sessionId: string, input: { provider: 'apns' | 'fcm' | 'apns_voip'; token: string; environment: 'sandbox' | 'production'; lang?: Lang }, acceptLanguage?: string) {
   const lang: Lang = input.lang ?? (/^\s*en\b/i.test(acceptLanguage ?? '') ? 'en' : 'es');
+  const voip = input.provider === 'apns_voip';
   await tx(async (c) => {
     // Un token por sesión: el anterior de esta sesión se reemplaza; si el token venía de
     // otra sesión (se volvió a iniciar sesión en el mismo teléfono), pasa a esta.
-    await c.query('DELETE FROM push_subscriptions WHERE session_id = $1 AND NOT (provider = $2 AND token = $3)', [sessionId, input.provider, input.token]);
+    // El token VoIP (CH029) va aparte: registrar uno no borra el de avisos ni al revés.
+    await c.query(
+      "DELETE FROM push_subscriptions WHERE session_id = $1 AND (provider = 'apns_voip') = $4 AND NOT (provider = $2 AND token = $3)",
+      [sessionId, input.provider, input.token, voip],
+    );
     await c.query(
       `INSERT INTO push_subscriptions (session_id, provider, token, environment, lang) VALUES ($1,$2,$3,$4,$5)
        ON CONFLICT (provider, token) DO UPDATE SET session_id = EXCLUDED.session_id, environment = EXCLUDED.environment,
@@ -33,17 +38,19 @@ export async function removeToken(sessionId: string) {
   return { ok: true };
 }
 
-interface Target { user_id: string; sub_id: string; provider: 'apns' | 'fcm'; token: string; environment: 'sandbox' | 'production'; lang: Lang; mentioned?: boolean }
+interface Target { user_id: string; sub_id: string; provider: 'apns' | 'fcm' | 'apns_voip'; token: string; environment: 'sandbox' | 'production'; lang: Lang; mentioned?: boolean }
 
 /**
  * Sesiones con token de quien no tiene «No molestar» activo ni está en su modo sueño (horario de descanso): con dnd_until > now() no sale ningún push
  * (mensajes, menciones, reacciones, reuniones, avisos de reunión ni recordatorios). Todas las consultas
  * de destinatarios pasan por aquí.
  */
-const ACTIVE_SESSION = `JOIN sessions s ON s.user_id = u.id AND s.revoked_at IS NULL AND s.expires_at > now()
+const sessionJoin = (providers: string) => `JOIN sessions s ON s.user_id = u.id AND s.revoked_at IS NULL AND s.expires_at > now()
     AND (u.dnd_until IS NULL OR u.dnd_until <= now())
     AND NOT tiecoms_sleeping(u.sleep_on, u.sleep_start, u.sleep_end, u.sleep_tz)
-  JOIN push_subscriptions ps ON ps.session_id = s.id AND ps.provider IN ('apns', 'fcm')`;
+  JOIN push_subscriptions ps ON ps.session_id = s.id AND ps.provider IN (${providers})`;
+/** Avisos normales: el token VoIP (apns_voip) solo sirve para llamadas entrantes (pushCall). */
+const ACTIVE_SESSION = sessionJoin("'apns', 'fcm'");
 
 /** No leídos de cada persona (conversaciones que puede leer y no tiene silenciadas): el globo del ícono. */
 async function badges(userIds: string[]): Promise<Map<string, number>> {
@@ -99,6 +106,14 @@ export function apnsPayload(n: Note, badge: number) {
   };
 }
 
+/**
+ * Push VoIP de llamada entrante (CH029): sin `aps` (PushKit no muestra nada por sí solo). La app lo reporta a CallKit
+ * con el nombre de quien llama (`callerName`) y el del grupo (`subtitle`, solo si no es un directo).
+ */
+export function voipPayload(n: Note) {
+  return { ...n.data, callerName: n.title, subtitle: n.subtitle ?? null };
+}
+
 /** FCM: todos los valores de `data` son texto. */
 export function fcmData(n: Note, badge: number): Record<string, string> {
   const out: Record<string, string> = { title: n.title, subtitle: n.subtitle ?? '', body: n.body, badge: String(badge), threadId: n.threadId, category: n.category };
@@ -138,7 +153,9 @@ async function deliver(targets: Target[], note: (t: Target) => Note) {
     const badge = counts.get(t.user_id) ?? 0;
     let r: PushResult;
     try {
-      r = t.provider === 'apns'
+      r = t.provider === 'apns_voip'
+        ? await sendApns(t.token, t.environment, voipPayload(n), { collapseId: n.collapseId, voip: true })
+        : t.provider === 'apns'
         ? await sendApns(t.token, t.environment, apnsPayload(n, badge), { collapseId: n.collapseId })
         : await sendFcm(t.token, fcmData(n, badge), { collapseKey: n.threadId });
     } catch (e: any) { r = { ok: false, invalidToken: false, error: String(e?.message ?? e) }; }
@@ -495,6 +512,11 @@ export async function pushCallMissed(p: { callId: string; userIds: string[] }) {
   return targets.length;
 }
 
+/**
+ * Llamada entrante. Un iPhone con token VoIP (CH029) recibe el push de PushKit y timbra con la pantalla del sistema
+ * (CallKit), con la app cerrada o el teléfono bloqueado; a esa sesión no le va además el aviso normal. Las demás
+ * sesiones (Android, iOS sin PushKit) reciben el aviso de siempre.
+ */
 export async function pushCall(p: { callId: string; userIds: string[]; callerName: string; title: string | null }) {
   if (!p.userIds?.length) return 0;
   const { rows } = await pool.query('SELECT id, conversation_id, kind, ended_at FROM calls WHERE id = $1', [p.callId]);
@@ -502,7 +524,8 @@ export async function pushCall(p: { callId: string; userIds: string[]; callerNam
   if (!call || call.ended_at) return 0;
   const { rows: targets } = await pool.query<Target>(
     `SELECT u.id AS user_id, ps.id AS sub_id, ps.provider, ps.token, ps.environment, ps.lang
-       FROM users u ${ACTIVE_SESSION} WHERE u.id = ANY($1) AND u.disabled_at IS NULL`,
+       FROM users u ${sessionJoin("'apns', 'fcm', 'apns_voip'")} WHERE u.id = ANY($1) AND u.disabled_at IS NULL
+        AND NOT (ps.provider = 'apns' AND EXISTS (SELECT 1 FROM push_subscriptions v WHERE v.session_id = s.id AND v.provider = 'apns_voip'))`,
     [p.userIds],
   );
   await deliver(targets, (t) => ({

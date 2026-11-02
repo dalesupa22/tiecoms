@@ -96,10 +96,13 @@ enum Naming {
 
     /// Personas para un chat nuevo: solo humanas, sin mí ni `exclude`, filtradas por nombre, cargo, área o empresa,
     /// agrupadas: primero mi empresa, luego las demás por nombre y al final los terceros (como PeoplePicker de la web).
-    static func peopleByOrg(_ d: BootstrapDTO, query: String, exclude: Set<String> = []) -> [OrgGroup] {
+    /// `includeMe` («Mensaje nuevo», peopleByOrg de apps/web/src/quick-search.ts): yo voy primero en mi equipo («Tú»,
+    /// notas para ti) sin búsqueda, o si lo escrito me nombra (mi nombre o «tú», «yo», «notas»…).
+    static func peopleByOrg(_ d: BootstrapDTO, query: String, exclude: Set<String> = [], includeMe: Bool = false) -> [OrgGroup] {
         let fold: (String) -> String = { $0.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil) }
         let q = fold(query.trimmingCharacters(in: .whitespaces))
-        let people = d.people.filter { $0.kind == "human" && $0.id != d.me.id && !exclude.contains($0.id) }
+        let me = includeMe && !exclude.contains(d.me.id) && (q.isEmpty || SelfSearch.matches(d, folded: q)) ? [SelfSearch.mePerson(d)] : []
+        let people = me + d.people.filter { $0.kind == "human" && $0.id != d.me.id && !exclude.contains($0.id) }
             .filter { p in q.isEmpty || [p.name, p.title, p.area, org(d, p.orgId)?.name].compactMap { $0 }.contains { fold($0).contains(q) } }
             .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
         var groups: [String: [PersonDTO]] = [:]
@@ -355,4 +358,34 @@ enum HomeFilter: String, CaseIterable, Identifiable {
         get { HomeFilter(rawValue: UserDefaults.standard.string(forKey: key) ?? "") ?? .all }
         set { UserDefaults.standard.set(newValue.rawValue, forKey: key) }
     }
+}
+
+/// Encontrarme a mí en las búsquedas («Tú», notas para ti), como WhatsApp o Slack. Mismas reglas que
+/// apps/web/src/quick-search.ts (SELF_WORDS, matchesMe, mePerson).
+enum SelfSearch {
+    /// Palabras con las que también me encuentro (ya sin tildes): «tú», «yo», «notas», «conmigo»…
+    static let words = ["tu", "yo", "notas", "conmigo", "you", "me", "notes", "self", "myself"]
+
+    static func fold(_ s: String) -> String { s.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil) }
+
+    /// Yo como persona (por si el directorio no me trae).
+    static func mePerson(_ d: BootstrapDTO) -> PersonDTO {
+        if let p = d.person(id: d.me.id) { return p }
+        var p = PersonDTO(id: d.me.id, name: d.me.name, kind: "human", orgId: d.me.primaryOrgId, avatarUrl: d.me.avatarUrl)
+        p.title = d.me.title
+        p.area = d.me.area
+        return p
+    }
+
+    /// ¿Lo escrito (ya sin tildes ni mayúsculas) me nombra? Con 2+ letras, el comienzo de «tú», «yo», «notas»…;
+    /// o mi nombre, cargo, área o empresa lo contienen.
+    static func matches(_ d: BootstrapDTO, folded q: String) -> Bool {
+        guard !q.isEmpty else { return false }
+        if q.count >= 2 && words.contains(where: { $0.hasPrefix(q) }) { return true }
+        let me = mePerson(d)
+        return [me.name, me.title, me.area, Naming.org(d, me.orgId)?.name].compactMap { $0 }.contains { fold($0).contains(q) }
+    }
+
+    /// Igual, con el texto tal cual se escribió.
+    static func matches(_ d: BootstrapDTO, query: String) -> Bool { matches(d, folded: fold(query.trimmingCharacters(in: .whitespaces))) }
 }

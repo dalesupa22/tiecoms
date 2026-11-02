@@ -324,7 +324,14 @@ extension Naming {
         let fold: (String) -> String = { $0.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil) }
         let q = fold(query.trimmingCharacters(in: .whitespaces))
         return d.conversations.filter { $0.kind.isChat && !isThread($0) }
-            .filter { c in q.isEmpty || ([title(d, c), subtitle(d, c)] + c.memberIds.compactMap { person(d, $0)?.name }).contains { fold($0).contains(q) } }
+            .filter { c in
+                guard !q.isEmpty else { return true }
+                // «Tú» (notas para ti) sale con mi nombre o «tú», «yo», «notas»… (searchChats de la web). Mi nombre
+                // no cuenta en los demás chats: estoy en todos.
+                if GG.isSelf(d, c) { return SelfSearch.matches(d, folded: q) }
+                return ([title(d, c), subtitle(d, c)] + c.memberIds.filter { $0 != d.me.id }.compactMap { person(d, $0)?.name })
+                    .contains { fold($0).contains(q) }
+            }
             .sorted(by: HomeOrder.before)
     }
 

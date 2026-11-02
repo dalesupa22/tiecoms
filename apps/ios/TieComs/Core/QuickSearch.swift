@@ -12,15 +12,19 @@ enum QuickSearch {
 
     private static func fold(_ s: String) -> String { s.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil) }
 
-    /// Personas (humanas, sin mí) cuyo nombre, cargo, área o empresa coincide; primero con las que ya hablo.
+    /// Personas (humanas) cuyo nombre, cargo, área o empresa coincide; primero con las que ya hablo.
+    /// Yo también salgo (abre «Tú», notas para ti) si lo escrito me nombra: mi nombre, cargo, área o empresa, o «tú»,
+    /// «yo», «notas», «conmigo», «me», «self»… (searchPeople de apps/web/src/quick-search.ts); si no, no estorbo.
     static func people(_ d: BootstrapDTO, query: String, exclude: Set<String> = []) -> [PersonDTO] {
         let q = fold(query.trimmingCharacters(in: .whitespaces))
         guard !q.isEmpty else { return [] }
         let order = recentPeopleIds(d)
         let rank = Dictionary(uniqueKeysWithValues: order.enumerated().map { ($1, $0) })
-        return d.people
+        let me = !exclude.contains(d.me.id) && SelfSearch.matches(d, folded: q) ? [SelfSearch.mePerson(d)] : []
+        let others = d.people
             .filter { $0.kind == "human" && $0.id != d.me.id && !exclude.contains($0.id) }
             .filter { p in [p.name, p.title, p.area, Naming.org(d, p.orgId)?.name].compactMap { $0 }.contains { fold($0).contains(q) } }
+        return (me + others)
             .sorted { a, b in
                 // Quien empieza con lo escrito va antes que quien solo lo contiene (Ana antes que Mariana).
                 let pa = fold(a.name).hasPrefix(q), pb = fold(b.name).hasPrefix(q)
@@ -52,9 +56,17 @@ enum QuickSearch {
         Results(people: people(d, query: query), groups: groups(d, query: query), chats: Naming.dms(d, query: query))
     }
 
-    /// El directo que ya tengo con esa persona (si existe).
+    /// El directo que ya tengo con esa persona (si existe); conmigo mismo es «Tú» (todos sus miembros soy yo).
     static func direct(_ d: BootstrapDTO, with personId: String) -> ConversationDTO? {
-        d.conversations.first { $0.kind == .direct && $0.memberIds.contains(personId) && !Naming.isThread($0) }
+        d.conversations.first { c in
+            c.kind == .direct && !Naming.isThread(c) && (personId == d.me.id ? GG.isSelf(d, c) : c.memberIds.contains(personId))
+        }
+    }
+
+    /// Personas cuyo directo ya está entre estos chats (no se repiten en «Personas»): la otra persona de cada directo,
+    /// y yo solo si «Tú» está (estoy en todos los directos, pero eso no me esconde).
+    static func directPeople(_ d: BootstrapDTO, _ chats: [ConversationDTO]) -> Set<String> {
+        Set(chats.filter { $0.kind == .direct }.flatMap { c in GG.isSelf(d, c) ? [d.me.id] : c.memberIds.filter { $0 != d.me.id } })
     }
 
     /// Personas de mis directos, de la conversación más reciente a la más vieja (fila «Recientes»).

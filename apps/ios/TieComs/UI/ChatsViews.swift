@@ -186,12 +186,15 @@ enum ComposeRules {
     static func backspace(_ picked: [String], query: String) -> [String] {
         query.isEmpty && !picked.isEmpty ? Array(picked.dropLast()) : picked
     }
-    /// El botón de abajo: con 1, su directo; con 2 o más, un chat grupal.
-    static func action(_ picked: [String]) -> Action {
-        switch picked.count {
-        case 0: return .none
-        case 1: return .openDirect(picked[0])
-        default: return .createChat(picked)
+    /// El botón de abajo: con 1, su directo; con 2 o más, un chat grupal. Marcarme a mí (`me`) con otras personas no
+    /// suma a nadie (ya estoy); solo a mí es «Tú», notas para ti (create de NewChatDialog en la web).
+    static func action(_ picked: [String], me: String? = nil) -> Action {
+        let others = picked.filter { $0 != me }
+        if picked.isEmpty { return .none }
+        switch others.count {
+        case 0: return .openDirect(me ?? picked[0])
+        case 1: return .openDirect(others[0])
+        default: return .createChat(others)
         }
     }
 }
@@ -285,7 +288,8 @@ struct NewChatSheet: View {
 
     @ViewBuilder private func list(_ d: BootstrapDTO) -> some View {
         let searching = !query.trimmingCharacters(in: .whitespaces).isEmpty
-        let orgs = Naming.peopleByOrg(d, query: query)
+        // Yo voy primero en mi equipo («Tú», notas para ti), y salgo al buscar mi nombre o «tú», «yo», «notas».
+        let orgs = Naming.peopleByOrg(d, query: query, includeMe: true)
         let groups = picked.isEmpty ? QuickSearch.groups(d, query: query) : []
         List {
             if picked.isEmpty && !searching {
@@ -402,7 +406,7 @@ struct NewChatSheet: View {
 
     @ViewBuilder private func footer(_ d: BootstrapDTO) -> some View {
         VStack(spacing: 10) {
-            switch ComposeRules.action(picked) {
+            switch ComposeRules.action(picked, me: d.me.id) {
             case .none:
                 HStack(spacing: 10) {
                     Button(L("common.cancel")) { dismiss() }
@@ -412,7 +416,7 @@ struct NewChatSheet: View {
                         .accessibilityIdentifier("compose.space")
                 }
             case .openDirect(let id):
-                let first = Naming.person(d, id)?.name.split(separator: " ").first.map(String.init) ?? ""
+                let first = id == d.me.id ? L("self.title") : Naming.person(d, id)?.name.split(separator: " ").first.map(String.init) ?? ""
                 Button(action: create) { Text(L("compose.openWith", ["name": first])).frame(maxWidth: .infinity) }
                     .buttonStyle(PrimaryButtonStyle())
                     .accessibilityIdentifier("newChat.create")
@@ -458,7 +462,7 @@ struct NewChatSheet: View {
     }
 
     private func create() {
-        let action = ComposeRules.action(picked)
+        let action = ComposeRules.action(picked, me: store.data?.me.id)
         busy = true; error = nil
         Task {
             do {

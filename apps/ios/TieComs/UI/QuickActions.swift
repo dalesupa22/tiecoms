@@ -75,7 +75,7 @@ struct QuickSearchSections: View {
         let groups = showGroups ? QuickSearch.groups(d, query: query) : []
         let chats = showChats ? Naming.dms(d, query: query) : []
         // Quien ya tiene su directo entre los chats encontrados sale una sola vez (en Chats).
-        let people = QuickSearch.people(d, query: query, exclude: hidePeople.union(chats.filter { $0.kind == .direct }.flatMap(\.memberIds)))
+        let people = QuickSearch.people(d, query: query, exclude: hidePeople.union(QuickSearch.directPeople(d, chats)))
         if !people.isEmpty {
             Section {
                 ForEach(people.prefix(8)) { p in
@@ -102,7 +102,7 @@ struct QuickSearchSections: View {
     }
 
     private func open(_ p: PersonDTO) {
-        // Con directo: se abre en esta misma pestaña; sin directo: se crea y se abre en DMs.
+        // Con directo: se abre en esta misma pestaña; sin directo: se crea y se abre en DMs (yo: «Tú», POST /me/notes).
         if let c = QuickSearch.direct(d, with: p.id) { store.push(.conversation(c.id)); return }
         Task { do { try await store.openDirect(with: p.id) } catch { store.show(L10n.errorText(error)) } }
     }
@@ -121,9 +121,11 @@ struct PersonPickRow: View {
         HStack(spacing: 12) {
             Avatar(person: p, org: org, size: 38, badge: org != nil)
             VStack(alignment: .leading, spacing: 2) {
-                Text(p.name).font(.body).foregroundStyle(Theme.textPrimary).lineLimit(1)
-                let line = Naming.roleLine(p)
-                let company = org?.name ?? (p.guest ? L("common.guest") : "")
+                // Yo («Tú», notas para ti): «Danny (tú)» y debajo «notas para ti».
+                let isMe = p.id == d.me.id
+                Text(isMe ? "\(p.name) \(L("common.you"))" : p.name).font(.body).foregroundStyle(Theme.textPrimary).lineLimit(1)
+                let line = isMe ? L("self.rowHint") : Naming.roleLine(p)
+                let company = isMe ? "" : org?.name ?? (p.guest ? L("common.guest") : "")
                 Text([line, company].filter { !$0.isEmpty }.joined(separator: " · "))
                     .font(.subheadline).foregroundStyle(Theme.textSecondary).lineLimit(1)
             }

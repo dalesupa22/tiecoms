@@ -657,7 +657,7 @@ struct DMsView: View {
                     // Al buscar: personas con las que aún no hay directo en la lista (tocar = escribirle) y grupos.
                     if searching {
                         QuickSearchSections(d: d, query: query, showChats: false,
-                                            hidePeople: Set(list.filter { $0.kind == .direct }.flatMap(\.memberIds)))
+                                            hidePeople: QuickSearch.directPeople(d, list))
                     }
                 }
                 .listStyle(.insetGrouped)

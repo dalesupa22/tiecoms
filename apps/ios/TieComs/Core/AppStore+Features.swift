@@ -478,11 +478,23 @@ extension AppStore {
         return r
     }
 
-    /// Toque en una persona (búsqueda, «Recientes», «Mensaje nuevo»): abre su directo y, si no existe, lo crea.
+    /// Toque en una persona (búsqueda, «Recientes», «Mensaje nuevo», ficha de un autor o participante): abre su directo
+    /// y, si no existe, lo crea. Conmigo mismo es «Tú» (notas para ti): POST /me/notes, porque /chats no admite solo a uno mismo.
     func openDirect(with personId: String) async throws {
         if let d = data, let c = QuickSearch.direct(d, with: personId) { navigate(to: .conversation(c.id)); return }
+        if let d = data, personId == d.me.id {
+            let r = try await openSelfNotesRequest()
+            if data?.conversations.contains(where: { $0.id == r.id }) != true { try await loadBootstrap() }
+            navigate(to: .conversation(r.id))
+            return
+        }
         let r = try await createChat(userIds: [personId], name: nil)
         navigate(to: .conversation(r.id))
+    }
+
+    /// POST /me/notes → { id }: crea o recupera el directo conmigo mismo («Tú»).
+    func openSelfNotesRequest() async throws -> SelfNotesResult {
+        try await api.request("/me/notes", method: "POST", json: [:])
     }
 
     /// «Grupo en un espacio»: POST /workspaces/:id/conversations {name, kind, level, memberIds}.
@@ -944,4 +956,9 @@ extension AppStore {
         try await loadBootstrap()
         return r.id
     }
+}
+
+/// `{ id }` de POST /me/notes.
+struct SelfNotesResult: Decodable, Sendable {
+    var id: String
 }

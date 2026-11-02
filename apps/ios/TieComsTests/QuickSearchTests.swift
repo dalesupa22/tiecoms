@@ -31,15 +31,16 @@ final class QuickSearchTests: XCTestCase {
     func testPeopleIncludeThoseWithoutDirectAndSkipMeAndAgents() throws {
         let d = try boot()
         XCTAssertEqual(QuickSearch.people(d, query: "mariana").map(\.id), ["mar"], "sin directo también sale")
-        XCTAssertTrue(QuickSearch.people(d, query: "ana").allSatisfy { $0.id != "me" }, "nunca yo")
+        XCTAssertTrue(QuickSearch.people(d, query: "bob").allSatisfy { $0.id != "me" }, "yo solo si lo escrito me nombra")
         XCTAssertTrue(QuickSearch.people(d, query: "asist").isEmpty, "los agentes no son personas a las que escribir")
         XCTAssertTrue(QuickSearch.people(d, query: " ").isEmpty, "sin texto, nada")
     }
 
     func testPeopleMatchCompanyAndRoleAndOrderPrefixFirst() throws {
         let d = try boot()
-        // «ana»: Ánalía empieza con lo escrito (sin tildes) y va antes que Mariana, que solo lo contiene.
-        XCTAssertEqual(QuickSearch.people(d, query: "ana").map(\.id), ["ana2", "mar"])
+        // «ana»: Ánalía empieza con lo escrito (sin tildes) y va antes que Mariana, que solo lo contiene. Yo (Ana Ruiz) también
+        // salgo, porque lo escrito me nombra (CH028, como la web): abre «Tú».
+        XCTAssertEqual(QuickSearch.people(d, query: "ana").map(\.id), ["me", "ana2", "mar"])
         XCTAssertEqual(Set(QuickSearch.people(d, query: "ongoing").map(\.id)), ["bob", "mar", "ana2"], "por empresa")
         XCTAssertEqual(QuickSearch.people(d, query: "pagos").map(\.id), ["col"], "por cargo")
         XCTAssertEqual(QuickSearch.people(d, query: "ongoing", exclude: ["bob"]).count, 2)

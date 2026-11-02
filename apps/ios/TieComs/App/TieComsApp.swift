@@ -120,7 +120,8 @@ struct TieComsApp: App {
                 .task {
                     // Las pruebas unitarias se alojan en la app: no se arranca la sesión real.
                     guard !AppConfig.isRunningUnitTests, !isNightProof else { return }
-                    await store.start()
+                    // Si un push VoIP ya arrancó la sesión en segundo plano (llamada entrante), no se reinicia.
+                    _ = await store.ensureSession()
                 }
                 .onOpenURL { markLinkLaunch(); store.handle(url: $0) }
                 .onContinueUserActivity(NSUserActivityTypeBrowsingWeb) { activity in

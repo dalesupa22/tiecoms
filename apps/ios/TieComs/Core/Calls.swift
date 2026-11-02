@@ -439,9 +439,11 @@ enum CallRules {
 
     /// La llamada que suena en el sistema debe terminar: ya no hay llamada en curso (o es otra), terminó, o ya estoy
     /// dentro desde otro dispositivo. nil = sigue sonando. `call` es la de la conversación (GET /conversations/:id/call).
-    static func incomingEnd(_ call: CallDTO?, callId: String, me: String?) -> CXCallEndedReason? {
+    /// `acked`: ya confirmé que me suena; si después no aparezco en ringingUserIds, rechacé en otro dispositivo.
+    static func incomingEnd(_ call: CallDTO?, callId: String, me: String?, acked: Bool = false) -> CXCallEndedReason? {
         guard let call, call.id == callId, call.endedAt == nil else { return .remoteEnded }
         if let me, call.activeUserIds.contains(me) { return .answeredElsewhere }
+        if acked, let me, !call.ringingUserIds.contains(me) { return .declinedElsewhere }
         return nil
     }
 
@@ -636,6 +638,8 @@ final class CallCenter: CallMediaDelegate {
     /// La sesión de audio la activó CallKit: al colgar la desactiva el sistema, no la app.
     @ObservationIgnored private var systemAudio = false
     @ObservationIgnored private var systemOutgoing = false
+    /// Contestada en la pantalla del sistema y todavía entrando (CH029): colgar ahí la cancela.
+    @ObservationIgnored private var answering: UUID?
 
     /// Cómo terminó una llamada que el sistema conoce.
     enum SystemEndCause: Equatable { case local, remote, failed }
@@ -664,15 +668,20 @@ final class CallCenter: CallMediaDelegate {
     func join(_ callId: String, camera: Bool, incoming: Bool = false, callerName: String? = nil, systemCall: UUID? = nil) async throws {
         if view?.call.id == callId, view?.phase != .ended {
             expanded = true
-            if let systemCall { systemCalls?.end(systemCall, cause: .remote) }
+            if let systemCall { answering = nil; systemCalls?.end(systemCall, cause: .remote) }
             return
         }
         if view != nil { await hangUp() }
         guard let store else { return }
         let j: CallJoinDTO
         do { j = try await store.joinCallRequest(callId) } catch {
-            if let systemCall { systemCalls?.end(systemCall, cause: .failed) }
+            if let systemCall { answering = nil; systemCalls?.end(systemCall, cause: .failed) }
             throw error
+        }
+        if let systemCall {
+            // Colgué en la pantalla del sistema mientras se entraba: se sale en el servidor y no se conecta.
+            guard answering == systemCall else { _ = try? await store.leaveCallRequest(callId); return }
+            answering = nil
         }
         await connect(j, camera: camera, direction: incoming ? .incoming : .outgoing, name: callerName, systemCall: systemCall)
     }
@@ -709,7 +718,8 @@ final class CallCenter: CallMediaDelegate {
         let m = makeMedia(j)
         media = m
         m.delegate = self
-        if m is NullCallMedia, let uuid = systemCall { systemCallId = uuid }
+        // Contestada en la pantalla del sistema: desde ya es la llamada del sistema (si algo falla, el teardown la termina).
+        if let uuid = systemCall { systemCallId = uuid; systemOutgoing = false }
         do {
             var callKitAudio = false
             if !(m is NullCallMedia) {
@@ -717,8 +727,7 @@ final class CallCenter: CallMediaDelegate {
                 // CallKit: la llamada queda en Recientes y el sistema activa el audio. Si algo falla, como antes.
                 if let sys = systemCalls, let uuid = systemCall {
                     // Contestada en la pantalla del sistema: ya existe; el audio llega con didActivate.
-                    systemCallId = uuid
-                    systemOutgoing = false
+                    _ = uuid
                     callKitAudio = await sys.waitForAudio()
                     guard media === m else { return }
                     if !callKitAudio { NSLog("[Chaggu] CallKit no activó el audio a tiempo: la app lo activa") }
@@ -774,6 +783,7 @@ final class CallCenter: CallMediaDelegate {
 
     /// Colgaron desde la interfaz del sistema (CXEndCallAction): se cuelga la llamada de chaggu.
     func systemEnded(_ uuid: UUID) {
+        if answering == uuid { answering = nil; return }
         guard systemCallId == uuid else { return }
         // El sistema ya la dio por terminada: el teardown no vuelve a pedírselo.
         systemCallId = nil
@@ -795,11 +805,11 @@ final class CallCenter: CallMediaDelegate {
         if view?.call.id == push.callId, inCall { systemCalls?.endIncoming(push.callId, reason: .answeredElsewhere); return }
         Task { @MainActor [weak self] in
             guard let store = self?.store, await store.ensureSession() else { return }
-            try? await store.ringingCallRequest(push.callId)
+            let acked = (try? await store.ringingCallRequest(push.callId)) != nil
             // Con la app cerrada el socket puede tardar: se pregunta cada pocos segundos mientras suene.
             while let self, self.systemCalls?.hasIncoming(push.callId) == true {
                 if let r = try? await store.activeCallRequest(push.conversationId) {
-                    if let reason = CallRules.incomingEnd(r, callId: push.callId, me: store.me?.id) {
+                    if let reason = CallRules.incomingEnd(r, callId: push.callId, me: store.me?.id, acked: acked) {
                         self.systemCalls?.endIncoming(push.callId, reason: reason)
                         return
                     }
@@ -812,9 +822,11 @@ final class CallCenter: CallMediaDelegate {
     /// Contesté en la pantalla del sistema: se entra a la llamada (arrancando la sesión si la app estaba cerrada).
     func systemAnswered(_ uuid: UUID, _ push: VoipCallPush) {
         if ringing?.call.id == push.callId { dismissRing() }
+        answering = uuid
         Task { @MainActor [weak self] in
             guard let self, let store = self.store else { return }
-            guard await store.ensureSession() else { self.systemCalls?.end(uuid, cause: .failed); return }
+            guard await store.ensureSession() else { self.answering = nil; self.systemCalls?.end(uuid, cause: .failed); return }
+            guard self.answering == uuid else { return }
             do { try await self.join(push.callId, camera: false, incoming: true, callerName: push.displayName, systemCall: uuid) }
             catch { store.show(L10n.errorText(error)) }
         }

@@ -20,15 +20,12 @@ final class CH029Tests: XCTestCase {
         XCTAssertEqual(p?.video, true)
         XCTAssertEqual(p?.displayName, "Danny")
         XCTAssertNil(p?.subtitle)
-        // El UUID del sistema es el de la llamada: dos push de la misma llamada suenan una vez.
-        XCTAssertEqual(p?.systemId, UUID(uuidString: id))
     }
 
     func testVoipPayloadInAGroupShowsTheGroup() {
         let p = VoipCallPush(["type": "call", "callId": "x", "conversationId": "g", "kind": "audio", "callerName": "Danny", "subtitle": "Ventas"])
         XCTAssertEqual(p?.displayName, "Danny · Ventas")
         XCTAssertEqual(p?.video, false)
-        XCTAssertNotNil(p?.systemId, "un id que no es UUID igual da un UUID")
     }
 
     func testVoipPayloadThatIsNotACall() {
@@ -57,6 +54,10 @@ final class CH029Tests: XCTestCase {
         XCTAssertEqual(CallRules.incomingEnd(ended, callId: "k", me: "me"), .remoteEnded)
         let mine = try call(#"{"id":"k","conversationId":"c","activeUserIds":["ana","me"]}"#)
         XCTAssertEqual(CallRules.incomingEnd(mine, callId: "k", me: "me"), .answeredElsewhere, "contesté en otro dispositivo")
+        let ringingMe = try call(#"{"id":"k","conversationId":"c","activeUserIds":["ana"],"ringingUserIds":["me"]}"#)
+        XCTAssertNil(CallRules.incomingEnd(ringingMe, callId: "k", me: "me", acked: true), "sigue sonando")
+        XCTAssertEqual(CallRules.incomingEnd(live, callId: "k", me: "me", acked: true), .declinedElsewhere, "rechacé en otro dispositivo")
+        XCTAssertNil(CallRules.incomingEnd(live, callId: "k", me: "me", acked: false), "sin confirmar no se concluye nada")
     }
 
     // MARK: Llamando… / Sonando…

@@ -195,18 +195,21 @@ final class CallKitBridge: NSObject {
             }
             return
         }
-        let uuid = push.systemId
+        // Un UUID nuevo por timbre; si esta llamada ya suena, el mismo (el sistema la muestra una vez). Volver a llamar
+        // después de que terminó de sonar es otro timbre.
+        let existing = incoming.first { $0.value.callId == push.callId }?.key
+        let uuid = existing ?? UUID()
         update.remoteHandle = CXHandle(type: .generic, value: push.displayName)
         update.localizedCallerName = push.displayName
         update.hasVideo = push.video
-        let isNew = incoming[uuid] == nil
+        let isNew = existing == nil
         incoming[uuid] = push
         provider.reportNewIncomingCall(with: uuid, update: update) { error in
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 if let error {
                     // Ya estaba sonando (dos push de la misma llamada) no es un problema; otro error sí.
-                    if (error as? CXErrorCodeIncomingCallError)?.code == .callUUIDAlreadyExists { return }
+                    if !isNew, (error as? CXErrorCodeIncomingCallError)?.code == .callUUIDAlreadyExists { return }
                     NSLog("[Chaggu] CallKit: no se pudo mostrar la llamada entrante: \(error.localizedDescription)")
                     self.forgetIncoming(uuid)
                     return

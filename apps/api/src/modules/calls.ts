@@ -196,7 +196,7 @@ async function callDTO(db: Db, id: string, viewerId?: string): Promise<CallDTO> 
             (SELECT jsonb_agg(jsonb_build_object('id', q.id, 'name', q.name) ORDER BY q.joined_at) FROM call_guests q
               WHERE q.call_id = c.id AND q.left_at IS NULL) AS guests,
             ARRAY(SELECT r.user_id FROM call_ringees r WHERE r.call_id = c.id AND c.ended_at IS NULL AND r.reached_at IS NOT NULL
-                     AND r.declined_at IS NULL
+                     AND r.declined_at IS NULL AND r.rung_at > now() - interval '45 seconds'
                      AND NOT EXISTS (SELECT 1 FROM call_participants p WHERE p.call_id = c.id AND p.user_id = r.user_id AND p.left_at IS NULL)
                    ORDER BY r.reached_at) AS ringing
        FROM calls c WHERE c.id = $1`,

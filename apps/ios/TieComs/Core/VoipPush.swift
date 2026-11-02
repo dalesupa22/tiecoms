@@ -34,9 +34,6 @@ struct VoipCallPush: Equatable, Sendable {
         subtitle = sub.isEmpty ? nil : sub
     }
 
-    /// UUID de CallKit: el mismo id de la llamada (si llegan dos push de la misma llamada, el sistema la ve una vez).
-    var systemId: UUID { UUID(uuidString: callId) ?? UUID() }
-
     /// Cómo se ve en la pantalla de llamada y en Recientes: «Danny» o «Danny · Ventas».
     var displayName: String {
         let who = CallKitRules.handleName(callerName)

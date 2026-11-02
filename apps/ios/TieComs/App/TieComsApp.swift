@@ -37,6 +37,8 @@ struct TieComsApp: App {
         let s = AppStore(baseURL: base, secrets: secrets, feedback: AppFeedback.shared)
         VoicePlayer.shared.canUseAudio = { [weak s] in s?.callCenter.inCall != true }
         ChoiceSoundPlayer.shared.canUseAudio = { [weak s] in s?.callCenter.inCall != true }
+        // Llamadas en «Recientes» de Teléfono (CallKit), salvo en China y en pruebas unitarias.
+        if CallKitRules.enabled() { s.callCenter.installSystemCalls(CallKitBridge()) }
         _store = State(initialValue: s)
         _updates = State(initialValue: AppUpdateChecker(baseURL: base))
         // «Abierta» exige mensajes cargados: un chat vacío por un 502 no calla sus avisos.

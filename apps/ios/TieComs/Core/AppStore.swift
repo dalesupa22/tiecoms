@@ -359,7 +359,8 @@ final class AppStore {
         pendingCallJoin = nil
         callCenter.dismissRing()
         let center = callCenter
-        Task { do { try await center.join(callId, camera: false) } catch { show(L10n.errorText(error)) } }
+        // Contesté desde el aviso (acción «Contestar» del push): en Recientes es entrante.
+        Task { do { try await center.join(callId, camera: false, incoming: true) } catch { show(L10n.errorText(error)) } }
     }
     var meetingAttempts: [String: MeetingAttempt] = [:]
     @ObservationIgnored var meetingAuthorization: MeetingAuthorization?

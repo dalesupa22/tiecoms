@@ -80,7 +80,8 @@ targets:
             CFBundleURLSchemes: [chaggu]
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
-        # audio: una llamada en curso sigue sonando con la app en segundo plano (sin CallKit por ahora).
+        # audio: una llamada en curso sigue sonando con la app en segundo plano. CallKit (CH028, Recientes de Teléfono)
+        # no necesita `voip` sin PushKit; ese modo solo hará falta cuando lleguen los push VoIP.
         UIBackgroundModes: [audio]
   TieComsShare:
     type: app-extension

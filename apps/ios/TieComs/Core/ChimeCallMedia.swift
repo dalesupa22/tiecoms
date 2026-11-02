@@ -28,13 +28,14 @@ final class ChimeCallMedia: NSObject, CallMedia {
 
     private var av: AudioVideoFacade { session.audioVideo }
 
-    func start() throws {
+    /// `callKit`: CallKit ya activó la sesión de audio (CallKitBridge); el SDK no la activa ni maneja sus interrupciones.
+    func start(callKit: Bool) throws {
         av.addAudioVideoObserver(observer: self)
         av.addRealtimeObserver(observer: self)
         av.addVideoTileObserver(observer: self)
         av.addActiveSpeakerObserver(policy: DefaultActiveSpeakerPolicy(), observer: self)
         // La transcripción va por Groq (pedazos del micrófono, CallRecorder.swift): no se usa el TranscriptEvent de Chime.
-        try av.start(audioVideoConfiguration: AudioVideoConfiguration(audioMode: .mono48K, callKitEnabled: false))
+        try av.start(audioVideoConfiguration: AudioVideoConfiguration(audioMode: .mono48K, callKitEnabled: callKit))
         av.startRemoteVideo()
     }
 

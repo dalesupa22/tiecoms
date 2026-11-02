@@ -76,6 +76,7 @@
 		3AAE83D59C3F9C13324BCF6D /* ShareHandoffApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1C1BD71C52769D78A7C9019 /* ShareHandoffApp.swift */; };
 		3BCE3A639DB59885D77A01CD /* SwipeToReply.swift in Sources */ = {isa = PBXBuildFile; fileRef = 913E113F3642DB737660EF6B /* SwipeToReply.swift */; };
 		3D53B4758E7E3CFB64F70708 /* ring_suave.caf in Resources */ = {isa = PBXBuildFile; fileRef = B4E231628C4FBB5BDAE32F1B /* ring_suave.caf */; };
+		4D1A0D113C22AEB9DFC6E2C4 /* callkit_silence.wav in Resources */ = {isa = PBXBuildFile; fileRef = 34662EBB618DAA07B2F7A2A3 /* callkit_silence.wav */; };
 		3F8172550A64ECA0C549BB92 /* SharedText.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD8AAAA7104EA6BD0C5C7B6D /* SharedText.swift */; };
 		3FFDC3BF8E2B6DF516EAEADF /* Menus.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBB336317C73EE48E2442822 /* Menus.swift */; };
 		40B2A1774474771BBED2D94C /* IssueTasks.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92E328380AAD4AD20697FDC7 /* IssueTasks.swift */; };
@@ -153,6 +154,7 @@
 		7CAF1C4ADC5EEB29A1DC74FD /* V2Tests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF721E25FDD0841A9CA663EC /* V2Tests.swift */; };
 		7D64F9F1796899E79F79CA25 /* AppStore+Features.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F521EF4D592789CF8E947FE /* AppStore+Features.swift */; };
 		7DAD75DAB24753FBC4AD5E9A /* CallsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B725A99713D31DE419505933 /* CallsTests.swift */; };
+		8EE4772D0D4CE58D2BF405E0 /* CH028Tests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F32BE3FC08207EB41B204BA /* CH028Tests.swift */; };
 		7DB3F2DFD15EE86041C65551 /* CommunicationNotification.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F1FB42FA08DF6BC0C3115C7 /* CommunicationNotification.swift */; };
 		7E32BF546BC3912953CC54A3 /* V10IssueTasksTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0F74399F62C210F5D5E5480 /* V10IssueTasksTests.swift */; };
 		7E55D7C316E16C7E29BDD886 /* Assistant.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0DF211F0D4E2862568A60C6A /* Assistant.swift */; };
@@ -234,6 +236,7 @@
 		BF823CAF90098A4FBD5EF2A3 /* AttachmentViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 787E89B5DD3CCB47B23CF7B9 /* AttachmentViews.swift */; };
 		C0652C2639F88BE93F37B899 /* ChatRecoveryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D8D602F456FEA7F1B4BC2EE /* ChatRecoveryTests.swift */; };
 		C0D257FDB7A4EA4084B2DA84 /* CallRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = C335C5192C1E3560004AD1C4 /* CallRecorder.swift */; };
+		A58229881F9C229383D4A24E /* CallKitBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E432DC03324023DF832E0B8 /* CallKitBridge.swift */; };
 		C0DFF21BBD9AF47BB0AF61E2 /* PerfUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B94D3E89C5F287D3BED370A /* PerfUITests.swift */; };
 		C1FE08A06C676C845F640EE1 /* SleepViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FA9EAB28848181435FA4D36 /* SleepViews.swift */; };
 		C266980A6A153DE0496A274B /* Attachments.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4E9802F016F0B0A5FD993D1 /* Attachments.swift */; };
@@ -570,12 +573,14 @@
 		B3068A6F5B7DE8788B944476 /* Storage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Storage.swift; sourceTree = "<group>"; };
 		B4492FE6B8E74D3999B5AC89 /* ScheduledViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduledViews.swift; sourceTree = "<group>"; };
 		B4E231628C4FBB5BDAE32F1B /* ring_suave.caf */ = {isa = PBXFileReference; path = ring_suave.caf; sourceTree = "<group>"; };
+		34662EBB618DAA07B2F7A2A3 /* callkit_silence.wav */ = {isa = PBXFileReference; path = callkit_silence.wav; sourceTree = "<group>"; };
 		B52B41CC252A748322D44E63 /* Tanda17UITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Tanda17UITests.swift; sourceTree = "<group>"; };
 		B5E87C423391FC6DFBA28D1B /* SignIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignIntegrationTests.swift; sourceTree = "<group>"; };
 		B6C6D89C1C0A915A5831A75C /* GgViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GgViews.swift; sourceTree = "<group>"; };
 		B6F41FDFCE489BF4B6CE0F29 /* AppleSignIn.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleSignIn.swift; sourceTree = "<group>"; };
 		B70974444ADBE38043BB433E /* EventCardTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventCardTests.swift; sourceTree = "<group>"; };
 		B725A99713D31DE419505933 /* CallsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallsTests.swift; sourceTree = "<group>"; };
+		2F32BE3FC08207EB41B204BA /* CH028Tests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CH028Tests.swift; sourceTree = "<group>"; };
 		B7568544A40900AFE4D73CA5 /* Sounds.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sounds.swift; sourceTree = "<group>"; };
 		BC7091EF3CF417ADE10FD1B2 /* snd_brisa_m.caf */ = {isa = PBXFileReference; path = snd_brisa_m.caf; sourceTree = "<group>"; };
 		BC9F4FC91E577352D1412556 /* V9LanguageSubjectsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = V9LanguageSubjectsTests.swift; sourceTree = "<group>"; };
@@ -585,6 +590,7 @@
 		C115125AD76AE7BC5F0F1966 /* snd_portal_m.caf */ = {isa = PBXFileReference; path = snd_portal_m.caf; sourceTree = "<group>"; };
 		C2FB64772EFA2D4814AFBC97 /* ShareHandoff.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareHandoff.swift; sourceTree = "<group>"; };
 		C335C5192C1E3560004AD1C4 /* CallRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallRecorder.swift; sourceTree = "<group>"; };
+		4E432DC03324023DF832E0B8 /* CallKitBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallKitBridge.swift; sourceTree = "<group>"; };
 		C3C077B49624604810EB0C19 /* snd_marimba_m.caf */ = {isa = PBXFileReference; path = snd_marimba_m.caf; sourceTree = "<group>"; };
 		C58633227DB28C377878EED8 /* AppleSignInTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleSignInTests.swift; sourceTree = "<group>"; };
 		C65C910BCFA9055C4CAEF2A6 /* snd_cristal_m.caf */ = {isa = PBXFileReference; path = snd_cristal_m.caf; sourceTree = "<group>"; };
@@ -716,6 +722,7 @@
 				E4E9802F016F0B0A5FD993D1 /* Attachments.swift */,
 				F1F26A8663845155717B1EED /* CalendarGrid.swift */,
 				C335C5192C1E3560004AD1C4 /* CallRecorder.swift */,
+				4E432DC03324023DF832E0B8 /* CallKitBridge.swift */,
 				075C265E661534831521432C /* Calls.swift */,
 				A533581A82A3D8834C30DBED /* ChatNav.swift */,
 				B1FD141B091DFF880DF318BF /* ChatSearch.swift */,
@@ -782,6 +789,7 @@
 				6AD86F9C677442AE4FEC6A20 /* ring_clasico.caf */,
 				77AF9EB4C7B36648BBC2073D /* ring_marimba.caf */,
 				B4E231628C4FBB5BDAE32F1B /* ring_suave.caf */,
+				34662EBB618DAA07B2F7A2A3 /* callkit_silence.wav */,
 				E17E26E6A0979009EE0DEC41 /* snd_acorde_m.caf */,
 				2A476A7F8D234AFA2A831BA3 /* snd_acorde.caf */,
 				BC7091EF3CF417ADE10FD1B2 /* snd_brisa_m.caf */,
@@ -974,6 +982,7 @@
 				08078C3CA36813D3506FCD99 /* CalendarGridTests.swift */,
 				7ABD55CF24BEE201F8E3E781 /* Calls171Tests.swift */,
 				B725A99713D31DE419505933 /* CallsTests.swift */,
+				2F32BE3FC08207EB41B204BA /* CH028Tests.swift */,
 				55C8B19C2103FA286D289157 /* ChatBarTests.swift */,
 				6D8D602F456FEA7F1B4BC2EE /* ChatRecoveryTests.swift */,
 				701807F5A1694A914A001927 /* ChatsProfileTests.swift */,
@@ -1211,6 +1220,7 @@
 				756898B7FBAF1A8B5934063A /* ring_clasico.caf in Resources */,
 				CC418B37F5862C31E0739C3B /* ring_marimba.caf in Resources */,
 				3D53B4758E7E3CFB64F70708 /* ring_suave.caf in Resources */,
+				4D1A0D113C22AEB9DFC6E2C4 /* callkit_silence.wav in Resources */,
 				91CEBA636FABCF67E546E074 /* snd_acorde.caf in Resources */,
 				568B40E6161C6542BD259C48 /* snd_acorde_m.caf in Resources */,
 				EAE45A159934152229C767F8 /* snd_brisa.caf in Resources */,
@@ -1281,6 +1291,7 @@
 				5C5A90EE8D7AFC7E28E68DF0 /* AuthViews.swift in Sources */,
 				684594BBF3A68C08608001B2 /* CalendarGrid.swift in Sources */,
 				C0D257FDB7A4EA4084B2DA84 /* CallRecorder.swift in Sources */,
+				A58229881F9C229383D4A24E /* CallKitBridge.swift in Sources */,
 				CCFE51781A6060B6ED4DD580 /* CallViews.swift in Sources */,
 				ACD77B05FD80DAA8B940A2FB /* Calls.swift in Sources */,
 				4E59CFA741A2A59474D6B018 /* ChatBarViews.swift in Sources */,
@@ -1469,6 +1480,7 @@
 				B186685CD82FD534F8D5E9D5 /* CalendarGridTests.swift in Sources */,
 				4575784212C42A63866E36D8 /* Calls171Tests.swift in Sources */,
 				7DAD75DAB24753FBC4AD5E9A /* CallsTests.swift in Sources */,
+				8EE4772D0D4CE58D2BF405E0 /* CH028Tests.swift in Sources */,
 				87B86A5253581DFFC1523AB7 /* ChatBarTests.swift in Sources */,
 				C0652C2639F88BE93F37B899 /* ChatRecoveryTests.swift in Sources */,
 				2ACFB2451080E499FAA6C162 /* ChatsProfileTests.swift in Sources */,

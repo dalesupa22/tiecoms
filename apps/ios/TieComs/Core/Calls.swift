@@ -459,7 +459,8 @@ protocol CallMediaDelegate: AnyObject {
 protocol CallMedia: AnyObject {
     var delegate: CallMediaDelegate? { get set }
     /// Conecta el audio (y el video remoto). Llama a mediaDidStart cuando hay audio.
-    func start() throws
+    /// `callKit`: CallKit ya activó la sesión de audio (CallKitBridge); el SDK no la toca.
+    func start(callKit: Bool) throws
     func stop()
     func setMuted(_ muted: Bool)
     func startCamera() throws
@@ -473,6 +474,10 @@ protocol CallMedia: AnyObject {
     func audioDevices() -> [CallAudioDevice]
     func activeAudioDevice() -> String?
     func chooseAudioDevice(_ id: String)
+}
+
+extension CallMedia {
+    func start() throws { try start(callKit: false) }
 }
 
 /// Una salida de audio de la llamada.
@@ -505,7 +510,7 @@ final class NullCallMedia: CallMedia {
     private(set) var started = false
     private(set) var camera = false
     private(set) var muted = false
-    func start() throws {
+    func start(callKit: Bool) throws {
         started = true
         DispatchQueue.main.async { [weak self] in self?.delegate?.mediaDidStart() }
     }
@@ -605,6 +610,24 @@ final class CallCenter: CallMediaDelegate {
     /// Lotes enviados (pruebas y diagnóstico).
     @ObservationIgnored private(set) var sentBatches = 0
 
+    // CallKit (CallKitBridge.swift): la llamada en «Recientes» de Teléfono. Sin puente (China, pruebas), como antes.
+    @ObservationIgnored private(set) var systemCalls: CallKitBridge?
+    /// UUID de CallKit de la llamada en curso (nil si el sistema no la conoce).
+    @ObservationIgnored private(set) var systemCallId: UUID?
+    /// La sesión de audio la activó CallKit: al colgar la desactiva el sistema, no la app.
+    @ObservationIgnored private var systemAudio = false
+    @ObservationIgnored private var systemOutgoing = false
+
+    /// Cómo terminó una llamada que el sistema conoce.
+    enum SystemEndCause: Equatable { case local, remote, failed }
+    /// Sentido de la llamada en Recientes.
+    enum Direction: Equatable { case outgoing, incoming }
+
+    func installSystemCalls(_ bridge: CallKitBridge) {
+        systemCalls = bridge
+        bridge.center = self
+    }
+
     var inCall: Bool { view != nil && view?.phase != .ended }
 
     /// Llama o entra a la llamada en curso de la conversación.
@@ -613,16 +636,17 @@ final class CallCenter: CallMediaDelegate {
         if view != nil { await hangUp() }
         guard let store else { return }
         let j = try await store.startCallRequest(conversationId, kind: kind)
-        await connect(j, camera: kind == "video")
+        await connect(j, camera: kind == "video", direction: .outgoing)
     }
 
-    /// Entrar desde el aviso o la franja «Unirse».
-    func join(_ callId: String, camera: Bool) async throws {
+    /// Entrar desde el aviso o la franja «Unirse». `incoming`: contesté una llamada que me sonaba (Recientes: entrante).
+    /// `callerName`: quien llama (si no conozco el chat, es el nombre que ve el sistema).
+    func join(_ callId: String, camera: Bool, incoming: Bool = false, callerName: String? = nil) async throws {
         if view?.call.id == callId, view?.phase != .ended { expanded = true; return }
         if view != nil { await hangUp() }
         guard let store else { return }
         let j = try await store.joinCallRequest(callId)
-        await connect(j, camera: camera)
+        await connect(j, camera: camera, direction: incoming ? .incoming : .outgoing, name: callerName)
     }
 
     /// Entrar con el enlace /llamada/<token> (con o sin sesión). La vista ya preguntó si había otra llamada.
@@ -633,10 +657,19 @@ final class CallCenter: CallMediaDelegate {
         let j = try await store.joinCallLink(token, name: name)
         guest = GuestSession(id: j.guestId, secret: j.secret, token: token, title: title)
         guestOutcome = nil
-        await connect(j.join, camera: camera)
+        await connect(j.join, camera: camera, direction: .outgoing, name: title)
     }
 
-    private func connect(_ j: CallJoinDTO, camera: Bool) async {
+    /// Nombre de la llamada para el sistema: el del chat (en un directo, la otra persona) o el de quien llama.
+    private func systemName(_ call: CallDTO, fallback: String?) -> String {
+        if let d = store?.data, let c = d.conversations.first(where: { $0.id == call.conversationId }) {
+            // Directo: la persona; grupo o chat grupal: su nombre.
+            return CallKitRules.handleName(Naming.title(d, c))
+        }
+        return CallKitRules.handleName(fallback)
+    }
+
+    private func connect(_ j: CallJoinDTO, camera: Bool, direction: Direction, name: String? = nil) async {
         leaving = false
         outbox = []
         bound = [:]
@@ -649,17 +682,39 @@ final class CallCenter: CallMediaDelegate {
         media = m
         m.delegate = self
         do {
+            var callKitAudio = false
             if !(m is NullCallMedia) {
                 guard await Self.microphoneAllowed() else { throw CallMediaError.microphone }
-                try Self.activateAudioSession(video: camera)
+                // CallKit: la llamada queda en Recientes y el sistema activa el audio. Si algo falla, como antes.
+                if let sys = systemCalls {
+                    let label = guest != nil ? CallKitRules.handleName(name) : systemName(j.call, fallback: name)
+                    let uuid = await sys.begin(outgoing: direction == .outgoing, name: label, video: camera || j.call.isVideo)
+                    guard media === m else {
+                        // Colgué mientras el sistema la registraba.
+                        if let uuid { sys.end(uuid, cause: .local) }
+                        return
+                    }
+                    if let uuid {
+                        systemCallId = uuid
+                        systemOutgoing = direction == .outgoing
+                        callKitAudio = await sys.waitForAudio()
+                        guard media === m else { return }
+                        if !callKitAudio { NSLog("[Chaggu] CallKit no activó el audio a tiempo: la app lo activa") }
+                    }
+                }
+                if !callKitAudio {
+                    // Con una llamada de CallKit en curso el sistema puede haberla activado ya: no es un error.
+                    if systemCallId != nil { try? Self.activateAudioSession(video: camera) } else { try Self.activateAudioSession(video: camera) }
+                }
+                systemAudio = callKitAudio
             }
-            try m.start()
+            try m.start(callKit: callKitAudio)
             if camera { await startCamera() }
             if guest != nil { startGuestHeartbeat(j.call.id) } else { startHeartbeat(j.call.id) }
         } catch {
             view?.error = (error as? CallMediaError)?.text ?? error.localizedDescription
             let id = j.call.id, g = guest
-            await teardown(keepError: true)
+            await teardown(keepError: true, cause: .failed)
             await leaveRemote(id, guest: g)
         }
     }
@@ -675,6 +730,30 @@ final class CallCenter: CallMediaDelegate {
     func toggleMute() {
         guard let v = view, let media else { return }
         media.setMuted(!v.muted)
+        // El botón de silencio de la interfaz del sistema (CallKit) también cambia.
+        if let id = systemCallId { systemCalls?.setMuted(id, !v.muted) }
+    }
+
+    // MARK: CallKit → llamada
+
+    /// Colgaron desde la interfaz del sistema (CXEndCallAction): se cuelga la llamada de chaggu.
+    func systemEnded(_ uuid: UUID) {
+        guard systemCallId == uuid else { return }
+        // El sistema ya la dio por terminada: el teardown no vuelve a pedírselo.
+        systemCallId = nil
+        Task { await hangUp() }
+    }
+
+    /// Silencio desde el sistema (CXSetMutedCallAction): el micrófono de Chime.
+    func systemMuted(_ uuid: UUID, _ muted: Bool) {
+        guard systemCallId == uuid, let v = view, v.muted != muted else { return }
+        media?.setMuted(muted)
+    }
+
+    /// El sistema reinició el proveedor (providerDidReset): la llamada ya no existe para él.
+    func systemDidReset() {
+        guard let id = systemCallId else { return }
+        systemEnded(id)
     }
 
     func toggleCamera() async {
@@ -767,12 +846,13 @@ final class CallCenter: CallMediaDelegate {
         guard let v = view else { return }
         let id = v.call.id, g = guest
         if g == nil { await flush() }
-        await teardown(outcome: .left)
+        await teardown(outcome: .left, cause: .local)
         await leaveRemote(id, guest: g, forAll: forAll && g == nil)
     }
 
     /// `outcome`: solo en la llamada de invitado, qué dice después la pantalla del enlace.
-    private func teardown(keepError: Bool = false, outcome: GuestOutcome? = nil) async {
+    /// `cause`: cómo se le cuenta el final a CallKit (colgué yo, colgaron o falló).
+    private func teardown(keepError: Bool = false, outcome: GuestOutcome? = nil, cause: SystemEndCause = .remote) async {
         leaving = true
         if guest != nil { guestOutcome = outcome; guest = nil }
         bound = [:]
@@ -782,7 +862,10 @@ final class CallCenter: CallMediaDelegate {
         media = nil
         m?.stopCamera()
         m?.stop()
-        if m != nil && !(m is NullCallMedia) { Self.deactivateAudioSession() }
+        // CallKit: el sistema desactiva el audio al terminar (didDeactivate devuelve la categoría de la app).
+        if let sid = systemCallId { systemCallId = nil; systemCalls?.end(sid, cause: cause) }
+        if m != nil && !(m is NullCallMedia) && !systemAudio { Self.deactivateAudioSession() }
+        systemAudio = false
         let err = keepError ? view?.error : nil
         view = nil
         expanded = false
@@ -803,6 +886,8 @@ final class CallCenter: CallMediaDelegate {
         flushTask?.cancel(); flushTask = nil
         ringTask?.cancel(); ringTask = nil
         media?.stop(); media = nil
+        if let sid = systemCallId { systemCallId = nil; systemCalls?.end(sid, cause: .local) }
+        systemAudio = false
         view = nil; ringing = nil; expanded = false; outbox = []
     }
 
@@ -914,7 +999,7 @@ final class CallCenter: CallMediaDelegate {
         guard let r = ringing else { return }
         dismissRing()
         Task {
-            do { try await join(r.call.id, camera: camera) } catch { store?.show(L10n.errorText(error)) }
+            do { try await join(r.call.id, camera: camera, incoming: true, callerName: r.callerName) } catch { store?.show(L10n.errorText(error)) }
         }
     }
 
@@ -956,6 +1041,8 @@ final class CallCenter: CallMediaDelegate {
     func mediaDidStart() {
         guard view?.phase == .connecting else { return }
         view?.phase = .live
+        // Saliente conectada: Recientes cuenta la duración desde aquí.
+        if let id = systemCallId, systemOutgoing { systemCalls?.reportConnected(id) }
         // Auricular por defecto en voz, altavoz en video (si hay Bluetooth o audífonos, se quedan esos).
         refreshAudio()
         if let v = view, let target = CallRules.defaultOutput(v.audioDevices, video: v.camera || v.call.isVideo) { chooseAudio(target) }
@@ -991,7 +1078,7 @@ final class CallCenter: CallMediaDelegate {
         guard !leaving, let v = view else { return }
         if let error { view?.error = error }
         let id = v.call.id, g = guest
-        Task { await teardown(keepError: error != nil, outcome: .ended); await leaveRemote(id, guest: g) }
+        Task { await teardown(keepError: error != nil, outcome: .ended, cause: error != nil ? .failed : .remote); await leaveRemote(id, guest: g) }
     }
     func mediaMuteChanged(_ muted: Bool) { view?.muted = muted }
     func mediaTileAdded(_ tile: CallTile) {
@@ -1039,16 +1126,24 @@ final class CallCenter: CallMediaDelegate {
 
     /// playAndRecord / voiceChat: cancelación de eco y la llamada sigue en segundo plano (UIBackgroundModes audio).
     static func activateAudioSession(video: Bool) throws {
-        let s = AVAudioSession.sharedInstance()
+        try configureAudioCategory(video: video)
+        try AVAudioSession.sharedInstance().setActive(true)
+    }
+
+    /// Solo la categoría (con CallKit la activa el sistema: CallKitBridge la pone al ejecutar la acción).
+    static func configureAudioCategory(video: Bool) throws {
         var options: AVAudioSession.CategoryOptions = [.allowBluetoothHFP, .allowBluetoothA2DP]
         if video { options.insert(.defaultToSpeaker) }
-        try s.setCategory(.playAndRecord, mode: video ? .videoChat : .voiceChat, options: options)
-        try s.setActive(true)
+        try AVAudioSession.sharedInstance().setCategory(.playAndRecord, mode: video ? .videoChat : .voiceChat, options: options)
     }
 
     static func deactivateAudioSession() {
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
-        // De vuelta al modo de los sonidos de la app (no interrumpen otra música y respetan el modo silencio).
+        restoreAppAudioCategory()
+    }
+
+    /// De vuelta al modo de los sonidos de la app (no interrumpen otra música y respetan el modo silencio).
+    static func restoreAppAudioCategory() {
         try? AVAudioSession.sharedInstance().setCategory(.ambient, mode: .default, options: [.mixWithOthers])
     }
 }

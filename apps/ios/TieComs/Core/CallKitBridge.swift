@@ -190,8 +190,8 @@ final class CallKitBridge: NSObject {
         guard let push else {
             let uuid = UUID()
             update.remoteHandle = CXHandle(type: .generic, value: "chaggu")
-            provider.reportNewIncomingCall(with: uuid, update: update) { [provider] _ in
-                provider.reportCall(with: uuid, endedAt: Date(), reason: .failed)
+            provider.reportNewIncomingCall(with: uuid, update: update) { _ in
+                Task { @MainActor [weak self] in self?.provider.reportCall(with: uuid, endedAt: Date(), reason: .failed) }
             }
             return
         }

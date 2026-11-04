@@ -15,7 +15,7 @@ enum TaskAttachmentRules {
     /// Error si con estos archivos la tarea pasaría del máximo o alguno pesa más de 25 MB.
     static func problem(existing: Int, adding files: [LocalAttachment]) -> String? {
         if existing + files.count > maxPerTask { return L("taskFiles.max", ["n": maxPerTask]) }
-        if let big = files.first(where: \.tooBig) { return L("att.tooBig", ["name": big.name]) }
+        if let big = files.first(where: \.tooBig) { return L("att.tooBigLarge", ["name": big.name]) }
         return nil
     }
 
@@ -29,9 +29,9 @@ enum TaskAttachmentRules {
 
 extension APIClient {
     func uploadIssueAttachment(_ issueId: String, _ file: LocalAttachment, progress: @escaping @Sendable (Double) -> Void) async throws -> AttachmentDTO {
-        guard !file.tooBig else { throw ApiRequestError(status: 413, code: "too_large", message: L("att.tooBig", ["name": file.name])) }
+        guard !file.tooBig else { throw ApiRequestError(status: 413, code: "too_large", message: L("att.tooBigLarge", ["name": file.name])) }
         let name = file.name.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? "archivo"
-        return try await uploadWithProgress("/issues/\(issueId)/attachments", data: file.data, contentType: "application/octet-stream",
+        return try await uploadWithProgress("/issues/\(issueId)/\(file.isLarge ? "files" : "attachments")", data: file.data, contentType: "application/octet-stream",
                                             headers: ["x-file-name": name, "x-file-type": file.contentType], progress: progress)
     }
 }

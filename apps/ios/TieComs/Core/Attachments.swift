@@ -5,7 +5,10 @@ import UniformTypeIdentifiers
 
 /// Adjuntos: límites, tipos y subida (la usan la app y la extensión Compartir).
 enum AttachmentRules {
+    /// Subida directa (POST …/attachments, nginx 26m). La extensión Compartir se queda en este límite por memoria.
     static let maxBytes = 25 * 1024 * 1024
+    /// Archivos y videos grandes por stream (…/files y …/videos, MAX_LARGE_FILE_BYTES del API), como la web (CH031).
+    static let maxLargeBytes = 150 * 1024 * 1024
     static let maxPerMessage = 10
     static let maxShareTargets = 5
 
@@ -53,7 +56,27 @@ struct LocalAttachment: Identifiable, Equatable, Codable {
     var sizeBytes: Int { data.count }
     var isImage: Bool { contentType.hasPrefix("image/") }
     var isVideo: Bool { contentType.hasPrefix("video/") }
-    var tooBig: Bool { data.count > AttachmentRules.maxBytes }
+    var tooBig: Bool { data.count > AttachmentRules.maxLargeBytes }
+    /// Más de 25 MB: va por la ruta de stream en vez de …/attachments.
+    var isLarge: Bool { data.count > AttachmentRules.maxBytes }
+}
+
+/// Lee un archivo elegido en Archivos (iCloud Drive, Drive, OneDrive…). Sin coordinador, un archivo de iCloud que
+/// aún no está en el teléfono devolvía error y el adjunto no salía (CH031, César). Corre fuera del hilo principal.
+enum PickedFile {
+    static func read(_ url: URL) async -> Data? {
+        await Task.detached(priority: .userInitiated) {
+            let ok = url.startAccessingSecurityScopedResource()
+            defer { if ok { url.stopAccessingSecurityScopedResource() } }
+            if let d = try? Data(contentsOf: url, options: .mappedIfSafe) { return d }
+            var out: Data?
+            var err: NSError?
+            NSFileCoordinator().coordinate(readingItemAt: url, options: .withoutChanges, error: &err) { real in
+                out = try? Data(contentsOf: real, options: .mappedIfSafe)
+            }
+            return out
+        }.value
+    }
 }
 
 /// Fotos listas para enviar: orientación aplicada, lado mayor ≤ 2560 px y JPEG de ≤ ~2 MB (una foto de la cámara
@@ -118,9 +141,20 @@ extension APIClient {
     /// POST /conversations/:id/attachments (bytes; x-file-name URL-encoded y x-file-type). Queda pendiente hasta que un mensaje la use.
     func uploadAttachment(_ conversationId: String, _ file: LocalAttachment, progress: @escaping @Sendable (Double) -> Void) async throws -> AttachmentDTO {
         guard !file.tooBig else {
-            throw ApiRequestError(status: 413, code: "too_large", message: L("att.tooBig", ["name": file.name]))
+            throw ApiRequestError(status: 413, code: "too_large", message: L("att.tooBigLarge", ["name": file.name]))
         }
         let name = file.name.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? "archivo"
+        if file.isLarge {
+            // Más de 25 MB: por stream (hasta 150 MB). Los videos conservan su reproductor; el resto queda como archivo.
+            var a: AttachmentDTO = try await uploadWithProgress("/conversations/\(conversationId)/\(file.isVideo ? "videos" : "files")", data: file.data,
+                                                               contentType: file.isVideo ? file.contentType : "application/octet-stream",
+                                                               headers: ["x-file-name": name, "x-file-type": file.contentType], progress: progress)
+            if file.isVideo, let thumb = Thumbnails.jpeg(for: file),
+               let data = try? await requestData("/attachments/\(a.id)/thumb", method: "POST", body: .init(data: thumb, contentType: "application/octet-stream")) {
+                a.thumbUrl = (try? JSONDecoder().decode(ThumbResult.self, from: data))?.thumbUrl ?? "/api/v1/attachments/\(a.id)/thumb"
+            }
+            return a
+        }
         var a: AttachmentDTO = try await uploadWithProgress("/conversations/\(conversationId)/attachments", data: file.data, contentType: "application/octet-stream",
                                                            headers: ["x-file-name": name, "x-file-type": file.contentType], progress: progress)
         // La miniatura la genera y sube el cliente (opcional): si falla, se usa la original.

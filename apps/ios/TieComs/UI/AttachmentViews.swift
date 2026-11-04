@@ -30,11 +30,14 @@ final class AttachmentCache {
     }()
 
     private func key(_ path: String, api: APIClient) -> String {
-        let scope = api.baseURL.absoluteString + "|" + (api.accessToken ?? "anonymous") + "|" + path
+        // Por usuario y no por token: el token cambia cada pocos minutos y con él se volvían a bajar todas las fotos (CH031).
+        let scope = api.baseURL.absoluteString + "|" + api.cacheScope + "|" + path
         return SHA256.hash(data: Data(scope.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 
-    func data(_ path: String, api: APIClient) async throws -> Data {
+    /// `timeout`: 25 s para fotos y miniaturas; un documento grande que se abre o comparte lleva más (CH031: un PDF
+    /// pesado en una red lenta se cortaba a los 25 s y salía «No se pudo abrir»).
+    func data(_ path: String, api: APIClient, timeout: TimeInterval = AttachmentCache.timeout) async throws -> Data {
         let k = key(path, api: api)
         if WaPrivacy.requestSource(path) != nil {
             memory.removeObject(forKey: k as NSString)
@@ -44,12 +47,12 @@ final class AttachmentCache {
         if let d = memory.object(forKey: k as NSString) { return d as Data }
         let file = dir.appendingPathComponent(k)
         if let d = try? Data(contentsOf: file) { memory.setObject(d as NSData, forKey: k as NSString, cost: d.count); return d }
-        if let t = inflight[k], Date().timeIntervalSince(t.started) < Self.staleAfter { return try await Self.withTimeout(Self.timeout) { try await t.task.value } }
+        if let t = inflight[k], Date().timeIntervalSince(t.started) < max(Self.staleAfter, timeout) { return try await Self.withTimeout(timeout) { try await t.task.value } }
         let t = Task { try await api.download(path) }
         inflight[k] = (t, Date())
         defer { if inflight[k]?.task == t { inflight[k] = nil } }
-        let d = try await Self.withTimeout(Self.timeout) { try await t.value }
-        memory.setObject(d as NSData, forKey: k as NSString, cost: d.count)
+        let d = try await Self.withTimeout(timeout) { try await t.value }
+        if d.count <= 8 * 1024 * 1024 { memory.setObject(d as NSData, forKey: k as NSString, cost: d.count) }
         try? d.write(to: file, options: .atomic)
         return d
     }
@@ -78,12 +81,16 @@ final class AttachmentCache {
     func fileURL(_ att: AttachmentDTO, api: APIClient) async throws -> URL {
         let source = WaPrivacy.requestSource(att.url)
         let token = try source.map { try api.waPrivacyCheck?($0) ?? 0 }
-        let d = try await data(att.url, api: api)
-        if let source, let token { guard try (api.waPrivacyCheck?(source) ?? 0) == token else { throw CancellationError() } }
         let folder = dir.appendingPathComponent(att.id, isDirectory: true)
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let safe = att.name.replacingOccurrences(of: "/", with: "-")
         let url = folder.appendingPathComponent(safe.isEmpty ? "archivo" : safe)
+        // Ya bajado: se abre sin volver a cargarlo entero en memoria.
+        if source == nil, FileManager.default.fileExists(atPath: url.path) { return url }
+        // 2 min + 1 min por cada 10 MB (cubre redes de ~1,5 Mbps).
+        let wait = 120 + Double(att.sizeBytes) / (10 * 1024 * 1024) * 60
+        let d = try await data(att.url, api: api, timeout: wait)
+        if let source, let token { guard try (api.waPrivacyCheck?(source) ?? 0) == token else { throw CancellationError() } }
         if source != nil || !FileManager.default.fileExists(atPath: url.path) { try d.write(to: url, options: .atomic) }
         if let source { waFiles[source, default: []].insert(url) }
         return url
@@ -599,14 +606,14 @@ struct AttachButton: View {
         }
         .fileImporter(isPresented: $showFiles, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
             guard case .success(let urls) = result else { return }
-            for url in urls {
-                let ok = url.startAccessingSecurityScopedResource()
-                defer { if ok { url.stopAccessingSecurityScopedResource() } }
-                guard let d = try? Data(contentsOf: url) else { onError(L("att.loadFailed")); continue }
-                let type = AttachmentRules.mimeType(for: url)
-                // HEIC u otras fotos grandes desde Archivos: igual que desde Fotos.
-                if type.hasPrefix("image/"), type != "image/svg+xml", let img = ImagePrep.prepare(d, name: url.lastPathComponent, contentType: type) { add(img) }
-                else { add(LocalAttachment(name: url.lastPathComponent, contentType: type, data: d)) }
+            Task {
+                for url in urls {
+                    guard let d = await PickedFile.read(url) else { onError(L("att.loadFailed")); continue }
+                    let type = AttachmentRules.mimeType(for: url)
+                    // HEIC u otras fotos grandes desde Archivos: igual que desde Fotos.
+                    if type.hasPrefix("image/"), type != "image/svg+xml", let img = ImagePrep.prepare(d, name: url.lastPathComponent, contentType: type) { add(img) }
+                    else { add(LocalAttachment(name: url.lastPathComponent, contentType: type, data: d)) }
+                }
             }
         }
     }
@@ -636,7 +643,7 @@ struct AttachButton: View {
 
     private func add(_ a: LocalAttachment) {
         guard staged.count + otherStagedCount < AttachmentRules.maxPerMessage else { onError(L("att.max", ["n": AttachmentRules.maxPerMessage])); return }
-        if a.tooBig { onError(L("att.tooBig", ["name": a.name])); return }
+        if a.tooBig { onError(L("att.tooBigLarge", ["name": a.name])); return }
         staged.append(a)
     }
 }

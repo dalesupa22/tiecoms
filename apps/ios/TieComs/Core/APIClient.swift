@@ -127,6 +127,19 @@ final class APIClient {
         return cfg
     }
     private(set) var accessToken: String?
+    /// Usuario del token (claim `sub`): ámbito estable del caché de adjuntos aunque el token se renueve.
+    var cacheScope: String {
+        guard let t = accessToken else { return "anonymous" }
+        let parts = t.split(separator: ".")
+        if parts.count == 3 {
+            var b = String(parts[1]).replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
+            while b.count % 4 != 0 { b += "=" }
+            if let d = Data(base64Encoded: b), let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any], let sub = o["sub"] as? String, !sub.isEmpty {
+                return "u:" + sub
+            }
+        }
+        return t
+    }
     private var requestGeneration = UUID()
     func invalidateRequests() {
         requestGeneration = UUID()
@@ -287,7 +300,7 @@ final class APIClient {
         return data
     }
 
-    /// Subida con progreso (0…1): adjuntos de hasta 25 MB. Reintenta una vez tras renovar el token ante 401.
+    /// Subida con progreso (0…1): adjuntos (hasta 150 MB por las rutas de stream). Reintenta una vez tras renovar el token ante 401.
     func uploadWithProgress<T: Decodable>(_ path: String, data: Data, contentType: String, headers: [String: String] = [:],
                                           progress: @escaping @Sendable (Double) -> Void) async throws -> T {
         let generation = requestGeneration

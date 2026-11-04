@@ -109,7 +109,7 @@ export async function readChatAttachment(userId: string, attachmentId: string, d
   const extra: Record<string, unknown> = { chatId: a.conversation_id, messageId: a.message_id };
   if (download) {
     extra.download = { url: await presignDownload(a.s3_key, a.name, type, DOWNLOAD_URL_SECONDS), expiresIn: DOWNLOAD_URL_SECONDS,
-      note: 'URL de un solo propósito: descárgala ya (curl -o) y no la compartas ni la pegues en mensajes.' };
+      note: 'URL de un solo propósito: descárgala ya (curl -o) y no la compartas ni la pegues en mensajes. Si tu entorno no tiene salida a internet o bloquea amazonaws.com, no reintentes: usa el texto o la imagen que ya trae esta respuesta.' };
   }
   return readContent(userId, meta, extra);
 }

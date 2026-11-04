@@ -378,6 +378,9 @@ final class AppStore {
     @ObservationIgnored private var flushTask: Task<Void, Never>?
     @ObservationIgnored private var flushing = false
     @ObservationIgnored private var bootstrapTask: Task<Void, Never>?
+    @ObservationIgnored private var resyncTask: Task<Void, Never>?
+    @ObservationIgnored private var resyncStartedAt = Date.distantPast
+    @ObservationIgnored private var resyncAgain = false
     @ObservationIgnored private var bootstrapRefreshing = false
     @ObservationIgnored private var bootstrapNeedsRefresh = false
     @ObservationIgnored private var bootstrapSignals: Set<String> = []
@@ -851,7 +854,30 @@ final class AppStore {
     }
 
     /// Tras reconectar o volver del segundo plano: snapshot + recuperación de huecos + cola.
+    /// Volver al frente reconecta el socket y su «ready» pedía otro resync a la vez: cada GET salía dos veces
+    /// (bootstrap de ~100 KB incluido, CH031). Ahora una sola vuelta en curso; quien llega durante ella la espera y,
+    /// si llegó cuando ya iba avanzada, se repite una vez para no perder lo ocurrido entre medias.
     func resync() async {
+        guard status == .ready else { return }
+        if let running = resyncTask {
+            if Date().timeIntervalSince(resyncStartedAt) > 1.5 { resyncAgain = true }
+            await running.value
+            return
+        }
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            repeat {
+                self.resyncAgain = false
+                self.resyncStartedAt = Date()
+                await self.resyncOnce()
+            } while self.resyncAgain && self.status == .ready && !Task.isCancelled
+        }
+        resyncTask = task
+        await task.value
+        resyncTask = nil
+    }
+
+    private func resyncOnce() async {
         guard status == .ready else { return }
         let stamp = sessionStamp
         do {

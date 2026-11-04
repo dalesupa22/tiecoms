@@ -115,7 +115,8 @@ export async function buildHttp() {
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
     maxAge: 600,
   });
-  await app.register(rateLimit, { max: 600, timeWindow: '1 minute', keyGenerator: (r) => r.ip });
+  // 1200/min por IP (CH031): una oficina entera sale por la misma IP y al reconectar cada app pide su ronda completa.
+  await app.register(rateLimit, { max: 1200, timeWindow: '1 minute', keyGenerator: (r) => r.ip });
   // Telemetría de memoria: peticiones por patrón de ruta (sin ids ni datos), ver memory-watch.ts.
   app.addHook('onResponse', async (req) => { countHit(`${req.method} ${req.routeOptions?.url ?? 'sin-ruta'}`); });
 

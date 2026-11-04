@@ -1747,7 +1747,7 @@ struct ConversationView: View {
     private func stagePasted(_ list: [LocalAttachment]) {
         for a in list {
             guard staged.count + stagedGifs.count < AttachmentRules.maxPerMessage else { store.show(L("att.max", ["n": AttachmentRules.maxPerMessage])); return }
-            if a.tooBig { store.show(L("att.tooBig", ["name": a.name])); continue }
+            if a.tooBig { store.show(L("att.tooBigLarge", ["name": a.name])); continue }
             staged.append(a)
         }
         Haptics.tap()

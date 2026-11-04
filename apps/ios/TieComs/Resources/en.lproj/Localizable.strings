@@ -166,6 +166,7 @@
 "att.signBtn" = "Sign";
 "att.signedBy" = "✓ Signed by {name}";
 "att.tooBig" = "“{name}” is larger than 25 MB";
+"att.tooBigLarge" = "“{name}” is larger than 150 MB";
 "att.unavailable" = "Attachment not available";
 "att.uploadNetwork" = "No connection: “{name}” wasn't uploaded. It's still in the message to retry.";
 "att.uploadTooLarge" = "Couldn't upload “{name}”: the server rejected its size. It's still in the message to retry.";

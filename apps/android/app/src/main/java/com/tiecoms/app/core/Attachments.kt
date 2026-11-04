@@ -2,7 +2,10 @@ package com.tiecoms.app.core
 
 /** Reglas de adjuntos y de lo que llega desde «Compartir» (SPEC-v4), en Kotlin puro. */
 object Attachments {
+    /** Subida directa (POST …/attachments, nginx 26m). */
     const val MAX_BYTES = 25L * 1024 * 1024
+    /** Archivos y videos grandes por stream (…/files y …/videos), como la web: hasta 150 MB (CH031). */
+    const val MAX_LARGE_BYTES = 150L * 1024 * 1024
     const val MAX_PER_MESSAGE = 10
     /** Conversaciones destino a la vez desde la hoja de compartir. */
     const val MAX_TARGETS = 5
@@ -68,12 +71,12 @@ object Attachments {
     @kotlinx.serialization.Serializable
     data class Shared(val name: String, val contentType: String, val sizeBytes: Long, val path: String) {
         val kind: Kind get() = kind(contentType)
-        val tooLarge: Boolean get() = sizeBytes > MAX_BYTES
+        val tooLarge: Boolean get() = sizeBytes > MAX_LARGE_BYTES
     }
 
     /**
      * Qué se puede enviar desde la hoja de compartir: hasta [MAX_PER_MESSAGE] archivos (los demás se descartan y se avisa),
-     * los de más de 25 MB se rechazan con su nombre.
+     * los de más de 150 MB se rechazan con su nombre.
      */
     data class Plan(val files: List<Shared>, val tooLarge: List<Shared>, val dropped: Int, val text: String) {
         val empty: Boolean get() = files.isEmpty() && text.isBlank()

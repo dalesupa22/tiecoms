@@ -51,7 +51,7 @@ object ShareIntake {
                 val clean = safeName(name ?: uri.lastPathSegment ?: "archivo", type, i)
                 val out = File(dir, "$i-$clean")
                 // Un archivo que ya sabemos que es muy grande no se copia (se informa con su tamaño).
-                if (size > Attachments.MAX_BYTES) return@runCatching Attachments.Shared(clean, type, size, "")
+                if (size > Attachments.MAX_LARGE_BYTES) return@runCatching Attachments.Shared(clean, type, size, "")
                 cr.openInputStream(uri)?.use { input -> out.outputStream().use { input.copyTo(it) } } ?: return@runCatching null
                 Attachments.Shared(clean, type, out.length(), out.absolutePath)
             }.getOrNull()

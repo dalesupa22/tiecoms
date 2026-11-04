@@ -76,7 +76,7 @@ class ShareV4Test {
 
     // ---------- Compartir ----------
     @Test fun `plan de compartir - maximo 10, mas de 25 MB fuera, tipos`() {
-        val big = Attachments.Shared("video.mov", "video/quicktime", Attachments.MAX_BYTES + 1, "")
+        val big = Attachments.Shared("video.mov", "video/quicktime", Attachments.MAX_LARGE_BYTES + 1, "")
         val many = List(12) { Attachments.Shared("f$it.jpg", "image/jpeg", 1000, "/c/f$it") }
         val p = Attachments.plan(many + big, "  https://chaggu.com  ")
         assertEquals(10, p.files.size); assertEquals(2, p.dropped); assertEquals(listOf(big), p.tooLarge); assertEquals("https://chaggu.com", p.text)

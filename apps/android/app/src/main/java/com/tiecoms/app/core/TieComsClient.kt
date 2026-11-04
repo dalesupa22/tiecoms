@@ -1208,11 +1208,12 @@ class TieComsClient(
     /** 1.7.14: sube un archivo a una tarea (POST /issues/:id/attachments); queda suelto hasta [setIssueAttachments]. */
     suspend fun uploadIssueAttachment(issueId: String, file: java.io.File, name: String, contentType: String, onProgress: ((Long, Long) -> Unit)? = null): AttachmentDTO =
         withContext(dispatcher) {
-            if (file.length() > Attachments.MAX_BYTES) throw ApiException(413, "too_large", "El archivo pesa más de 25 MB.")
+            if (file.length() > Attachments.MAX_LARGE_BYTES) throw ApiException(413, "too_large", "El archivo pesa más de 150 MB.")
             val raw = HttpApi.RawBody(ByteArray(0), "application/octet-stream",
                 mapOf("x-file-name" to java.net.URLEncoder.encode(name.ifBlank { "archivo" }, "UTF-8").replace("+", "%20"), "x-file-type" to contentType.ifBlank { "application/octet-stream" }),
                 file = file, onProgress = onProgress)
-            request("POST", "/issues/$issueId/attachments", null, AttachmentDTO.serializer(), raw)
+            // Más de 25 MB: por stream (…/files), como la web (CH031).
+            request("POST", "/issues/$issueId/${if (file.length() > Attachments.MAX_BYTES) "files" else "attachments"}", null, AttachmentDTO.serializer(), raw)
         }
     /** Deja en la tarea exactamente estos adjuntos (PATCH attachmentIds, como la web): los que falten se quitan. */
     suspend fun setIssueAttachments(issueId: String, ids: List<String>): IssueDTO = withContext(dispatcher) {
@@ -1848,15 +1849,21 @@ class TieComsClient(
         voice: Voice? = null, onProgress: ((Long, Long) -> Unit)? = null,
     ): AttachmentDTO =
         withContext(dispatcher) {
-            if (file.length() > Attachments.MAX_BYTES) throw ApiException(413, "too_large", "El archivo pesa más de 25 MB.")
+            if (file.length() > Attachments.MAX_LARGE_BYTES) throw ApiException(413, "too_large", "El archivo pesa más de 150 MB.")
             val type = contentType.ifBlank { "application/octet-stream" }
+            // Más de 25 MB (CH031): por stream como la web; los videos por …/videos para conservar el reproductor.
+            val route = when {
+                voice != null || file.length() <= Attachments.MAX_BYTES -> "attachments"
+                Attachments.kind(type) == Attachments.Kind.VIDEO -> "videos"
+                else -> "files"
+            }
             val raw = HttpApi.RawBody(ByteArray(0), "application/octet-stream",
                 mapOf("x-file-name" to java.net.URLEncoder.encode(name.ifBlank { "archivo" }, "UTF-8").replace("+", "%20"), "x-file-type" to type) +
                     (voice?.headers() ?: emptyMap()) +
                     // Idioma de la transcripción: el de la app.
                     mapOf("accept-language" to java.util.Locale.getDefault().toLanguageTag()),
                 file = file, onProgress = onProgress)
-            request("POST", "/conversations/$conversationId/attachments", null, AttachmentDTO.serializer(), raw)
+            request("POST", "/conversations/$conversationId/$route", null, AttachmentDTO.serializer(), raw)
         }
 
     /** Resumen sugerido para «Llevar al hilo» (DeepSeek si hay llave; si no, las últimas respuestas). */

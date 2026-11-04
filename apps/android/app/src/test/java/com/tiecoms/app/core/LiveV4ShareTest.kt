@@ -131,10 +131,10 @@ class LiveV4ShareTest {
             try { b.downloadAttachment(img.url, File.createTempFile("tcv4", "del")); fail("debía dar 404") } catch (e: ApiException) { assertEquals(404, e.status) }
             log("borrar", "mensaje borrado → su adjunto da 404")
 
-            // 8. Más de 25 MB: se rechaza antes de subir.
-            val big = File.createTempFile("tcv4", "big").apply { deleteOnExit(); RandomAccessFile(this, "rw").use { it.setLength(Attachments.MAX_BYTES + 1) } }
+            // 8. Más de 150 MB: se rechaza antes de subir (hasta 150 MB va por stream, CH031).
+            val big = File.createTempFile("tcv4", "big").apply { deleteOnExit(); RandomAccessFile(this, "rw").use { it.setLength(Attachments.MAX_LARGE_BYTES + 1) } }
             try { a.uploadAttachment(group, big, "grande.mov", "video/quicktime"); fail("debía rechazar") } catch (e: ApiException) { assertEquals("too_large", e.code) }
-            log("límites", "archivo de 25 MB + 1 B → too_large sin subir")
+            log("límites", "archivo de 150 MB + 1 B → too_large sin subir")
 
             // 9. §D Nuevo chat → Grupo en un espacio (directivo con B; interno solo de mi empresa).
             val ws = fx["workspaceId"]!!.jsonPrimitive.content

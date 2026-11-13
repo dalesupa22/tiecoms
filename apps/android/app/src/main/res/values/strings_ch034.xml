@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- CH034: que los avisos no fallen en silencio. -->
+    <string name="ph_off">Notifications are off: you won\'t know when someone writes to you</string>
+    <string name="ph_off_action">Turn on</string>
+    <string name="ph_failed">This phone couldn\'t be registered for notifications</string>
+    <string name="ph_failed_action">Retry</string>
+    <string name="ph_battery">Your phone may hold back Chaggu notifications</string>
+    <string name="ph_battery_action">Fix</string>
+    <string name="ph_battery_title">Let notifications arrive on time</string>
+    <string name="ph_battery_body">Some phones close apps in the background to save battery, and messages then arrive late or not at all. In the app settings:</string>
+    <string name="ph_battery_generic">• Battery → choose “Unrestricted” (or “Don\'t optimize”).</string>
+    <string name="ph_battery_xiaomi">• Turn on “Autostart”.\n• Battery saver → “No restrictions”.</string>
+    <string name="ph_battery_oppo">• Battery usage → allow “Background activity” and “Auto launch”.</string>
+    <string name="ph_battery_transsion">• Battery → “Unrestricted”.\n• In Phone Master / App management, allow “Auto-start”.</string>
+    <string name="ph_battery_huawei">• App launch → “Manage manually” and turn on all three switches.</string>
+    <string name="ph_battery_samsung">• Battery → “Unrestricted”, and make sure Chaggu is not in “Sleeping apps”.</string>
+    <string name="ph_battery_open">Open settings</string>
+    <string name="ph_battery_done">Done, don\'t show again</string>
+</resources>

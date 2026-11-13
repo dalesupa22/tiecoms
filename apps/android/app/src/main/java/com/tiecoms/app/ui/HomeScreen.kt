@@ -231,6 +231,7 @@ fun GroupsScreen(
         Column(Modifier.padding(pad).fillMaxSize()) {
             ConnectionBanner(state.connection)
             DndBanner()
+            PushHealthBanner()
             SearchField(query) { query = it }
             FilterPills(
                 GroupsTree.Tab.entries.map { t -> t.name to when (t) { GroupsTree.Tab.ALL -> R.string.home_tab_all; GroupsTree.Tab.UNREAD -> R.string.home_tab_unread; GroupsTree.Tab.ISSUES -> R.string.home_tab_issues } },
@@ -460,6 +461,7 @@ fun DmsScreen(onOpen: (String) -> Unit, onNewMessage: () -> Unit, onDetails: (St
         Column(Modifier.padding(pad).fillMaxSize()) {
             ConnectionBanner(state.connection)
             DndBanner()
+            PushHealthBanner()
             SearchField(query, placeholder = stringResource(R.string.dm_search)) { query = it }
             val all = data.conversations.count { GroupsTree.isDm(data, it) } + com.tiecoms.app.core.WaInbox.inPlace(data, com.tiecoms.app.core.WaInbox.DMS).size
             val unread = GroupsTree.dmsUnreadCount(data)

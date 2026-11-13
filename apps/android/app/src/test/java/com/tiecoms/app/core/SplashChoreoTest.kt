@@ -157,4 +157,14 @@ class SplashChoreoTest {
         assertTrue(f(1.73f, Mode.REDUCED).sparksAlpha in 0.2f..0.8f)
         assertEquals(1f, f(1.85f, Mode.REDUCED).sparksAlpha, eps)
     }
+
+    @Test fun `con copia local el splash completo sale de una vez`() {
+        assertTrue(SplashChoreo.fastExit(Mode.FULL, ready = true, cached = true))
+        // Sin copia (primer arranque) o sin estar lista, la coreografía completa se conserva.
+        assertTrue(!SplashChoreo.fastExit(Mode.FULL, ready = true, cached = false))
+        assertTrue(!SplashChoreo.fastExit(Mode.FULL, ready = false, cached = true))
+        assertTrue(!SplashChoreo.fastExit(Mode.SHORT, ready = true, cached = true))
+        // Salir de una vez = saltar al fundido de salida.
+        assertTrue(SplashChoreo.step(0.1f, 0.016f, canExit = true, skip = true) >= SplashChoreo.EXIT_START)
+    }
 }

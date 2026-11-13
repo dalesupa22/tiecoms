@@ -147,7 +147,7 @@ fun AppRoot() {
                 SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().imePadding().padding(bottom = 72.dp))
                 // Splash animado sobre la app: la app carga debajo y aparece cuando el splash se aleja.
                 splash?.let { mode ->
-                    SplashOverlay(mode, ready = state.status != SessionStatus.LOADING) { container.splashMode.value = null }
+                    SplashOverlay(mode, ready = state.status != SessionStatus.LOADING, cached = state.status == SessionStatus.READY && client.paintedFromCache) { container.splashMode.value = null }
                 }
                 if (update is com.tiecoms.app.core.AppUpdate.Status.Required) UpdateRequiredScreen(update)
             }

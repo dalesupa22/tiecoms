@@ -103,7 +103,10 @@ class ImageLoader(context: Context, base: OkHttpClient, private val privacyCheck
 
     /** [bearer]: para imágenes protegidas (adjuntos y sus miniaturas). */
     suspend fun load(url: String, px: Int, bearer: String? = null, retry: Boolean = false): ImageBitmap? {
-        if (bearer != null || com.tiecoms.app.core.WaPrivacy.source(url) != null) return loadBytes(url, bearer, private = true)?.let { decode(it, px) }
+        if (bearer != null || com.tiecoms.app.core.WaPrivacy.source(url) != null) return loadBytes(url, bearer, private = true)?.let { bytes ->
+            // CH034: decodificar fuera del hilo de la interfaz (antes corría en Main, en pleno scroll del chat).
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { decode(bytes, px) }
+        }
         val k = key(url, px)
         memory.get(k)?.let { return it }
         if (!retry) failedAt[k]?.let { if (System.currentTimeMillis() - it < 60_000) return null }

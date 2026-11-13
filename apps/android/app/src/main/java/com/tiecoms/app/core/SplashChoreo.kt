@@ -173,6 +173,12 @@ object SplashChoreo {
         return if (canExit) next else min(next, max(base, EXIT_START))
     }
 
+    /**
+     * CH034: con la lista ya pintada desde la copia local, el splash completo no espera nada: solo tapa la app
+     * ~2,65 s. En ese caso sale de una vez (fundido de salida), sin sonido. El primer arranque, sin copia, lo conserva.
+     */
+    fun fastExit(mode: Mode, ready: Boolean, cached: Boolean): Boolean = mode == Mode.FULL && ready && cached
+
     /** El reloj cruzó el instante [at] entre dos cuadros (para disparar sonido y vibración una vez). */
     fun crossed(prev: Float, now: Float, at: Float): Boolean = prev < at && now >= at
 }

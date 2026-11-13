@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="ph_off">Las notificaciones están apagadas: no te enterarás cuando te escriban</string>
+    <string name="ph_off_action">Activar</string>
+    <string name="ph_failed">No se pudo registrar este teléfono para recibir avisos</string>
+    <string name="ph_failed_action">Reintentar</string>
+    <string name="ph_battery">Tu teléfono puede frenar los avisos de Chaggu</string>
+    <string name="ph_battery_action">Arreglar</string>
+    <string name="ph_battery_title">Que los avisos lleguen a tiempo</string>
+    <string name="ph_battery_body">Algunos teléfonos cierran las apps en segundo plano para ahorrar batería, y entonces los mensajes llegan tarde o no llegan. En los ajustes de la app:</string>
+    <string name="ph_battery_generic">• Batería → elige «Sin restricciones» (o «No optimizar»).</string>
+    <string name="ph_battery_xiaomi">• Activa «Inicio automático».\n• Ahorro de batería → «Sin restricciones».</string>
+    <string name="ph_battery_oppo">• Uso de batería → permite «Actividad en segundo plano» e «Inicio automático».</string>
+    <string name="ph_battery_transsion">• Batería → «Sin restricciones».\n• En Phone Master / Gestión de apps, permite «Inicio automático».</string>
+    <string name="ph_battery_huawei">• Inicio de aplicaciones → «Gestionar manualmente» y enciende los tres interruptores.</string>
+    <string name="ph_battery_samsung">• Batería → «Sin restricciones», y revisa que Chaggu no esté en «Aplicaciones en suspensión».</string>
+    <string name="ph_battery_open">Abrir ajustes</string>
+    <string name="ph_battery_done">Listo, no mostrar más</string>
+</resources>

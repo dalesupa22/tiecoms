@@ -58,7 +58,7 @@ private val Paper = Color(0xFFF6F3EC)
  * y lo dibuja a partir de la función pura [SplashChoreo.frame]. [ready] indica que la app ya puede mostrarse.
  */
 @Composable
-fun SplashOverlay(mode: Mode, ready: Boolean, onFinished: () -> Unit) {
+fun SplashOverlay(mode: Mode, ready: Boolean, cached: Boolean = false, onFinished: () -> Unit) {
     val ctx = LocalContext.current
     val container = LocalContainer.current
     val view = LocalView.current
@@ -67,6 +67,7 @@ fun SplashOverlay(mode: Mode, ready: Boolean, onFinished: () -> Unit) {
     }
     val effMode = if (reduce && mode == Mode.FULL) Mode.REDUCED else mode
     val readyNow by rememberUpdatedState(ready)
+    val cachedNow by rememberUpdatedState(cached)
     // Solo depuración: fotograma congelado (`am start … --ef splashFreeze 0.45`).
     val freeze = container.splashFreezeAt
     var t by remember { mutableFloatStateOf(freeze ?: SplashChoreo.startTime(effMode)) }
@@ -93,9 +94,10 @@ fun SplashOverlay(mode: Mode, ready: Boolean, onFinished: () -> Unit) {
             val dt = minOf(now - prev, 50_000_000L) / 1e9f; prev = now
             val real = (now - start) / 1e9f
             val before = t
-            val next = SplashChoreo.step(before, dt, SplashChoreo.canExit(readyNow, real), skip)
+            val fast = SplashChoreo.fastExit(effMode, readyNow, cachedNow)
+            val next = SplashChoreo.step(before, dt, SplashChoreo.canExit(readyNow, real), skip || fast)
             skip = false
-            if (SplashChoreo.crossed(before, next, SplashChoreo.FEEDBACK_AT)) {
+            if (!fast && SplashChoreo.crossed(before, next, SplashChoreo.FEEDBACK_AT)) {
                 container.sounds.play(Sound.SPLASH)
                 view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
             }

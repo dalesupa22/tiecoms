@@ -29,11 +29,16 @@ object PushSetup {
 
     private val registration = PushRegistrationCoordinator()
 
+    /** CH034: ¿este teléfono quedó registrado para avisos? La app lo muestra (PushHealthBanner) en vez de fallar en silencio. */
+    enum class Health { UNKNOWN, OK, FAILED }
+    val health = kotlinx.coroutines.flow.MutableStateFlow(Health.UNKNOWN)
+
     /** Retry briefly; session restoration, foreground and network recovery trigger later attempts. */
     suspend fun register(ctx: Context) {
         val container = ctx.container
         if (!container.notifier.enabled() || container.client.value.state.value.status != SessionStatus.READY) return
-        if (!available(ctx)) { Log.i("TieComs", "Push desactivado: falta google-services.json"); return }
+        if (!available(ctx)) { Log.i("TieComs", "Push desactivado: falta google-services.json"); health.value = Health.FAILED; return }
+        var registered = false
         registration.synchronize(
             allowed = { container.notifier.enabled() && container.client.value.state.value.status == SessionStatus.READY },
             reportFailure = { Log.w("TieComs", "No se registró el token push; se reintentará") },
@@ -51,9 +56,13 @@ object PushSetup {
                     val lang = AppLocale.effective(ctx)
                     container.push.onToken(token)
                     container.client.value.registerPushToken(token, lang)
+                    registered = true
                 }
             },
         )
+        // Solo cuenta como falla si seguía permitido: cerrar sesión o quitar el permiso a mitad no es un error de registro.
+        if (registered) health.value = Health.OK
+        else if (container.notifier.enabled() && container.client.value.state.value.status == SessionStatus.READY) health.value = Health.FAILED
     }
 }
 

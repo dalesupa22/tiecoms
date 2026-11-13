@@ -146,7 +146,13 @@ import java.time.LocalDate
 internal sealed interface ChatItem {
     val key: String
     data class Day(val date: LocalDate) : ChatItem { override val key = "d:$date" }
-    data class Msg(val m: MessageDTO, val mine: Boolean, val showAuthor: Boolean) : ChatItem { override val key = "m:" + m.id }
+    /**
+     * CH034: mi mensaje conserva la clave de su burbuja «enviando» (p:<clientMessageId>) al confirmarse: la fila es
+     * la misma para la lista, así que no se destruye y recrea (el saltito al enviar). Los demás van por id.
+     */
+    data class Msg(val m: MessageDTO, val mine: Boolean, val showAuthor: Boolean) : ChatItem {
+        override val key = if (mine && m.clientMessageId != null) "p:" + m.clientMessageId else "m:" + m.id
+    }
     data class Pending(val p: PendingMessage) : ChatItem { override val key = "p:" + p.clientMessageId }
     data object LateJoin : ChatItem { override val key = "late" }
     data object Older : ChatItem { override val key = "older" }

@@ -139,6 +139,10 @@ class AppSettings(context: Context) {
     var askedNotificationPermission: Boolean
         get() = prefs.getBoolean("askedNotif", false)
         set(v) { prefs.edit().putBoolean("askedNotif", v).apply() }
+    /** CH034: la persona ya vio (o descartó) la guía de batería para que lleguen los avisos. */
+    var batteryHintDismissed: Boolean
+        get() = prefs.getBoolean("batteryHintDismissed", false)
+        set(v) { prefs.edit().putBoolean("batteryHintDismissed", v).apply() }
     /** Solo en builds debug: servidor alternativo (p. ej. http://10.0.2.2:3021). */
     var debugApiUrl: String?
         get() = prefs.getString("debugApiUrl", null)

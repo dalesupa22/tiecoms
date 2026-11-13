@@ -186,6 +186,17 @@ final class SplashTimelineTests: XCTestCase {
         XCTAssertEqual(T.exit(2.65).scale, 1.04, accuracy: 0.001)
     }
 
+    func testSplashLeavesAtOnceWhenListCameFromCache() {
+        XCTAssertTrue(T.fastExit(short: false, ready: true, cached: true))
+        XCTAssertFalse(T.fastExit(short: false, ready: true, cached: false))
+        XCTAssertFalse(T.fastExit(short: false, ready: false, cached: true))
+        XCTAssertFalse(T.fastExit(short: true, ready: true, cached: true))
+        // El adelanto (como un toque) deja el reloj en la salida y termina 0,3 s después.
+        let skip = T.exitStart - 0.1
+        XCTAssertEqual(T.clock(elapsed: 0.1, short: false, readyAt: 0.1, skip: skip), T.exitStart, accuracy: 0.001)
+        XCTAssertEqual(T.clock(elapsed: 0.4, short: false, readyAt: 0.1, skip: skip), T.total, accuracy: 0.001)
+    }
+
     func testClockHoldsUntilReadyAndShortMode() {
         XCTAssertEqual(T.clock(elapsed: 0.5, short: false, readyAt: 0.2), 0.5)
         XCTAssertEqual(T.clock(elapsed: 2.5, short: false, readyAt: 0.2), 2.5, accuracy: 0.001)

@@ -35,7 +35,7 @@ APNs (tema `com.tiecoms.app`, `apns-push-type: alert`, prioridad 10, `apns-colla
 - Recordatorio: `type: "reminder"`, `category: "TC_REMINDER"`, `reminderId` (+ `messageId`). Reunión: `type: "event"`, `category: "TC_EVENT"`, `eventId`.
 - Reacción a mi mensaje: `type: "reaction"`, `category: "TC_MESSAGE"`, `apns-collapse-id` = `react-<messageId>`, `conversationId` + `messageId` (un aviso agrupado cada 2 min; ver docs/REACCIONES_ENLACES.md).
 
-FCM: **mensaje de datos** (sin `notification`), `android.priority: high`, `collapse_key` = conversación. `data` (todo texto):
+FCM: **mensaje de datos** (sin `notification`), `android.priority: high`, sin `collapse_key` (CH034: con él FCM guardaba solo el último aviso de cada chat y a lo sumo 4 chats para un teléfono sin red). `data` (todo texto):
 `type, title, subtitle, body, badge, threadId, category, conversationId, messageId, authorId, authorName, authorAvatarUrl` (y `reminderId`/`eventId`).
 
 ### Push VoIP de llamada (CH029)

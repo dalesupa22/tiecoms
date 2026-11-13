@@ -142,7 +142,10 @@ struct AttachmentImage: View {
         for path in paths {
             for round in 0..<2 {
                 if Task.isCancelled { return }
-                if let d = try? await AttachmentCache.shared.data(path, api: store.api), let img = UIImage(data: d) {
+                // CH034: decodificar fuera del hilo principal y dejar la imagen lista para pintar (antes se decodificaba
+                // en el MainActor y otra vez al dibujar, en pleno scroll).
+                if let d = try? await AttachmentCache.shared.data(path, api: store.api),
+                   let img = await Task.detached(priority: .userInitiated, operation: { UIImage(data: d).map { $0.preparingForDisplay() ?? $0 } }).value {
                     let decoded = att.isGif ? await Task.detached { GifAnimation.decode(d) }.value : nil
                     guard !Task.isCancelled else { return }
                     image = decoded?.frames.first ?? img; animation = decoded

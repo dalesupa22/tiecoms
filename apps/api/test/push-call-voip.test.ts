@@ -37,7 +37,7 @@ describe('push de llamada entrante', () => {
     expect([token, env]).toEqual(['VOIP', 'production']);
     expect(opts).toMatchObject({ voip: true, collapseId: 'call-call' });
     expect(payload).toEqual({ type: 'call', callId: 'call', conversationId: 'chat', kind: 'audio', callerName: 'Danny', subtitle: null });
-    expect(mocks.fcm).toHaveBeenCalledWith('FCM', expect.objectContaining({ type: 'call', callId: 'call', category: 'TC_CALL' }), expect.anything());
+    expect(mocks.fcm).toHaveBeenCalledWith('FCM', expect.objectContaining({ type: 'call', callId: 'call', category: 'TC_CALL' }));
     // La sesión con VoIP no recibe además el aviso normal; DND y modo sueño se respetan igual.
     expect(targetsSql).toMatch(/'apns_voip'/);
     expect(targetsSql).toMatch(/NOT \(ps\.provider = 'apns' AND EXISTS/);

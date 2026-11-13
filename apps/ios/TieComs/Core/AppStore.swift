@@ -70,6 +70,8 @@ final class AppStore {
 
     // MARK: Estado observable
     private(set) var status: Status = .loading
+    /// CH034: este arranque pintó la lista desde la copia local (el splash no tiene nada que esperar).
+    private(set) var paintedFromCache = false
     private(set) var connection: Connection = .offline
     private(set) var data: BootstrapDTO?
     private(set) var conversations: [String: ConversationState] = [:]
@@ -498,6 +500,7 @@ final class AppStore {
         // 1.7.0: con caché de esta cuenta, la lista sale al instante y la red revalida detrás.
         if restoreSnapshot() {
             Perf.mark("ready.cache")
+            paintedFromCache = true
             status = .ready
             let r = await api.refresh()
             Perf.mark("refresh.done")

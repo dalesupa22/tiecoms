@@ -22,7 +22,7 @@ struct RootView: View {
                     .accessibilityIdentifier("metrics.splash").accessibilityLabel("\(Int(s * 1000))")
             }
             if showSplash {
-                LaunchSplashView(ready: store.status != .loading, short: store.launchedByLink) { seconds in
+                LaunchSplashView(ready: store.status != .loading, short: store.launchedByLink, cached: store.paintedFromCache) { seconds in
                     splashSeconds = seconds
                     withAnimation(.easeOut(duration: 0.2)) { showSplash = false }
                 }

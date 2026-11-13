@@ -157,7 +157,9 @@ async function deliver(targets: Target[], note: (t: Target) => Note) {
         ? await sendApns(t.token, t.environment, voipPayload(n), { collapseId: n.collapseId, voip: true })
         : t.provider === 'apns'
         ? await sendApns(t.token, t.environment, apnsPayload(n, badge), { collapseId: n.collapseId })
-        : await sendFcm(t.token, fcmData(n, badge), { collapseKey: n.threadId });
+        // CH034: sin collapse_key. Con él, a un teléfono sin red o dormido FCM le guarda solo el último mensaje
+        // de cada chat y a lo sumo 4 chats; el resto de avisos se perdía. La app ya agrupa por conversación.
+        : await sendFcm(t.token, fcmData(n, badge));
     } catch (e: any) { r = { ok: false, invalidToken: false, error: String(e?.message ?? e) }; }
     if (!r.ok && r.invalidToken) {
       // Provider rejection is known; removal is not known until the DB confirms it.

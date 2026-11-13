@@ -105,6 +105,10 @@ enum SplashTimeline {
         return (reduced ? 1 : 1 + 0.04 * p, 1 - p)
     }
 
+    /// CH034: con la lista ya pintada desde la copia local, el splash completo no espera nada: solo tapa la app
+    /// ~2,65 s. En ese caso sale de una vez (fundido de salida), sin sonido. El primer arranque, sin copia, lo conserva.
+    static func fastExit(short: Bool, ready: Bool, cached: Bool) -> Bool { !short && ready && cached }
+
     /// Reloj del splash (función pura).
     /// - short: arranque en frío por un enlace → empieza en `shortStart`.
     /// - readyAt: segundo (del reloj real) en que la app quedó lista; nil = aún carga →
@@ -127,6 +131,8 @@ struct LaunchSplashView: View {
     var ready: Bool
     /// Arranque en frío por un enlace.
     var short: Bool
+    /// La lista ya salió de la copia local (CH034): el splash se va de una vez.
+    var cached: Bool = false
     /// Recibe cuánto estuvo en pantalla (segundos).
     var onFinish: (Double) -> Void
 
@@ -137,6 +143,7 @@ struct LaunchSplashView: View {
     @State private var soundPlayed = false
     @State private var hapticDone = false
     @State private var finished = false
+    @State private var fastDone = false
     /// Solo pruebas: congela el fotograma en este instante (argumento -TCSplashFreeze <s>).
     private let freeze: Double? = AppConfig.launchValue("TCSplashFreeze").flatMap(Double.init)
 
@@ -229,6 +236,11 @@ struct LaunchSplashView: View {
     private func tick(t: Double, elapsed: Double) {
         guard freeze == nil, !finished else { return }
         if ready && readyAt == nil { readyAt = elapsed }
+        // CH034: mismo adelanto que un toque, sin ¡pum! (la app ya está lista debajo).
+        if !fastDone, T.fastExit(short: short, ready: ready, cached: cached) {
+            fastDone = true; soundPlayed = true; hapticDone = true
+            if t < T.exitStart { skip += T.exitStart - t }
+        }
         // ¡Pum! (sonido + háptico). La versión corta (enlace) empieza en 1,55 s, antes del ¡pum!, así que también suena.
         if !reduceMotion, !soundPlayed, t >= T.soundAt { soundPlayed = true; AppFeedback.shared.playSplash() }
         if !reduceMotion, !hapticDone, t >= T.hapticAt { hapticDone = true; Haptics.tap() }

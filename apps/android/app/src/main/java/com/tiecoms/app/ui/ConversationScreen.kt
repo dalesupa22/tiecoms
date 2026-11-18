@@ -143,6 +143,8 @@ import kotlinx.serialization.json.contentOrNull
 import java.time.Instant
 import java.time.LocalDate
 
+/** CH035: inmutable para Compose: una fila igual a la anterior (aunque sea otra instancia) no recompone su burbuja. */
+@androidx.compose.runtime.Immutable
 internal sealed interface ChatItem {
     val key: String
     companion object {
@@ -391,7 +393,7 @@ fun ConversationScreen(
     val mentionQueue = remember(id) { androidx.compose.runtime.mutableStateListOf<Long>() }
     /** Último seq cuando la persona dejó el final; lo que llegue de otros después va en el globo del ⌄. */
     var awaySeq by remember(id) { mutableStateOf<Long?>(null) }
-    val newWhileAway = awaySeq?.let { from -> conv?.messages.orEmpty().count { it.seq > from && it.authorId != me && it.authorId !in state.blockedUserIds } } ?: 0
+    val newWhileAway = remember(awaySeq, conv?.messages, state.blockedUserIds, me) { awaySeq?.let { from -> conv?.messages.orEmpty().count { it.seq > from && it.authorId != me && it.authorId !in state.blockedUserIds } } ?: 0 }
     /** CH035: ids ya cargados (incluye autores bloqueados): una cita fuera de aquí se puede ir a buscar. */
     val loadedIds = remember(conv?.messages) { conv?.messages.orEmpty().mapTo(HashSet()) { it.id } }
     val byId = remember(conv?.messages, state.blockedUserIds) { (conv?.messages ?: emptyList()).filter { it.authorId !in state.blockedUserIds }.associateBy { it.id } }
@@ -740,8 +742,21 @@ fun ConversationScreen(
     val typers = (state.typing[id] ?: emptyList()).filter { it.until > System.currentTimeMillis() && it.userId != me }
         .mapNotNull { Names.person(data, it.userId)?.name?.substringBefore(' ') }
     val chat = LocalChatColors.current
-    val pinned = (state.pins[id] ?: emptyList()).toSet()
-    val openHere = state.issues.values.filter { it.conversationId == id && !it.closed }
+    // CH035 (tanda 2): lo que cada fila necesita se calcula una vez por cambio real, no por fila ni por pasada.
+    /** `data` para las filas: la misma instancia mientras solo cambie lo volátil (último mensaje, leídos…): así un mensaje nuevo no recompone las burbujas que ya estaban. */
+    val rowDataHolder = remember { arrayOfNulls<BootstrapDTO>(1) }
+    val rowData = rowDataHolder[0]?.takeIf { com.tiecoms.app.core.ChatSlice.sameForRows(it, data) } ?: data.also { rowDataHolder[0] = it }
+    val pinned = remember(state.pins[id]) { (state.pins[id] ?: emptyList()).toSet() }
+    val openHere = remember(state.issues, id) { state.issues.values.filter { it.conversationId == id && !it.closed } }
+    /** Asunto abierto que nació de cada mensaje (el primero, como antes con firstOrNull). */
+    val issueByMsg = remember(openHere) { HashMap<String, IssueDTO>().apply { for (i in openHere) i.originMessageId?.let { if (it !in this) put(it, i) } } }
+    /** Sidechats e hilos por mensaje ancla: antes se filtraban (y ordenaban) TODAS las conversaciones por cada burbuja. */
+    val sidesByMsg = remember(data.conversations, id, embedded) {
+        if (embedded) emptyMap() else data.conversations.filter { it.isSide && it.parentId == id && it.parentMessageId != null }.groupBy { it.parentMessageId!! }
+    }
+    val threadsByMsg = remember(data.conversations, id, embedded) {
+        if (embedded) emptyMap() else threadsOf(data, id).filter { !it.isSide && it.parentMessageId != null }.groupBy { it.parentMessageId!! }
+    }
     // Asuntos y reuniones también en directos y chats grupales (SPEC-v4 §E).
     val canWork = meta.canPost
     val myWsRole = data.workspaces.firstOrNull { it.id == meta.workspaceId }?.myRole
@@ -961,7 +976,27 @@ fun ConversationScreen(
                         Text(stringResource(R.string.topic_empty, activeTopic.name), Modifier.align(Alignment.Center).padding(32.dp).testTag("topicEmpty"),
                             textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     items.isEmpty() -> Text(stringResource(if (meta.isSide) R.string.side_empty_chat else R.string.no_messages), Modifier.align(Alignment.Center).testTag("sideEmpty"), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    else -> androidx.compose.runtime.CompositionLocalProvider(LocalVoiceQueue provides voiceQueue) { LazyColumn(
+                    else -> androidx.compose.runtime.CompositionLocalProvider(LocalVoiceQueue provides voiceQueue) {
+                    // CH035 (tanda 2): lo que las filas llaman al tocar pasa por una referencia que no cambia. Antes cada
+                    // lambda capturaba `meta` y `data` (que cambian con cada mensaje) y ninguna burbuja se podía saltar.
+                    val menuNow by androidx.compose.runtime.rememberUpdatedState<(MessageDTO) -> List<SheetItem?>> { m -> messageMenu(m) }
+                    val jumpNow by androidx.compose.runtime.rememberUpdatedState<(Long) -> Unit> { seq -> jumpTo(seq) }
+                    val jumpMessageNow by androidx.compose.runtime.rememberUpdatedState<(String) -> Unit> { mid -> jumpToMessage(mid) }
+                    val cardActionsNow by androidx.compose.runtime.rememberUpdatedState<(MessageDTO, String?) -> CardActions> { cm, emailId ->
+                        val author = Names.person(data, cm.authorId)
+                        CardActions(
+                            reply = if (meta.canPost && !blockedDirect) ({ replyTo = cm; editing = null; replyFocus++ }) else null,
+                            replyPrivately = if (cm.authorId != me && meta.kind != "direct" && author?.kind == "human") ({ onPrivateReply(cm) }) else null,
+                            forward = emailId?.let { e -> { forwardCard = e } },
+                            copyLink = { copyToClipboard(ctx, messageLink(id, cm.seq)); container.toast(ctx.getString(R.string.toast_link_copied)) },
+                        )
+                    }
+                    val cardActionsStable = remember<(MessageDTO, String?) -> CardActions> { { cm, emailId -> cardActionsNow(cm, emailId) } }
+                    val openConvNow by androidx.compose.runtime.rememberUpdatedState(onOpenConversation)
+                    val openConvStable = remember<(String, Long?) -> Unit> { { c, seq -> openConvNow(c, seq) } }
+                    val canPostHere = meta.canPost && !blockedDirect
+                    val showAvatars = meta.kind != "direct"
+                    LazyColumn(
                         state = listState, reverseLayout = true, modifier = Modifier.fillMaxSize().onGloballyPositioned { listRect = it.boundsInRoot() }.dismissKeyboardOnTouch().testTag("messages"),
                         // Con la hoja del sidechat a medias (teléfono), el relleno deja el ancla por encima de la hoja.
                         contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp,
@@ -971,48 +1006,40 @@ fun ConversationScreen(
                         items(items, key = { it.key }, contentType = { ChatItem.contentType(it) }) { item ->
                             when (item) {
                                 is ChatItem.Day -> DaySeparator(dayText(ctx, item.date))
-                                is ChatItem.Msg -> if (item.m.kind == "system") SystemRow(item.m, data, state.events, onOpenConversation, onOpenIssue, onOpenEvent, canPost = meta.canPost && !blockedDirect,
+                                is ChatItem.Msg -> if (item.m.kind == "system") SystemRow(item.m, rowData, state.events, openConvStable, onOpenIssue, onOpenEvent, canPost = canPostHere,
                                     animate = item.m.id in liveFx,
                                     // Reacciones en las tarjetas (1.7.13): mantener presionado abre la barra y los chips van debajo.
                                     react = if (embedded) null else CardReact(item.m.reactions.filter { me in it.userIds }.map { it.emoji }.toSet(), reactionActions,
                                         enabled = canReact(item.m), onReact = { e, on -> react(item.m, e, on) }, onMore = { pickerFor = item.m }),
                                     // Tarjetas de correo o WhatsApp: responder aquí, en privado y reenviar, como un mensaje normal.
-                                    cardActions = if (embedded) null else { cm, emailId ->
-                                        val author = Names.person(data, cm.authorId)
-                                        CardActions(
-                                            reply = if (meta.canPost && !blockedDirect) ({ replyTo = cm; editing = null; replyFocus++ }) else null,
-                                            replyPrivately = if (cm.authorId != me && meta.kind != "direct" && author?.kind == "human") ({ onPrivateReply(cm) }) else null,
-                                            forward = emailId?.let { e -> { forwardCard = e } },
-                                            copyLink = { copyToClipboard(ctx, messageLink(id, cm.seq)); container.toast(ctx.getString(R.string.toast_link_copied)) },
-                                        )
-                                    })
+                                    cardActions = if (embedded) null else cardActionsStable)
                                 else GgSelectable(selecting, item.m.id in selectedIds, onToggle = { if (item.m.id in selectedIds) selectedIds.remove(item.m.id) else selectedIds.add(item.m.id) }) { MessageBubble(
-                                    item, data, quoted = item.m.replyTo?.let { byId[it] }, pinnedHere = item.m.id in pinned, highlighted = highlight == item.m.seq,
-                                    issue = openHere.firstOrNull { it.originMessageId == item.m.id },
-                                    showAvatars = meta.kind != "direct",
-                                    sides = if (embedded) emptyList() else sidesOf(data, id, item.m.id), onOpenSide = { sid -> sideOpen = sid },
-                                    threads = if (embedded) emptyList() else threadsOf(data, id, item.m.id).filter { !it.isSide },
+                                    item, rowData, quoted = item.m.replyTo?.let { byId[it] }, pinnedHere = item.m.id in pinned, highlighted = highlight == item.m.seq,
+                                    issue = issueByMsg[item.m.id],
+                                    showAvatars = showAvatars,
+                                    sides = sidesByMsg[item.m.id] ?: emptyList(), onOpenSide = { sid -> sideOpen = sid },
+                                    threads = threadsByMsg[item.m.id] ?: emptyList(),
                                     menuOpen = menuFor?.id == item.m.id,
-                                    menuItems = { messageMenu(item.m) },
+                                    menuItems = { menuNow(item.m) },
                                     onDismissMenu = { menuFor = null },
                                     onLongPress = { if (item.m.deletedAt == null) menuFor = item.m },
-                                    onQuote = { q -> jumpTo(q.seq) },
-                                    onQuoteMissing = if (!embedded && item.m.replyTo != null && item.m.replyTo !in loadedIds) ({ mid -> jumpToMessage(mid) }) else null,
-                                    onIssue = onOpenIssue, onOpenConversation = { c, seq -> onOpenConversation(c, seq) },
+                                    onQuote = { q -> jumpNow(q.seq) },
+                                    onQuoteMissing = if (!embedded && item.m.replyTo != null && item.m.replyTo !in loadedIds) ({ mid -> jumpMessageNow(mid) }) else null,
+                                    onIssue = onOpenIssue, onOpenConversation = openConvStable,
                                     onOpenMedia = { list, i -> viewer = list to i },
                                     onVoiceIssue = if (myWsRole != "guest") ({ t -> voiceIssue = t to item.m }) else null,
                                     isAnchor = sideMeta?.parentMessageId == item.m.id && !embedded,
                                     onAnchorBounds = { r -> anchorRect = r },
                                     onPerson = { pid -> personCard = pid },
                                     // 1.7.1: deslizar a la derecha = responder citando (como WhatsApp); el sidechat queda en el menú.
-                                    onSwipeReply = if (item.m.deletedAt == null && meta.canPost && !blockedDirect) ({ replyTo = item.m; editing = null; replyFocus++ }) else null,
+                                    onSwipeReply = if (item.m.deletedAt == null && canPostHere) ({ replyTo = item.m; editing = null; replyFocus++ }) else null,
                                     onOpenFile = { a -> scope.launch { openAttachment(ctx, client, a) } },
                                     onOpenPdf = { a, sign -> pdfViewer = a to sign; pdfSaved = a.id + "|" + (if (sign) "1" else "0") },
                                     canReact = canReact(item.m), reactionActions = reactionActions,
                                     onReact = { e, on -> react(item.m, e, on) }, onMoreReactions = { pickerFor = item.m },
                                     topic = if (!showTopics || item.m.deletedAt != null) null else item.m.topicId?.let { topicById[it] },
                                     highlightQuery = searchHighlight,
-                                    topicBy = com.tiecoms.app.core.Topics.setBy(item.m)?.let { by -> if (by == me) stringResource(R.string.common_you_short) else Names.person(data, by)?.name?.substringBefore(' ') ?: "" },
+                                    topicBy = com.tiecoms.app.core.Topics.setBy(item.m)?.let { by -> if (by == me) stringResource(R.string.common_you_short) else Names.person(rowData, by)?.name?.substringBefore(' ') ?: "" },
                                 ) }
                                 is ChatItem.Pending -> PendingBubble(item.p, onRetry = { client.retry(item.p.clientMessageId) }, onDiscard = { client.discard(item.p.clientMessageId) })
                                 ChatItem.LateJoin -> Notice(stringResource(R.string.late_join))
@@ -1865,7 +1892,7 @@ internal fun SystemRow(
 }
 
 /** Reacciones de una tarjeta: las mías, si mi empresa tiene reacciones con acción, y qué hacer al tocar. */
-class CardReact(val mine: Set<String>, val actions: Boolean, val enabled: Boolean, val onReact: (String, Boolean) -> Unit, val onMore: () -> Unit)
+data class CardReact(val mine: Set<String>, val actions: Boolean, val enabled: Boolean, val onReact: (String, Boolean) -> Unit, val onMore: () -> Unit)
 
 /** La barra de reacciones para el menú de las tarjetas de correo y WhatsApp (lo lee BroughtBy). */
 val LocalCardReact = androidx.compose.runtime.staticCompositionLocalOf<CardReact?> { null }

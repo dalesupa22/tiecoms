@@ -39,4 +39,14 @@ object Perf {
         Trace.endAsyncSection("tcOpenChat", 1)
         Log.i(TAG, "chat ${conversationId.take(8)} tap=${tap ?: -1} ms screen=${now - enteredAt} ms memory=$fromMemory")
     }
+
+    /**
+     * CH035: cuántas veces se compone cada pieza (pantalla del chat, burbuja, navegación). Apagado no cuesta más que
+     * leer una variable; lo encienden las pruebas para comprobar que un evento de OTRO chat no repinta el abierto.
+     */
+    @Volatile var countCompositions = false
+    private val compositions = java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.atomic.AtomicInteger>()
+    fun composed(what: String) { if (countCompositions) compositions.getOrPut(what) { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() }
+    fun compositionCounts(): Map<String, Int> = compositions.mapValues { it.value.get() }.toSortedMap()
+    fun resetCompositions() = compositions.clear()
 }

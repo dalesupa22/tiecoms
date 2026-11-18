@@ -146,8 +146,7 @@ fun rememberCallLauncher(): CallLauncher {
 fun CallHeaderButtons(conv: ConversationDTO, data: BootstrapDTO, compact: Boolean = false) {
     val client = LocalClient.current
     val container = LocalContainer.current
-    val st by client.state.collectAsStateWithLifecycle()
-    val known = st.calls.containsKey(conv.id)
+    val known by client.select(conv.id) { it.calls.containsKey(conv.id) } // CH035: solo la llamada de este chat
     LaunchedEffect(data.callsEnabled, conv.id, known) { if (data.callsEnabled && !known) runCatching { client.loadCall(conv.id) } }
     if (!data.callsEnabled || !conv.canPost) return
     val launcher = rememberCallLauncher()
@@ -178,9 +177,8 @@ fun CallHeaderButtons(conv: ConversationDTO, data: BootstrapDTO, compact: Boolea
 fun CallBanner(conversationId: String, data: BootstrapDTO) {
     val client = LocalClient.current
     val container = LocalContainer.current
-    val st by client.state.collectAsStateWithLifecycle()
     val mine by container.calls.view.collectAsStateWithLifecycle()
-    val call = st.calls[conversationId]
+    val call = client.select(conversationId) { it.calls[conversationId] }.value // CH035: solo la llamada de este chat
     if (!data.callsEnabled || call == null || mine?.call?.id == call.id) return
     // Acabo de colgar y el servidor todavía no confirmó: solo quedaba yo dentro, no hay a qué unirse.
     if (call.activeUserIds.all { it == data.me.id }) return
@@ -220,13 +218,14 @@ fun CallOverlayHost(onOpenConversation: (String) -> Unit) {
 fun rememberElsewhereCall(): com.tiecoms.app.core.CallDTO? {
     val client = LocalClient.current
     val container = LocalContainer.current
-    val st by client.state.collectAsStateWithLifecycle()
+    // CH035: devuelve un valor, así que lo que lea recompone a quien la llama (la raíz de la app): solo lo que usa.
+    val myId = client.select { it.data?.takeIf { d -> d.callsEnabled }?.me?.id }.value ?: return null
+    val active by client.select { it.data?.myActiveCall }
+    val calls by client.selectRef { it.calls }
     val view by container.calls.view.collectAsStateWithLifecycle()
     val ring by container.calls.ringing.collectAsStateWithLifecycle()
-    val data = st.data ?: return null
-    if (!data.callsEnabled) return null
-    val keys = remember(client, data.me.id) { client.myDeviceKeys() }
-    return com.tiecoms.app.core.Calls171.elsewhere(data.myActiveCall, st.calls, view?.call?.id, keys)?.takeIf { it.id != ring?.call?.id }
+    val keys = remember(client, myId) { client.myDeviceKeys() }
+    return com.tiecoms.app.core.Calls171.elsewhere(active, calls, view?.call?.id, keys)?.takeIf { it.id != ring?.call?.id }
 }
 
 /**

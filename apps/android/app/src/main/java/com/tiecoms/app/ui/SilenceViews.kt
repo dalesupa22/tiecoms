@@ -216,9 +216,9 @@ fun DndBanner() {
     val ctx = LocalContext.current
     val client = LocalClient.current
     val container = com.tiecoms.app.ui.LocalContainer.current
-    val state by client.state.collectAsStateWithLifecycle()
-    val now = rememberSilenceNow(state.dndUntil)
-    val text = dndBannerText(ctx, state.dndUntil, now) ?: return
+    val dndUntil by client.select { it.dndUntil } // CH035: va arriba de Grupos y DMs
+    val now = rememberSilenceNow(dndUntil)
+    val text = dndBannerText(ctx, dndUntil, now) ?: return
     Surface(color = MaterialTheme.colorScheme.secondaryContainer, modifier = Modifier.fillMaxWidth().testTag("dndBanner")) {
         Row(Modifier.padding(horizontal = 16.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("🌙", style = MaterialTheme.typography.labelMedium)

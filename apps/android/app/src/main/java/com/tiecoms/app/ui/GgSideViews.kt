@@ -283,7 +283,8 @@ fun rememberGgSide(source: String, enabled: Boolean): GgSideModel? {
     val client = LocalClient.current
     val scope = rememberCoroutineScope()
     if (!enabled) return null
-    val privacy = client.state.collectAsStateWithLifecycle().value.waPrivacy
+    // CH035: solo la privacidad de WhatsApp; esta función devuelve un valor, así que lo que lea recompone a quien la llama (el chat entero).
+    val privacy = client.selectRef { it.waPrivacy }.value
     val model = remember(source, client, client.sessionGeneration) { GgSideModel(client, source, scope) }
     val epoch = remember(source, client, client.sessionGeneration) { privacy.token(source) }
     val permitted = privacy.allows(source) && privacy.token(source) == epoch

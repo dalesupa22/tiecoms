@@ -93,7 +93,8 @@ import kotlinx.coroutines.launch
 /** Snapshot con las vistas previas ocultas en chats con alguien bloqueado (el snapshot no trae el autor). */
 @Composable
 private fun visibleData(): Pair<BootstrapDTO, com.tiecoms.app.core.ClientState>? {
-    val state by LocalClient.current.state.collectAsStateWithLifecycle()
+    // CH035 (tanda 2): solo lo que leen las listas; «escribiendo…» y los mensajes de cada chat ya no las recomponen.
+    val state by LocalClient.current.listsState()
     val originalData = state.data ?: return null
     val workOnly = WaWorkOnly.value
     val data = remember(originalData, state.blockedUserIds, workOnly) {
@@ -719,7 +720,7 @@ private fun IssueLine(row: GroupsTree.Issue, data: BootstrapDTO, menuOpen: Boole
         // 1.6.4 (22): el ◆ pasa a ser el círculo para completar (área táctil ampliada a 48 dp por Compose).
         IssueCheck(i, { toggle(i) }, size = 16.dp, box = 40.dp)
         Text((if (i.restricted) "🔒 " else "") + i.title, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-        val kids = com.tiecoms.app.core.IssueTasks.childrenOf(LocalClient.current.state.collectAsStateWithLifecycle().value.issues.values, i.id)
+        val kids = com.tiecoms.app.core.IssueTasks.childrenOf(LocalClient.current.selectRef { it.issues }.value.values, i.id)
         if (kids.isNotEmpty()) { Spacer(Modifier.width(6.dp)); com.tiecoms.app.core.IssueTasks.progress(kids).let { KidsBadge(it.done, it.total, Modifier.testTag("groupKids-${i.id}")) } }
         val ownerName = i.ownerId?.takeIf { it != data.me.id }?.let { com.tiecoms.app.core.IssueTasks.firstName(com.tiecoms.app.core.Names.person(data, it)?.name) }?.takeIf { it.isNotEmpty() }
         if (ownerName != null) {

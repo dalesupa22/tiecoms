@@ -70,8 +70,8 @@ fun EventChatCard(eventId: String, creatorId: String, data: BootstrapDTO, onOpen
     val ctx = LocalContext.current
     val client = LocalClient.current
     val container = LocalContainer.current
-    val st by client.state.collectAsStateWithLifecycle()
-    val ev = st.events[eventId]
+    // CH035: solo este evento, no el estado entero (una tarjeta por fila del chat).
+    val ev = client.select(eventId) { it.events[eventId] }.value
     var missing by remember(eventId) { mutableStateOf(false) }
     // No está en memoria: GET /events/:id (sin acceso o borrado, no se muestra).
     LaunchedEffect(eventId, ev == null) {

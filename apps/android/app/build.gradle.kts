@@ -141,6 +141,11 @@ androidComponents {
     }
 }
 
+// CH035 (tanda 2): ver compose_stability.conf.
+composeCompiler {
+    stabilityConfigurationFiles.add(rootProject.layout.projectDirectory.file("compose_stability.conf"))
+}
+
 kotlin {
     compilerOptions {
         jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)

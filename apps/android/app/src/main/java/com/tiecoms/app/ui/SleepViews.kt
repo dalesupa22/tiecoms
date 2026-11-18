@@ -70,9 +70,10 @@ fun rememberMinute(): Long {
 @Composable
 fun mySleepingNow(): Boolean {
     val client = LocalClient.current
-    val st by client.state.collectAsStateWithLifecycle()
+    // CH035: solo mi horario de descanso (devuelve un valor: lo que lea recompone a quien la llama).
+    val sleep by client.select { it.data?.me?.sleep }
     val now = rememberMinute()
-    return SleepMode.sleepingNow(SleepMode.of(st.data?.me?.sleep), Instant.ofEpochMilli(now))
+    return SleepMode.sleepingNow(SleepMode.of(sleep), Instant.ofEpochMilli(now))
 }
 
 /** «🌙 Todas las noches»: interruptor, desde / hasta (22:00–07:00 por defecto) y la zona del teléfono. */

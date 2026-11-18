@@ -194,20 +194,22 @@ class AccessCounts(val wa: Int?, val mail: Int?, val providers: List<String>)
 @Composable
 fun rememberAccessCounts(): AccessCounts {
     val client = LocalClient.current
-    val st by client.state.collectAsStateWithLifecycle()
-    val mailOn = st.data?.mailEnabled == true
+    // CH035: solo lo que usa (devuelve un valor: lo que lea recompone a quien la llama, las listas de Grupos y DMs).
+    val mailOn by client.select { it.data?.mailEnabled == true }
+    val waRevision by client.select { it.waRevision }
+    val mailConnections by client.selectRef { it.mailConnections }
     var wa by remember { mutableStateOf<Int?>(null) }
     var mail by remember { mutableStateOf<Int?>(null) }
-    LaunchedEffect(st.waRevision) {
+    LaunchedEffect(waRevision) {
         wa = null
         runCatching { client.waUnreadTotal() }.onSuccess { wa = it }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
     }
     LaunchedEffect(mailOn) {
         if (!mailOn) return@LaunchedEffect
-        if (st.mailConnections == null) runCatching { client.loadMailConnections() }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
+        if (client.state.value.mailConnections == null) runCatching { client.loadMailConnections() }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
         runCatching { client.mailUnreadCached() }.onSuccess { mail = it }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
     }
-    val providers = if (mailOn) st.mailConnections.orEmpty().filter { it.status == "active" }.map { it.provider } else emptyList()
+    val providers = if (mailOn) mailConnections.orEmpty().filter { it.status == "active" }.map { it.provider } else emptyList()
     return AccessCounts(wa, if (providers.isEmpty()) null else (mail ?: 0), providers)
 }
 

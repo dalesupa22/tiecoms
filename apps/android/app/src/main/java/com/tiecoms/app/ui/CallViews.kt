@@ -220,13 +220,14 @@ fun CallOverlayHost(onOpenConversation: (String) -> Unit) {
 fun rememberElsewhereCall(): com.tiecoms.app.core.CallDTO? {
     val client = LocalClient.current
     val container = LocalContainer.current
-    val st by client.state.collectAsStateWithLifecycle()
+    // CH035: devuelve un valor, así que lo que lea recompone a quien la llama (la raíz de la app): solo lo que usa.
+    val myId = client.select { it.data?.takeIf { d -> d.callsEnabled }?.me?.id }.value ?: return null
+    val active by client.select { it.data?.myActiveCall }
+    val calls by client.selectRef { it.calls }
     val view by container.calls.view.collectAsStateWithLifecycle()
     val ring by container.calls.ringing.collectAsStateWithLifecycle()
-    val data = st.data ?: return null
-    if (!data.callsEnabled) return null
-    val keys = remember(client, data.me.id) { client.myDeviceKeys() }
-    return com.tiecoms.app.core.Calls171.elsewhere(data.myActiveCall, st.calls, view?.call?.id, keys)?.takeIf { it.id != ring?.call?.id }
+    val keys = remember(client, myId) { client.myDeviceKeys() }
+    return com.tiecoms.app.core.Calls171.elsewhere(active, calls, view?.call?.id, keys)?.takeIf { it.id != ring?.call?.id }
 }
 
 /**

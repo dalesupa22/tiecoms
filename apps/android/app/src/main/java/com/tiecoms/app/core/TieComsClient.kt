@@ -2726,6 +2726,8 @@ class TieComsClient(
     /** Corta el socket sin cerrar la sesión (pruebas de recuperación). */
     fun debugDisconnect() { scope.launch { socket.stop() } }
     fun debugReconnect() { scope.launch { socket.start() } }
+    /** Un evento del socket como si llegara del servidor (pruebas de recomposición, CH035). */
+    fun debugSocketEvent(name: String, payload: JsonElement) { scope.launch { onSocketEvent(name, listOf(payload)) } }
 
     fun close(): Unit = synchronized(noticeSessionLock) {
         endNoticeSession()

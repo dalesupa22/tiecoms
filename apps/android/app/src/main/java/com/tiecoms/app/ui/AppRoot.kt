@@ -107,10 +107,12 @@ val LocalSnackbar = staticCompositionLocalOf { SnackbarHostState() }
 @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
 @Composable
 fun AppRoot() {
+    com.tiecoms.app.platform.Perf.composed("root")
     val container = LocalContext.current.container
     remember(container) { WaWorkOnly.value = container.settings.waWorkOnly }
     val client by container.client.collectAsStateWithLifecycle()
-    val state by client.state.collectAsStateWithLifecycle()
+    // CH035 (tanda 2): la raíz solo mira el estado de la sesión; antes se recomponía con cada evento de cualquier chat.
+    val status by client.select { it.status }
     val snackbar = remember { SnackbarHostState() }
     val splash by container.splashMode.collectAsStateWithLifecycle()
     LaunchedEffect(Unit) { container.toasts.collect { snackbar.showSnackbar(it) } }
@@ -125,12 +127,12 @@ fun AppRoot() {
                 Column(Modifier.fillMaxSize()) {
                     if (update is com.tiecoms.app.core.AppUpdate.Status.Available) UpdateBanner(update)
                     // 1.7.1: «📞 En llamada en tu …» (estoy en la llamada desde otro dispositivo), fija arriba.
-                    val elsewhere = if (state.status == SessionStatus.READY) rememberElsewhereCall() else null
+                    val elsewhere = if (status == SessionStatus.READY) rememberElsewhereCall() else null
                     if (elsewhere != null) ElsewhereBanner(elsewhere, if (update is com.tiecoms.app.core.AppUpdate.Status.Available) Modifier else Modifier.windowInsetsPadding(WindowInsets.statusBars))
                     // Con la franja, la barra de estado ya está ocupada: las pantallas no vuelven a sumarla.
                     Box(Modifier.weight(1f).fillMaxWidth().then(if (update is com.tiecoms.app.core.AppUpdate.Status.Available || elsewhere != null)
                         Modifier.consumeWindowInsets(WindowInsets.statusBars) else Modifier)) {
-                        when (state.status) {
+                        when (status) {
                             SessionStatus.LOADING -> Splash()
                             SessionStatus.UNREACHABLE -> Unreachable()
                             SessionStatus.ANONYMOUS -> AuthNav()
@@ -147,7 +149,7 @@ fun AppRoot() {
                 SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().imePadding().padding(bottom = 72.dp))
                 // Splash animado sobre la app: la app carga debajo y aparece cuando el splash se aleja.
                 splash?.let { mode ->
-                    SplashOverlay(mode, ready = state.status != SessionStatus.LOADING, cached = state.status == SessionStatus.READY && client.paintedFromCache) { container.splashMode.value = null }
+                    SplashOverlay(mode, ready = status != SessionStatus.LOADING, cached = status == SessionStatus.READY && client.paintedFromCache) { container.splashMode.value = null }
                 }
                 if (update is com.tiecoms.app.core.AppUpdate.Status.Required) UpdateRequiredScreen(update)
             }
@@ -317,12 +319,15 @@ private fun Modifier.androidx_selectable(selected: Boolean, label: String, onCli
 
 @Composable
 internal fun MainNav() {
+    com.tiecoms.app.platform.Perf.composed("nav")
     val nav = rememberNavController()
     val container = LocalContainer.current
     val client = LocalClient.current
     val ctx = LocalContext.current
     val pending by container.pendingLink.collectAsStateWithLifecycle()
-    val state by client.state.collectAsStateWithLifecycle()
+    // CH035 (tanda 2): la navegación no observa el estado entero (se recomponía, con sus ~35 rutas, por cada evento de
+    // cualquier chat); solo si ya hay datos. Las insignias de la barra leen lo suyo dentro de la barra.
+    val hasData by client.select { it.data != null }
     val backStack by nav.currentBackStackEntryAsState()
     val route = backStack?.destination?.route
     val uiScope = rememberCoroutineScope()
@@ -364,18 +369,18 @@ internal fun MainNav() {
     }
     fun tab(r: String) = nav.navigate(r) { popUpTo(nav.graph.findStartDestination().id) { saveState = true }; launchSingleTop = true; restoreState = true }
     // ✏️ y «＋ Crear» de Grupos, DMs, Asuntos y Calendario (docs/GRUPOS.md › Barra de arriba).
-    val quick = QuickNav(
+    val quick = remember(nav, container) { QuickNav(
         onCompose = { nav.navigate("newchat") { launchSingleTop = true } },
         onOpen = { id -> openConv(id) },
         onOpenIssue = { i -> nav.navigate("issue/$i") },
         onJoinCode = { code -> nav.navigate("invite/$code") { launchSingleTop = true } },
-    )
+    ) }
 
     val callLauncher = rememberCallLauncher()
     // El aviso se lanza en un scope propio: al consumir el enlace cambia la clave del efecto y lo cancelaría.
-    LaunchedEffect(pending, state.data != null, backStack != null) {
+    LaunchedEffect(pending, hasData, backStack != null) {
         val p = pending ?: return@LaunchedEffect
-        val data = state.data ?: return@LaunchedEffect
+        val data = client.state.value.data ?: return@LaunchedEffect
         // Cold notification taps can arrive before NavHost installs its graph.
         // Keep the link pending until the first destination is ready.
         if (backStack == null) return@LaunchedEffect
@@ -425,16 +430,19 @@ internal fun MainNav() {
     Scaffold(
         bottomBar = {
             if (route in TABS) {
-                val data = state.data
-                val now = System.currentTimeMillis()
-                val groupsBadge = data?.let { com.tiecoms.app.core.GroupsTree.groupsUnread(it, now) } ?: 0
-                val dmsBadge = data?.let { com.tiecoms.app.core.GroupsTree.dmsUnread(it, now) } ?: 0
+                // CH035: la barra lee solo lo suyo y las insignias se recalculan cuando cambian los datos, no en cada emisión.
+                val data by client.selectRef { it.data }
+                val issues by client.selectRef { it.issues }
+                val dndUntil by client.select { it.dndUntil }
+                val groupsBadge = remember(data) { data?.let { com.tiecoms.app.core.GroupsTree.groupsUnread(it, System.currentTimeMillis()) } ?: 0 }
+                val dmsBadge = remember(data) { data?.let { com.tiecoms.app.core.GroupsTree.dmsUnread(it, System.currentTimeMillis()) } ?: 0 }
+                val tasksBadge = remember(issues, data?.me?.id) { com.tiecoms.app.core.IssueTasks.myOpenCount(issues.values, data?.me?.id) }
                 // Solo íconos de línea, sin texto (pedido de Danny, 29-sep-2026): [label] es el nombre completo para lectores de pantalla.
                 val items = listOfNotNull(
                     BottomTab("home?ws={ws}", R.string.nav_groups, groupsBadge, Icons.Outlined.Group, Icons.Rounded.Group),
                     BottomTab("dms", R.string.nav_dms, dmsBadge, Icons.Outlined.Forum, Icons.Rounded.Forum),
                     // «Todo» / «Hub» (30-sep-2026): Tareas con atajos a Correo, WhatsApp, Archivos y Trazo; el número son mis tareas sin cerrar (como iOS).
-                    BottomTab("issues", R.string.nav_hub, com.tiecoms.app.core.IssueTasks.myOpenCount(state.issues.values, data?.me?.id), TodoIcons.outlined, TodoIcons.filled),
+                    BottomTab("issues", R.string.nav_hub, tasksBadge, TodoIcons.outlined, TodoIcons.filled),
                     BottomTab("agenda", R.string.nav_agenda, 0, Icons.Outlined.CalendarMonth, Icons.Rounded.CalendarMonth),
                     // Llamadas (docs/LLAMADAS.md): sexto ícono, solo si el servidor las tiene prendidas.
                     // Perdidas sin ver: número en pastilla roja e ícono rojo; se quita al abrir la pestaña (POST /calls/seen).
@@ -447,8 +455,8 @@ internal fun MainNav() {
                         val me = data?.me
                         val org = com.tiecoms.app.core.Names.org(data, me?.primaryOrgId)
                         // «No molestar» activo: la lunita sobre la foto (SPEC-silencio §3).
-                        val dndNow = rememberSilenceNow(state.dndUntil)
-                        DndMoonBadge(com.tiecoms.app.core.Silence.active(state.dndUntil, dndNow) || mySleepingNow()) {
+                        val dndNow = rememberSilenceNow(dndUntil)
+                        DndMoonBadge(com.tiecoms.app.core.Silence.active(dndUntil, dndNow) || mySleepingNow()) {
                         Avatar(me?.name ?: "?", parseColor(org?.colorBg, com.tiecoms.app.ui.theme.Brand.Black), parseColor(org?.colorFg, androidx.compose.ui.graphics.Color.White),
                             size = 26.dp, photo = me?.avatarUrl,
                             modifier = if (on) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, androidx.compose.foundation.shape.CircleShape) else Modifier)
@@ -631,11 +639,11 @@ internal fun MainNav() {
     }
     // Llamada en curso y llamada entrante (docs/LLAMADAS.md): encima de todo, también de la barra de pestañas.
     CallOverlayHost(onOpenConversation = { c -> openConv(c) })
-    AssistantPanel(gg, myName = state.data?.me?.name ?: "") { target ->
+    AssistantPanel(gg, myName = client.select { it.data?.me?.name ?: "" }.value) { target ->
         gg.close()
         when (target) {
             is com.tiecoms.app.core.Assistant.Target.Conversation ->
-                if (state.data?.conversations?.any { it.id == target.id } == true) openConv(target.id)
+                if (client.state.value.data?.conversations?.any { it.id == target.id } == true) openConv(target.id)
                 else uiScope.launch { runCatching { client.loadBootstrap() }; openConv(target.id) }
             is com.tiecoms.app.core.Assistant.Target.Screen -> tab(target.name)
         }

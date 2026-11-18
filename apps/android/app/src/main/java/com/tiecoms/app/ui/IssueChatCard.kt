@@ -78,8 +78,8 @@ fun IssueChatCard(issueId: String, creatorId: String, data: BootstrapDTO, canPos
     val client = LocalClient.current
     val container = LocalContainer.current
     val snackbar = LocalSnackbar.current
-    val st by client.state.collectAsStateWithLifecycle()
-    val i = st.issues[issueId]
+    // CH035: solo esta tarea, no el estado entero (una tarjeta por fila del chat).
+    val i = client.select(issueId) { it.issues[issueId] }.value
     var comments by remember(issueId) { mutableStateOf(listOf<IssueEventDTO>()) }
     var missing by remember(issueId) { mutableStateOf(false) }
     var text by remember(issueId) { mutableStateOf("") }
@@ -111,7 +111,7 @@ fun IssueChatCard(issueId: String, creatorId: String, data: BootstrapDTO, canPos
     val tint = when (sys?.key) { "issue.done" -> Color(0xFF15803D).copy(alpha = 0.08f); "issue.overdue" -> MaterialTheme.colorScheme.error.copy(alpha = 0.07f); else -> Color.Transparent }
     val owner = i.ownerId?.let { Names.person(data, it) }
     val creator = Names.person(data, creatorId)?.name?.substringBefore(' ') ?: ""
-    val topic = i.topicId?.let { tid -> st.topics[i.conversationId ?: ""]?.firstOrNull { it.id == tid } }
+    val topic = i.topicId?.let { tid -> client.select(i.conversationId, tid) { st -> st.topics[i.conversationId ?: ""]?.firstOrNull { it.id == tid } }.value }
     fun send() {
         val body = text.trim()
         if (body.isEmpty() || busy) return

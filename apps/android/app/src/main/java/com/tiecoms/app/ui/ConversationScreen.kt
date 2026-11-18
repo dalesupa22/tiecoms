@@ -237,9 +237,11 @@ fun ConversationScreen(
     val leaveFocus = androidx.compose.ui.platform.LocalFocusManager.current
     val leaveKeyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
     val leaveChat = { leaveFocus.clearFocus(force = true); leaveKeyboard?.hide(); onBack() }
-    val state by client.state.collectAsStateWithLifecycle()
+    com.tiecoms.app.platform.Perf.composed("chat")
+    // CH035 (tanda 2): solo la porción del estado de ESTE chat; lo que pasa en otros no recompone esta pantalla ni sus burbujas.
+    val state by client.chatState(id)
     val data = state.data
-    val meta = data?.conversations?.firstOrNull { it.id == id }
+    val meta = remember(data, id) { data?.conversations?.firstOrNull { it.id == id } }
     val convFallback = stringResource(R.string.conversation)
 
     if (data == null || meta == null) {
@@ -1952,6 +1954,7 @@ internal fun MessageBubble(
     /** Búsqueda en el chat abierta (tanda 1.7): resalta lo que coincide. */
     highlightQuery: String? = null,
 ) {
+    com.tiecoms.app.platform.Perf.composed("bubble")
     val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
     val openMenu = { haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress); onLongPress() }
     // La burbuja se eleva mientras su menú está abierto (como el menú contextual de iPhone).
@@ -2049,7 +2052,7 @@ internal fun MessageBubble(
                 // Respuesta en privado: el servidor agrega forwarded.excerpt y messageSeq (el cliente no manda el extracto).
                 val from = f.fromConversationId?.let { cid -> data.conversations.firstOrNull { it.id == cid } }
                 val quote = f.excerpt?.takeIf { it.isNotBlank() }
-                    ?: f.fromConversationId?.let { cid -> LocalClient.current.state.collectAsStateWithLifecycle().value.conversations[cid]?.messages?.firstOrNull { it.id == f.messageId }?.body }?.let { excerpt(it, 200) }
+                    ?: f.fromConversationId?.let { cid -> LocalClient.current.select(cid, f.messageId) { st -> st.conversations[cid]?.messages?.firstOrNull { it.id == f.messageId }?.body }.value }?.let { excerpt(it, 200) }
                     ?: ""
                 val base = if (item.mine) stringResource(R.string.reply_private_label, quote)
                     else stringResource(R.string.reply_private_label_them, Names.person(data, m.authorId)?.name ?: "", quote)

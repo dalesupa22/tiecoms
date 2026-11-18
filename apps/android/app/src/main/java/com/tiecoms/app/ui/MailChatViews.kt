@@ -297,8 +297,8 @@ internal fun MailCard(emailId: String, data: BootstrapDTO, canPost: Boolean, onO
                       fallback: String? = null, banner: (@Composable () -> Unit)? = null) {
     val client = LocalClient.current
     val nav = LocalMailNav.current
-    val st by client.state.collectAsStateWithLifecycle()
-    val e = st.mails[emailId]
+    // CH035: solo este correo, no el estado entero (una tarjeta por fila del chat).
+    val e = client.select(emailId) { it.mails[emailId] }.value
     var missing by remember(emailId) { mutableStateOf(false) }
     var task by remember(emailId) { mutableStateOf(false) }
     LaunchedEffect(emailId, e == null) {

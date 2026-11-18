@@ -263,7 +263,9 @@ fun GroupsScreen(
                     // Correos fijados en la pantalla principal: en «Fijados», junto a los grupos fijados.
                     val mainPins = if (query.isBlank() && filterWs == null && tab == GroupsTree.Tab.ALL) com.tiecoms.app.core.MailPins.main(data.mailPins) else emptyList()
                     val display = withMailPins(rows.filter { !(it is GroupsTree.Empty && it.filtered && query.isNotBlank() && !quickResults.isEmpty) }, mainPins)
-                    items(display, key = { e -> if (e is com.tiecoms.app.core.MailPinDTO) "mp:" + e.key else (e as GroupsTree.Row).key }) { entry ->
+                    // CH035: contentType para que al desplazar se reutilicen filas del mismo tipo (encabezado, grupo, chat, correo).
+                    items(display, key = { e -> if (e is com.tiecoms.app.core.MailPinDTO) "mp:" + e.key else (e as GroupsTree.Row).key },
+                        contentType = { e -> e::class }) { entry ->
                         if (entry is com.tiecoms.app.core.MailPinDTO) { Box(Modifier.animateItem()) { MailPinRow(entry, indent = 16.dp, iconSize = 32.dp) }; return@items }
                         val row = entry as GroupsTree.Row
                         // Al cambiar el orden (llega un no leído), la fila se desliza a su lugar en vez de saltar.
@@ -486,16 +488,16 @@ fun DmsScreen(onOpen: (String) -> Unit, onNewMessage: () -> Unit, onDetails: (St
                     val mainPins = if (!searching && !unreadOnly) com.tiecoms.app.core.MailPins.main(data.mailPins) else emptyList()
                     val lastPinned = list.indexOfLast { com.tiecoms.app.core.HomeTree.blockOf(it, nowMs, tree) == com.tiecoms.app.core.HomeTree.Block.PINNED }
                     if (mainPins.isNotEmpty() && lastPinned < 0) {
-                        item(key = "b:PINNED") { Box(Modifier.animateItem()) { BlockHeader(com.tiecoms.app.core.HomeTree.Block.PINNED) } }
-                        items(mainPins, key = { "mp:" + it.key }) { p -> Box(Modifier.animateItem()) { MailPinRow(p, indent = 16.dp, iconSize = 44.dp) } }
+                        item(key = "b:PINNED", contentType = "block") { Box(Modifier.animateItem()) { BlockHeader(com.tiecoms.app.core.HomeTree.Block.PINNED) } }
+                        items(mainPins, key = { "mp:" + it.key }, contentType = { "mp" }) { p -> Box(Modifier.animateItem()) { MailPinRow(p, indent = 16.dp, iconSize = 44.dp) } }
                     }
                     list.forEachIndexed { i, c ->
                         // Separadores «Fijados · Sin leer · Recientes» (orden único 1.6.4); buscando no hacen falta.
-                        if (lastPinned >= 0 && i == lastPinned + 1) items(mainPins, key = { "mp:" + it.key }) { p -> Box(Modifier.animateItem()) { MailPinRow(p, indent = 16.dp, iconSize = 44.dp) } }
+                        if (lastPinned >= 0 && i == lastPinned + 1) items(mainPins, key = { "mp:" + it.key }, contentType = { "mp" }) { p -> Box(Modifier.animateItem()) { MailPinRow(p, indent = 16.dp, iconSize = 44.dp) } }
                         val block = com.tiecoms.app.core.HomeTree.blockOf(c, nowMs, tree)
                         if (!searching && (i == 0 || com.tiecoms.app.core.HomeTree.blockOf(list[i - 1], nowMs, tree) != block))
-                            item(key = "b:" + block.name) { Box(Modifier.animateItem()) { BlockHeader(block) } }
-                        item(key = c.id) {
+                            item(key = "b:" + block.name, contentType = "block") { Box(Modifier.animateItem()) { BlockHeader(block) } }
+                        item(key = c.id, contentType = "dm") {
                         val origin = GroupsTree.sideOrigin(data, c)
                         val wa = waChatOf(data, c)
                         if (wa != null) Box(Modifier.animateItem()) {
@@ -517,7 +519,7 @@ fun DmsScreen(onOpen: (String) -> Unit, onNewMessage: () -> Unit, onDetails: (St
                         }
                         }
                     }
-                    if (lastPinned >= 0 && lastPinned == list.lastIndex) items(mainPins, key = { "mp:" + it.key }) { p -> Box(Modifier.animateItem()) { MailPinRow(p, indent = 16.dp, iconSize = 44.dp) } }
+                    if (lastPinned >= 0 && lastPinned == list.lastIndex) items(mainPins, key = { "mp:" + it.key }, contentType = { "mp" }) { p -> Box(Modifier.animateItem()) { MailPinRow(p, indent = 16.dp, iconSize = 44.dp) } }
                     if (searching) quickSearchSections(data, quickResults, hidePeople = QuickSearch.directPeople(data, list), internalFallback, convFallback,
                         onPerson = { p -> openPerson(p) }, onConv = onOpen)
                     item { Spacer(Modifier.heightIn(min = 24.dp)) }

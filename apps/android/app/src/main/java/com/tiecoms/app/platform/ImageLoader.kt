@@ -59,6 +59,16 @@ class ImageLoader(context: Context, base: OkHttpClient, private val privacyCheck
 
     fun cached(url: String, px: Int): ImageBitmap? = memory.get(key(url, px))
 
+    /**
+     * CH035: miniaturas protegidas de adjuntos ya decodificadas, SOLO en memoria (nada a disco) y atadas a la sesión:
+     * al hacer scroll o volver al chat no se descargan ni decodifican otra vez. Fuera quedan los orígenes de WhatsApp
+     * con privacidad y las imágenes a tamaño completo del visor; «una sola vista» no pasa por aquí (sus adjuntos no traen URL).
+     */
+    private val privateThumbs = com.tiecoms.app.core.SessionLru<ImageBitmap>(16L * 1024 * 1024) { it.width * it.height * 4 }
+    fun cachedPrivate(url: String, px: Int, session: Long): ImageBitmap? =
+        if (com.tiecoms.app.core.WaPrivacy.source(url) != null) null else privateThumbs.get(session, key(url, px))
+    fun clearPrivate() = privateThumbs.clear()
+
     /** Bounded authenticated bytes; once-only signed URLs bypass every disk/memory cache. */
     /**
      * 1.7.14: la lectura del cuerpo va en IO. `await()` vuelve al hilo de quien llama (Main en un produceState) y, si
@@ -102,10 +112,16 @@ class ImageLoader(context: Context, base: OkHttpClient, private val privacyCheck
     }
 
     /** [bearer]: para imágenes protegidas (adjuntos y sus miniaturas). */
-    suspend fun load(url: String, px: Int, bearer: String? = null, retry: Boolean = false): ImageBitmap? {
-        if (bearer != null || com.tiecoms.app.core.WaPrivacy.source(url) != null) return loadBytes(url, bearer, private = true)?.let { bytes ->
-            // CH034: decodificar fuera del hilo de la interfaz (antes corría en Main, en pleno scroll del chat).
-            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { decode(bytes, px) }
+    /** [keepSession]: sesión dueña de una miniatura protegida que puede quedar en memoria (ver [cachedPrivate]); null = no se guarda. */
+    suspend fun load(url: String, px: Int, bearer: String? = null, retry: Boolean = false, keepSession: Long? = null): ImageBitmap? {
+        val waSource = com.tiecoms.app.core.WaPrivacy.source(url) != null
+        if (bearer != null || waSource) {
+            val keep = keepSession?.takeIf { !waSource }
+            keep?.let { privateThumbs.get(it, key(url, px)) }?.let { return it }
+            return loadBytes(url, bearer, private = true)?.let { bytes ->
+                // CH034: decodificar fuera del hilo de la interfaz (antes corría en Main, en pleno scroll del chat).
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { decode(bytes, px) }
+            }?.also { img -> keep?.let { privateThumbs.put(it, key(url, px), img) } }
         }
         val k = key(url, px)
         memory.get(k)?.let { return it }

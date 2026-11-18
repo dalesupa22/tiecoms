@@ -20,7 +20,17 @@ object Names {
         OLD_SIDE_PREFIXES.firstOrNull { name.startsWith(it) }?.let { labels.sideName.replace("%1\$s", name.removePrefix(it)) } ?: name
     @Volatile var labels = Labels()
 
-    fun person(data: BootstrapDTO?, id: String): PersonDTO? = data?.people?.firstOrNull { it.id == id }?.let { p ->
+    /** CH035: índice de personas por id para la última lista vista (misma instancia); antes era una búsqueda lineal por burbuja. */
+    @Volatile private var peopleIndex: Pair<List<PersonDTO>, Map<String, PersonDTO>>? = null
+    private fun byId(people: List<PersonDTO>): Map<String, PersonDTO> {
+        peopleIndex?.let { (list, map) -> if (list === people) return map }
+        val map = HashMap<String, PersonDTO>(people.size * 2)
+        for (p in people) if (p.id !in map) map[p.id] = p
+        peopleIndex = people to map
+        return map
+    }
+
+    fun person(data: BootstrapDTO?, id: String): PersonDTO? = data?.people?.let { byId(it)[id] }?.let { p ->
         // gg siempre se llama «gg» (docs/GG-CHAT.md).
         if (Gg.isGg(p.id, data)) p.copy(name = Gg.NAME, kind = "agent") else p
     } ?: if (Gg.isGg(id, data)) PersonDTO(id = id, name = Gg.NAME, kind = "agent") else null

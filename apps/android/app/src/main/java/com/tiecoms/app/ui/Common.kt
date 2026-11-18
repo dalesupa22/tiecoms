@@ -192,8 +192,19 @@ fun roleText(ctx: Context, role: String) = ctx.getString(
 // ---------- Fechas ----------
 fun parseInstant(iso: String?): Instant? = iso?.let { runCatching { Instant.parse(it) }.getOrNull() }
 private val zone: ZoneId get() = ZoneId.systemDefault()
+/** CH035: formateadores por idioma, creados una vez (antes, uno nuevo por burbuja y por repintado). */
+private class Formatters(val locale: Locale) {
+    val time: DateTimeFormatter = DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT).withLocale(locale)
+    val dateShort: DateTimeFormatter = DateTimeFormatter.ofLocalizedDate(FormatStyle.SHORT).withLocale(locale)
+    val dateMedium: DateTimeFormatter = DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM).withLocale(locale)
+}
+@Volatile private var formatters: Formatters? = null
+private fun fmt(): Formatters {
+    val locale = Locale.getDefault(Locale.Category.FORMAT)
+    return formatters?.takeIf { it.locale == locale } ?: Formatters(locale).also { formatters = it }
+}
 fun localDate(iso: String?): LocalDate? = parseInstant(iso)?.atZone(zone)?.toLocalDate()
-fun timeText(iso: String?): String = parseInstant(iso)?.atZone(zone)?.format(DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT)) ?: ""
+fun timeText(iso: String?): String = parseInstant(iso)?.atZone(zone)?.format(fmt().time) ?: ""
 
 /** Hora relativa de la lista: hoy → hora; ayer; esta semana → día; antes → fecha. */
 fun relativeTime(ctx: Context, iso: String?): String {
@@ -201,10 +212,10 @@ fun relativeTime(ctx: Context, iso: String?): String {
     val d = t.toLocalDate()
     val today = LocalDate.now(zone)
     return when {
-        d == today -> t.format(DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT))
+        d == today -> t.format(fmt().time)
         d == today.minusDays(1) -> ctx.getString(R.string.yesterday)
         d.isAfter(today.minusDays(7)) -> d.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.getDefault())
-        else -> d.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.SHORT))
+        else -> d.format(fmt().dateShort)
     }
 }
 
@@ -213,11 +224,11 @@ fun dayText(ctx: Context, d: LocalDate): String {
     return when (d) {
         today -> ctx.getString(R.string.today)
         today.minusDays(1) -> ctx.getString(R.string.yesterday)
-        else -> d.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM))
+        else -> d.format(fmt().dateMedium)
     }
 }
 
-fun dateText(iso: String?): String = localDate(iso)?.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM)) ?: (iso ?: "")
+fun dateText(iso: String?): String = localDate(iso)?.format(fmt().dateMedium) ?: (iso ?: "")
 
 fun parseColor(hex: String?, fallback: Color): Color = runCatching {
     val h = hex!!.removePrefix("#")

@@ -199,6 +199,8 @@ class AppContainer(private val app: Application) {
                 .distinctUntilChanged()
                 .collect { (status, meId) ->
                     if (status != com.tiecoms.app.core.SessionStatus.READY || meId == null) {
+                        // CH035: las miniaturas protegidas en memoria no sobreviven a la sesión.
+                        images.clearPrivate()
                         client.value.cancelMeetingConnect(); meetingConnecting = null
                     }
                     if (status == com.tiecoms.app.core.SessionStatus.READY && meId != null) retryPushRegistration()

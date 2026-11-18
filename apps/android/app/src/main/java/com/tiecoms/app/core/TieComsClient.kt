@@ -179,6 +179,11 @@ class TieComsClient(
     private var accessExp = 0L
     private var authSessionId: String? = null
     @Volatile var sessionGeneration: Long = 0; private set
+    /** CH035: cargas secundarias de un chat (asuntos, fijados, temas, eventos) hechas hace poco; clave «sesión:chat». */
+    val secondaryLoads = RecentLoads(15_000)
+    /** CH035: último resync completo (reloj local) y de qué sesión: ver [ResyncRule]. */
+    private var lastResyncAt = 0L
+    private var lastResyncGeneration = -1L
     @Volatile private var issuesAccessRevision: Long = 0
     /** Unlike request generation, first cold refresh preserves decisions already made by FCM. */
     @Volatile var noticeGeneration: Long = 0; private set
@@ -620,7 +625,9 @@ class TieComsClient(
             })
             val privacy = if (privacyRevision == waPrivacy.revision) waPrivacy.accept(merged.waInbox) else waPrivacy
             val rows = if (privacyRevision == privacy.revision) merged.waInbox else this.data?.waInbox.orEmpty()
-            copy(data = merged.copy(waInbox = rows.filter { privacy.allows(WaInbox.key(it)) }), waPrivacy = privacy,
+            // CH035: si el snapshot es el mismo (solo cambia la hora del servidor) se conserva el anterior: no se emite nada.
+            val next = merged.copy(waInbox = rows.filter { privacy.allows(WaInbox.key(it)) })
+            copy(data = if (ResyncRule.unchanged(this.data, next)) this.data else next, waPrivacy = privacy,
                 conversations = conversations.filterKeys { it in allowed }, dndUntil = dnd, dndLocalOnly = localOnly)
         }
         // 1.7.1: la llamada en la que estoy desde otro dispositivo (con myDevices) entra al estado de llamadas.
@@ -699,7 +706,9 @@ class TieComsClient(
         try {
             invalidateKnownWaPrivacy()
             runCatching { waAccounts() }
+            val generation = sessionGeneration
             loadBootstrapInternal()
+            lastResyncAt = now(); lastResyncGeneration = generation
             runCatching { loadBlocks() }
             for (c in s.data?.conversations ?: emptyList()) {
                 val local = s.conversations[c.id]
@@ -717,7 +726,12 @@ class TieComsClient(
                 SessionStatus.READY -> {
                     // Solo la copia local a la vista: primero la sesión.
                     if (!live) { if (startRetryJob?.isActive != true) start(); return@launch }
-                    if (s.connection == ConnectionStatus.ONLINE && !forceReconnect) resyncInternal()
+                    if (s.connection == ConnectionStatus.ONLINE && !forceReconnect) {
+                        // CH035: con el socket conectado y un resync reciente no se pide todo otra vez (ni se repinta
+                        // la app) en cada vuelta al frente o cambio de red; lo nuevo ya llegó por el socket.
+                        val hasWa = s.waPrivacy.knownAccounts.isNotEmpty() || s.data?.waInbox.orEmpty().isNotEmpty()
+                        if (!ResyncRule.skip(hasWa, if (lastResyncGeneration == sessionGeneration) lastResyncAt else 0L, now())) resyncInternal()
+                    }
                     else socket.reconnectNow(force = forceReconnect)
                     scheduleFlush(0)
                 }

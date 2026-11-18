@@ -145,6 +145,15 @@ import java.time.LocalDate
 
 internal sealed interface ChatItem {
     val key: String
+    companion object {
+        /** Tipo de fila para el pool de reutilización de la lista: burbuja, tarjeta de sistema, pendiente, día y el resto. */
+        fun contentType(item: ChatItem): Int = when (item) {
+            is Msg -> if (item.m.kind == "system") 1 else 0
+            is Pending -> 2
+            is Day -> 3
+            else -> 4
+        }
+    }
     data class Day(val date: LocalDate) : ChatItem { override val key = "d:$date" }
     /**
      * CH034: mi mensaje conserva la clave de su burbuja «enviando» (p:<clientMessageId>) al confirmarse: la fila es
@@ -351,7 +360,10 @@ fun ConversationScreen(
     /** Primer no leído: ahí va la línea «N mensajes nuevos». */
     var dividerSeq by remember(id) { mutableStateOf<Long?>(null) }
     /** Ya se colocó la vista al abrir (en el primer no leído o al final); hasta entonces no se marca leído. */
-    var positioned by remember(id) { mutableStateOf(entry.second <= 0 || (jumpSeq ?: 0) > 0 || jumpMessageId != null) }
+    /** CH035: el salto con que se abrió el chat (aviso, mención, enlace) ya se hizo; al volver de Detalles, un asunto o un evento no se repite. */
+    var jumpConsumed by rememberSaveable(id) { mutableStateOf(false) }
+    val routeJump = com.tiecoms.app.core.ChatReturn.shouldJump(jumpConsumed, jumpSeq, jumpMessageId)
+    var positioned by remember(id) { mutableStateOf(entry.second <= 0 || routeJump) }
     /** Mensajes a los que se saltó (mención, enlace, ?m=): quedan a la vista. */
     val revealed = remember(id) { androidx.compose.runtime.mutableStateListOf<Long>() }
     val activeTopicIds = remember(topics) { com.tiecoms.app.core.Topics.activeIds(topics) }
@@ -371,12 +383,15 @@ fun ConversationScreen(
     val itemsNow by androidx.compose.runtime.rememberUpdatedState(items)
     // «Seguir el final»: solo cambia con la lista quieta. Si llega un mensaje durante la animación de otro
     // (mi envío y la respuesta inmediata), atBottom daría falso a mitad de camino y dejaría de seguir.
-    var follow by remember(id) { mutableStateOf(true) }
+    // CH035: al volver al chat la lista recupera su posición; «seguir» arranca según dónde quedó, no siempre en el final.
+    var follow by remember(id) { mutableStateOf(com.tiecoms.app.core.ChatReturn.followAt(listState.firstVisibleItemIndex)) }
     /** Menciones a mí sin leer al entrar (botón «@»): se quitan al verlas o al saltar a ellas. */
     val mentionQueue = remember(id) { androidx.compose.runtime.mutableStateListOf<Long>() }
     /** Último seq cuando la persona dejó el final; lo que llegue de otros después va en el globo del ⌄. */
     var awaySeq by remember(id) { mutableStateOf<Long?>(null) }
     val newWhileAway = awaySeq?.let { from -> conv?.messages.orEmpty().count { it.seq > from && it.authorId != me && it.authorId !in state.blockedUserIds } } ?: 0
+    /** CH035: ids ya cargados (incluye autores bloqueados): una cita fuera de aquí se puede ir a buscar. */
+    val loadedIds = remember(conv?.messages) { conv?.messages.orEmpty().mapTo(HashSet()) { it.id } }
     val byId = remember(conv?.messages, state.blockedUserIds) { (conv?.messages ?: emptyList()).filter { it.authorId !in state.blockedUserIds }.associateBy { it.id } }
 
     var jumpJob by remember(id) { mutableStateOf<kotlinx.coroutines.Job?>(null) }
@@ -403,7 +418,8 @@ fun ConversationScreen(
                     if (idx >= 0) break
                 }
                 if (idx < 0) { readLoadFailed = true; return@launch }
-                listState.scrollToItem(idx)
+                // CH035: a un tercio del alto, no pegado al borde inferior bajo los botones flotantes.
+                listState.scrollToItem(idx, com.tiecoms.app.core.ChatReturn.landingOffset(listState.layoutInfo.viewportSize.height))
                 withFrameNanos { }; withFrameNanos { }
                 if (generation != client.sessionGeneration || listState.layoutInfo.visibleItemsInfo.none { it.key == "m-${target?.id}" || (itemsNow.getOrNull(it.index) as? ChatItem.Msg)?.m?.seq == seq }) {
                     readLoadFailed = true; return@launch
@@ -438,6 +454,24 @@ fun ConversationScreen(
                 jumping = false
                 jumpTo(target.seq)
             } catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e; readLoadFailed = true }
+            finally { jumping = false }
+        }
+    }
+
+    /** CH035: cita de un mensaje que todavía no está cargado: se trae su historial y se salta a él. */
+    fun jumpToMessage(messageId: String) {
+        if (jumping) return
+        jumpJob?.cancel()
+        val generation = client.sessionGeneration
+        jumpJob = scope.launch {
+            jumping = true; readLoadFailed = false
+            try {
+                val seq = client.ensureMessageId(id, messageId)
+                if (generation != client.sessionGeneration) return@launch
+                if (seq == null) { container.toast(ctx.getString(R.string.vo_expired)); return@launch }
+                jumping = false
+                jumpTo(seq)
+            } catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e; container.toast(errorText(ctx, e)) }
             finally { jumping = false }
         }
     }
@@ -492,12 +526,18 @@ fun ConversationScreen(
             // Sin mensajes no hay nada que posicionar ni marcar como leído.
             if (client.state.value.conversations[id]?.loaded != true) return@LaunchedEffect
         }
-        launch { runCatching { client.loadIssues(conversationId = id) } }
-        launch { runCatching { client.loadPins(id) } }
-        launch { runCatching { client.loadTopics(id) } }
-        launch { runCatching { client.loadEvents(Instant.now().minusSeconds(30L * 86400), Instant.now().plusSeconds(60L * 86400), id) } }
-        if (jumpSeq != null && jumpSeq > 0) jumpTo(jumpSeq)
-        else if (jumpMessageId != null) {
+        // CH035: al volver de Detalles, un asunto o un evento no se repiten las cargas secundarias recién hechas
+        // (lo que cambie entretanto llega por el socket). «Reintentar» sí las fuerza.
+        val loadsKey = "${client.sessionGeneration}:$id"
+        if (reloadKey > 0 || client.secondaryLoads.claim(loadsKey, android.os.SystemClock.elapsedRealtime())) {
+            launch { runCatching { client.loadIssues(conversationId = id) }.onFailure { client.secondaryLoads.release(loadsKey) } }
+            launch { runCatching { client.loadPins(id) }.onFailure { client.secondaryLoads.release(loadsKey) } }
+            launch { runCatching { client.loadTopics(id) }.onFailure { client.secondaryLoads.release(loadsKey) } }
+            launch { runCatching { client.loadEvents(Instant.now().minusSeconds(30L * 86400), Instant.now().plusSeconds(60L * 86400), id) }.onFailure { client.secondaryLoads.release(loadsKey) } }
+        }
+        if (routeJump && jumpSeq != null && jumpSeq > 0) { jumpConsumed = true; jumpTo(jumpSeq) }
+        else if (routeJump && jumpMessageId != null) {
+            jumpConsumed = true
             val seq = client.ensureMessageId(id, jumpMessageId)
             if (seq != null) jumpTo(seq) else {
                 // El mensaje no apareció: al menos el tema que traía el aviso.
@@ -628,8 +668,10 @@ fun ConversationScreen(
         // índice 0, la lista conserva la posición y atBottom cambiaría sin que nadie se haya movido.
         snapshotFlow { listState.isScrollInProgress }.distinctUntilChanged().collect { moving -> if (!moving && positioned) follow = atBottom }
     }
+    // CH035: al volver al chat, el último mensaje que ya estaba no es «nuevo»: aunque sea mío, no arrastra al final.
+    val newestAtEntry = remember(id) { newest?.key }
     LaunchedEffect(newest?.key) {
-        if (!positioned) return@LaunchedEffect
+        if (!positioned || newest?.key == newestAtEntry) return@LaunchedEffect
         val mine = newest is ChatItem.Pending || (newest as? ChatItem.Msg)?.mine == true
         // Arriba, lo nuevo no arrastra al final: se cuenta en el globo del ⌄.
         if (newest != null && highlight == null && !jumping && (follow || mine)) { follow = true; listState.animateScrollToItem(0) }
@@ -923,7 +965,8 @@ fun ConversationScreen(
                         contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp,
                             bottom = if (showPanel && !wide) (LocalConfiguration.current.screenHeightDp * 0.45f).dp else 8.dp),
                     ) {
-                        items(items, key = { it.key }) { item ->
+                        // CH035: contentType para reutilizar al desplazar filas del mismo tipo (burbuja, tarjeta, día, aviso).
+                        items(items, key = { it.key }, contentType = { ChatItem.contentType(it) }) { item ->
                             when (item) {
                                 is ChatItem.Day -> DaySeparator(dayText(ctx, item.date))
                                 is ChatItem.Msg -> if (item.m.kind == "system") SystemRow(item.m, data, state.events, onOpenConversation, onOpenIssue, onOpenEvent, canPost = meta.canPost && !blockedDirect,
@@ -951,7 +994,9 @@ fun ConversationScreen(
                                     menuItems = { messageMenu(item.m) },
                                     onDismissMenu = { menuFor = null },
                                     onLongPress = { if (item.m.deletedAt == null) menuFor = item.m },
-                                    onQuote = { q -> jumpTo(q.seq) }, onIssue = onOpenIssue, onOpenConversation = { c, seq -> onOpenConversation(c, seq) },
+                                    onQuote = { q -> jumpTo(q.seq) },
+                                    onQuoteMissing = if (!embedded && item.m.replyTo != null && item.m.replyTo !in loadedIds) ({ mid -> jumpToMessage(mid) }) else null,
+                                    onIssue = onOpenIssue, onOpenConversation = { c, seq -> onOpenConversation(c, seq) },
                                     onOpenMedia = { list, i -> viewer = list to i },
                                     onVoiceIssue = if (myWsRole != "guest") ({ t -> voiceIssue = t to item.m }) else null,
                                     isAnchor = sideMeta?.parentMessageId == item.m.id && !embedded,
@@ -975,6 +1020,8 @@ fun ConversationScreen(
                         }
                     } }
                 }
+                // CH035: buscando el mensaje al que se salta (puede pedir varias páginas de historial).
+                if (jumping) androidx.compose.material3.LinearProgressIndicator(Modifier.align(Alignment.TopCenter).fillMaxWidth().testTag("jumpProgress"))
                 ConfettiOverlay(confetti)
                 if (selecting) GgSelectionBar(selectedIds.size, onAsk = { suggestFor = selectedIds.toList() }, onCancel = { selecting = false; selectedIds.clear() },
                     Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp))
@@ -1883,6 +1930,8 @@ internal fun MessageBubble(
     /** Hilos (derivadas) que cuelgan de este mensaje: chip como en Slack. */
     threads: List<ConversationDTO> = emptyList(),
     onLongPress: () -> Unit, onQuote: (MessageDTO) -> Unit, onIssue: (String) -> Unit, onOpenConversation: (String, Long?) -> Unit,
+    /** CH035: la cita apunta a un mensaje sin cargar (recibe su id): tocarla lo trae y salta. null = no se puede. */
+    onQuoteMissing: ((String) -> Unit)? = null,
     onOpenMedia: (List<com.tiecoms.app.core.AttachmentDTO>, Int) -> Unit = { _, _ -> }, onOpenFile: (com.tiecoms.app.core.AttachmentDTO) -> Unit = {}, onOpenPdf: ((com.tiecoms.app.core.AttachmentDTO, Boolean) -> Unit)? = null,
     /** Sugerencia de asunto de una nota de voz; null la oculta (terceros). */
     onVoiceIssue: ((String) -> Unit)? = {},
@@ -1988,7 +2037,7 @@ internal fun MessageBubble(
                 .testTag("msg-${m.seq}"),
         ) {
             if (m.replyTo != null) {
-                Surface(color = fg.copy(alpha = 0.12f), shape = RoundedCornerShape(8.dp), modifier = Modifier.padding(bottom = 4.dp).clickable(enabled = quoted != null) { quoted?.let(onQuote) }) {
+                Surface(color = fg.copy(alpha = 0.12f), shape = RoundedCornerShape(8.dp), modifier = Modifier.padding(bottom = 4.dp).clickable(enabled = quoted != null || onQuoteMissing != null) { if (quoted != null) onQuote(quoted) else onQuoteMissing?.invoke(m.replyTo) }) {
                     Text(
                         if (quoted != null) "${Names.person(data, quoted.authorId)?.name ?: ""}: " + (if (quoted.deletedAt != null) stringResource(R.string.deleted) else excerpt(quoteText(ctx, quoted), 120))
                         else stringResource(R.string.reply_quote_missing),

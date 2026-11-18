@@ -105,7 +105,11 @@ fun rememberAttachmentImageState(a: AttachmentDTO, full: Boolean, px: Int): Atta
     val path = if (full || a.thumbUrl == null) a.url else a.thumbUrl
     var attempt by remember(path) { mutableStateOf(0) }
     var failed by remember(path) { mutableStateOf(false) }
-    val img by produceState<ImageBitmap?>(null, path, px, client.sessionGeneration, attempt) {
+    // CH035: las miniaturas (no el tamaño completo del visor) quedan en memoria por sesión: al reaparecer la fila
+    // se pintan en el primer fotograma, sin spinner ni otra descarga.
+    val keep = if (full) null else client.sessionGeneration
+    val ready = if (keep != null) client.mediaUrl(path)?.let { container.images.cachedPrivate(it, px, keep) } else null
+    val img by produceState<ImageBitmap?>(ready, path, px, client.sessionGeneration, attempt) {
         failed = false
         val delays = listOf(0L, 1_500L, 4_000L)
         for ((n, wait) in delays.withIndex()) {
@@ -113,7 +117,7 @@ fun rememberAttachmentImageState(a: AttachmentDTO, full: Boolean, px: Int): Atta
             // Último intento: si la miniatura no carga, la original (la miniatura puede no existir todavía).
             val p = if (n == delays.lastIndex && !full && a.thumbUrl != null) a.url else path
             val url = client.mediaUrl(p) ?: break
-            val got = runCatching { container.images.load(url, px, client.bearer()) }.getOrNull()
+            val got = runCatching { container.images.load(url, px, client.bearer(), keepSession = keep) }.getOrNull()
             if (got != null) { value = got; return@produceState }
         }
         failed = true

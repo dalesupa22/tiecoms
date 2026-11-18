@@ -70,16 +70,19 @@ fun ChatBar(
 ) {
     val ctx = LocalContext.current
     val client = LocalClient.current
-    val st by client.state.collectAsStateWithLifecycle()
+    // CH035: la barra del chat lee solo asuntos, reuniones y recordatorios (antes, el estado entero en cada emisión).
+    val allIssues by client.selectRef { it.issues }
+    val allEvents by client.selectRef { it.events }
+    val allReminders by client.selectRef { it.reminders }
     var pane by remember { mutableStateOf<Pane?>(null) }
     val sheetSnackbar = remember { androidx.compose.material3.SnackbarHostState() }
     LaunchedEffect(conv.id) { runCatching { client.loadEvents(Instant.now().minusSeconds(3600), Instant.now().plusSeconds(90L * 86400), conv.id) } }
     val today = com.tiecoms.app.core.IssueTasks.localToday().toString()
-    val issues = st.issues.values.filter { it.conversationId == conv.id && !it.closed }.sortedWith(com.tiecoms.app.core.IssueTasks.byUrgency())
+    val issues = allIssues.values.filter { it.conversationId == conv.id && !it.closed }.sortedWith(com.tiecoms.app.core.IssueTasks.byUrgency())
     val threads = threadsOf(data, conv.id)
     val openThreads = threads.count { it.returnedAt == null }
-    val events = st.events.values.filter { it.conversationId == conv.id && it.cancelledAt == null && (parseInstant(it.endsAt)?.isAfter(Instant.now()) == true) }
-    val reminders = st.reminders.filter { it.conversationId == conv.id && it.doneAt == null }
+    val events = allEvents.values.filter { it.conversationId == conv.id && it.cancelledAt == null && (parseInstant(it.endsAt)?.isAfter(Instant.now()) == true) }
+    val reminders = allReminders.filter { it.conversationId == conv.id && it.doneAt == null }
     val agendaCount = events.size + issues.count { it.dueDate != null } + reminders.size
     val overdue = issues.any { it.dueDate != null && it.dueDate < today }
     val meetingToday = events.any { localDate(it.startsAt)?.toString() == today }
@@ -193,7 +196,7 @@ private fun ThreadRow(ctx: Context, d: BootstrapDTO, c: ConversationDTO, onClick
 fun ThreadChip(threads: List<ConversationDTO>, onOpen: (String) -> Unit) {
     if (threads.isEmpty()) return
     val ctx = LocalContext.current
-    val data = LocalClient.current.state.collectAsStateWithLifecycle().value.data ?: return
+    val data = LocalClient.current.selectRef { it.data }.value ?: return // CH035: va en cada burbuja con hilos
     threads.forEach { c ->
         val n = (c.lastMessageSeq - 1).coerceAtLeast(0).toInt()
         val last = c.lastHumanPreview?.let { h ->

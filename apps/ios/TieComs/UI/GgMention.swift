@@ -10,8 +10,10 @@ enum GGMention {
     static let colors: [UIColor] = [0xFF5A36, 0xFFB23F, 0xFF4FA3, 0x7B61FF, 0x2F8CFF].map { UIColor(hexRGB: $0) }
 
     /// Posiciones (UTF-16) de «@gg» como palabra: no dentro de un correo («ana@gg.com») ni de «@ggg».
+    private static let typedRE = try? NSRegularExpression(pattern: #"(^|[^\w@.])(@gg)(?![\w])"#, options: [.caseInsensitive])
     static func typedRanges(in text: String) -> [NSRange] {
-        guard let re = try? NSRegularExpression(pattern: #"(^|[^\w@.])(@gg)(?![\w])"#, options: [.caseInsensitive]) else { return [] }
+        // Sin «@» no hay nada que buscar (casi todas las burbujas).
+        guard text.contains("@"), let re = typedRE else { return [] }
         let ns = text as NSString
         return re.matches(in: text, range: NSRange(location: 0, length: ns.length)).map { $0.range(at: 2) }
     }

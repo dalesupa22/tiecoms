@@ -233,8 +233,12 @@ enum Prefs {
 }
 
 /// Cola de salida persistente (JSON en Application Support), por usuario.
-final class OutboxStore {
+/// Las escrituras van a una cola en serie fuera del hilo principal (CH035: eran 3 o 4 por mensaje enviado, la primera
+/// antes de pintar la burbuja). El orden se conserva; `drained()` espera a que lo pendiente esté en disco y la lectura
+/// y el borrado pasan por la misma cola, así que siempre ven la última escritura.
+final class OutboxStore: @unchecked Sendable {
     private let dir: URL
+    private let queue = DispatchQueue(label: "com.chaggu.outbox", qos: .userInitiated)
 
     init(directory: URL? = nil) {
         let base = directory ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -257,16 +261,30 @@ final class OutboxStore {
     private func file(_ userId: String) -> URL { dir.appendingPathComponent("outbox-\(userId).json") }
 
     func load(userId: String) -> [PendingMessage] {
-        guard let data = try? Data(contentsOf: file(userId)) else { return [] }
-        return (try? JSONDecoder().decode([PendingMessage].self, from: data)) ?? []
+        let url = file(userId)
+        return queue.sync {
+            guard let data = try? Data(contentsOf: url) else { return [] }
+            return (try? JSONDecoder().decode([PendingMessage].self, from: data)) ?? []
+        }
     }
 
     func save(_ list: [PendingMessage], userId: String) {
-        guard let data = try? JSONEncoder().encode(list) else { return }
-        try? data.write(to: file(userId), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        let url = file(userId)
+        queue.async {
+            guard let data = try? JSONEncoder().encode(list) else { return }
+            try? data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        }
     }
 
-    func clear(userId: String) { try? FileManager.default.removeItem(at: file(userId)) }
+    /// Vuelve cuando todo lo guardado hasta ahora está en disco: la cola de envío lo espera antes de mandar nada.
+    func drained() async {
+        await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in queue.async { c.resume() } }
+    }
+
+    func clear(userId: String) {
+        let url = file(userId)
+        queue.sync { try? FileManager.default.removeItem(at: url) }
+    }
 }
 
 struct PendingMessage: Codable, Equatable, Identifiable, Sendable {

@@ -138,8 +138,8 @@ struct MainView: View {
             if let hit = RemoteImageCache.shared.object(forKey: url as NSURL) { myPhoto = hit; return }
             guard let (data, resp) = try? await RemoteImageCache.session.data(from: url),
                   (resp as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) ?? false,
-                  let img = UIImage(data: data) else { return }
-            RemoteImageCache.shared.setObject(img, forKey: url as NSURL)
+                  let img = await RemoteImageCache.decode(data) else { return }
+            RemoteImageCache.store(img, for: url)
             myPhoto = img
         }
         .overlay(alignment: .bottomTrailing) {
@@ -220,9 +220,9 @@ extension MainView {
     }
 
     fileprivate func youIcon(_ d: BootstrapDTO?) -> UIImage {
-        TabAvatar.image(name: d?.me.name ?? "", photo: myPhoto,
-                        fill: UIColor(d.map { PersonColor.fill($0.me.id) } ?? Theme.bubbleMine),
-                        selected: false, moon: store.dndActive || store.sleepActive)
+        TabAvatar.memoized(name: d?.me.name ?? "", photo: myPhoto,
+                           fill: UIColor(d.map { PersonColor.fill($0.me.id) } ?? Theme.bubbleMine), fillId: d?.me.id ?? "",
+                           selected: false, moon: store.dndActive || store.sleepActive)
     }
 
     fileprivate func badge(_ t: AppTab, _ d: BootstrapDTO?) -> Int {
@@ -251,6 +251,9 @@ extension MainView {
         // Como hidesBottomBarWhenPushed (y .shell.in-conv de la web): dentro de un chat, un detalle o cualquier pantalla
         // empujada no hay barra, así nunca tapa el compositor. Tampoco con el teclado.
         .safeAreaInset(edge: .bottom, spacing: 0) {
+          // La animación es solo de la barra (CH035). Antes cubría también todas las pilas de navegación: al empujar o
+          // volver, el cambio de área segura se animaba cuadro a cuadro sobre el chat y las listas en plena transición.
+          ZStack {
             if TabBarRule.visible(path: store.currentPath, keyboard: keyboardVisible) {
                 AppTabBar(items: tabs.map { t in
                     AppTabBar.Item(tab: t, label: TabInfo.title(t), symbol: TabInfo.symbol(t), badge: badge(t, d), identifier: "tab.\(TabInfo.id(t))",
@@ -267,8 +270,9 @@ extension MainView {
                         .allowsHitTesting(false)
                 }
             }
+          }
+          .animation(.easeOut(duration: 0.2), value: TabBarRule.visible(path: store.currentPath, keyboard: keyboardVisible))
         }
-        .animation(.easeOut(duration: 0.2), value: TabBarRule.visible(path: store.currentPath, keyboard: keyboardVisible))
         .onChange(of: store.tab, initial: true) { _, t in visited.insert(t) }
         .onChange(of: d?.callsEnabled) { _, on in if on != true, store.tab == .calls { store.tab = .home } }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in keyboardVisible = true }

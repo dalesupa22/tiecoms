@@ -617,6 +617,9 @@ extension AppStore {
 
     /// Carga hacia atrás hasta tener el mensaje con ese seq (ensureMessage de la web). Devuelve su id.
     func ensureMessage(_ conversationId: String, seq: Int) async -> String? {
+        // Ya en memoria (CH035): se salta de una vez. `openConversation` con el chat cargado hace un viaje de red
+        // (catchUp) y cada salto —incluido cada ↑↓ de la búsqueda— lo pagaba antes de moverse.
+        if let c = conversations[conversationId], c.loaded, let m = c.messages.first(where: { $0.seq == seq }) { return m.id }
         try? await openConversation(conversationId)
         for _ in 0..<40 {
             guard let c = conversations[conversationId], c.loaded else { return nil }
@@ -629,6 +632,7 @@ extension AppStore {
 
     /// Carga hacia atrás (hasta 10 páginas) hasta tener el mensaje con ese id. Devuelve su seq.
     func ensureMessage(_ conversationId: String, id: String) async -> Int? {
+        if let c = conversations[conversationId], c.loaded, let m = c.messages.first(where: { $0.id == id }) { return m.seq }
         try? await openConversation(conversationId)
         for _ in 0..<10 {
             guard let c = conversations[conversationId], c.loaded else { return nil }
@@ -651,7 +655,7 @@ extension AppStore {
 
     /// Laterales visibles para mí que cuelgan de un mensaje.
     func sides(of messageId: String) -> [ConversationDTO] {
-        (data?.conversations ?? []).filter { Naming.isSide($0) && $0.parentMessageId == messageId }
+        (data?.conversations(parentMessageId: messageId) ?? []).filter { Naming.isSide($0) }
             .sorted { ($0.lastMessageAt ?? "") > ($1.lastMessageAt ?? "") }
     }
 

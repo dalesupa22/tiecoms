@@ -204,7 +204,11 @@ struct RichMessageText: UIViewRepresentable {
         }
         // Brillo de @gg: después de maquetar (las posiciones dependen del ancho).
         let gg = context.coordinator.ggRanges
-        DispatchQueue.main.async { GGShimmer.update(v, ranges: gg) }
+        // Sin @gg (casi todas las burbujas) no hay nada que programar en cada actualización; solo si antes sí hubo brillo.
+        if !gg.isEmpty || context.coordinator.shimmerOn {
+            context.coordinator.shimmerOn = !gg.isEmpty
+            DispatchQueue.main.async { GGShimmer.update(v, ranges: gg) }
+        }
         if v.textContainer.maximumNumberOfLines != maxLines {
             v.textContainer.maximumNumberOfLines = maxLines
             v.textContainer.lineBreakMode = maxLines > 0 ? .byTruncatingTail : .byWordWrapping
@@ -228,6 +232,7 @@ struct RichMessageText: UIViewRepresentable {
         var parent: RichMessageText
         var key: RichText.Key?
         var ggRanges: [NSRange] = []
+        var shimmerOn = false
         init(_ p: RichMessageText) { parent = p }
         func textView(_ textView: UITextView, primaryActionFor textItem: UITextItem, defaultAction: UIAction) -> UIAction? {
             guard case .link(let url) = textItem.content else { return defaultAction }

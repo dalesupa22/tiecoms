@@ -245,6 +245,14 @@ struct RemoteImage<Content: View>: View {
     @ViewBuilder var content: (Image) -> Content
     @State private var image: UIImage?
 
+    /// Lo que ya está en caché se pinta en el primer cuadro (CH035): antes cada fila que reaparecía en el scroll pasaba
+    /// un cuadro vacía mientras arrancaba la tarea.
+    init(url: URL, @ViewBuilder content: @escaping (Image) -> Content) {
+        self.url = url
+        self.content = content
+        _image = State(initialValue: RemoteImageCache.shared.object(forKey: url as NSURL))
+    }
+
     var body: some View {
         Group {
             if let image { content(Image(uiImage: image)) } else { Color.clear }
@@ -259,8 +267,9 @@ struct RemoteImage<Content: View>: View {
                 req.setValue("image/*", forHTTPHeaderField: "accept")
                 if let (data, resp) = try? await RemoteImageCache.session.data(for: req),
                    (resp as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) ?? false,
-                   let img = UIImage(data: data) {
-                    RemoteImageCache.shared.setObject(img, forKey: url as NSURL)
+                   let img = await RemoteImageCache.decode(data) {
+                    guard !Task.isCancelled else { return }
+                    RemoteImageCache.store(img, for: url)
                     image = img
                     return
                 }
@@ -271,7 +280,28 @@ struct RemoteImage<Content: View>: View {
 }
 
 enum RemoteImageCache {
-    static let shared: NSCache<NSURL, UIImage> = { let c = NSCache<NSURL, UIImage>(); c.countLimit = 300; return c }()
+    static let shared: NSCache<NSURL, UIImage> = {
+        let c = NSCache<NSURL, UIImage>(); c.countLimit = 300; c.totalCostLimit = 48 * 1024 * 1024; return c
+    }()
+    /// Lado mayor, en píxeles, de lo que se guarda: avatares y vistas previas de enlaces nunca se muestran más grandes.
+    static let maxPixels: CGFloat = 1024
+    /// Decodifica fuera del hilo principal y deja la imagen lista para pintar, reducida si viene enorme (CH035: se
+    /// decodificaba en main al dibujar, en pleno scroll).
+    nonisolated static func decode(_ data: Data) async -> UIImage? {
+        guard let img = UIImage(data: data) else { return nil }
+        let w = img.size.width * img.scale, h = img.size.height * img.scale
+        if max(w, h) > maxPixels, w > 0, h > 0 {
+            let k = maxPixels / max(w, h)
+            // `preparingThumbnail` mide en puntos de la pantalla principal; con escala 1 el tamaño pedido son píxeles.
+            let format = UIGraphicsImageRendererFormat(); format.scale = 1
+            let size = CGSize(width: (w * k).rounded(), height: (h * k).rounded())
+            return UIGraphicsImageRenderer(size: size, format: format).image { _ in img.draw(in: CGRect(origin: .zero, size: size)) }
+        }
+        return img.preparingForDisplay() ?? img
+    }
+    static func store(_ img: UIImage, for url: URL) {
+        shared.setObject(img, forKey: url as NSURL, cost: Int(img.size.width * img.scale * img.size.height * img.scale) * 4)
+    }
     static let session: URLSession = {
         let cfg = URLSessionConfiguration.default
         cfg.urlCache = URLCache(memoryCapacity: 8 << 20, diskCapacity: 80 << 20)

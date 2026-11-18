@@ -46,16 +46,19 @@ final class AttachmentCache {
         }
         if let d = memory.object(forKey: k as NSString) { return d as Data }
         let file = dir.appendingPathComponent(k)
-        if let d = try? Data(contentsOf: file) { memory.setObject(d as NSData, forKey: k as NSString, cost: d.count); return d }
+        // Disco fuera del hilo principal (CH035): leer y escribir aquí frenaba el scroll con fotos.
+        if let d = await Self.read(file) { memory.setObject(d as NSData, forKey: k as NSString, cost: d.count); return d }
         if let t = inflight[k], Date().timeIntervalSince(t.started) < max(Self.staleAfter, timeout) { return try await Self.withTimeout(timeout) { try await t.task.value } }
         let t = Task { try await api.download(path) }
         inflight[k] = (t, Date())
         defer { if inflight[k]?.task == t { inflight[k] = nil } }
         let d = try await Self.withTimeout(timeout) { try await t.value }
         if d.count <= 8 * 1024 * 1024 { memory.setObject(d as NSData, forKey: k as NSString, cost: d.count) }
-        try? d.write(to: file, options: .atomic)
+        await Self.write(d, to: file)
         return d
     }
+    nonisolated private static func read(_ file: URL) async -> Data? { try? Data(contentsOf: file) }
+    nonisolated private static func write(_ d: Data, to file: URL) async { try? d.write(to: file, options: .atomic) }
 
     /// Olvida lo guardado de una ruta (p. ej. datos que no se pudieron leer como imagen) para volver a bajarla.
     func forget(_ path: String, api: APIClient) {
@@ -97,6 +100,26 @@ final class AttachmentCache {
     }
 }
 
+/// Fotos de adjuntos ya decodificadas, en memoria y con tope (CH035). No entra lo de WhatsApp con privacidad (se
+/// revalida en cada vista, como en `AttachmentCache.data`) ni los GIF (se animan aparte). «Una sola vista» no pasa por
+/// `AttachmentImage`. Se vacía al cerrar sesión junto con lo demás del usuario.
+enum DecodedImageCache {
+    static let shared: NSCache<NSString, UIImage> = {
+        let c = NSCache<NSString, UIImage>(); c.totalCostLimit = 48 * 1024 * 1024; c.countLimit = 120; return c
+    }()
+    static func key(_ att: AttachmentDTO, thumb: Bool) -> NSString? {
+        guard !att.isGif, WaPrivacy.requestSource(att.url) == nil, att.thumbUrl.map({ WaPrivacy.requestSource($0) == nil }) ?? true else { return nil }
+        return "\(att.id)#\(thumb && att.thumbUrl != nil ? "t" : "o")" as NSString
+    }
+    static func cost(_ img: UIImage) -> Int { Int(img.size.width * img.scale * img.size.height * img.scale) * 4 }
+    /// Una foto enorme (original a pantalla completa) no desaloja a todas las miniaturas: no se guarda.
+    static let maxCost = 12 * 1024 * 1024
+    static func store(_ img: UIImage, _ key: NSString) {
+        let c = cost(img)
+        if c <= maxCost { shared.setObject(img, forKey: key, cost: c) }
+    }
+}
+
 /// Imagen de un adjunto (miniatura si existe).
 struct AttachmentImage: View {
     @Environment(AppStore.self) private var store
@@ -135,6 +158,11 @@ struct AttachmentImage: View {
 
     /// Miniatura y, si falla, el original; cada una con un reintento. Datos que no son imagen se olvidan del caché.
     private func load() async {
+        // Ya decodificada (CH035): al reaparecer en el scroll no se vuelve a leer ni a decodificar, ni sale la ruedita.
+        if let key = DecodedImageCache.key(att, thumb: useThumb), let hit = DecodedImageCache.shared.object(forKey: key) {
+            image = hit; animation = nil; failed = false
+            return
+        }
         image = nil; animation = nil; failed = false
         var paths: [String] = []
         if useThumb && !att.isGif, let t = att.thumbUrl { paths.append(t) }
@@ -149,6 +177,7 @@ struct AttachmentImage: View {
                     let decoded = att.isGif ? await Task.detached { GifAnimation.decode(d) }.value : nil
                     guard !Task.isCancelled else { return }
                     image = decoded?.frames.first ?? img; animation = decoded
+                    if decoded == nil, let key = DecodedImageCache.key(att, thumb: useThumb) { DecodedImageCache.store(img, key) }
                     return
                 }
                 AttachmentCache.shared.forget(path, api: store.api)

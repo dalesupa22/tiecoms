@@ -9,8 +9,9 @@ enum ChatThreads {
 
     /// Los que cuelgan de la conversación (o de un mensaje): abiertos primero y luego por actividad.
     static func of(_ d: BootstrapDTO, _ conversationId: String, messageId: String? = nil) -> [ConversationDTO] {
-        d.conversations.filter { $0.parentId == conversationId && (messageId == nil || $0.parentMessageId == messageId) }
-            .sorted { a, b in
+        // Por índice (CH035): se llama por cada burbuja; antes filtraba todas las conversaciones cada vez.
+        let hits = messageId.map { d.conversations(parentMessageId: $0).filter { $0.parentId == conversationId } } ?? d.conversations(parentId: conversationId)
+        return hits.sorted { a, b in
                 if (a.returnedAt != nil) != (b.returnedAt != nil) { return a.returnedAt == nil }
                 return (a.lastMessageAt ?? "") > (b.lastMessageAt ?? "")
             }

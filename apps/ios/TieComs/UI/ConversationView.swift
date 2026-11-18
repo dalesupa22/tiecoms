@@ -13,8 +13,8 @@ private enum ChatItem: Identifiable {
         switch self {
         case .newDivider: return ChatNavIds.divider
         case .day(let k, _): return "day-\(k)"
-        case .message(let m, _), .system(let m): return m.id
-        case .pending(let p): return "p-\(p.clientMessageId)"
+        case .message(let m, _), .system(let m): return SentRows.rowId(m)
+        case .pending(let p): return SentRows.pendingId(p.clientMessageId)
         }
     }
 }
@@ -90,8 +90,11 @@ enum ChatSheet: Identifiable {
     }
 }
 
+private let excerptSpaces = try? NSRegularExpression(pattern: "\\s+")
 func excerpt(_ s: String, _ n: Int = 120) -> String {
-    let t = s.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression).trimmingCharacters(in: .whitespaces)
+    // El patrón se compila una vez (CH035); antes se compilaba por cada cita en cada pintada.
+    let t = (excerptSpaces?.stringByReplacingMatches(in: s, range: NSRange(location: 0, length: (s as NSString).length), withTemplate: " ") ?? s)
+        .trimmingCharacters(in: .whitespaces)
     return t.count > n ? String(t.prefix(n)) + "…" : t
 }
 
@@ -671,7 +674,9 @@ struct ConversationView: View {
             }
             prevDate = date
         }
-        items += pending.filter { filter == nil || $0.topicId == filter }.map(ChatItem.pending)
+        // Un pendiente cuyo mensaje ya llegó no se repite (comparten id de fila, SentRows).
+        let confirmed = pending.isEmpty ? [] : Set(state.messages.suffix(60).compactMap(\.clientMessageId))
+        items += pending.filter { (filter == nil || $0.topicId == filter) && !confirmed.contains($0.clientMessageId) }.map(ChatItem.pending)
         return items
     }
 
@@ -826,13 +831,17 @@ struct ConversationView: View {
                 let pause = UUID()
                 readPauseID = pause
                 defer { if readPauseID == pause { readPauseID = nil } }
+                // Si ya está en memoria no hay nada que esperar de la red ni del historial (CH035): solo un cuadro para que
+                // la lista aplique el filtro de tema. Si hubo que cargarlo, la espera de siempre a que se maquete.
+                let known = store.conversations[conversationId]?.messages.contains { $0.seq == seq } == true
                 await prepareJump(messageId: nil, seq: seq)
                 if let id = await store.ensureMessage(conversationId, seq: seq) {
                     followTopic(store.conversations[conversationId]?.messages.first { $0.seq == seq })
                     revealed.insert(seq)
-                    do { try await Task.sleep(nanoseconds: 250_000_000) } catch { return }
+                    do { try await Task.sleep(nanoseconds: known ? 30_000_000 : 250_000_000) } catch { return }
                     guard store.jumpTo[conversationId] == seq else { return }
-                    withAnimation { proxy.scrollTo(id, anchor: .center) }
+                    // Animado y rematado sin animar: en una lista larga un solo `scrollTo` se queda corto.
+                    jump(proxy, to: id, anchor: .center)
                     highlighted = id
                     do { try await Task.sleep(nanoseconds: 1_800_000_000) } catch {
                         if highlighted == id { highlighted = nil }
@@ -854,7 +863,7 @@ struct ConversationView: View {
                 // En teléfono queda arriba, visible sobre la hoja a medias.
                 Task {
                     try? await Task.sleep(nanoseconds: 350_000_000)
-                    withAnimation(.easeInOut(duration: 0.35)) { proxy.scrollTo(id, anchor: UnitPoint(x: 0.5, y: sizeClass == .compact ? 0.12 : 0.4)) }
+                    withAnimation(.easeInOut(duration: 0.35)) { proxy.scrollTo(rowId(id), anchor: UnitPoint(x: 0.5, y: sizeClass == .compact ? 0.12 : 0.4)) }
                 }
             }
             .scrollDismissesKeyboard(.interactively)
@@ -1080,7 +1089,7 @@ struct ConversationView: View {
         let anchor = state.messages.first?.id
         Task {
             await store.loadOlder(conversationId)
-            if let anchor { proxy.scrollTo(anchor, anchor: .top) }
+            if let anchor { proxy.scrollTo(rowId(anchor), anchor: .top) }
             try? await Task.sleep(nanoseconds: 300_000_000)
             loadingOlder = false
         }
@@ -1191,7 +1200,7 @@ struct ConversationView: View {
                 for _ in 0..<5 {
                     try await Task.sleep(nanoseconds: 180_000_000)
                     guard readPauseID == token, !Task.isCancelled else { return }
-                    proxy.scrollTo(target.id, anchor: .center)
+                    proxy.scrollTo(rowId(target.id), anchor: .center)
                     try await Task.sleep(nanoseconds: 140_000_000)
                     if track.visibleSeqs.contains(target.seq) {
                         try await Task.sleep(nanoseconds: 200_000_000)
@@ -1205,8 +1214,24 @@ struct ConversationView: View {
         }
     }
 
+    /// Tocar la cita de una respuesta: salta al mensaje citado; si no está cargado, se trae el historial hasta él
+    /// (el mismo camino que un aviso que solo conoce el id del mensaje).
+    private func openQuoted(_ messageId: String) {
+        if let m = store.conversations[conversationId]?.messages.first(where: { $0.id == messageId }) {
+            store.jumpTo[conversationId] = m.seq
+        } else {
+            store.jumpToMessage[conversationId] = messageId
+        }
+    }
+
+    /// Id de la fila de un mensaje (lo que mandé en esta sesión conserva el de su burbuja pendiente, SentRows).
+    private func rowId(_ messageId: String) -> String {
+        SentRows.rowId(messageId: messageId, in: store.conversations[conversationId]?.messages ?? [])
+    }
+
     /// Salto animado; en una LazyVStack larga la animación se queda corta (alturas estimadas): se remata sin animar.
-    private func jump(_ proxy: ScrollViewProxy, to id: String, anchor: UnitPoint) {
+    private func jump(_ proxy: ScrollViewProxy, to messageId: String, anchor: UnitPoint) {
+        let id = rowId(messageId)
         unreadJumpTask?.cancel(); unreadJumpTask = nil; jumpingUnread = false
         let pause = UUID()
         readPauseID = pause
@@ -1284,6 +1309,7 @@ struct ConversationView: View {
                 authorId: mine ? nil : m.authorId,
                 status: nil, italic: m.deletedAt != nil,
                 quote: m.replyTo == nil ? nil : (quoted.map { q in (Naming.person(d, q.authorId)?.name ?? "", q.deletedAt != nil ? L("chat.deleted") : excerpt(MailText.quoteText(kind: q.kind, body: q.body))) } ?? ("", L("reply.quoteMissing"))),
+                onQuote: m.deletedAt != nil ? nil : m.replyTo.map { target in { openQuoted(target) } },
                 forwardedLabel: m.forwarded.map { forwardedLabel(d, $0, mine: mine, authorName: author?.name) },
                 merged: m.mergedKind == "side" ? L("side.fromSidechat")
                     : m.mergedFrom.map { id in store.meta(id).map { L("lin.resultOf", ["name": Naming.title(d, $0)]) } ?? L("lin.resultHidden") },
@@ -2084,6 +2110,8 @@ struct MessageBubble: View {
     var status: Status?
     var italic: Bool
     var quote: (author: String, text: String)? = nil
+    /// Tocar la cita lleva al mensaje citado (CH035). nil = sin gesto.
+    var onQuote: (() -> Void)? = nil
     var forwardedLabel: String? = nil
     var merged: String? = nil
     var pinned = false
@@ -2151,6 +2179,10 @@ struct MessageBubble: View {
                         .foregroundStyle(mine ? Color.white.opacity(0.92) : Theme.textSecondary)
                         .padding(.leading, 8)
                         .overlay(alignment: .leading) { Rectangle().fill(mine ? Color.white.opacity(0.7) : Theme.orange).frame(width: 3) }
+                        .contentShape(Rectangle())
+                        .gesture(TapGesture().onEnded { onQuote?() }, including: onQuote != nil ? .all : .subviews)
+                        .accessibilityIdentifier("msg.quote.\(messageId ?? "")")
+                        .accessibilityAddTraits(onQuote != nil ? .isButton : [])
                     }
                     if let merged {
                         Label(merged, systemImage: "arrow.uturn.backward").font(.caption.weight(.semibold))

@@ -360,10 +360,19 @@ struct MessageDTO: Codable, Equatable, Identifiable, Sendable {
 
     var isSystem: Bool { kind == "system" }
     /// Mensaje de sistema estructurado ({"k": …}).
+    /// Se decodifica una vez por texto (CH035): las tarjetas lo consultan varias veces por pintada.
     var systemPayload: [String: Any]? {
-        guard isSystem, body.hasPrefix("{"), let d = body.data(using: .utf8) else { return nil }
-        return (try? JSONSerialization.jsonObject(with: d)) as? [String: Any]
+        guard isSystem, body.hasPrefix("{") else { return nil }
+        let key = body as NSString
+        if let hit = Self.payloadCache.object(forKey: key) { return hit.value }
+        let parsed = body.data(using: .utf8).flatMap { (try? JSONSerialization.jsonObject(with: $0)) as? [String: Any] }
+        Self.payloadCache.setObject(PayloadBox(parsed), forKey: key, cost: key.length)
+        return parsed
     }
+    private final class PayloadBox { let value: [String: Any]?; init(_ v: [String: Any]?) { value = v } }
+    private static let payloadCache: NSCache<NSString, PayloadBox> = {
+        let c = NSCache<NSString, PayloadBox>(); c.countLimit = 600; c.totalCostLimit = 1_000_000; return c
+    }()
 
     init(from decoder: Decoder) throws {
         let c = try container(decoder)
@@ -485,13 +494,16 @@ struct BootstrapDTO: Codable, Equatable, Sendable {
     var me: UserDTO
     var organizations: [OrganizationDTO] { didSet { lookup = Lookup() } }
     var workspaces: [WorkspaceDTO]
-    var conversations: [ConversationDTO]
+    var conversations: [ConversationDTO] { didSet { convLookup = ConvLookup() } }
     var people: [PersonDTO] { didSet { lookup = Lookup() } }
     /// Funciones que el servidor tiene prendidas (aditivo: un servidor viejo no lo manda).
     var features: FeaturesDTO?
     /// Índices por id (1.7.1): `Naming.person`/`org` se llaman miles de veces por pintada (autor de cada burbuja,
     /// filas de Inicio). Se arman la primera vez y se descartan al cambiar `people`/`organizations`.
     private var lookup = Lookup()
+    /// Índices de conversaciones (CH035): `meta(id)` y los hilos/laterales que cuelgan de cada mensaje se consultan por
+    /// cada burbuja en cada pintada. Aparte del de personas: `conversations` cambia con cada mensaje y no debe tirarlo.
+    private var convLookup = ConvLookup()
 
     private enum CodingKeys: String, CodingKey { case contract, serverTime, me, organizations, workspaces, conversations, people, features }
 
@@ -500,8 +512,59 @@ struct BootstrapDTO: Codable, Equatable, Sendable {
             && a.workspaces == b.workspaces && a.conversations == b.conversations && a.people == b.people && a.features == b.features
     }
 
+    /// Mismo contenido aunque el servidor lo haya generado en otro instante (`serverTime` cambia en cada respuesta).
+    /// Incluye lo que `==` deja fuera. Sirve para no reasignar el snapshot —y repintar toda la app— si nada cambió (CH035).
+    func sameContent(as o: BootstrapDTO) -> Bool {
+        contract == o.contract && me == o.me && organizations == o.organizations && workspaces == o.workspaces
+            && conversations == o.conversations && people == o.people && features == o.features
+            && myActiveCall == o.myActiveCall && missedCalls == o.missedCalls && waInbox == o.waInbox && mailPins == o.mailPins
+    }
+
     func person(id: String) -> PersonDTO? { lookup.person(id, people) }
     func organization(id: String) -> OrganizationDTO? { lookup.org(id, organizations) }
+    /// La primera conversación con ese id (como `conversations.first { $0.id == id }`), en O(1).
+    func conversation(id: String) -> ConversationDTO? { convLookup.byId(id, conversations) }
+    func conversationIndex(id: String) -> Int? { convLookup.index(id, conversations) }
+    /// Las que cuelgan de un mensaje (`parentMessageId`), en el orden de `conversations`.
+    func conversations(parentMessageId: String) -> [ConversationDTO] { convLookup.children(ofMessage: parentMessageId, conversations) }
+    /// Las que cuelgan de una conversación (`parentId`), en el orden de `conversations`.
+    func conversations(parentId: String) -> [ConversationDTO] { convLookup.children(of: parentId, conversations) }
+
+    final class ConvLookup: @unchecked Sendable {
+        private let lock = NSLock()
+        private var ids: [String: Int]?
+        private var byMessage: [String: [Int]]?
+        private var byParent: [String: [Int]]?
+        func index(_ id: String, _ list: [ConversationDTO]) -> Int? {
+            lock.lock(); defer { lock.unlock() }
+            if ids == nil {
+                var out: [String: Int] = [:]
+                out.reserveCapacity(list.count)
+                for (i, c) in list.enumerated() where out[c.id] == nil { out[c.id] = i }
+                ids = out
+            }
+            return ids?[id]
+        }
+        func byId(_ id: String, _ list: [ConversationDTO]) -> ConversationDTO? { index(id, list).map { list[$0] } }
+        func children(ofMessage id: String, _ list: [ConversationDTO]) -> [ConversationDTO] {
+            lock.lock(); defer { lock.unlock() }
+            if byMessage == nil {
+                var out: [String: [Int]] = [:]
+                for (i, c) in list.enumerated() { if let m = c.parentMessageId { out[m, default: []].append(i) } }
+                byMessage = out
+            }
+            return (byMessage?[id] ?? []).map { list[$0] }
+        }
+        func children(of id: String, _ list: [ConversationDTO]) -> [ConversationDTO] {
+            lock.lock(); defer { lock.unlock() }
+            if byParent == nil {
+                var out: [String: [Int]] = [:]
+                for (i, c) in list.enumerated() { if let p = c.parentId { out[p, default: []].append(i) } }
+                byParent = out
+            }
+            return (byParent?[id] ?? []).map { list[$0] }
+        }
+    }
 
     final class Lookup: @unchecked Sendable {
         private let lock = NSLock()

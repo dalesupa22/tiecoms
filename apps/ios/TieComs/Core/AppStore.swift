@@ -248,6 +248,7 @@ final class AppStore {
         readRevisions = [:]
         VoicePlayer.shared.resetScope()
         AttachmentCache.shared.purgeWhatsApp { _ in true }
+        DecodedImageCache.shared.removeAllObjects()
         sessionGeneration = UUID()
         feedback?.cancelPendingMessages()
         api.invalidateRequests()
@@ -383,6 +384,10 @@ final class AppStore {
     @ObservationIgnored private var resyncTask: Task<Void, Never>?
     @ObservationIgnored private var resyncStartedAt = Date.distantPast
     @ObservationIgnored private var resyncAgain = false
+    /// Vuelta corta al frente con el socket vivo: la próxima vuelta de resync no pide `/bootstrap` (ResyncRule).
+    @ObservationIgnored private var lightResync = false
+    @ObservationIgnored private var resyncRunningLight = false
+    @ObservationIgnored private var backgroundedAt: Date?
     @ObservationIgnored private var bootstrapRefreshing = false
     @ObservationIgnored private var bootstrapNeedsRefresh = false
     @ObservationIgnored private var bootstrapSignals: Set<String> = []
@@ -765,7 +770,8 @@ final class AppStore {
         if privacyRevision == waPrivacy.revision { waPrivacy.accept(d.waInbox ?? []) }
         else { d.waInbox = waInbox } // Never restore a response started before an invalidation.
         d.waInbox = d.waInbox?.filter { waPrivacy.allows($0.inboxKey) }
-        data = d
+        // Solo si cambió (CH035): reasignar un snapshot idéntico repintaba todas las pantallas en cada vuelta al frente.
+        if data.map({ !$0.sameContent(as: d) }) ?? true { data = d }
         VoicePlayer.shared.setScope(server: api.baseURL.absoluteString, account: d.me.id)
         restoreMeetingAttempts()
         loadLocalDnd()
@@ -841,6 +847,9 @@ final class AppStore {
         switch name {
         case "ready":
             connection = .online
+            // Reconexión: pudo perderse algo. Si la vuelta en curso es la ligera (sin bootstrap), se repite completa.
+            lightResync = false
+            if resyncRunningLight { resyncAgain = true }
             Task { await resync() }
         case "conv.event":
             if let e = JSONBridge.decode(ConversationEvent.self, from: payload) { onConversationEvent(e, live: true) }
@@ -883,12 +892,16 @@ final class AppStore {
     private func resyncOnce() async {
         guard status == .ready else { return }
         let stamp = sessionStamp
+        let light = lightResync
+        lightResync = false
+        resyncRunningLight = light
+        defer { resyncRunningLight = false }
         do {
             try requireSession(stamp)
             invalidateKnownWaPrivacy()
             _ = try? await waAccounts()
             try requireSession(stamp)
-            if !waPrivacy.knownAccounts.isEmpty || Date().timeIntervalSince(lastBootstrapAt) > 3 { try await loadBootstrap() }
+            if !waPrivacy.knownAccounts.isEmpty || (!light && Date().timeIntervalSince(lastBootstrapAt) > 3) { try await loadBootstrap() }
             try requireSession(stamp)
             Task { await loadOpenIssues() }
             Task { await loadScheduled() }
@@ -1239,15 +1252,15 @@ final class AppStore {
 
     // MARK: - Conversaciones
 
-    func meta(_ id: String) -> ConversationDTO? { data?.conversations.first { $0.id == id } }
+    func meta(_ id: String) -> ConversationDTO? { data?.conversation(id: id) }
 
     func patchMeta(_ id: String, _ f: (inout ConversationDTO) -> Void) {
-        guard let i = data?.conversations.firstIndex(where: { $0.id == id }) else { return }
+        guard let i = data?.conversationIndex(id: id) else { return }
         // Copia, cambio y escritura: el closure puede leer el store (`me`, `data`) sin abrir un acceso exclusivo a `data`
         // (leerlo dentro de `f(&data!…)` aborta por exclusividad de Swift).
         var c = data!.conversations[i]
         f(&c)
-        guard let j = data?.conversations.firstIndex(where: { $0.id == id }) else { return }
+        guard let j = data?.conversationIndex(id: id) else { return }
         data!.conversations[j] = c
         scheduleBadge()
     }
@@ -1508,6 +1521,7 @@ final class AppStore {
                                mentions: mentionsTrimmed.isEmpty ? nil : MentionText.valid(mentionsTrimmed, in: text),
                                topicId: topicId, viewOnce: viewOnce ? true : nil, createdAt: ISODate.string(), attempts: 0, status: .pending, error: nil, nextAttemptAt: 0)
         Donations.donate(self, conversationId: conversationId)
+        SentRows.note(clientMessageId)
         // Primero se guarda localmente: si la app se cierra, el mensaje sigue en la cola.
         savePending(pending + [p])
         scheduleFlush(0)
@@ -1547,6 +1561,9 @@ final class AppStore {
         guard !flushing, status == .ready else { return }
         flushing = true
         defer { flushing = false }
+        // Primero en disco y después a la red: lo guardado se escribe fuera del hilo principal (CH035) y aquí se espera.
+        await outbox.drained()
+        guard status == .ready else { return }
         // En orden: dentro de una conversación, los mensajes salen uno tras otro.
         for p in pending {
             guard p.status != .failed, p.nextAttemptAt <= Date().timeIntervalSince1970 * 1000 else { continue }
@@ -1791,13 +1808,17 @@ final class AppStore {
             if status == .unreachable { Task { await start() } }
             return
         }
+        // Antes de `reconnectNow`: interesa si el socket seguía conectado al volver.
+        let away = backgroundedAt.map { Date().timeIntervalSince($0) } ?? 0
+        backgroundedAt = nil
+        lightResync = ResyncRule.skipBootstrap(away: away, socketConnected: socket.state == .connected, waAccounts: false)
         socket.reconnectNow()
         resumePendingShareHandoff()
         Task { await retryPushRegistration() }
         Task { await resync() }
     }
 
-    func enteredBackground() { appActive = false; invalidateKnownWaPrivacy(); saveSnapshotNow() }
+    func enteredBackground() { appActive = false; backgroundedAt = Date(); invalidateKnownWaPrivacy(); saveSnapshotNow() }
 
     private func startPathMonitor() {
         guard pathMonitor == nil else { return }

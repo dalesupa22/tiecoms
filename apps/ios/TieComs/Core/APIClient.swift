@@ -241,7 +241,15 @@ final class APIClient {
         return ApiRequestError(status: status, code: "http_\(status)", message: HTTPURLResponse.localizedString(forStatusCode: status))
     }
 
-    private func decode<T: Decodable>(_ data: Data) throws -> T {
+    /// Las respuestas grandes (`/bootstrap`, páginas de mensajes) se decodifican fuera del hilo principal (CH035): en main
+    /// frenaban el scroll y la transición al abrir un chat. Las pequeñas no saltan de hilo: cuesta más el salto.
+    static let offMainDecodeBytes = 8 * 1024
+    private func decode<T: Decodable>(_ data: Data) async throws -> T {
+        if data.count < Self.offMainDecodeBytes { return try Self.decodeNow(data) }
+        return try await Self.decodeOffMain(data)
+    }
+    nonisolated private static func decodeOffMain<T: Decodable>(_ data: Data) async throws -> T { try decodeNow(data) }
+    nonisolated static func decodeNow<T: Decodable>(_ data: Data) throws -> T {
         do { return try JSONDecoder().decode(T.self, from: data) } catch {
             throw ApiRequestError(status: 200, code: "decode", message: "Respuesta inesperada del servidor")
         }
@@ -250,13 +258,13 @@ final class APIClient {
     /// Petición autenticada. Renueva el access token si está por vencer y reintenta una vez ante 401.
     func request<T: Decodable>(_ path: String, method: String = "GET", json: [String: Any]? = nil) async throws -> T {
         let data = try await requestData(path, method: method, json: json)
-        return try decode(data)
+        return try await decode(data)
     }
 
     /// Petición autenticada con cuerpo crudo (foto de perfil, archivos).
     func upload<T: Decodable>(_ path: String, method: String = "POST", body: RawBody) async throws -> T {
         let data = try await requestData(path, method: method, body: body)
-        return try decode(data)
+        return try await decode(data)
     }
 
     @discardableResult
@@ -340,7 +348,7 @@ final class APIClient {
         if res.statusCode == 401 { throw APIClient.parseError(body, status: 401) }
         guard (200..<300).contains(res.statusCode) else { throw APIClient.parseError(body, status: res.statusCode) }
         progress(1)
-        return try decode(body)
+        return try await decode(body)
     }
 
     /// Descarga autenticada (adjuntos): Bearer en la cabecera; sigue la redirección firmada si la hay.
@@ -367,7 +375,7 @@ final class APIClient {
     func publicRequest<T: Decodable>(_ path: String, method: String = "GET", json: [String: Any]? = nil) async throws -> T {
         let (data, res) = try await raw(path, method: method, json: json, auth: false)
         guard (200..<300).contains(res.statusCode) else { throw APIClient.parseError(data, status: res.statusCode) }
-        return try decode(data)
+        return try await decode(data)
     }
 
     // MARK: Sesión
@@ -378,7 +386,7 @@ final class APIClient {
         let (data, res) = try await raw(AuthRoutes.login, method: "POST", json: ["email": email, "password": password, "device": device()], auth: false)
         guard (200..<300).contains(res.statusCode) else { throw APIClient.parseError(data, status: res.statusCode) }
         try requireGeneration(generation)
-        let r: AuthResult = try decode(data)
+        let r: AuthResult = try await decode(data)
         apply(r)
         return r
     }
@@ -391,7 +399,7 @@ final class APIClient {
         let (data, res) = try await raw(AuthRoutes.signup, method: "POST", json: body, auth: false)
         guard (200..<300).contains(res.statusCode) else { throw APIClient.parseError(data, status: res.statusCode) }
         try requireGeneration(generation)
-        let r: AuthResult = try decode(data)
+        let r: AuthResult = try await decode(data)
         apply(r)
         return r
     }
@@ -404,7 +412,7 @@ final class APIClient {
                                         json: ["code": code, "code_verifier": verifier, "device": device()], auth: false)
         guard (200..<300).contains(res.statusCode) else { throw APIClient.parseError(data, status: res.statusCode) }
         try requireGeneration(generation)
-        let r: AuthResult = try decode(data)
+        let r: AuthResult = try await decode(data)
         apply(r)
         return r
     }
@@ -427,7 +435,7 @@ final class APIClient {
         let (data, res) = try await raw(AuthRoutes.base + "/apple/complete", method: "POST", json: body, auth: false, uncached: true)
         guard (200..<300).contains(res.statusCode) else { throw APIClient.parseError(data, status: res.statusCode) }
         try requireGeneration(generation)
-        let result: AuthResult = try decode(data)
+        let result: AuthResult = try await decode(data)
         apply(result)
         return result
     }
@@ -443,7 +451,7 @@ final class APIClient {
             json: authorization.completionBody(challenge: challenge, proof: proof, device: device()), uncached: true)
         try requireGeneration(generation)
         guard (200..<300).contains(response.statusCode) else { throw APIClient.parseError(data, status: response.statusCode) }
-        let result: Linked = try decode(data)
+        let result: Linked = try await decode(data)
         guard result.linked else { throw AppleSignInError.invalidResponse }
     }
     #endif

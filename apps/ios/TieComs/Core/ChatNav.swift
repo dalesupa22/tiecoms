@@ -1,5 +1,34 @@
 import Foundation
 
+/// Volver al frente (CH035, criterio de la web PERF-C1): si la app estuvo fuera menos de un minuto y el socket nunca se
+/// cayó, no se perdió ningún evento y no hace falta pedir `/bootstrap` entero. Con cuentas de WhatsApp conocidas se pide
+/// siempre (su privacidad se revalida en cada vuelta). Si el socket reconecta, su «ready» pide la vuelta completa.
+enum ResyncRule {
+    static let shortAway: TimeInterval = 60
+    static func skipBootstrap(away: TimeInterval, socketConnected: Bool, waAccounts: Bool) -> Bool {
+        socketConnected && !waAccounts && away >= 0 && away < shortAway
+    }
+}
+
+/// Identidad de fila estable al confirmar un envío (CH035). Lo que mandé en esta sesión conserva el id de su burbuja
+/// «enviando» (`p-<clientMessageId>`): para la lista es la misma fila, así que no hay quitar-y-poner ni un segundo
+/// desplazamiento al final cuando el servidor confirma. Lo demás usa el id del mensaje, como siempre.
+enum SentRows {
+    /// Solo se toca desde el hilo principal (el store y la vista).
+    private static var sent = Set<String>()
+    static func note(_ clientMessageId: String) { sent.insert(clientMessageId) }
+    static func pendingId(_ clientMessageId: String) -> String { "p-\(clientMessageId)" }
+    static func rowId(_ m: MessageDTO) -> String {
+        if let c = m.clientMessageId, sent.contains(c) { return pendingId(c) }
+        return m.id
+    }
+    /// El id de fila de un mensaje por su id (para `scrollTo`); si no está cargado, el propio id.
+    static func rowId(messageId: String, in messages: [MessageDTO]) -> String {
+        messages.last { $0.id == messageId }.map(rowId) ?? messageId
+    }
+    static func reset() { sent.removeAll() }
+}
+
 /// Navegar un chat largo (1.6.4, SPEC-bandeja D): abrir en el primer no leído con la línea «N mensajes nuevos»,
 /// botón ⌄ «Ir al final», píldora «↑ N nuevos» y botón «@» a la siguiente mención. Reglas puras (sin vista).
 enum ChatNav {

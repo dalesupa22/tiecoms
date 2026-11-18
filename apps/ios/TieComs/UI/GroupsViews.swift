@@ -882,6 +882,24 @@ struct OversightReaderView: View {
 
 /// Mi foto (o mis iniciales) en círculo como ícono de la pestaña «Tú», como el perfil de Instagram.
 enum TabAvatar {
+    /// El último ícono dibujado (CH035). La barra lo pide en cada pintada de la raíz, que ocurre con cada mensaje de
+    /// cualquier chat: redibujar el bitmap y entregar un `UIImage` nuevo hacía rehacer la barra entera.
+    struct MemoKey: Equatable {
+        var name: String, fillId: String, selected: Bool, moon: Bool, side: CGFloat, dark: Bool
+    }
+    @MainActor private static var memo: (key: MemoKey, photo: UIImage?, image: UIImage)?
+    /// Cuántas veces se dibujó de verdad (pruebas).
+    @MainActor private(set) static var draws = 0
+    @MainActor static func memoized(name: String, photo: UIImage?, fill: UIColor, fillId: String, selected: Bool, moon: Bool = false, side: CGFloat = 26) -> UIImage {
+        let key = MemoKey(name: name, fillId: fillId, selected: selected, moon: moon, side: side,
+                          dark: UITraitCollection.current.userInterfaceStyle == .dark)
+        if let m = memo, m.key == key, m.photo === photo { return m.image }
+        let img = image(name: name, photo: photo, fill: fill, selected: selected, moon: moon, side: side)
+        draws += 1
+        memo = (key, photo, img)
+        return img
+    }
+
     static func image(name: String, photo: UIImage?, fill: UIColor, selected: Bool, moon: Bool = false, side: CGFloat = 26) -> UIImage {
         let size = CGSize(width: side, height: side)
         let img = UIGraphicsImageRenderer(size: size).image { ctx in

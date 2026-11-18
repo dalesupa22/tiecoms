@@ -120,7 +120,9 @@ struct MainView: View {
 
     var body: some View {
         @Bindable var store = store
-        let d = store.data
+        // Con una pantalla empujada (un chat) la barra no se ve: la raíz sigue la copia agrupada del store y no se
+        // vuelve a evaluar —con los contadores de las pestañas— por cada mensaje (CH035).
+        let d = store.data(visible: store.currentPath.isEmpty)
         // Barra propia (con llamadas son 6 pestañas y el TabView del sistema pondría «Más» en iPhone): solo íconos, salvo «DMs».
         tabShell(d, tabs: AppTab.allCases.filter { $0 != .calls || d?.callsEnabled == true })
             .onAppear { Perf.mark("list.visible") }
@@ -288,7 +290,7 @@ extension MainView {
     }
 
     fileprivate var myPhotoURL: URL? {
-        guard let d = store.data else { return nil }
+        guard let d = store.data(visible: store.currentPath.isEmpty) else { return nil }
         return MediaURL.absolute(Naming.person(d, d.me.id)?.avatarUrl ?? d.me.avatarUrl)
     }
 }

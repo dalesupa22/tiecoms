@@ -88,7 +88,7 @@ extension AppStore {
     /// Mi ventana de descanso está activa ahora (la lunita del avatar también se enciende).
     var sleepActive: Bool {
         _ = clockTick
-        return SleepRules.sleepingNow(data?.me.sleep?.window)
+        return SleepRules.sleepingNow(me?.sleep?.window)
     }
 
     /// PUT /me/sleep { on?, start?, end?, tz?, tzAuto? } → { sleep }; el servidor avisa a mis otras sesiones (me.sleep).

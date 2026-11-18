@@ -47,6 +47,19 @@ enum PerfCounters {
     }
 }
 
+/// Memoria de un derivado por su entrada (CH035): se recalcula solo cuando la entrada cambió de verdad. Vive en una
+/// referencia (en `@State`), así que escribirla durante una evaluación no vuelve a pintar nada.
+final class Memo<Key: Equatable, Value> {
+    private var key: Key?
+    private var value: Value?
+    func callAsFunction(_ k: Key, _ make: () -> Value) -> Value {
+        if let key, key == k, let value { return value }
+        let v = make()
+        key = k; value = v
+        return v
+    }
+}
+
 /// Aciertos de la caché de burbujas (la extensión Compartir no compila las vistas del chat).
 enum RichTextStats {
     nonisolated(unsafe) static var hits = 0

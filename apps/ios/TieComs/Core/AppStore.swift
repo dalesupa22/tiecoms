@@ -73,7 +73,41 @@ final class AppStore {
     /// CH034: este arranque pintó la lista desde la copia local (el splash no tiene nada que esperar).
     private(set) var paintedFromCache = false
     private(set) var connection: Connection = .offline
-    private(set) var data: BootstrapDTO?
+    private(set) var data: BootstrapDTO? { didSet { dataChanged() } }
+    /// Lo que del snapshot casi nunca cambia, en propiedades aparte (CH035). `data` cambia con cada mensaje de cualquier
+    /// chat; quien solo necesita saber quién soy (`me`) o qué funciones hay prendidas quedaba suscrito a todo eso y se
+    /// volvía a evaluar con cada mensaje. Estas solo cambian —y solo avisan— cuando su contenido cambia.
+    private(set) var meSlice: UserDTO?
+    private(set) var featuresSlice: FeaturesDTO?
+    private func dataChanged() {
+        if data?.me != meSlice { meSlice = data?.me }
+        if data?.features != featuresSlice { featuresSlice = data?.features }
+        scheduleListData()
+    }
+    /// Copia de `data` para las listas que NO se están viendo (CH035): una pestaña oculta o la lista que queda debajo de
+    /// un chat. `data` cambia con cada mensaje de cualquier chat y cada cambio volvía a evaluar esas listas enteras
+    /// (árbol de grupos, orden, bandeja) sin que nadie las viera. Esta copia se pone al día como mucho cada
+    /// `listDataInterval`; la lista que sí se ve lee `data` en vivo (`data(visible:)`).
+    private(set) var listData: BootstrapDTO?
+    @ObservationIgnored private var listDataTask: Task<Void, Never>?
+    static let listDataInterval: UInt64 = 1_500_000_000
+    private func scheduleListData() {
+        // Primer snapshot, cierre de sesión o cambio de cuenta: al momento (nada de la sesión anterior queda a la vista).
+        if data == nil || listData == nil || listData?.me.id != data?.me.id {
+            listDataTask?.cancel(); listDataTask = nil
+            listData = data
+            return
+        }
+        guard listDataTask == nil else { return }
+        listDataTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: AppStore.listDataInterval)
+            guard let self, !Task.isCancelled else { return }
+            self.listDataTask = nil
+            self.listData = self.data
+        }
+    }
+    /// El snapshot para una lista raíz: en vivo si está a la vista; si no, la copia agrupada.
+    func data(visible: Bool) -> BootstrapDTO? { visible ? data : listData }
     private(set) var conversations: [String: ConversationState] = [:]
     private(set) var pending: [PendingMessage] = []
     private(set) var typing: [String: [TypingEntry]] = [:]
@@ -491,7 +525,7 @@ final class AppStore {
         }
     }
 
-    var me: UserDTO? { data?.me }
+    var me: UserDTO? { meSlice }
 
     // MARK: - Sesión
 

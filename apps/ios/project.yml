@@ -61,7 +61,7 @@ targets:
         CFBundleLocalizations: [en, es]
         CFBundleAllowMixedLocalizations: true
         ITSAppUsesNonExemptEncryption: false
-        NSUserActivityTypes: [INSendMessageIntent]
+        NSUserActivityTypes: [INSendMessageIntent, INStartCallIntent, INStartAudioCallIntent, INStartVideoCallIntent]
         NSCameraUsageDescription: chaggu uses the camera for video calls and when you choose to take a profile or group photo, a photo or video to attach, or a photo of your handwritten signature.
         # Letras cursivas (OFL) para la firma escrita.
         UIAppFonts: [DancingScript.ttf, GreatVibes-Regular.ttf, Caveat.ttf]

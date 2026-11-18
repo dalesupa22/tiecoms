@@ -1,6 +1,7 @@
 import AVFoundation
 import CallKit
 import Foundation
+import Intents
 import UIKit
 
 // Llamadas de chaggu en «Recientes» de la app Teléfono (CallKit), como WhatsApp.
@@ -19,6 +20,9 @@ import UIKit
 //   (reportIncomingPush, con el tono elegido en la app), con la app cerrada o el teléfono bloqueado. Contestar
 //   (CXAnswerCallAction) entra a la llamada de chaggu; colgar antes de contestar (CXEndCallAction) la rechaza. Si
 //   cuelga quien llama, contesto en otro dispositivo o pasan 45 s, se termina en el sistema (perdida en Recientes).
+// - CH038: tocar una llamada de chaggu en «Recientes» abre la app con un INStartCallIntent cuyo contacto es el nombre que
+//   vio el sistema. CallKitRecents recuerda a qué chat corresponde cada nombre (al registrar cada llamada) y la app
+//   vuelve a llamar a ese chat, como WhatsApp. Entradas anteriores a CH038: se busca un chat con ese mismo nombre.
 
 /// Reglas puras (las usan el puente y las pruebas).
 enum CallKitRules {
@@ -48,6 +52,68 @@ enum CallKitRules {
         case .failed: return .failed
         case .local, .remote: return .remoteEnded
         }
+    }
+}
+
+/// CH038: de una entrada de «Recientes» al chat al que hay que volver a llamar.
+enum CallKitRecents {
+    static let key = "callkit.recents.v1"
+    /// Nombres recordados como máximo (los más recientes).
+    static let limit = 300
+    static let activityTypes = ["INStartCallIntent", "INStartAudioCallIntent", "INStartVideoCallIntent"]
+
+    struct Entry: Codable, Equatable {
+        var conversationId: String
+        var at: Date
+    }
+
+    /// Lo que pide el sistema al tocar la entrada: el nombre registrado y si era videollamada.
+    struct Request: Equatable {
+        var handle: String
+        var video: Bool
+    }
+
+    /// Lee el intent de Recientes (o de Siri/Contactos) que trae la actividad.
+    static func request(_ activity: NSUserActivity) -> Request? {
+        guard let intent = activity.interaction?.intent else { return nil }
+        if let i = intent as? INStartCallIntent {
+            return request(i.contacts, video: i.callCapability == .videoCall)
+        }
+        if let i = intent as? INStartVideoCallIntent { return request(i.contacts, video: true) }
+        if let i = intent as? INStartAudioCallIntent { return request(i.contacts, video: false) }
+        return nil
+    }
+
+    static func request(_ contacts: [INPerson]?, video: Bool) -> Request? {
+        guard let p = contacts?.first else { return nil }
+        let value = (p.personHandle?.value ?? p.displayName).trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? nil : Request(handle: value, video: video)
+    }
+
+    /// Guarda a qué chat corresponde el nombre que ve el sistema (el último gana: es la llamada más reciente).
+    static func remember(_ handle: String, conversationId: String, at: Date = Date(), defaults: UserDefaults = .standard) {
+        guard !conversationId.isEmpty else { return }
+        var all = load(defaults)
+        all[CallKitRules.handleName(handle)] = Entry(conversationId: conversationId, at: at)
+        if all.count > limit {
+            let keep = all.sorted { $0.value.at > $1.value.at }.prefix(limit)
+            all = Dictionary(uniqueKeysWithValues: keep.map { ($0.key, $0.value) })
+        }
+        if let data = try? JSONEncoder().encode(all) { defaults.set(data, forKey: key) }
+    }
+
+    static func load(_ defaults: UserDefaults = .standard) -> [String: Entry] {
+        guard let data = defaults.data(forKey: key) else { return [:] }
+        return (try? JSONDecoder().decode([String: Entry].self, from: data)) ?? [:]
+    }
+
+    /// El chat al que se vuelve a llamar: el recordado si sigo en él; si no, el único chat con ese nombre.
+    /// `chats`: id y nombre (como lo ve el sistema) de mis conversaciones.
+    static func resolve(_ handle: String, remembered: [String: Entry], chats: [(id: String, title: String)]) -> String? {
+        let name = CallKitRules.handleName(handle)
+        if let id = remembered[name]?.conversationId, chats.contains(where: { $0.id == id }) { return id }
+        let same = chats.filter { CallKitRules.handleName($0.title).caseInsensitiveCompare(name) == .orderedSame }
+        return same.count == 1 ? same[0].id : nil
     }
 }
 
@@ -90,8 +156,10 @@ final class CallKitBridge: NSObject {
 
     /// Registra la llamada en el sistema. `outgoing`: la empecé yo (o entré a una en curso); si no, contesté una entrante.
     /// Devuelve el UUID de CallKit, o nil si el sistema no la aceptó (la llamada sigue sin CallKit).
-    func begin(outgoing: Bool, name: String, video: Bool) async -> UUID? {
+    /// `conversationId`: el chat de la llamada, para volver a llamar desde Recientes (nil para invitados por enlace).
+    func begin(outgoing: Bool, name: String, video: Bool, conversationId: String? = nil) async -> UUID? {
         let uuid = UUID()
+        if let conversationId { CallKitRecents.remember(name, conversationId: conversationId) }
         // Contestar desde el aviso de la app: sin timbre del sistema (la app ya sonó).
         if incoming.isEmpty { provider.configuration = Self.configuration(ringtone: CallKitRules.silentRingtone) }
         audioActive = false
@@ -204,6 +272,7 @@ final class CallKitBridge: NSObject {
         update.hasVideo = push.video
         let isNew = existing == nil
         incoming[uuid] = push
+        CallKitRecents.remember(push.displayName, conversationId: push.conversationId)
         provider.reportNewIncomingCall(with: uuid, update: update) { error in
             Task { @MainActor [weak self] in
                 guard let self else { return }

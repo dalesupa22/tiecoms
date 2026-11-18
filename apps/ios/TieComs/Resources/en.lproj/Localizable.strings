@@ -366,6 +366,7 @@
 "call.answerAudio" = "Answer without camera";
 "call.answerVideo" = "Answer with camera";
 "call.audio" = "Voice call";
+"call.recents.notFound" = "Could not find the chat for “{name}” to call";
 "call.audioMenu" = "Audio";
 "call.audioOut" = "Audio output";
 "call.cameraOff" = "Turn camera off";

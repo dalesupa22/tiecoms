@@ -346,6 +346,7 @@ final class AppStore {
     let callCenter = CallCenter()
     /// «Contestar» desde el push con la app cerrada: se entra al tener sesión.
     @ObservationIgnored var pendingCallJoin: String?
+    @ObservationIgnored var pendingRecentsCall: CallKitRecents.Request?
     @ObservationIgnored var snapshotTask: Task<Void, Never>?
     @ObservationIgnored var lastBootstrapAt = Date.distantPast
 
@@ -416,6 +417,21 @@ final class AppStore {
         let center = callCenter
         // Contesté desde el aviso (acción «Contestar» del push): en Recientes es entrante.
         Task { do { try await center.join(callId, camera: false, incoming: true) } catch { show(L10n.errorText(error)) } }
+    }
+    /// CH038: tocar una llamada de chaggu en «Recientes» de Teléfono vuelve a llamar a ese chat (ya o al terminar de abrir).
+    func callFromRecents(_ request: CallKitRecents.Request) {
+        guard status == .ready, let d = data else { pendingRecentsCall = request; return }
+        pendingRecentsCall = nil
+        let chats = d.conversations.map { (id: $0.id, title: Naming.title(d, $0)) }
+        guard let id = CallKitRecents.resolve(request.handle, remembered: CallKitRecents.load(), chats: chats) else {
+            alert = AppAlert(title: L("call.recents.notFound", ["name": request.handle]), message: nil)
+            return
+        }
+        // Al colgar se queda en el chat.
+        navigate(to: .conversation(id))
+        guard d.callsEnabled else { return }
+        let center = callCenter
+        Task { do { try await center.start(id, kind: request.video ? "video" : "audio") } catch { show(L10n.errorText(error)) } }
     }
     var meetingAttempts: [String: MeetingAttempt] = [:]
     @ObservationIgnored var meetingAuthorization: MeetingAuthorization?
@@ -717,6 +733,7 @@ final class AppStore {
         scheduleFlush(0)
         consumePendingLink()
         if let callId = pendingCallJoin { answerCallFromPush(callId) }
+        if let r = pendingRecentsCall { callFromRecents(r) }
         #if DEBUG
         // Solo pruebas/diagnóstico: abrir una conversación al entrar (-TCOpenConversation <id>).
         if let id = AppConfig.launchValue("TCOpenConversation") { navigate(to: .conversation(id)) }

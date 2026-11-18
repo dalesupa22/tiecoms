@@ -88,6 +88,11 @@ struct TieComsApp: App {
         if Date().timeIntervalSince(launchedAt) < 1.5 { store.launchedByLink = true }
     }
 
+    private func callFromRecents(_ activity: NSUserActivity) {
+        guard let r = CallKitRecents.request(activity) else { return }
+        store.callFromRecents(r)
+    }
+
     private var isNightProof: Bool {
         #if DEBUG
         return AppConfig.launchFlag("TCNightProof")
@@ -128,6 +133,10 @@ struct TieComsApp: App {
                     markLinkLaunch()
                     if let url = activity.webpageURL { store.handle(url: url) }
                 }
+                // CH038: tocar una llamada de chaggu en «Recientes» de Teléfono (o pedirla a Siri) vuelve a llamar.
+                .onContinueUserActivity(CallKitRecents.activityTypes[0], perform: callFromRecents)
+                .onContinueUserActivity(CallKitRecents.activityTypes[1], perform: callFromRecents)
+                .onContinueUserActivity(CallKitRecents.activityTypes[2], perform: callFromRecents)
         }
         .onChange(of: scenePhase) { _, phase in
             switch phase {

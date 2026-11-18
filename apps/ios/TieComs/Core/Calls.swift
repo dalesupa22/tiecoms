@@ -733,7 +733,8 @@ final class CallCenter: CallMediaDelegate {
                     if !callKitAudio { NSLog("[Chaggu] CallKit no activó el audio a tiempo: la app lo activa") }
                 } else if let sys = systemCalls {
                     let label = guest != nil ? CallKitRules.handleName(name) : systemName(j.call, fallback: name)
-                    let uuid = await sys.begin(outgoing: direction == .outgoing, name: label, video: camera || j.call.isVideo)
+                    let uuid = await sys.begin(outgoing: direction == .outgoing, name: label, video: camera || j.call.isVideo,
+                                               conversationId: guest != nil ? nil : j.call.conversationId)
                     guard media === m else {
                         // Colgué mientras el sistema la registraba.
                         if let uuid { sys.end(uuid, cause: .local) }

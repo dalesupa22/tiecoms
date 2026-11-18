@@ -366,6 +366,7 @@
 "call.answerAudio" = "Contestar sin cámara";
 "call.answerVideo" = "Contestar con cámara";
 "call.audio" = "Llamada de voz";
+"call.recents.notFound" = "No encontré el chat de «{name}» para llamar";
 "call.audioMenu" = "Audio";
 "call.audioOut" = "Salida de audio";
 "call.cameraOff" = "Apagar cámara";

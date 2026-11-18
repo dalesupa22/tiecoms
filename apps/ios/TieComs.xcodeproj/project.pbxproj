@@ -160,6 +160,7 @@
 		2ED92AEF541416E0663D3499 /* CH029Tests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E44090CBEF54419B32A2D93 /* CH029Tests.swift */; };
 		C0350A01C0350A01C0350A01 /* CH035Tests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0350F01C0350F01C0350F01 /* CH035Tests.swift */; };
 		C6C2DC564B1A6AA37BFBAA8F /* CH035Tanda2Tests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7BFBAA8F87A6740CB7B05E57 /* CH035Tanda2Tests.swift */; };
+		C38C38C38C38C38C38C38C01 /* CH038Tests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C38C38C38C38C38C38C38F01 /* CH038Tests.swift */; };
 		7DB3F2DFD15EE86041C65551 /* CommunicationNotification.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F1FB42FA08DF6BC0C3115C7 /* CommunicationNotification.swift */; };
 		7E32BF546BC3912953CC54A3 /* V10IssueTasksTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0F74399F62C210F5D5E5480 /* V10IssueTasksTests.swift */; };
 		7E55D7C316E16C7E29BDD886 /* Assistant.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0DF211F0D4E2862568A60C6A /* Assistant.swift */; };
@@ -592,6 +593,7 @@
 		0E44090CBEF54419B32A2D93 /* CH029Tests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CH029Tests.swift; sourceTree = "<group>"; };
 		C0350F01C0350F01C0350F01 /* CH035Tests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CH035Tests.swift; sourceTree = "<group>"; };
 		7BFBAA8F87A6740CB7B05E57 /* CH035Tanda2Tests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CH035Tanda2Tests.swift; sourceTree = "<group>"; };
+		C38C38C38C38C38C38C38F01 /* CH038Tests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CH038Tests.swift; sourceTree = "<group>"; };
 		B7568544A40900AFE4D73CA5 /* Sounds.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sounds.swift; sourceTree = "<group>"; };
 		BC7091EF3CF417ADE10FD1B2 /* snd_brisa_m.caf */ = {isa = PBXFileReference; path = snd_brisa_m.caf; sourceTree = "<group>"; };
 		BC9F4FC91E577352D1412556 /* V9LanguageSubjectsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = V9LanguageSubjectsTests.swift; sourceTree = "<group>"; };
@@ -1001,6 +1003,7 @@
 				0E44090CBEF54419B32A2D93 /* CH029Tests.swift */,
 				C0350F01C0350F01C0350F01 /* CH035Tests.swift */,
 				7BFBAA8F87A6740CB7B05E57 /* CH035Tanda2Tests.swift */,
+				C38C38C38C38C38C38C38F01 /* CH038Tests.swift */,
 				55C8B19C2103FA286D289157 /* ChatBarTests.swift */,
 				6D8D602F456FEA7F1B4BC2EE /* ChatRecoveryTests.swift */,
 				701807F5A1694A914A001927 /* ChatsProfileTests.swift */,
@@ -1505,6 +1508,7 @@
 				2ED92AEF541416E0663D3499 /* CH029Tests.swift in Sources */,
 				C0350A01C0350A01C0350A01 /* CH035Tests.swift in Sources */,
 				C6C2DC564B1A6AA37BFBAA8F /* CH035Tanda2Tests.swift in Sources */,
+				C38C38C38C38C38C38C38C01 /* CH038Tests.swift in Sources */,
 				87B86A5253581DFFC1523AB7 /* ChatBarTests.swift in Sources */,
 				C0652C2639F88BE93F37B899 /* ChatRecoveryTests.swift in Sources */,
 				2ACFB2451080E499FAA6C162 /* ChatsProfileTests.swift in Sources */,

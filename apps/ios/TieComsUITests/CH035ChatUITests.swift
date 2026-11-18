@@ -85,14 +85,17 @@ final class CH035ChatUITests: XCTestCase {
         // Enviar: la burbuja pendiente se vuelve la enviada (misma fila), sin quedar duplicada.
         field.tap(); field.typeText("Hola desde la prueba")
         app.buttons["composer.send"].tap()
-        // Semilla: 1 mensaje + 3 pendientes de leer = 4; el mío es el quinto.
-        XCTAssertTrue(any(app, "msg.\(f.otherId)-m5").waitForExistence(timeout: 8), "mi mensaje confirmado")
-        XCTAssertEqual(app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'pending.'")).count, 0, "no queda burbuja pendiente")
+        // Por texto y no por id: la API sintética sigue viva entre pruebas y la numeración depende de lo ya sembrado.
+        let bubble = { (text: String) in app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'msg.' AND label CONTAINS %@", text)).firstMatch }
+        let pending = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'pending.'"))
+        XCTAssertTrue(bubble("Hola desde la prueba").waitForExistence(timeout: 8), "mi mensaje confirmado")
+        XCTAssertEqual(pending.count, 0, "no queda burbuja pendiente junto a la enviada")
+        XCTAssertEqual(app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'msg.' AND label CONTAINS 'Hola desde la prueba'")).count, 1, "una sola burbuja")
         XCTAssertFalse((field.value as? String ?? "").contains("Hola desde la prueba"), "el compositor quedó vacío")
 
         // Llega uno a este chat: aparece al final.
         call(f, "/__say", ["conv": f.otherId, "body": "Respuesta en vivo"])
-        XCTAssertTrue(any(app, "msg.\(f.otherId)-m6").waitForExistence(timeout: 8), "mensaje entrante en vivo")
+        XCTAssertTrue(bubble("Respuesta en vivo").waitForExistence(timeout: 8), "mensaje entrante en vivo")
 
         // Volver y reabrir: ya sin divisor (todo leído) y con el compositor listo.
         sleep(2)
@@ -100,7 +103,7 @@ final class CH035ChatUITests: XCTestCase {
         XCTAssertTrue(row.waitForExistence(timeout: 10))
         row.tap()
         XCTAssertTrue(field.waitForExistence(timeout: 15))
-        XCTAssertTrue(any(app, "msg.\(f.otherId)-m6").waitForExistence(timeout: 8))
+        XCTAssertTrue(bubble("Respuesta en vivo").waitForExistence(timeout: 8))
         XCTAssertFalse(any(app, "chat.newDivider").exists, "sin no leídos no hay divisor")
     }
 

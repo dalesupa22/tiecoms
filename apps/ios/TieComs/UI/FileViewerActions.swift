@@ -21,6 +21,23 @@ extension EnvironmentValues {
     }
 }
 
+/// Cómo abre el chat un enlace de una burbuja (menciones, #grupos, http), CH035. Es una referencia que se crea UNA vez
+/// por chat, y no un cierre ni `openURL`: SwiftUI no sabe comparar cierres, así que un valor de entorno con uno «cambia»
+/// cada vez que el entorno de arriba se toca (una evaluación de la pantalla, una transición) y todas las burbujas que lo
+/// leen se volvían a pintar aunque sus filas no hubieran cambiado. Una referencia compara por identidad.
+/// Fuera de un chat no hay ninguna y abre el sistema.
+final class ChatLinkOpener {
+    let open: (URL) -> Void
+    init(_ open: @escaping (URL) -> Void) { self.open = open }
+}
+private struct ChatOpenURLKey: EnvironmentKey { static let defaultValue: ChatLinkOpener? = nil }
+extension EnvironmentValues {
+    var chatOpenURL: ChatLinkOpener? {
+        get { self[ChatOpenURLKey.self] }
+        set { self[ChatOpenURLKey.self] = newValue }
+    }
+}
+
 /// Barra inferior del visor: gg, tarea y compartir. `dark` en el visor de fotos (fondo negro).
 struct FileViewerActionBar: View {
     @Environment(AppStore.self) private var store

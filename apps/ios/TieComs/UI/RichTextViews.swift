@@ -176,7 +176,10 @@ struct RichMessageText: UIViewRepresentable {
     /// 0 = sin tope (mensaje muy largo plegado: 30).
     var maxLines = 0
     var onMention: (String) -> Void
-    @Environment(\.openURL) private var openURL
+    /// La referencia estable del chat (CH035), no `openURL` del entorno: con aquel cada cambio del entorno de arriba
+    /// actualizaba todas las burbujas con formato. Fuera de un chat abre el sistema.
+    @Environment(\.chatOpenURL) private var chatOpenURL
+    fileprivate func openURL(_ url: URL) { if let chatOpenURL { chatOpenURL.open(url) } else { UIApplication.shared.open(url) } }
 
     func makeUIView(context: Context) -> UITextView {
         let v = UITextView()

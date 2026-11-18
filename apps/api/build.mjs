@@ -12,6 +12,10 @@ if (!(await readFile(baileysSocket, 'utf8')).includes('companion_reg_refresh')) 
 if (!(await readFile(baileysSocket.replace(/socket\.js$/, 'chats.js'), 'utf8')).includes('Chaggu privacy receipt')) {
   throw new Error('baileys sin recibo de privacidad: corre npm install');
 }
+// Sin confirmar los <status>, WhatsApp corta cada ~50 min y retiene mensajes (Baileys #2858).
+if (!(await readFile(baileysSocket.replace(/socket\.js$/, 'messages-recv.js'), 'utf8')).includes("ws.on('CB:status'")) {
+  throw new Error('baileys sin confirmar estados (CB:status): corre npm install');
+}
 
 await rm('dist', { recursive: true, force: true });
 const bundled = await build({

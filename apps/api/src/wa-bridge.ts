@@ -27,6 +27,11 @@ import {
   storeReaction, aliasOf, rememberSenders, storeAliases,
 } from './modules/wa-sync.ts';
 
+import { installSignalLogGuard } from './modules/wa-quiet-signal.ts';
+
+// Antes de abrir cualquier sesión: libsignal imprime las llaves de cifrado por consola.
+installSignalLogGuard();
+
 const BRIDGE_ID = `${hostname()}:${process.pid}`;
 const LEASE_SECONDS = 60;
 const setStatus=(id:string,fields:Record<string,unknown>)=>persistStatus(id,fields,BRIDGE_ID);

@@ -73,6 +73,9 @@ services:
     environment:
       INSTANCE_ID: wa-1
       DB_POOL_MAX: "4"
+      # Heap explícito (antes ~256 MB por defecto con 512M): el 18-nov se cayó por heap out of memory
+      # al volver a vincular un WhatsApp personal grande (historial completo de ~1300 chats).
+      NODE_OPTIONS: "--max-old-space-size=768"
     stop_grace_period: 15s
     healthcheck:
       # Latido del ciclo (src/watchdog.ts): sin vueltas en 2 min se ve «unhealthy»; a los 5 min el proceso sale solo.
@@ -84,4 +87,4 @@ services:
       start_period: 120s
     deploy:
       resources:
-        limits: { cpus: "0.75", memory: 512M, pids: 128 }
+        limits: { cpus: "0.75", memory: 1024M, pids: 128 }

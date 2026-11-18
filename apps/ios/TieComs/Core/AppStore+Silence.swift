@@ -7,7 +7,7 @@ extension AppStore {
     var dndUntil: Date? {
         _ = dndTick
         let now = Date()
-        return [ISODate.parse(data?.me.dndUntil), localDndUntil]
+        return [ISODate.parse(me?.dndUntil), localDndUntil]
             .compactMap { $0 }.filter { $0 > now }.max()
     }
 

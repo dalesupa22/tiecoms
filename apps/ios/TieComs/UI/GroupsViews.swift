@@ -598,15 +598,23 @@ struct DMsView: View {
     @State private var issuesFor: String?
     /// Correo fijado en la pantalla principal que se abrió (su vista previa).
     @State private var mailOpen: MailPinDTO?
+    /// La lista y los no leídos de hilos, memorizados por sus entradas (CH035).
+    @State private var derived = Derived()
+    final class Derived {
+        struct ListKey: Equatable { var d: BootstrapDTO; var query: String }
+        let list = Memo<ListKey, [ConversationDTO]>()
+        let threadUnread = Memo<BootstrapDTO, [String: Int]>()
+    }
 
     var body: some View {
         Group {
-            if let d = store.data {
-                let list = Naming.dms(d, query: query)
+            // Oculta (otra pestaña o un chat encima) sigue la copia agrupada del store, no cada evento (CH035).
+            if let d = store.data(visible: store.tab == .dms && store.dmsPath.isEmpty) {
+                let list = derived.list(.init(d: d, query: query)) { Naming.dms(d, query: query) }
                 // WhatsApp movido a DMs: se mezcla con el mismo orden y separadores.
                 let wa = WaInbox.rows(store.waInbox, place: WaInbox.dms, query: query, workOnly: store.waWorkOnly)
                 let searching = !query.trimmingCharacters(in: .whitespaces).isEmpty
-                let threadUnread = Naming.chatThreadUnread(d)
+                let threadUnread = derived.threadUnread(d) { Naming.chatThreadUnread(d) }
                 List {
                     if store.dndActive {
                         DndBanner()

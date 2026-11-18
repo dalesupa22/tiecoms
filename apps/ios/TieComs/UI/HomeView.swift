@@ -22,6 +22,17 @@ struct HomeView: View {
     /// Último árbol sin búsqueda de esta pintada (referencia: escribirlo no vuelve a pintar).
     @State private var treeMemo = TreeMemo()
     final class TreeMemo { var tree: GroupsTree? }
+    /// Derivados de la lista memorizados por sus entradas (CH035): si la vista se evalúa por otra cosa (conexión, avisos,
+    /// volver de un chat sin novedades) no se arma otra vez el árbol ni se reagrupan los asuntos.
+    @State private var derived = Derived()
+    final class Derived {
+        struct TreeKey: Equatable { var d: BootstrapDTO; var query: String; var workspace: String?; var tab: HomeFilter }
+        let tree = Memo<TreeKey, GroupsTree>()
+        let flat = Memo<TreeKey, [GroupsTree.ConvNode]>()
+        let open = Memo<[String: IssueDTO], [String: [IssueDTO]]>()
+    }
+    /// ¿Se ve esta lista? (pestaña Grupos sin nada empujado encima). Si no, sigue la copia agrupada del store.
+    private var onScreen: Bool { store.tab == .home && store.homePath.isEmpty }
     @State private var sheet: GroupsSheet?
     @State private var collapsed = HomeCollapse.load()
     @State private var tab = HomeFilter.savedGroups
@@ -43,10 +54,11 @@ struct HomeView: View {
     var body: some View {
         @Bindable var store = store
         Group {
-            if let d = store.data {
+            if let d = store.data(visible: onScreen) {
                 let _ = PerfCounters.bump("home.body")
-                let tree = PerfCounters.measure("home.groupsTree") { Naming.groupsTree(d, query: query, filterWorkspace: store.workspaceFilter, tab: tab) }
-                let flat = viewMode == .list ? PerfCounters.measure("home.groupsList") { Naming.groupsList(d, from: tree) } : []
+                let key = Derived.TreeKey(d: d, query: query, workspace: store.workspaceFilter, tab: tab)
+                let tree = derived.tree(key) { PerfCounters.measure("home.groupsTree") { Naming.groupsTree(d, query: query, filterWorkspace: store.workspaceFilter, tab: tab) } }
+                let flat = viewMode == .list ? derived.flat(key) { PerfCounters.measure("home.groupsList") { Naming.groupsList(d, from: tree) } } : []
                 // El menú de plegar usa el árbol sin búsqueda: sin búsqueda es este mismo (no se arma otra vez).
                 let _ = { treeMemo.tree = query.trimmingCharacters(in: .whitespaces).isEmpty ? tree : nil }()
                 let hasGroups = viewMode == .list ? !flat.isEmpty : tree.hasGroups
@@ -54,7 +66,7 @@ struct HomeView: View {
                 // Asuntos abiertos por conversación (se muestran bajo cada grupo).
                 // Las tareas de un asunto que veo no van sueltas: se cuentan en su chapita «☑ 1/3».
                 // Los personales no tienen grupo: no van bajo ninguna fila.
-                let open = Self.openByConversation(store.issues)
+                let open = derived.open(store.issues) { Self.openByConversation(store.issues) }
                 // WhatsApp movido a Grupos: mismas reglas de orden y separadores (sin espacio elegido ni en Menciones/Tareas).
                 let wa = store.workspaceFilter == nil ? WaInbox.rows(store.waInbox, place: WaInbox.groups, query: query, filter: tab, workOnly: store.waWorkOnly) : []
                 // Recordatorios vencidos: chip «🔔 N» al final de los filtros (antes, una fila propia).
@@ -178,7 +190,7 @@ struct HomeView: View {
             // Vista (plegar/desplegar): a la izquierda, aparte de ✏️ y «＋», que son para escribir y crear.
             ToolbarItem(placement: .topBarLeading) {
                 Menu {
-                    if let d = store.data { foldMenu(treeMemo.tree ?? Naming.groupsTree(d, filterWorkspace: store.workspaceFilter, tab: tab), issuesOnly: viewMode == .list) }
+                    if let d = store.data(visible: onScreen) { foldMenu(treeMemo.tree ?? Naming.groupsTree(d, filterWorkspace: store.workspaceFilter, tab: tab), issuesOnly: viewMode == .list) }
                 } label: { Image(systemName: "line.3.horizontal") }
                 .accessibilityLabel(L("grp.foldMenu"))
                 .accessibilityIdentifier("home.fold")

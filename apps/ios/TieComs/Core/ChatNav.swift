@@ -74,6 +74,31 @@ enum ChatNav {
     }
 
     /// Mensajes posteriores a lo leído al abrir que me mencionan (a mí o a todos), en orden.
+    /// Primer no leído con lo que YA está en memoria (CH035), para colocar el chat antes del primer fotograma en vez de
+    /// esperar a la red. `.some(m)`: ese es; `.some(nil)`: no queda ninguno; `nil`: con lo cargado no se puede saber
+    /// (falta historial o hay un hueco) y decide el camino de siempre, que sí pide páginas (`firstUnreadMessage`).
+    static func firstUnreadInMemory(_ messages: [MessageDTO], snapshot: Snapshot, historyFromSeq: Int, lastMessageSeq: Int,
+                                    me: String?, blocked: Set<String>) -> MessageDTO?? {
+        guard snapshot.unread > 0 else { return .some(nil) }
+        let floor = max(snapshot.lastReadSeq, historyFromSeq)
+        guard let first = messages.first, first.seq <= floor + 1 else { return nil }
+        var cursor = floor
+        for m in messages where m.seq > floor {
+            guard m.seq == cursor + 1 else { return nil }
+            cursor = m.seq
+            if !m.isSystem && m.deletedAt == nil && m.authorId != me && !blocked.contains(m.authorId) { return .some(m) }
+        }
+        return cursor >= lastMessageSeq ? .some(nil) : nil
+    }
+
+    /// El tema con que abre el chat si se puede saber ya: `.some(tema o nil)`. `nil` = hay que esperar la lista de temas
+    /// (el primer no leído trae tema y todavía no se sabe si está activo). Misma regla que `TopicRules.openFilter`.
+    static func openFilterInMemory(_ messages: [MessageDTO], after read: Int, me: String, topics: [TopicDTO]?) -> String?? {
+        if let topics { return .some(TopicRules.openFilter(messages, after: read, me: me, active: TopicRules.activeIds(topics))) }
+        let first = messages.filter { TopicRules.countsAsUnread($0, after: read, me: me) }.min { $0.seq < $1.seq }
+        return first?.topicId == nil ? .some(nil) : nil
+    }
+
     static func mentionIds(_ messages: [MessageDTO], after lastReadSeq: Int, me: String) -> [String] {
         messages.filter { $0.seq > lastReadSeq && $0.deletedAt == nil && MentionText.mentionsMe($0.mentions, me: me, authorId: $0.authorId) }.map(\.id)
     }

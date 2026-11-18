@@ -73,7 +73,41 @@ final class AppStore {
     /// CH034: este arranque pintó la lista desde la copia local (el splash no tiene nada que esperar).
     private(set) var paintedFromCache = false
     private(set) var connection: Connection = .offline
-    private(set) var data: BootstrapDTO?
+    private(set) var data: BootstrapDTO? { didSet { dataChanged() } }
+    /// Lo que del snapshot casi nunca cambia, en propiedades aparte (CH035). `data` cambia con cada mensaje de cualquier
+    /// chat; quien solo necesita saber quién soy (`me`) o qué funciones hay prendidas quedaba suscrito a todo eso y se
+    /// volvía a evaluar con cada mensaje. Estas solo cambian —y solo avisan— cuando su contenido cambia.
+    private(set) var meSlice: UserDTO?
+    private(set) var featuresSlice: FeaturesDTO?
+    private func dataChanged() {
+        if data?.me != meSlice { meSlice = data?.me }
+        if data?.features != featuresSlice { featuresSlice = data?.features }
+        scheduleListData()
+    }
+    /// Copia de `data` para las listas que NO se están viendo (CH035): una pestaña oculta o la lista que queda debajo de
+    /// un chat. `data` cambia con cada mensaje de cualquier chat y cada cambio volvía a evaluar esas listas enteras
+    /// (árbol de grupos, orden, bandeja) sin que nadie las viera. Esta copia se pone al día como mucho cada
+    /// `listDataInterval`; la lista que sí se ve lee `data` en vivo (`data(visible:)`).
+    private(set) var listData: BootstrapDTO?
+    @ObservationIgnored private var listDataTask: Task<Void, Never>?
+    static let listDataInterval: UInt64 = 1_500_000_000
+    private func scheduleListData() {
+        // Primer snapshot, cierre de sesión o cambio de cuenta: al momento (nada de la sesión anterior queda a la vista).
+        if data == nil || listData == nil || listData?.me.id != data?.me.id {
+            listDataTask?.cancel(); listDataTask = nil
+            listData = data
+            return
+        }
+        guard listDataTask == nil else { return }
+        listDataTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: AppStore.listDataInterval)
+            guard let self, !Task.isCancelled else { return }
+            self.listDataTask = nil
+            self.listData = self.data
+        }
+    }
+    /// El snapshot para una lista raíz: en vivo si está a la vista; si no, la copia agrupada.
+    func data(visible: Bool) -> BootstrapDTO? { visible ? data : listData }
     private(set) var conversations: [String: ConversationState] = [:]
     private(set) var pending: [PendingMessage] = []
     private(set) var typing: [String: [TypingEntry]] = [:]
@@ -87,6 +121,24 @@ final class AppStore {
     /// Últimos comentarios de cada tarjeta de tarea del chat (y con cuántos comentarios se pidieron). Vive en el store:
     /// la LazyVStack recrea la tarjeta al volver a verla y, con @State, su alto cambiaba y la lista no dejaba de reubicarse.
     var taskCardComments: [String: TaskCardComments] = [:]
+    /// Comentarios de tarjetas que llegan casi a la vez (al abrir un chat con varias tareas): se aplican juntos, en un
+    /// solo cambio (CH035). Antes cada respuesta cambiaba el alto de su tarjeta por separado y la lista se reubicaba N veces.
+    @ObservationIgnored private var taskCardBuffer: [String: TaskCardComments] = [:]
+    @ObservationIgnored private var taskCardFlush: Task<Void, Never>?
+    func putTaskCardComments(_ issueId: String, _ value: TaskCardComments) {
+        taskCardBuffer[issueId] = value
+        guard taskCardFlush == nil else { return }
+        let stamp = sessionStamp
+        taskCardFlush = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 80_000_000)
+            guard let self else { return }
+            let batch = self.taskCardBuffer
+            self.taskCardBuffer = [:]; self.taskCardFlush = nil
+            guard stamp == self.sessionStamp else { return }
+            let next = self.taskCardComments.merging(batch) { _, new in new }
+            if next != self.taskCardComments { self.taskCardComments = next }
+        }
+    }
     var reminders: [ReminderDTO] = []
     var events: [String: CalendarEventDTO] = [:]
     /// Mis mensajes programados pendientes, enviándose o fallidos (docs/PROGRAMADOS.md), por hora de salida.
@@ -491,7 +543,7 @@ final class AppStore {
         }
     }
 
-    var me: UserDTO? { data?.me }
+    var me: UserDTO? { meSlice }
 
     // MARK: - Sesión
 

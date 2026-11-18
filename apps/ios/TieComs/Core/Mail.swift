@@ -66,7 +66,7 @@ final class MailConnector: NSObject, ASWebAuthenticationPresentationContextProvi
 }
 
 extension AppStore {
-    var mailEnabled: Bool { data?.mailEnabled == true }
+    var mailEnabled: Bool { featuresSlice?.mail == true }
 
     // MARK: Tarjetas
 

@@ -1,11 +1,12 @@
 import SwiftUI
 import UIKit
 
-private enum ChatItem: Identifiable {
+private enum ChatItem: Identifiable, Equatable, Sendable {
     case day(String, Date)
     case message(MessageDTO, showAuthor: Bool)
     case system(MessageDTO)
-    case pending(PendingMessage)
+    /// `startsRun`: igual que `showAuthor` del mensaje ya enviado (primera burbuja de una racha mía).
+    case pending(PendingMessage, startsRun: Bool)
     /// Línea «N mensajes nuevos» antes del primer no leído (1.6.4).
     case newDivider(Int)
 
@@ -14,7 +15,7 @@ private enum ChatItem: Identifiable {
         case .newDivider: return ChatNavIds.divider
         case .day(let k, _): return "day-\(k)"
         case .message(let m, _), .system(let m): return SentRows.rowId(m)
-        case .pending(let p): return SentRows.pendingId(p.clientMessageId)
+        case .pending(let p, _): return SentRows.pendingId(p.clientMessageId)
         }
     }
 }
@@ -98,58 +99,345 @@ func excerpt(_ s: String, _ n: Int = 120) -> String {
     return t.count > n ? String(t.prefix(n)) + "…" : t
 }
 
+/// Frontera de invalidación (CH035): lo que `content` lee del modelo del chat o del store queda suscrito a ESTA vista y
+/// no a la pantalla entera. Así cada tecla solo vuelve a evaluar el compositor, y cruzar un umbral del scroll, los
+/// botones flotantes.
+private struct ChatSection<Content: View>: View {
+    @ViewBuilder let content: () -> Content
+    var body: some View { content() }
+}
+
+/// Lo que hace distinta a una fila del chat (CH035). Mientras su clave no cambie, SwiftUI no vuelve a evaluarla aunque
+/// la pantalla sí se evalúe (mensaje en otro chat, «escribiendo…», teclado, una fila nueva al final).
+private struct ChatRowKey: Equatable, Sendable {
+    var item: ChatItem
+    /// Personas, empresas, espacios, yo y funciones del servidor (ChatDerived.envRev): cambia muy poco.
+    var env = 0
+    /// Este chat sin lo que cambia con cada mensaje (no leídos, último mensaje, cursor de lectura).
+    var conv: ConversationDTO
+    var embedded = false
+    var quoted: MessageDTO?
+    var pinned = false
+    /// Texto que la búsqueda resalta en esta fila.
+    var search: String?
+    var anchor = false
+    var topic: TopicDTO?
+    var selecting = false
+    var selected = false
+    var highlighted = false
+    var threads: [ConversationDTO] = []
+    var sides: [ConversationDTO] = []
+    var merged: String?
+    var forwarded: String?
+    /// «Abrir» el chat de origen de una respuesta en privado.
+    var origin = false
+    /// Día en curso: las etiquetas «Hoy» y «Ayer» cambian a medianoche.
+    var today = 0
+}
+
+/// Una fila que solo se evalúa cuando cambia su clave. Su contenido NO debe leer del store nada que cambie con cada
+/// evento (`data`, `conversations`, `typing`): todo eso le llega por la clave.
+private struct ChatRow<Content: View>: View, Equatable {
+    let key: ChatRowKey
+    @ViewBuilder let content: () -> Content
+    nonisolated static func == (a: ChatRow, b: ChatRow) -> Bool { a.key == b.key }
+    var body: some View {
+        let _ = PerfCounters.bump("chat.row.body")
+        content()
+    }
+}
+
+/// Derivados del chat memorizados por sus entradas reales (CH035): antes se recalculaban en cada evaluación de la vista
+/// (cada tecla, cada evento de cualquier chat). No es observable: escribir aquí no invalida nada.
+@MainActor
+private final class ChatDerived {
+    struct ItemsKey: Equatable {
+        var messages: [MessageDTO]
+        var pending: [PendingMessage]
+        var blocked: Set<String>
+        var filter: String?
+        var active: Set<String>
+        var all: Bool
+        var revealed: Set<Int>
+        var dividerId: String?
+        var dividerCount: Int
+        /// Los asuntos solo cuentan con temas (tarjetas de tarea dentro de un tema); sin temas no entran a la clave.
+        var issues: [String: IssueDTO]?
+    }
+    private var itemsKey: ItemsKey?
+    private var cachedItems: [ChatItem] = []
+    func items(_ key: ItemsKey, build: () -> [ChatItem]) -> [ChatItem] {
+        if key == itemsKey { return cachedItems }
+        cachedItems = PerfCounters.measure("chat.buildItems", build)
+        itemsKey = key
+        return cachedItems
+    }
+
+    private var byIdKey: (messages: [MessageDTO], blocked: Set<String>)?
+    private var cachedById: [String: MessageDTO] = [:]
+    func byId(_ messages: [MessageDTO], blocked: Set<String>) -> [String: MessageDTO] {
+        if let k = byIdKey, k.blocked == blocked, k.messages == messages { return cachedById }
+        cachedById = Dictionary(messages.filter { !blocked.contains($0.authorId) }.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        byIdKey = (messages, blocked)
+        return cachedById
+    }
+
+    private var countsKey: [MessageDTO]?
+    private var cachedCounts: [String: Int] = [:]
+    func topicCounts(_ messages: [MessageDTO]) -> [String: Int] {
+        if let k = countsKey, k == messages { return cachedCounts }
+        cachedCounts = TopicRules.counts(messages)
+        countsKey = messages
+        return cachedCounts
+    }
+
+    private var unreadKey: (messages: [MessageDTO], read: Int, me: String, active: Set<String>)?
+    private var cachedUnread: [String: Int] = [:]
+    func topicUnread(_ messages: [MessageDTO], read: Int, me: String, active: Set<String>) -> [String: Int] {
+        if let k = unreadKey, k.read == read, k.me == me, k.active == active, k.messages == messages { return cachedUnread }
+        cachedUnread = TopicRules.unreadCounts(messages, read: read, me: me, active: active)
+        unreadKey = (messages, read, me, active)
+        return cachedUnread
+    }
+
+    /// Lo que las filas toman del snapshot aparte de las conversaciones. Los arreglos comparten memoria entre un
+    /// snapshot y el siguiente (un mensaje nuevo solo toca `conversations`), así que comparar es inmediato.
+    private var envOf: BootstrapDTO?
+    private(set) var envRev = 0
+    func env(_ d: BootstrapDTO) -> Int {
+        if let e = envOf, e.me == d.me, e.people == d.people, e.organizations == d.organizations, e.workspaces == d.workspaces, e.features == d.features { return envRev }
+        var e = d
+        e.conversations = []
+        envOf = e
+        envRev += 1
+        PerfCounters.bump("chat.env.changed")
+        return envRev
+    }
+
+    /// Valores de entorno que se crean una vez: las vistas que los leen (burbujas, adjuntos) se invalidan cuando el
+    /// entorno «cambia», y un cierre nuevo en cada evaluación cuenta como cambio (ver `ChatLinkOpener`).
+    private var urlAction: OpenURLAction?
+    func openURL(_ handler: @escaping (URL) -> OpenURLAction.Result) -> OpenURLAction {
+        if let a = urlAction { return a }
+        let a = OpenURLAction(handler: handler)
+        urlAction = a
+        return a
+    }
+    private var chatOpenAction: ChatLinkOpener?
+    func chatOpen(_ handler: @escaping (URL) -> Void) -> ChatLinkOpener {
+        if let a = chatOpenAction { return a }
+        let a = ChatLinkOpener(handler)
+        chatOpenAction = a
+        return a
+    }
+    private var askGgAction: ((String) -> Void)?
+    func askGg(_ handler: @escaping (String) -> Void) -> (String) -> Void {
+        if let a = askGgAction { return a }
+        askGgAction = handler
+        return handler
+    }
+
+    /// Pila perezosa o normal (CH035): se decide al abrir el chat y no se cambia en caliente — pasar de una a otra
+    /// destruye y vuelve a crear la lista entera (se perdía el estado de las filas y las fotos volvían a cargar, justo al
+    /// paginar hacia atrás). Única excepción: un historial enorme cargado en una pila normal pasa a la perezosa.
+    private var lazyDecided: Bool?
+    func lazy(count: Int) -> Bool {
+        if let v = lazyDecided {
+            if !v && count > ChatStackRule.lazyAbove * ChatStackRule.hardFactor { lazyDecided = true }
+            return lazyDecided ?? v
+        }
+        let v = count > ChatStackRule.lazyAbove
+        lazyDecided = v
+        return v
+    }
+
+    /// Este chat sin lo que cambia con cada mensaje: lo que de él depende una fila (permisos, tipo, nombre, miembros).
+    static func stable(_ c: ConversationDTO) -> ConversationDTO {
+        var k = c
+        k.lastMessageSeq = 0; k.lastEventSeq = 0; k.lastMessageAt = nil; k.lastMessagePreview = nil; k.lastHumanPreview = nil
+        k.lastReadSeq = 0; k.unread = 0; k.readRevision = nil; k.unreadMentions = 0; k.openIssues = 0
+        return k
+    }
+}
+
+/// Estado de la pantalla de un chat (CH035). Antes eran ~60 `@State` de `ConversationView`: cualquier cambio (cada tecla,
+/// cada umbral del scroll) reevaluaba la vista entera con su lista. En un `@Observable` cada propiedad invalida solo las
+/// vistas que la leen: el compositor lee `draft`, los botones flotantes `farFromBottom`, la lista sus filas.
+@MainActor @Observable
+private final class ChatModel {
+    var draft: String = ""
+    var sidePanel: String? = nil
+    /// Pide desplazar el chat a un mensaje (ancla de un sidechat) y resaltarlo.
+    var reveal: String? = nil
+    var addingToSide: Bool = false
+    /// Menciones del borrador (offsets UTF-16) y ficha de una persona mencionada.
+    var draftMentions: [Mention] = []
+    /// Programar envío: «Elegir fecha y hora…» y la lista de programados del chat.
+    var pickingSchedule: Bool = false
+    var showScheduled: Bool = false
+    var personCard: String? = nil
+    var sideForPerson: String? = nil
+    var highlighted: String? = nil
+    var staged: [LocalAttachment] = []
+    var stagedGifs: [GifMediaItem] = []
+    var pickingGifs: Bool = false
+    var uploadProgress: [UUID: Double] = [:]
+    var uploading: Bool = false
+    var askSide: MessageDTO? = nil
+    var replyTo: MessageDTO? = nil
+    var editing: MessageDTO? = nil
+    /// «Comenta esta tarea…» desde su tarjeta: lo que se escribe va como comentario de la tarea (no al chat).
+    var commentingIssue: IssueDTO? = nil
+    /// «Responder» de la franja de comentarios de un evento (tanda 1.7 §5): el compositor comenta el evento.
+    var commentingEvent: CalendarEventDTO? = nil
+    /// Para medir de tocar el chat a ver sus mensajes (Perf).
+    @ObservationIgnored var openedAt: Date = Date()
+    /// Buscar dentro del chat (tanda 1.7 §6).
+    var search: ChatSearchState = ChatSearchState()
+    /// ① «una vista» para el próximo mensaje (tanda 1.7 §7).
+    var viewOnceNext: Bool = false
+    var sheet: ChatSheet? = nil
+    var confirmDelete: MessageDTO? = nil
+    /// Banderita elegida: filtra el chat y es el tema de lo que escribo (nil = «Todo»).
+    var topicFilter: String? = nil
+    var confirmRemoveTopic: TopicDTO? = nil
+    /// Mensajes con tema a los que se saltó desde «Todo»: quedan a la vista aunque «Todo» esconda lo leído de los temas.
+    var revealed: Set<Int> = []
+    /// El filtro lo puso la apertura (todo lo no leído en un tema): no se baja al final, se queda en el primer no leído.
+    var autoFiltered: Bool = false
+    /// Se abrió (o se está abriendo) en un mensaje concreto: la apertura por no leídos no cambia el tema ni baja al divisor.
+    var jumped: Bool = false
+    @ObservationIgnored var unreadJumpTask: Task<Void, Never>? = nil
+    var jumpingUnread: Bool = false
+    @ObservationIgnored var gapFix: Task<Void, Never>? = nil
+    var blockUserId: String? = nil
+    @ObservationIgnored var draftFileURL: URL? = nil
+    @ObservationIgnored var draftSave: Task<Void, Never>? = nil
+    @ObservationIgnored var uploadedFiles: [UUID: AttachmentDTO] = [:]
+    @ObservationIgnored var uploadedGifs: [String: GifImport] = [:]
+    var pendingVoice: PendingVoiceSend? = nil
+    /// Nota cuya subida falló (413, red…): se conserva para reintentar, no se pierde en silencio.
+    var failedVoice: PendingVoiceSend? = nil
+    var showingVoiceAIConsent: Bool = false
+    var composerFocused: Bool = false
+    /// Cursor del compositor (UTF-16).
+    var draftCursor: Int = 0
+    /// ✅ sobre un mensaje que abrió un asunto aún abierto: «¿Cerrar también el asunto?».
+    var closeIssuePrompt: String? = nil
+    /// Lo no leído al abrir (antes de marcar leído); la línea «N mensajes nuevos» queda hasta salir del chat.
+    var unreadSnap: ChatNav.Snapshot? = nil
+    @ObservationIgnored var readingSession: AppStore.SessionStamp? = nil
+    /// Primer mensaje no leído (la línea va justo antes).
+    var dividerId: String? = nil
+    /// Ya se colocó el chat al abrir (en el primer no leído o al final).
+    var positioned: Bool = false
+    /// Hay una página vieja en camino (no se pide otra a la vez).
+    var loadingOlder: Bool = false
+    /// A más de una pantalla del final: sale el botón ⌄ y los mensajes nuevos no arrastran la vista.
+    var farFromBottom: Bool = false
+    /// Último seq visto estando al final: lo que llegue después cuenta en el globo del ⌄.
+    var bottomSeq: Int = 0
+    /// La línea de no leídos quedó por encima de la vista: píldora «↑ N nuevos».
+    var dividerAbove: Bool = false
+    /// Menciones a mí sin leer al abrir, por visitar con el botón «@».
+    var mentionQueue: [String] = []
+    var viewportHeight: CGFloat = 0
+    /// Al final del chat (a menos de 40 pt); esto no implica que se hayan visto las filas anteriores.
+    var atBottom: Bool = false
+    /// Filas visibles y visitadas desde la colocación inicial, sin saltar huecos del cursor.
+    @ObservationIgnored var readPauseID: UUID? = nil
+    var positioning: Bool = false
+    var positioningFailed: Bool = false
+    var initialLayoutAnchor: String? = nil
+    @ObservationIgnored var waitingForUnreadViewport: Bool = false
+    @ObservationIgnored var dividerPositionY: CGFloat? = nil
+    /// gg dentro del chat (contrato 1-oct-2026, parte B).
+    var gg: GgChatState = GgChatState()
+    /// Cambia al tocar la ✕ de la píldora gg o al volver a mostrarla (GgPillPrefs vive en UserDefaults).
+    var ggPillRev: Int = 0
+    /// Ancho de la pantalla del chat, para que el nombre en la cabecera quepa con los botones (headerTitleWidth).
+    var screenWidth: CGFloat = 393
+}
+
 struct ConversationView: View {
     @Environment(AppStore.self) private var store
     @Environment(\.scenePhase) private var scenePhase
-    @Environment(\.openURL) private var openURL
+    /// Enlaces que abre la propia pantalla (wa.me, mailto): directo al sistema. No se lee `openURL` del entorno: ese
+    /// valor nunca compara igual y cada cambio del entorno de arriba volvía a evaluar el chat (CH035).
+    private func openURL(_ url: URL) { UIApplication.shared.open(url) }
     @Environment(\.horizontalSizeClass) private var sizeClass
     let conversationId: String
     /// Dentro del panel de una conversación lateral.
     var embedded = false
-    @State private var draft = ""
-    @State private var sidePanel: String?
-    /// Pide desplazar el chat a un mensaje (ancla de un sidechat) y resaltarlo.
-    @State private var reveal: String?
-    @State private var addingToSide = false
-    /// Menciones del borrador (offsets UTF-16) y ficha de una persona mencionada.
-    @State private var draftMentions: [Mention] = []
-    /// Programar envío: «Elegir fecha y hora…» y la lista de programados del chat.
-    @State private var pickingSchedule = false
-    @State private var showScheduled = false
-    @State private var personCard: String?
-    @State private var sideForPerson: String?
-    @State private var highlighted: String?
-    @State private var staged: [LocalAttachment] = []
-    @State private var stagedGifs: [GifMediaItem] = []
-    @State private var pickingGifs = false
-    @State private var uploadProgress: [UUID: Double] = [:]
-    @State private var uploading = false
-    @State private var askSide: MessageDTO?
-    @State private var replyTo: MessageDTO?
-    @State private var editing: MessageDTO?
-    /// «Comenta esta tarea…» desde su tarjeta: lo que se escribe va como comentario de la tarea (no al chat).
-    @State private var commentingIssue: IssueDTO?
-    /// «Responder» de la franja de comentarios de un evento (tanda 1.7 §5): el compositor comenta el evento.
-    @State private var commentingEvent: CalendarEventDTO?
-    /// Para medir de tocar el chat a ver sus mensajes (Perf).
-    @State private var openedAt = Date()
-    /// Buscar dentro del chat (tanda 1.7 §6).
-    @State private var search = ChatSearchState()
+    /// Todo el estado vive en `ChatModel` (CH035); estas propiedades solo lo reenvían para no cambiar el resto del código.
+    @State private var m = ChatModel()
+    /// Enlaces (`bind.draft` de antes): `bind.draft`.
+    private var bind: Bindable<ChatModel> { Bindable(m) }
+    private var draft: String { get { m.draft } nonmutating set { m.draft = newValue } }
+    private var sidePanel: String? { get { m.sidePanel } nonmutating set { m.sidePanel = newValue } }
+    private var reveal: String? { get { m.reveal } nonmutating set { m.reveal = newValue } }
+    private var addingToSide: Bool { get { m.addingToSide } nonmutating set { m.addingToSide = newValue } }
+    private var draftMentions: [Mention] { get { m.draftMentions } nonmutating set { m.draftMentions = newValue } }
+    private var pickingSchedule: Bool { get { m.pickingSchedule } nonmutating set { m.pickingSchedule = newValue } }
+    private var showScheduled: Bool { get { m.showScheduled } nonmutating set { m.showScheduled = newValue } }
+    private var personCard: String? { get { m.personCard } nonmutating set { m.personCard = newValue } }
+    private var sideForPerson: String? { get { m.sideForPerson } nonmutating set { m.sideForPerson = newValue } }
+    private var highlighted: String? { get { m.highlighted } nonmutating set { m.highlighted = newValue } }
+    private var staged: [LocalAttachment] { get { m.staged } nonmutating set { m.staged = newValue } }
+    private var stagedGifs: [GifMediaItem] { get { m.stagedGifs } nonmutating set { m.stagedGifs = newValue } }
+    private var pickingGifs: Bool { get { m.pickingGifs } nonmutating set { m.pickingGifs = newValue } }
+    private var uploadProgress: [UUID: Double] { get { m.uploadProgress } nonmutating set { m.uploadProgress = newValue } }
+    private var uploading: Bool { get { m.uploading } nonmutating set { m.uploading = newValue } }
+    private var askSide: MessageDTO? { get { m.askSide } nonmutating set { m.askSide = newValue } }
+    private var replyTo: MessageDTO? { get { m.replyTo } nonmutating set { m.replyTo = newValue } }
+    private var editing: MessageDTO? { get { m.editing } nonmutating set { m.editing = newValue } }
+    private var commentingIssue: IssueDTO? { get { m.commentingIssue } nonmutating set { m.commentingIssue = newValue } }
+    private var commentingEvent: CalendarEventDTO? { get { m.commentingEvent } nonmutating set { m.commentingEvent = newValue } }
+    private var openedAt: Date { get { m.openedAt } nonmutating set { m.openedAt = newValue } }
+    private var search: ChatSearchState { get { m.search } nonmutating set { m.search = newValue } }
+    private var viewOnceNext: Bool { get { m.viewOnceNext } nonmutating set { m.viewOnceNext = newValue } }
+    private var sheet: ChatSheet? { get { m.sheet } nonmutating set { m.sheet = newValue } }
+    private var confirmDelete: MessageDTO? { get { m.confirmDelete } nonmutating set { m.confirmDelete = newValue } }
+    private var topicFilter: String? { get { m.topicFilter } nonmutating set { m.topicFilter = newValue } }
+    private var confirmRemoveTopic: TopicDTO? { get { m.confirmRemoveTopic } nonmutating set { m.confirmRemoveTopic = newValue } }
+    private var revealed: Set<Int> { get { m.revealed } nonmutating set { m.revealed = newValue } }
+    private var autoFiltered: Bool { get { m.autoFiltered } nonmutating set { m.autoFiltered = newValue } }
+    private var jumped: Bool { get { m.jumped } nonmutating set { m.jumped = newValue } }
+    private var unreadJumpTask: Task<Void, Never>? { get { m.unreadJumpTask } nonmutating set { m.unreadJumpTask = newValue } }
+    private var jumpingUnread: Bool { get { m.jumpingUnread } nonmutating set { m.jumpingUnread = newValue } }
+    private var gapFix: Task<Void, Never>? { get { m.gapFix } nonmutating set { m.gapFix = newValue } }
+    private var blockUserId: String? { get { m.blockUserId } nonmutating set { m.blockUserId = newValue } }
+    private var draftFileURL: URL? { get { m.draftFileURL } nonmutating set { m.draftFileURL = newValue } }
+    private var draftSave: Task<Void, Never>? { get { m.draftSave } nonmutating set { m.draftSave = newValue } }
+    private var uploadedFiles: [UUID: AttachmentDTO] { get { m.uploadedFiles } nonmutating set { m.uploadedFiles = newValue } }
+    private var uploadedGifs: [String: GifImport] { get { m.uploadedGifs } nonmutating set { m.uploadedGifs = newValue } }
+    private var pendingVoice: PendingVoiceSend? { get { m.pendingVoice } nonmutating set { m.pendingVoice = newValue } }
+    private var failedVoice: PendingVoiceSend? { get { m.failedVoice } nonmutating set { m.failedVoice = newValue } }
+    private var showingVoiceAIConsent: Bool { get { m.showingVoiceAIConsent } nonmutating set { m.showingVoiceAIConsent = newValue } }
+    private var composerFocused: Bool { get { m.composerFocused } nonmutating set { m.composerFocused = newValue } }
+    private var draftCursor: Int { get { m.draftCursor } nonmutating set { m.draftCursor = newValue } }
+    private var closeIssuePrompt: String? { get { m.closeIssuePrompt } nonmutating set { m.closeIssuePrompt = newValue } }
+    private var unreadSnap: ChatNav.Snapshot? { get { m.unreadSnap } nonmutating set { m.unreadSnap = newValue } }
+    private var readingSession: AppStore.SessionStamp? { get { m.readingSession } nonmutating set { m.readingSession = newValue } }
+    private var dividerId: String? { get { m.dividerId } nonmutating set { m.dividerId = newValue } }
+    private var positioned: Bool { get { m.positioned } nonmutating set { m.positioned = newValue } }
+    private var loadingOlder: Bool { get { m.loadingOlder } nonmutating set { m.loadingOlder = newValue } }
+    private var farFromBottom: Bool { get { m.farFromBottom } nonmutating set { m.farFromBottom = newValue } }
+    private var bottomSeq: Int { get { m.bottomSeq } nonmutating set { m.bottomSeq = newValue } }
+    private var dividerAbove: Bool { get { m.dividerAbove } nonmutating set { m.dividerAbove = newValue } }
+    private var mentionQueue: [String] { get { m.mentionQueue } nonmutating set { m.mentionQueue = newValue } }
+    private var viewportHeight: CGFloat { get { m.viewportHeight } nonmutating set { m.viewportHeight = newValue } }
+    private var atBottom: Bool { get { m.atBottom } nonmutating set { m.atBottom = newValue } }
+    private var readPauseID: UUID? { get { m.readPauseID } nonmutating set { m.readPauseID = newValue } }
+    private var positioning: Bool { get { m.positioning } nonmutating set { m.positioning = newValue } }
+    private var positioningFailed: Bool { get { m.positioningFailed } nonmutating set { m.positioningFailed = newValue } }
+    private var initialLayoutAnchor: String? { get { m.initialLayoutAnchor } nonmutating set { m.initialLayoutAnchor = newValue } }
+    private var waitingForUnreadViewport: Bool { get { m.waitingForUnreadViewport } nonmutating set { m.waitingForUnreadViewport = newValue } }
+    private var dividerPositionY: CGFloat? { get { m.dividerPositionY } nonmutating set { m.dividerPositionY = newValue } }
+    private var gg: GgChatState { get { m.gg } nonmutating set { m.gg = newValue } }
+    private var ggPillRev: Int { get { m.ggPillRev } nonmutating set { m.ggPillRev = newValue } }
+    private var screenWidth: CGFloat { get { m.screenWidth } nonmutating set { m.screenWidth = newValue } }
     @FocusState private var searchFocused: Bool
-    /// ① «una vista» para el próximo mensaje (tanda 1.7 §7).
-    @State private var viewOnceNext = false
-    @State private var sheet: ChatSheet?
-    @State private var confirmDelete: MessageDTO?
-    /// Banderita elegida: filtra el chat y es el tema de lo que escribo (nil = «Todo»).
-    @State private var topicFilter: String?
-    @State private var confirmRemoveTopic: TopicDTO?
-    /// Mensajes con tema a los que se saltó desde «Todo»: quedan a la vista aunque «Todo» esconda lo leído de los temas.
-    @State private var revealed: Set<Int> = []
-    /// El filtro lo puso la apertura (todo lo no leído en un tema): no se baja al final, se queda en el primer no leído.
-    @State private var autoFiltered = false
-    /// Se abrió (o se está abriendo) en un mensaje concreto: la apertura por no leídos no cambia el tema ni baja al divisor.
-    @State private var jumped = false
-    /// Borde inferior del contenido en la vista (para detectar el hueco en blanco al final, ver ChatContentBottomKey).
     /// Medidas del scroll que cambian en cada fotograma (fondo del contenido, filas visibles y vistas). Viven en una
     /// referencia: escribirlas no vuelve a pintar el chat entero (1.7.1; antes, una pintada por cada arrastre).
     @State private var track = ScrollTrack()
@@ -157,60 +445,13 @@ struct ConversationView: View {
         var contentBottom: CGFloat = 0
         var visibleSeqs: Set<Int> = []
         var seenSeqs: Set<Int> = []
+        /// Alto visible (copia de `viewportHeight` para los cierres de medición, sin que leerlo suscriba la lista).
+        var viewport: CGFloat = 0
     }
-    @State private var unreadJumpTask: Task<Void, Never>?
-    @State private var jumpingUnread = false
-    @State private var gapFix: Task<Void, Never>?
-    @State private var blockUserId: String?
-    @State private var draftFileURL: URL?
-    @State private var draftSave: Task<Void, Never>?
-    @State private var uploadedFiles: [UUID: AttachmentDTO] = [:]
-    @State private var uploadedGifs: [String: GifImport] = [:]
     @State private var recorder = VoiceRecorder()
-    @State private var pendingVoice: PendingVoiceSend?
-    /// Nota cuya subida falló (413, red…): se conserva para reintentar, no se pierde en silencio.
-    @State private var failedVoice: PendingVoiceSend?
-    @State private var showingVoiceAIConsent = false
     @StateObject private var composerFormatting = ComposerFormattingController()
-    @State private var composerFocused = false
-    /// Cursor del compositor (UTF-16).
-    @State private var draftCursor = 0
-    /// ✅ sobre un mensaje que abrió un asunto aún abierto: «¿Cerrar también el asunto?».
-    @State private var closeIssuePrompt: String?
-    // 1.6.4 · Navegar un chat largo (SPEC-bandeja D).
-    /// Lo no leído al abrir (antes de marcar leído); la línea «N mensajes nuevos» queda hasta salir del chat.
-    @State private var unreadSnap: ChatNav.Snapshot?
-    @State private var readingSession: AppStore.SessionStamp?
-    /// Primer mensaje no leído (la línea va justo antes).
-    @State private var dividerId: String?
-    /// Ya se colocó el chat al abrir (en el primer no leído o al final).
-    @State private var positioned = false
-    /// Hay una página vieja en camino (no se pide otra a la vez).
-    @State private var loadingOlder = false
-    /// A más de una pantalla del final: sale el botón ⌄ y los mensajes nuevos no arrastran la vista.
-    @State private var farFromBottom = false
-    /// Último seq visto estando al final: lo que llegue después cuenta en el globo del ⌄.
-    @State private var bottomSeq = 0
-    /// La línea de no leídos quedó por encima de la vista: píldora «↑ N nuevos».
-    @State private var dividerAbove = false
-    /// Menciones a mí sin leer al abrir, por visitar con el botón «@».
-    @State private var mentionQueue: [String] = []
-    @State private var viewportHeight: CGFloat = 0
-    /// Al final del chat (a menos de 40 pt); esto no implica que se hayan visto las filas anteriores.
-    @State private var atBottom = false
-    /// Filas visibles y visitadas desde la colocación inicial, sin saltar huecos del cursor.
-    @State private var readPauseID: UUID?
-    @State private var positioning = false
-    @State private var positioningFailed = false
-    @State private var initialLayoutAnchor: String?
-    @State private var waitingForUnreadViewport = false
-    @State private var dividerPositionY: CGFloat?
-    // gg dentro del chat (contrato 1-oct-2026, parte B).
-    @State private var gg = GgChatState()
-    /// Cambia al tocar la ✕ de la píldora gg o al volver a mostrarla (GgPillPrefs vive en UserDefaults).
-    @State private var ggPillRev = 0
-    /// Ancho de la pantalla del chat, para que el nombre en la cabecera quepa con los botones (headerTitleWidth).
-    @State private var screenWidth: CGFloat = 393
+    /// Derivados memorizados (filas, índices, conteos por tema): no se recalculan si sus entradas no cambiaron.
+    @State private var derived = ChatDerived()
 
     @ViewBuilder private var chatPresentation: some View {
         let _ = PerfCounters.bump("chat.body")
@@ -218,7 +459,7 @@ struct ConversationView: View {
             if let d = store.data, let c = store.meta(conversationId) {
                 content(d, c).modifier(removeTopicDialog)
                     // 1.7.14: «✨ Preguntar a gg» desde el visor de un archivo cita el mensaje que lo trae.
-                    .environment(\.askGgAboutMessage, embedded || store.ggSide.available != true ? nil : { id in
+                    .environment(\.askGgAboutMessage, embedded || store.ggSide.available != true ? nil : derived.askGg { id in
                         guard let d = store.data, let m = store.conversations[conversationId]?.messages.first(where: { $0.id == id }) else { return }
                         showGgPill(); gg.quotes = [ggQuote(d, m)]; gg.open = true
                     })
@@ -259,18 +500,25 @@ struct ConversationView: View {
             guard await store.openConversationRecovering(conversationId), !Task.isCancelled, stamp == store.sessionStamp else { return }
             // Sugerencias de la hoja de compartir: abrir una conversación también cuenta (como mucho una vez por hora).
             Donations.donate(store, conversationId: conversationId, minInterval: 3600)
-            _ = try? await store.loadPins(conversationId)
+            // Fijados, tareas y eventos (CH035): cuando ya terminó la transición de entrada (sus respuestas no caen en
+            // plena animación) y los tres a la vez, no uno detrás de otro.
+            await settleAfterOpen()
             guard !Task.isCancelled, stamp == store.sessionStamp else { return }
-            _ = try? await store.loadIssues(conversationId: conversationId)
-            guard !Task.isCancelled, stamp == store.sessionStamp else { return }
-            _ = try? await store.loadEvents(from: Date().addingTimeInterval(-30 * 86400), to: Date().addingTimeInterval(90 * 86400), conversationId: conversationId)
+            let app = store
+            await withTaskGroup(of: Void.self) { group in
+                group.addTask { _ = try? await app.loadPins(id) }
+                group.addTask { _ = try? await app.loadIssues(conversationId: id) }
+                group.addTask { _ = try? await app.loadEvents(from: Date().addingTimeInterval(-30 * 86400), to: Date().addingTimeInterval(90 * 86400), conversationId: id) }
+            }
         }
-        .sheet(item: $sheet) { s in sheetView(s) }
-        .modifier(GgChatSheets(gg: $gg, source: ggSource, conversationId: conversationId, chatTitle: store.data.flatMap { d in store.meta(conversationId).map { Naming.title(d, $0) } } ?? "",
+        .sheet(item: bind.sheet) { s in sheetView(s) }
+        .modifier(GgChatSheets(gg: bind.gg, source: ggSource, conversationId: conversationId, chatTitle: store.data.flatMap { d in store.meta(conversationId).map { Naming.title(d, $0) } } ?? "",
                                messages: store.conversations[conversationId]?.messages ?? [], onDraft: putGgDraft))
         // El número del botón gg (y saber que el servidor tiene gg). Se había perdido en 1.7.8 y el botón no salía (2-oct-2026).
         .task(id: conversationId) {
             guard !embedded else { return }
+            await settleAfterOpen()
+            guard !Task.isCancelled else { return }
             await store.ggSidePending([ggSource])
             // Mensajes nuevos de otra persona: el API recalcula el número (con tope por fuente).
             if let d = store.data, lastIsFromOther(d) { await store.ggSideRefreshPending(ggSource) }
@@ -280,10 +528,8 @@ struct ConversationView: View {
     private var composerLifecycle: some View {
         chatPresentation
         .task(id: "\(conversationId)|\(store.foregroundOwner)") { await restoreComposerDraft() }
-        .onChange(of: draft) { _, v in if v.isEmpty && gg.draftActive { gg.draftActive = false }; saveComposerDraft() }
-        .onChange(of: staged) { _, _ in saveComposerDraft() }
-        .onChange(of: stagedGifs) { _, _ in saveComposerDraft() }
-        .onChange(of: pendingVoice?.durationMs) { _, _ in saveComposerDraft() }
+        // Guardar el borrador al cambiar el texto o los adjuntos: va en la sección del compositor (`composerSection`),
+        // para que cada tecla no vuelva a evaluar la pantalla (CH035).
         .onDisappear {
             composerFocused = false; searchFocused = false
             UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
@@ -307,7 +553,7 @@ struct ConversationView: View {
             NewSideSheet(conversationId: conversationId, message: m, preselect: sideForPerson.map { [$0] } ?? []) { id in sidePanel = id; sideForPerson = nil }
         }
         // iPad / pantalla ancha: panel a la derecha; iPhone: hoja casi completa sobre el chat.
-        .modifier(SidePanelPresenter(sideId: $sidePanel,
+        .modifier(SidePanelPresenter(sideId: bind.sidePanel,
                                      anchorColor: activeAnchor.flatMap { id in store.conversations[conversationId]?.messages.first { $0.id == id } }
                                         .map { PersonColor.text($0.authorId) } ?? Theme.orange,
                                      onRevealAnchor: { reveal = $0 }))
@@ -315,15 +561,22 @@ struct ConversationView: View {
         .onChange(of: store.sideToOpen[conversationId], initial: true) { _, v in
             if let v { sidePanel = v; store.sideToOpen[conversationId] = nil }
         }
-        .sheet(isPresented: $addingToSide) { AddMembersSheet(conversationId: conversationId) }
+        .sheet(isPresented: bind.addingToSide) { AddMembersSheet(conversationId: conversationId) }
         .sheet(item: Binding(get: { personCard.map(IdBox.init) }, set: { personCard = $0?.id })) { box in
             PersonCardSheet(personId: box.id).presentationDetents([.height(300)])
         }
         // Tocar una mención abre la ficha de la persona.
-        .environment(\.openURL, OpenURLAction { url in
+        // Para los `Text` con enlaces y las tarjetas, que usan `openURL` del sistema. Las burbujas leen `chatOpenURL`,
+        // una referencia creada una sola vez: así un cambio del entorno no vuelve a pintarlas todas (CH035).
+        .environment(\.openURL, derived.openURL { url in
             if url.scheme == "chaggu-mention", let id = url.host { personCard = id; return .handled }
             if url.scheme == "chaggu-ref", let id = url.host { openRef(id); return .handled }
             return .systemAction
+        })
+        .environment(\.chatOpenURL, derived.chatOpen { url in
+            if url.scheme == "chaggu-mention", let id = url.host { personCard = id }
+            else if url.scheme == "chaggu-ref", let id = url.host { openRef(id) }
+            else { UIApplication.shared.open(url) }
         })
         .onChange(of: sidePanel) { _, v in if v == nil { store.openConversationId = conversationId } }
         .confirmationDialog(L("safety.blockConfirm"), isPresented: Binding(get: { blockUserId != nil }, set: { if !$0 { blockUserId = nil } }), titleVisibility: .visible) {
@@ -345,16 +598,22 @@ struct ConversationView: View {
             }
             Button(L("common.cancel"), role: .cancel) {}
         }
-        .alert(L("ai.voice.title"), isPresented: $showingVoiceAIConsent, presenting: pendingVoice) { voice in
+        .alert(L("ai.voice.title"), isPresented: bind.showingVoiceAIConsent, presenting: pendingVoice) { voice in
             Button(L("ai.voice.allow")) { uploadVoice(voice, aiConsent: true) }
             Button(L("ai.voice.without")) { uploadVoice(voice, aiConsent: false) }
             Button(L("common.cancel"), role: .cancel) {}
         } message: { _ in Text(L("ai.voice.message")) }
     }
 
+    /// Lo que no hace falta para pintar el chat espera a que termine la transición de entrada (≈0,35 s desde abrir).
+    private func settleAfterOpen() async {
+        let left = ChatOpenRule.settle - Date().timeIntervalSince(openedAt)
+        if left > 0 { try? await Task.sleep(nanoseconds: UInt64(left * 1_000_000_000)) }
+    }
+
     /// Quitar un tema: pide confirmación; sus mensajes quedan sin tema y no se borra ningún mensaje.
     private var removeTopicDialog: RemoveTopicDialog {
-        RemoveTopicDialog(topic: $confirmRemoveTopic, count: confirmRemoveTopic.flatMap { topicCounts[$0.id] } ?? 0) { t in
+        RemoveTopicDialog(topic: bind.confirmRemoveTopic, count: confirmRemoveTopic.flatMap { topicCounts[$0.id] } ?? 0) { t in
             if topicFilter == t.id { topicFilter = nil }
             act(toast: L("topic.removed", ["name": t.name])) { try await store.deleteTopic(t) }
         }
@@ -429,14 +688,14 @@ struct ConversationView: View {
         return store.topics[conversationId]?.first { $0.id == id }
     }
 
-    private var topicCounts: [String: Int] { TopicRules.counts(store.conversations[conversationId]?.messages ?? []) }
+    private var topicCounts: [String: Int] { derived.topicCounts(store.conversations[conversationId]?.messages ?? []) }
     private var activeTopicIds: Set<String> { embedded ? [] : TopicRules.activeIds(store.topics[conversationId] ?? []) }
     /// Lo leído al abrir (la regla de «Todo» no cambia mientras se lee).
     private var baseRead: Int { max(unreadSnap?.lastReadSeq ?? store.meta(conversationId)?.lastReadSeq ?? 0, store.meta(conversationId)?.historyFromSeq ?? 0) }
     /// Sin leer por banderita, con lo leído en vivo.
     private var topicUnread: [String: Int] {
         guard let c = store.meta(conversationId), let me = store.me?.id else { return [:] }
-        return TopicRules.unreadCounts(store.conversations[conversationId]?.messages ?? [], read: max(c.lastReadSeq, c.historyFromSeq), me: me, active: activeTopicIds)
+        return derived.topicUnread(store.conversations[conversationId]?.messages ?? [], read: max(c.lastReadSeq, c.historyFromSeq), me: me, active: activeTopicIds)
     }
 
     /// Asuntos: solo quien puede escribir y no es tercero (el API responde 403 a los terceros).
@@ -505,7 +764,9 @@ struct ConversationView: View {
                 if search.active { searchBar }
             }
             if let state, state.loaded {
-                messages(d, c, state)
+                // Sección propia: lo que la lista lee del modelo (colocación, altura visible, resaltado) no vuelve a
+                // evaluar la cabecera ni el compositor.
+                ChatSection { messages(d, c, state) }
             } else if let state, state.error != nil, state.transient {
                 // Error pasajero: se sigue reintentando (y al reconectar el socket). Sin «bad gateway».
                 ContentUnavailableView {
@@ -528,7 +789,8 @@ struct ConversationView: View {
             } else {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity).accessibilityLabel(L("common.loading"))
             }
-            typingLine
+            // «Escribiendo…» de CUALQUIER chat cambia `store.typing`: que solo se entere esta línea.
+            ChatSection { typingLine }
         }
         .frame(width: available.size.width, height: available.size.height, alignment: .top)
         .clipped()
@@ -541,7 +803,7 @@ struct ConversationView: View {
                 GgSelectionBar(count: gg.selected.count, onCancel: { gg.selecting = false; gg.selected = [] }, onAsk: { gg.suggesting = true })
             } else if c.kind == .direct && c.memberIds.contains(where: { store.blockedUserIds.contains($0) }) {
                 Text(L("safety.directBlocked")).font(.footnote).foregroundStyle(Theme.textSecondary).padding(14)
-            } else if c.canPost { composer(d, c) } else {
+            } else if c.canPost { composerSection(d, c) } else {
                 Text(L("chat.readOnly"))
                     .font(.footnote).foregroundStyle(Theme.textSecondary)
                     .frame(maxWidth: .infinity).padding(14)
@@ -676,15 +938,25 @@ struct ConversationView: View {
         }
         // Un pendiente cuyo mensaje ya llegó no se repite (comparten id de fila, SentRows).
         let confirmed = pending.isEmpty ? [] : Set(state.messages.suffix(60).compactMap(\.clientMessageId))
-        items += pending.filter { (filter == nil || $0.topicId == filter) && !confirmed.contains($0.clientMessageId) }.map(ChatItem.pending)
+        // El margen de arriba de un pendiente es el que tendrá al confirmarse (misma racha o no): la burbuja no se mueve.
+        var mineBefore = prev.map { $0.authorId == store.me?.id && Date().timeIntervalSince(prevDate ?? .distantPast) < ChatGrouping.window } ?? false
+        for p in pending where (filter == nil || p.topicId == filter) && !confirmed.contains(p.clientMessageId) {
+            items.append(.pending(p, startsRun: !(mineBefore && p.replyTo == nil && p.forwarded == nil)))
+            mineBefore = true
+        }
         return items
     }
 
     @ViewBuilder
     private func messages(_ d: BootstrapDTO, _ c: ConversationDTO, _ state: ConversationState) -> some View {
-        let items = PerfCounters.measure("chat.buildItems") { buildItems(state, pending: store.pendingFor(conversationId)) }
-        let lazyRows = items.count > ChatStackRule.lazyAbove
-        let byId = Dictionary(state.messages.filter { !store.blockedUserIds.contains($0.authorId) }.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        // Filas e índice memorizados (CH035): solo se rehacen si cambian los mensajes de ESTE chat, lo pendiente, el
+        // tema elegido o el divisor; no con cada tecla ni con cada evento de otro chat.
+        let _ = PerfCounters.bump("chat.list.body")
+        let key = itemsKey(state)
+        let items = derived.items(key) { buildItems(state, pending: key.pending) }
+        // Pila perezosa o normal: se decide una vez, al abrir, y no se cambia en caliente (cambiarla destruye la lista).
+        let lazyRows = derived.lazy(count: items.count)
+        let shared = rowShared(d, c, state)
         ScrollViewReader { proxy in
             ScrollView {
                 ChatStack(lazy: lazyRows) {
@@ -715,7 +987,8 @@ struct ConversationView: View {
                         Text(L("conv.noMessages")).font(.subheadline).foregroundStyle(Theme.textSecondary).padding(.top, 40)
                     }
                     ForEach(items) { item in
-                        row(d, c, item, byId: byId)
+                        let k = rowKey(d, item, shared)
+                        ChatRow(key: k) { row(d, c, k) }.equatable()
                             .modifier(LazyRowCap(cap: lazyRows ? ChatRowCapRule.cap(viewport: viewportHeight) : 0))
                             .environment(\.chatRowCap, lazyRows ? ChatRowCapRule.cap(viewport: viewportHeight) : 0)
                             .id(item.id)
@@ -773,7 +1046,8 @@ struct ConversationView: View {
                 let far = ChatNav.showsJumpToLatest(distanceFromBottom: maxY - viewportHeight, viewport: viewportHeight)
                 if far != farFromBottom { farFromBottom = far }
                 let bottom = viewportHeight > 0 && maxY - viewportHeight < 40
-                if bottom != atBottom { atBottom = bottom }
+                // Llegar al final marca leído aquí mismo (antes era un `onChange(of: atBottom)` que suscribía la lista).
+                if bottom != atBottom { atBottom = bottom; if bottom { markReadIfVisible() } }
                 // De vuelta al final: lo que llegó mientras estaba arriba ya se vio.
                 if !far, let last = store.conversations[conversationId]?.messages.last?.seq, last > bottomSeq {
                     bottomSeq = last
@@ -786,35 +1060,12 @@ struct ConversationView: View {
                 let above = y.map { $0 < 0 } ?? false
                 if above != dividerAbove { dividerAbove = above }
             }
-            .overlay(alignment: .bottomTrailing) { jumpButtons(d, proxy) }
-            .overlay(alignment: .top) {
-                if positioningFailed {
-                    Button { Task { await positionAtFirstUnread(proxy) } } label: {
-                        Label(L("chat.ios.unreadRetry"), systemImage: "arrow.clockwise").font(.footnote).padding(10)
-                            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 10))
-                    }.accessibilityIdentifier("chat.retryUnread")
-                } else if store.readFailures.contains(conversationId) {
-                    Button { markReadIfVisible() } label: {
-                        Label(L("chat.ios.readRetry"), systemImage: "arrow.clockwise").font(.footnote).padding(10)
-                            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 10))
-                    }.accessibilityIdentifier("chat.retryRead")
-                } else if positioning { ProgressView().padding(10).background(Theme.surface) }
-                else if let n = store.meta(conversationId)?.unread, n > 0, dividerAbove || farFromBottom {
-                    Button { jumpToCurrentUnread(proxy) } label: {
-                        Text(activeTopic != nil ? L("chat.jumpNew") : L("chat.newAbove", ["n": n])).font(.footnote.weight(.semibold)).foregroundStyle(.white)
-                            .padding(.horizontal, 12).padding(.vertical, 6)
-                            .background(Capsule().fill(Theme.accentText))
-                            .shadow(color: .black.opacity(0.15), radius: 4, y: 2)
-                    }
-                    .buttonStyle(.plain).disabled(jumpingUnread)
-                    .padding(.top, 8)
-                    .transition(.move(edge: .top).combined(with: .opacity))
-                    .accessibilityLabel(L("chat.jumpNew"))
-                    .accessibilityIdentifier("chat.jumpNew")
-                }
+            // Los flotantes y la píldora de «nuevos» van en secciones: cruzar el umbral del final o del divisor en pleno
+            // scroll solo las vuelve a evaluar a ellas (CH035; antes, la lista entera a mitad del gesto).
+            .overlay(alignment: .bottomTrailing) {
+                ChatSection { jumpButtons(d, proxy).animation(.easeInOut(duration: 0.2), value: farFromBottom) }
             }
-            .animation(.easeInOut(duration: 0.2), value: farFromBottom)
-            .animation(.easeInOut(duration: 0.2), value: dividerAbove)
+            .overlay(alignment: .top) { ChatSection { topNotice(proxy) } }
             // Al abrir: si hay no leídos, al primero (cargando todas las páginas necesarias) con la línea «N mensajes nuevos».
             // Tras la recuperación (ios-avisos) la primera página llega con loaded y aún loading: se espera a que termine.
             .task(id: state.loaded && (!state.loading || positioning)) {
@@ -889,15 +1140,47 @@ struct ConversationView: View {
             .onChange(of: composerFocused) { _, focused in
                 if focused && atBottom && readPauseID == nil { DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { if readPauseID == nil && atBottom { proxy.scrollTo("bottom", anchor: .bottom) } } }
             }
-            .onAppear { markReadIfVisible() }
+            .onAppear { positionFromMemory(); markReadIfVisible() }
             .onChange(of: store.meta(conversationId)?.lastReadSeq) { old, new in
                 if let old, let new, new < old {
                     track.seenSeqs = []; unreadSnap = .init(lastReadSeq: new, unread: store.meta(conversationId)?.unread ?? 0)
                 }
             }
-            .onChange(of: atBottom) { _, v in if v { markReadIfVisible() } }
             .onChange(of: scenePhase) { _, p in if p == .active { markReadIfVisible() } }
         }
+    }
+
+    /// Avisos sobre la lista: reintentos de colocación o de lectura, la rueda al colocar y la píldora «N nuevos arriba».
+    @ViewBuilder
+    private func topNotice(_ proxy: ScrollViewProxy) -> some View {
+        Group {
+                if positioningFailed {
+                    Button { Task { await positionAtFirstUnread(proxy) } } label: {
+                        Label(L("chat.ios.unreadRetry"), systemImage: "arrow.clockwise").font(.footnote).padding(10)
+                            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 10))
+                    }.accessibilityIdentifier("chat.retryUnread")
+                } else if store.readFailures.contains(conversationId) {
+                    Button { markReadIfVisible() } label: {
+                        Label(L("chat.ios.readRetry"), systemImage: "arrow.clockwise").font(.footnote).padding(10)
+                            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 10))
+                    }.accessibilityIdentifier("chat.retryRead")
+                } else if positioning { ProgressView().padding(10).background(Theme.surface) }
+                else if let n = store.meta(conversationId)?.unread, n > 0, dividerAbove || farFromBottom {
+                    Button { jumpToCurrentUnread(proxy) } label: {
+                        Text(activeTopic != nil ? L("chat.jumpNew") : L("chat.newAbove", ["n": n])).font(.footnote.weight(.semibold)).foregroundStyle(.white)
+                            .padding(.horizontal, 12).padding(.vertical, 6)
+                            .background(Capsule().fill(Theme.accentText))
+                            .shadow(color: .black.opacity(0.15), radius: 4, y: 2)
+                    }
+                    .buttonStyle(.plain).disabled(jumpingUnread)
+                    .padding(.top, 8)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .accessibilityLabel(L("chat.jumpNew"))
+                    .accessibilityIdentifier("chat.jumpNew")
+                }
+        }
+        .animation(.easeInOut(duration: 0.2), value: farFromBottom)
+        .animation(.easeInOut(duration: 0.2), value: dividerAbove)
     }
 
     /// «@consulta» justo antes del cursor, en cualquier posición (no si ese "@" ya es un token).
@@ -938,7 +1221,7 @@ struct ConversationView: View {
     private var searchBar: some View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass").foregroundStyle(Theme.textSecondary)
-            TextField(L("search.inChatPh"), text: $search.query)
+            TextField(L("search.inChatPh"), text: bind.search.query)
                 .focused($searchFocused)
                 .textInputAutocapitalization(.never).autocorrectionDisabled()
                 .submitLabel(.search)
@@ -1105,6 +1388,29 @@ struct ConversationView: View {
         Perf.mark("chat.positioned", "\(Int(Date().timeIntervalSince(openedAt) * 1000)) ms desde abrir")
     }
 
+    /// Colocación inmediata (CH035): si el chat ya está en memoria (copia local o precarga), el primer no leído, el tema
+    /// y el ancla se resuelven aquí, al aparecer la lista, sin esperar a ninguna respuesta. Antes el chat se pintaba al
+    /// final y saltaba al divisor cuando llegaban los temas. Si falta algo (historial, temas), sigue el camino de siempre.
+    private func positionFromMemory() {
+        guard !positioned, !positioning, !positioningFailed, initialLayoutAnchor == nil else { return }
+        guard let state = store.conversations[conversationId], state.loaded, !state.loading else { return }
+        snapshotUnread()
+        guard let snap = unreadSnap, let c = store.meta(conversationId),
+              let found = ChatNav.firstUnreadInMemory(state.messages, snapshot: snap, historyFromSeq: c.historyFromSeq, lastMessageSeq: c.lastMessageSeq,
+                                                      me: store.me?.id, blocked: store.blockedUserIds) else { return }
+        if let first = found {
+            let jumping = jumped || store.jumpTo[conversationId] != nil || store.jumpToMessage[conversationId] != nil
+            if !embedded, !jumping, topicFilter == nil, let me = store.me?.id {
+                guard let want = ChatNav.openFilterInMemory(state.messages, after: max(snap.lastReadSeq, c.historyFromSeq), me: me, topics: store.topics[conversationId]) else { return }
+                if let want { autoFiltered = true; topicFilter = want }
+            }
+            dividerId = first.id
+            mentionQueue = ChatNav.mentionIds(state.messages, after: first.seq - 1, me: store.me?.id ?? "")
+        }
+        positioning = true; track.seenSeqs = []
+        initialLayoutAnchor = found == nil ? ChatNavIds.bottom : ChatNavIds.divider
+    }
+
     private func positionAtFirstUnread(_ proxy: ScrollViewProxy) async {
         guard !positioning else { return }
         snapshotUnread()
@@ -1259,46 +1565,144 @@ struct ConversationView: View {
             .contentShape(Circle())
     }
 
-    @ViewBuilder
-    private func row(_ d: BootstrapDTO, _ c: ConversationDTO, _ item: ChatItem, byId: [String: MessageDTO]) -> some View {
+    // MARK: Filas (CH035)
+
+    /// Entradas de `buildItems`: mientras no cambien, las filas no se rehacen (ChatDerived.items).
+    private func itemsKey(_ state: ConversationState) -> ChatDerived.ItemsKey {
+        let active = activeTopicIds, filter = activeTopic?.id
+        // Lo pendiente de este chat; casi siempre vacío (y entonces no hace falta cruzarlo con lo ya recibido).
+        let pending = store.pending.contains { $0.conversationId == conversationId } ? store.pendingFor(conversationId) : []
+        return .init(messages: state.messages, pending: pending, blocked: store.blockedUserIds, filter: filter, active: active, all: showAll,
+                     revealed: revealed, dividerId: dividerId, dividerCount: unreadSnap?.unread ?? 0,
+                     issues: filter != nil || !active.isEmpty ? store.issues : nil)
+    }
+
+    /// Lo que comparten todas las filas en una pasada: se calcula una vez y cada fila toma de aquí su parte.
+    private struct RowShared {
+        var env: Int
+        var conv: ConversationDTO
+        var byId: [String: MessageDTO]
+        var pins: Set<String>
+        var topics: [TopicDTO]
+        var anchor: String?
+        var matchIds: Set<String>
+        var query: String
+        var selecting: Bool
+        var selected: Set<String>
+        var highlighted: String?
+        var today: Int
+    }
+
+    private func rowShared(_ d: BootstrapDTO, _ c: ConversationDTO, _ state: ConversationState) -> RowShared {
+        RowShared(env: derived.env(d), conv: ChatDerived.stable(c), byId: derived.byId(state.messages, blocked: store.blockedUserIds),
+                  pins: Set(store.pins[conversationId] ?? []), topics: embedded ? [] : (store.topics[conversationId] ?? []),
+                  anchor: activeAnchor, matchIds: search.active ? search.matchIds : [], query: search.query,
+                  selecting: gg.selecting, selected: gg.selected, highlighted: highlighted,
+                  today: Int(Calendar.current.startOfDay(for: Date()).timeIntervalSinceReferenceDate))
+    }
+
+    /// La clave de una fila: todo lo que su dibujo toma de fuera del propio mensaje. Lo que cambia con cada evento del
+    /// store (`data`, `conversations`) se resuelve AQUÍ, en la lista, y a la fila le llega ya como valor.
+    private func rowKey(_ d: BootstrapDTO, _ item: ChatItem, _ s: RowShared) -> ChatRowKey {
+        var k = ChatRowKey(item: item, env: s.env, conv: s.conv, embedded: embedded)
         switch item {
-        case .newDivider(let n):
-            HStack(spacing: 8) {
-                Rectangle().fill(Theme.accentText.opacity(0.55)).frame(height: 1)
-                Text(n == 1 ? L("chat.newMessagesOne") : L("chat.newMessages", ["n": n]))
-                    .font(.caption.weight(.semibold)).foregroundStyle(Theme.accentText).lineLimit(1).fixedSize()
-                Rectangle().fill(Theme.accentText.opacity(0.55)).frame(height: 1)
-            }
-            .padding(.vertical, 6)
-            .background(GeometryReader { g in Color.clear.preference(key: ChatDividerYKey.self, value: g.frame(in: .named("chat.scroll")).minY) })
-            .accessibilityElement(children: .combine)
-            .accessibilityIdentifier("chat.newDivider")
-        case .day(_, let date):
-            Text(L10n.dayLabel(date))
-                .font(.caption.weight(.semibold)).foregroundStyle(Theme.textSecondary)
-                .padding(.horizontal, 10).padding(.vertical, 4)
-                .background(Capsule().fill(Theme.surface))
-                .padding(.vertical, 8)
-                .accessibilityAddTraits(.isHeader)
-        case .system(let m):
-            // 1.7.13: evento, tarea, correo y WhatsApp aceptan reacciones como un mensaje (barra arriba del menú y chips debajo).
-            let reactable = CardReactions.allowed(m) && !embedded
-            VStack(alignment: .leading, spacing: 3) {
-                systemCard(d, c, m)
-                    .environment(\.cardReactions, reactable && c.canPost ? CardReactionContext(
-                        mine: Set(m.reactions.filter { $0.userIds.contains(d.me.id) }.map(\.emoji)), actions: Reactions.actionsEnabled(d),
-                        onPick: { react(m, $0) }, onMore: { sheet = .react(m) }) : nil)
-                if reactable && !m.reactions.isEmpty {
-                    ReactionChips(d: d, message: m, mine: false, canReact: c.canPost, onToggle: { react(m, $0) }, onMore: { sheet = .react(m) })
-                        .padding(.leading, 4)
-                        .accessibilityIdentifier("card.reactions.\(m.id)")
-                }
-            }
-        case .message(let m, let showAuthor):
+        case .day: k.today = s.today
+        case .newDivider, .system: break
+        case .pending(let p, _): k.forwarded = p.forwarded.map { forwardedLabel(d, $0) }
+        case .message(let m, _):
             let mine = m.authorId == d.me.id
-            let quoted = m.replyTo.flatMap { byId[$0] }
+            k.quoted = m.replyTo.flatMap { s.byId[$0] }
+            k.pinned = s.pins.contains(m.id)
+            k.search = s.matchIds.contains(m.id) ? s.query : nil
+            k.anchor = s.anchor == m.id
+            k.topic = embedded || m.deletedAt != nil ? nil : m.topicId.flatMap { id in s.topics.first { $0.id == id } }
+            k.selecting = s.selecting
+            k.selected = s.selecting && s.selected.contains(m.id)
+            k.highlighted = s.highlighted == m.id
+            if !embedded { k.threads = ChatThreads.of(d, conversationId, messageId: m.id).filter { !Naming.isSide($0) } }
+            k.sides = d.conversations(parentMessageId: m.id).filter { Naming.isSide($0) }.sorted { ($0.lastMessageAt ?? "") > ($1.lastMessageAt ?? "") }
+            if m.mergedKind == "side" { k.merged = L("side.fromSidechat") }
+            else if let id = m.mergedFrom { k.merged = d.conversation(id: id).map { L("lin.resultOf", ["name": Naming.title(d, $0)]) } ?? L("lin.resultHidden") }
+            if let f = m.forwarded {
+                k.forwarded = forwardedLabel(d, f, mine: mine, authorName: Naming.person(d, m.authorId)?.name)
+                if f.messageId != nil, let fromId = f.fromConversationId { k.origin = d.conversation(id: fromId) != nil }
+            }
+        }
+        return k
+    }
+
+    @ViewBuilder
+    private func row(_ d: BootstrapDTO, _ c: ConversationDTO, _ k: ChatRowKey) -> some View {
+        // Un mensaje mío en camino y el mismo ya confirmado pasan por la MISMA rama (`bubbleRow`): al confirmarse la
+        // fila se actualiza en su sitio, sin destruirse ni volver a cargar sus adjuntos (CH035).
+        if let b = BubbleItem(k.item) {
+            bubbleRow(d, c, b, k)
+        } else {
+            switch k.item {
+            case .newDivider(let n):
+                HStack(spacing: 8) {
+                    Rectangle().fill(Theme.accentText.opacity(0.55)).frame(height: 1)
+                    Text(n == 1 ? L("chat.newMessagesOne") : L("chat.newMessages", ["n": n]))
+                        .font(.caption.weight(.semibold)).foregroundStyle(Theme.accentText).lineLimit(1).fixedSize()
+                    Rectangle().fill(Theme.accentText.opacity(0.55)).frame(height: 1)
+                }
+                .padding(.vertical, 6)
+                .background(GeometryReader { g in Color.clear.preference(key: ChatDividerYKey.self, value: g.frame(in: .named("chat.scroll")).minY) })
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("chat.newDivider")
+            case .day(_, let date):
+                Text(L10n.dayLabel(date))
+                    .font(.caption.weight(.semibold)).foregroundStyle(Theme.textSecondary)
+                    .padding(.horizontal, 10).padding(.vertical, 4)
+                    .background(Capsule().fill(Theme.surface))
+                    .padding(.vertical, 8)
+                    .accessibilityAddTraits(.isHeader)
+            case .system(let m):
+                // 1.7.13: evento, tarea, correo y WhatsApp aceptan reacciones como un mensaje (barra arriba del menú y chips debajo).
+                let reactable = CardReactions.allowed(m) && !embedded
+                VStack(alignment: .leading, spacing: 3) {
+                    systemCard(d, c, m)
+                        .environment(\.cardReactions, reactable && c.canPost ? CardReactionContext(
+                            mine: Set(m.reactions.filter { $0.userIds.contains(d.me.id) }.map(\.emoji)), actions: Reactions.actionsEnabled(d),
+                            onPick: { react(m, $0) }, onMore: { sheet = .react(m) }) : nil)
+                    if reactable && !m.reactions.isEmpty {
+                        ReactionChips(d: d, message: m, mine: false, canReact: c.canPost, onToggle: { react(m, $0) }, onMore: { sheet = .react(m) })
+                            .padding(.leading, 4)
+                            .accessibilityIdentifier("card.reactions.\(m.id)")
+                    }
+                }
+            case .message, .pending: EmptyView()
+            }
+        }
+    }
+
+    /// Una burbuja: un mensaje del chat o uno mío que aún se está enviando.
+    private struct BubbleItem {
+        var message: MessageDTO?
+        var pending: PendingMessage?
+        var showAuthor: Bool
+        init?(_ item: ChatItem) {
+            switch item {
+            case .message(let m, let showAuthor): message = m; self.showAuthor = showAuthor
+            case .pending(let p, let startsRun): pending = p; showAuthor = startsRun
+            default: return nil
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func bubbleRow(_ d: BootstrapDTO, _ c: ConversationDTO, _ b: BubbleItem, _ k: ChatRowKey) -> some View {
+        let sent = b.message, p = b.pending
+        let mine = p != nil || sent?.authorId == d.me.id
+        let showAuthor = b.showAuthor
+        let live = sent.map { $0.deletedAt == nil } ?? true
+        let bubble: MessageBubble = {
+            guard let m = sent else {
+                return MessageBubble(text: p?.body ?? "", time: "", mine: true, author: nil, status: p?.status == .failed ? .failed : .sending, italic: false,
+                                     forwardedLabel: k.forwarded, attachments: p?.attachments ?? [], mentions: p?.mentions ?? [])
+            }
             let author = Naming.person(d, m.authorId)
-            let bubble = MessageBubble(
+            return MessageBubble(
                 text: m.deletedAt != nil ? L("chat.deleted") : MessageCopy.body(m.visibleBody, attachments: m.attachments),
                 leading: mine || !ChatGrouping.showsAvatars(c.kind) ? .none
                     : showAuthor ? .person(name: author?.name ?? "?", photo: author?.avatarUrl, id: m.authorId, agent: author?.kind == "agent") : .spacer,
@@ -1308,62 +1712,77 @@ struct ConversationView: View {
                 author: mine || !showAuthor ? nil : Naming.authorLine(d, m.authorId),
                 authorId: mine ? nil : m.authorId,
                 status: nil, italic: m.deletedAt != nil,
-                quote: m.replyTo == nil ? nil : (quoted.map { q in (Naming.person(d, q.authorId)?.name ?? "", q.deletedAt != nil ? L("chat.deleted") : excerpt(MailText.quoteText(kind: q.kind, body: q.body))) } ?? ("", L("reply.quoteMissing"))),
+                quote: m.replyTo == nil ? nil : (k.quoted.map { q in (Naming.person(d, q.authorId)?.name ?? "", q.deletedAt != nil ? L("chat.deleted") : excerpt(MailText.quoteText(kind: q.kind, body: q.body))) } ?? ("", L("reply.quoteMissing"))),
                 onQuote: m.deletedAt != nil ? nil : m.replyTo.map { target in { openQuoted(target) } },
-                forwardedLabel: m.forwarded.map { forwardedLabel(d, $0, mine: mine, authorName: author?.name) },
-                merged: m.mergedKind == "side" ? L("side.fromSidechat")
-                    : m.mergedFrom.map { id in store.meta(id).map { L("lin.resultOf", ["name": Naming.title(d, $0)]) } ?? L("lin.resultHidden") },
-                pinned: store.pins[conversationId]?.contains(m.id) == true,
+                forwardedLabel: k.forwarded,
+                merged: k.merged,
+                pinned: k.pinned,
                 linkify: m.deletedAt == nil && m.kind == "text",
                 linkPreview: m.deletedAt == nil && !MessageCopy.body(m.visibleBody, attachments: m.attachments).isEmpty ? m.linkPreview : nil,
                 attachments: m.deletedAt == nil ? m.attachments : [],
                 messageId: m.id, conversationId: conversationId,
                 mentions: m.deletedAt == nil ? m.mentions + RefText.tokens(m.refs) : [],
-                highlight: search.active && search.matchIds.contains(m.id) ? search.query : nil,
+                highlight: k.search,
                 mentionsMe: m.deletedAt == nil && MentionText.mentionsMe(m.mentions, me: d.me.id, authorId: m.authorId),
-                sideAnchor: activeAnchor == m.id,
-                topic: embedded || m.deletedAt != nil ? nil : m.topicId.flatMap { id in store.topics[conversationId]?.first { $0.id == id } },
+                sideAnchor: k.anchor,
+                topic: k.topic,
                 topicBy: TopicRules.byLine(m, me: d.me.id) { Naming.person(d, $0)?.name }
             )
-            Group {
-                if m.viewOnce && m.deletedAt == nil {
-                    // Una sola vista: burbuja cerrada, sin menú (no se copia, reenvía, fija ni convierte en tarea).
-                    ViewOnceBubble(message: m, mine: mine, time: L10n.clock(m.createdAt))
-                        .padding(.leading, !mine && ChatGrouping.showsAvatars(c.kind) ? 40 : 0)
-                } else if m.deletedAt == nil {
-                    // Pulsación larga como en iPhone: vista previa de la burbuja + barra rápida de reacciones + menú.
-                    bubble.contextMenu {
+        }()
+        let failed = p?.status == .failed
+        Group {
+            if let m = sent, m.viewOnce && m.deletedAt == nil {
+                // Una sola vista: burbuja cerrada, sin menú (no se copia, reenvía, fija ni convierte en tarea).
+                ViewOnceBubble(message: m, mine: mine, time: L10n.clock(m.createdAt))
+                    .padding(.leading, !mine && ChatGrouping.showsAvatars(c.kind) ? 40 : 0)
+            } else if live {
+                // Pulsación larga como en iPhone: vista previa de la burbuja + barra rápida de reacciones + menú.
+                bubble.contextMenu {
+                    if let m = sent {
                         if c.canPost && !m.isSystem {
                             QuickReactionBar(mineEmojis: Set(m.reactions.filter { $0.userIds.contains(d.me.id) }.map(\.emoji)),
                                              actions: Reactions.actionsEnabled(d), onPick: { react(m, $0) }, onMore: { sheet = .react(m) })
                         }
-                        messageMenu(d, c, m)
-                    } preview: {
-                        // La vista previa vive en otro contenedor y NO hereda el entorno: sin `.environment(store)` las
-                        // burbujas con fotos, archivos o voz (AttachmentImage, VoiceNoteView leen AppStore) cerraban la app
-                        // al mantenerlas presionadas (EXC_BREAKPOINT en EnvironmentValues.subscript.getter).
-                        bubble.frame(width: 340).padding(.vertical, 10).padding(.horizontal, 6).background(Theme.background)
-                            .environment(store)
+                        messageMenu(d, c, m, isPinned: k.pinned)
+                    } else if let p, failed {
+                        Button(L("chat.retry")) { store.retry(p.clientMessageId) }
+                        Button(L("chat.discard"), role: .destructive) { store.discard(p.clientMessageId) }
                     }
-                } else { bubble }
-            }
-            .padding(.top, showAuthor ? 6 : 0)
-            // «Seleccionar» (gg): círculo a la izquierda y tocar marca o desmarca el mensaje.
-            .padding(.leading, gg.selecting ? 30 : 0)
-            .overlay(alignment: .leading) { if gg.selecting { GgSelectCircle(on: gg.selected.contains(m.id)).padding(.leading, 2) } }
-            .overlay {
-                if gg.selecting {
-                    Color.clear.contentShape(Rectangle()).onTapGesture { toggleSelected(m.id) }
-                        .accessibilityElement()
-                        .accessibilityLabel(excerpt(m.body, 80))
-                        .accessibilityAddTraits(gg.selected.contains(m.id) ? [.isButton, .isSelected] : .isButton)
-                        .accessibilityIdentifier("gg.select.\(m.id)")
+                } preview: {
+                    // La vista previa vive en otro contenedor y NO hereda el entorno: sin `.environment(store)` las
+                    // burbujas con fotos, archivos o voz (AttachmentImage, VoiceNoteView leen AppStore) cerraban la app
+                    // al mantenerlas presionadas (EXC_BREAKPOINT en EnvironmentValues.subscript.getter).
+                    bubble.frame(width: 340).padding(.vertical, 10).padding(.horizontal, 6).background(Theme.background)
+                        .environment(store)
                 }
+            } else { bubble }
+        }
+        .padding(.top, showAuthor ? 6 : 0)
+        // «Seleccionar» (gg): círculo a la izquierda y tocar marca o desmarca el mensaje.
+        .padding(.leading, k.selecting && sent != nil ? 30 : 0)
+        .overlay(alignment: .leading) { if k.selecting && sent != nil { GgSelectCircle(on: k.selected).padding(.leading, 2) } }
+        .overlay {
+            if k.selecting, let m = sent {
+                Color.clear.contentShape(Rectangle()).onTapGesture { toggleSelected(m.id) }
+                    .accessibilityElement()
+                    .accessibilityLabel(excerpt(m.body, 80))
+                    .accessibilityAddTraits(k.selected ? [.isButton, .isSelected] : .isButton)
+                    .accessibilityIdentifier("gg.select.\(m.id)")
             }
-            .background(RoundedRectangle(cornerRadius: 12).fill(Theme.orange.opacity(highlighted == m.id ? 0.18 : gg.selected.contains(m.id) && gg.selecting ? 0.1 : 0)))
-            // Deslizar la burbuja a la derecha = responder con cita (1.7.1, como WhatsApp). El sidechat queda en el menú.
-            .modifier(SwipeToReply(enabled: canReply(c, m) && !gg.selecting) { startReply(m) })
-            .accessibilityIdentifier("msg.\(m.id)")
+        }
+        .background(RoundedRectangle(cornerRadius: 12).fill(Theme.orange.opacity(k.highlighted ? 0.18 : k.selected ? 0.1 : 0)))
+        // Deslizar la burbuja a la derecha = responder con cita (1.7.1, como WhatsApp). El sidechat queda en el menú.
+        .modifier(SwipeToReply(enabled: sent.map { canReply(c, $0) } == true && !k.selecting) { if let m = sent { startReply(m) } })
+        // Un envío fallido se reintenta tocándolo (solo entonces el gesto está activo).
+        .gesture(TapGesture().onEnded { if let p, failed { store.retry(p.clientMessageId) } }, including: failed ? .all : .subviews)
+        .accessibilityActions {
+            if let p {
+                Button(L("chat.retry")) { store.retry(p.clientMessageId) }
+                Button(L("chat.discard")) { store.discard(p.clientMessageId) }
+            }
+        }
+        .accessibilityIdentifier(sent.map { "msg.\($0.id)" } ?? "pending.\(p?.clientMessageId ?? "")")
+        if let m = sent {
             if m.deletedAt == nil && !m.reactions.isEmpty {
                 ReactionChips(d: d, message: m, mine: mine, canReact: c.canPost, onToggle: { react(m, $0) }, onMore: { sheet = .react(m) })
                     .frame(maxWidth: .infinity, alignment: mine ? .trailing : .leading)
@@ -1371,21 +1790,17 @@ struct ConversationView: View {
                     .padding(.trailing, mine ? 4 : 48)
                     .padding(.top, -1)
             }
-            if !embedded {
-                let threads = store.data.map { ChatThreads.of($0, conversationId, messageId: m.id).filter { !Naming.isSide($0) } } ?? []
-                if !threads.isEmpty {
-                    ThreadChip(threads: threads) { sidePanel = $0 }
-                        .frame(maxWidth: .infinity, alignment: mine ? .trailing : .leading)
-                        .padding(.horizontal, mine ? 4 : 40)
-                }
-            }
-            let sides = store.sides(of: m.id)
-            if !sides.isEmpty {
-                SideChip(sides: sides) { sidePanel = $0 }
+            if !k.threads.isEmpty {
+                ThreadChip(threads: k.threads) { sidePanel = $0 }
                     .frame(maxWidth: .infinity, alignment: mine ? .trailing : .leading)
                     .padding(.horizontal, mine ? 4 : 40)
             }
-            if let f = m.forwarded, f.messageId != nil, let fromId = f.fromConversationId, store.meta(fromId) != nil {
+            if !k.sides.isEmpty {
+                SideChip(sides: k.sides) { sidePanel = $0 }
+                    .frame(maxWidth: .infinity, alignment: mine ? .trailing : .leading)
+                    .padding(.horizontal, mine ? 4 : 40)
+            }
+            if k.origin, let f = m.forwarded, let fromId = f.fromConversationId {
                 Button {
                     if let seq = f.messageSeq { store.jumpTo[fromId] = seq }
                     store.navigate(to: .conversation(fromId))
@@ -1397,20 +1812,6 @@ struct ConversationView: View {
                 .padding(.horizontal, mine ? 4 : 40)
                 .accessibilityIdentifier("msg.privateOrigin.\(m.id)")
             }
-        case .pending(let p):
-            MessageBubble(text: p.body, time: "", mine: true, author: nil, status: p.status == .failed ? .failed : .sending, italic: false,
-                          forwardedLabel: p.forwarded.map { forwardedLabel(d, $0) }, attachments: p.attachments ?? [], mentions: p.mentions ?? [])
-                .padding(.top, 4)
-                .onTapGesture { if p.status == .failed { store.retry(p.clientMessageId) } }
-                .contextMenu {
-                    if p.status == .failed {
-                        Button(L("chat.retry")) { store.retry(p.clientMessageId) }
-                        Button(L("chat.discard"), role: .destructive) { store.discard(p.clientMessageId) }
-                    }
-                }
-                .accessibilityAction(named: Text(L("chat.retry"))) { store.retry(p.clientMessageId) }
-                .accessibilityAction(named: Text(L("chat.discard"))) { store.discard(p.clientMessageId) }
-                .accessibilityIdentifier("pending.\(p.clientMessageId)")
         }
     }
 
@@ -1479,9 +1880,8 @@ struct ConversationView: View {
 
     /// Menú de un mensaje (mismas acciones y orden que messageMenu de la web).
     @ViewBuilder
-    private func messageMenu(_ d: BootstrapDTO, _ c: ConversationDTO, _ m: MessageDTO) -> some View {
+    private func messageMenu(_ d: BootstrapDTO, _ c: ConversationDTO, _ m: MessageDTO, isPinned: Bool) -> some View {
         let mine = m.authorId == d.me.id
-        let isPinned = store.pins[conversationId]?.contains(m.id) == true
         // Asuntos y reuniones también en directos y multi (SPEC-v4 E); derivar sigue siendo de espacios.
         let canWork = c.canPost
         let myWsRole = d.workspaces.first { $0.id == c.workspaceId }?.myRole
@@ -1598,6 +1998,18 @@ struct ConversationView: View {
         }
     }
 
+    /// El compositor en su propia sección (CH035): es la única vista que lee `draft`, el cursor y los adjuntos en
+    /// preparación, así que escribir ya no vuelve a evaluar la pantalla ni la lista de mensajes.
+    private func composerSection(_ d: BootstrapDTO, _ c: ConversationDTO) -> some View {
+        ChatSection {
+            composer(d, c)
+                .onChange(of: draft) { _, v in if v.isEmpty && gg.draftActive { gg.draftActive = false }; saveComposerDraft() }
+                .onChange(of: staged) { _, _ in saveComposerDraft() }
+                .onChange(of: stagedGifs) { _, _ in saveComposerDraft() }
+                .onChange(of: pendingVoice?.durationMs) { _, _ in saveComposerDraft() }
+        }
+    }
+
     @ViewBuilder
     private func composer(_ d: BootstrapDTO, _ c: ConversationDTO) -> some View {
         let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1675,8 +2087,8 @@ struct ConversationView: View {
             if let issueId = c.sideIssueId { SideIssueStrip(sideId: c.id, issueId: issueId) }
             ScheduledStrip(conversationId: conversationId) { showScheduled = true }
             SleepNoticeBar(conversation: c, typing: !trimmed.isEmpty && editing == nil, onSchedule: scheduleDraft)
-            StagedAttachments(staged: $staged, progress: uploadProgress)
-            StagedGifs(items: $stagedGifs).disabled(uploading)
+            StagedAttachments(staged: bind.staged, progress: uploadProgress)
+            StagedGifs(items: bind.stagedGifs).disabled(uploading)
             if let v = failedVoice {
                 // La nota no se subió: queda aquí para reintentar o descartar.
                 HStack(spacing: 10) {
@@ -1699,7 +2111,7 @@ struct ConversationView: View {
                 } else {
                 // «＋»: fotos, archivos y, aparte, evento o asunto del chat.
                 if editing == nil && !commenting {
-                    AttachButton(staged: $staged, otherStagedCount: stagedGifs.count, onEvent: embedded ? nil : { sheet = .newEvent(nil) },
+                    AttachButton(staged: bind.staged, otherStagedCount: stagedGifs.count, onEvent: embedded ? nil : { sheet = .newEvent(nil) },
                                  onIssue: embedded || !canOpenIssues ? nil : { sheet = .newIssue(nil) },
                                  onMeeting: embedded ? nil : { now in sheet = .meeting(now: now) },
                                  // Correo en el chat (docs/CORREO.md): ＋ › Correo con este chat como destino; WhatsApp va a su pantalla.
@@ -1714,11 +2126,11 @@ struct ConversationView: View {
                                  formatting: composerFormatting) { store.show($0) }
                         .disabled(uploading)
                 }
-                if editing == nil && !commenting && !embedded { ViewOnceToggle(on: $viewOnceNext) }
+                if editing == nil && !commenting && !embedded { ViewOnceToggle(on: bind.viewOnceNext) }
                 // 1.7.13: la ✨ de «Ideas de respuesta» ya no sale sola en la barra (era redundante con la píldora gg);
                 // vive en el menú del «＋».
                 // UITextView: tokens resaltados, cursor real y retroceso que borra el token entero.
-                ComposerTextView(text: $draft, mentions: $draftMentions, cursor: $draftCursor, focused: $composerFocused,
+                ComposerTextView(text: bind.draft, mentions: bind.draftMentions, cursor: bind.draftCursor, focused: bind.composerFocused,
                                  placeholder: composerPlaceholder(d, c), accessibilityLabel: L("chat.composerLabel"),
                                  onChange: { new in if !new.isEmpty && editing == nil { store.userIsTyping(conversationId) } },
                                  onPasteAttachments: editing == nil && !commenting && !recorder.isActive && !uploading ? { stagePasted($0) } : nil,
@@ -1759,9 +2171,9 @@ struct ConversationView: View {
             .padding(.horizontal, 12).padding(.vertical, 8)
         }
         .background(Theme.surface.ignoresSafeArea(edges: .bottom))
-        .sheet(isPresented: $pickingSchedule) { PickWhenSheet(onPick: scheduleDraft) }
-        .sheet(isPresented: $showScheduled) { ScheduledSheet(conversationId: conversationId) }
-        .sheet(isPresented: $pickingGifs) {
+        .sheet(isPresented: bind.pickingSchedule) { PickWhenSheet(onPick: scheduleDraft) }
+        .sheet(isPresented: bind.showScheduled) { ScheduledSheet(conversationId: conversationId) }
+        .sheet(isPresented: bind.pickingGifs) {
             GifMemePicker(onGif: { item in
                 guard staged.count + stagedGifs.count < AttachmentRules.maxPerMessage else { store.show(L("att.max", ["n": AttachmentRules.maxPerMessage])); return }
                 if !stagedGifs.contains(where: { $0.id == item.id }) { stagedGifs.append(item) }
@@ -2130,7 +2542,9 @@ struct MessageBubble: View {
     /// Tema del mensaje (etiqueta junto a la hora) y «tema puesto por X» si no fue el autor.
     var topic: TopicDTO? = nil
     var topicBy: String? = nil
-    @Environment(\.openURL) private var openURL
+    /// Enlaces y menciones: la referencia estable del chat (CH035), no `openURL` del entorno (ver `ChatLinkOpener`).
+    @Environment(\.chatOpenURL) private var chatOpenURL
+    private func openURL(_ url: URL) { if let chatOpenURL { chatOpenURL.open(url) } else { UIApplication.shared.open(url) } }
     /// Mensaje muy largo (1.7.1): plegado a `LongText.collapsedLines` con «Ver más».
     @State private var expanded = false
     @State private var reading = false
@@ -2373,9 +2787,16 @@ enum LongText {
     }
 }
 
+/// Apertura de un chat (CH035): las cargas que no hacen falta para pintarlo esperan a que acabe la transición.
+enum ChatOpenRule {
+    static let settle: TimeInterval = 0.45
+}
+
 enum ChatStackRule {
     /// `-TCLazyAbove <n>` (pruebas) fuerza la pila perezosa con menos filas.
     static let lazyAbove: Int = UserDefaults.standard.object(forKey: "TCLazyAbove") != nil ? UserDefaults.standard.integer(forKey: "TCLazyAbove") : 200
+    /// Un chat abierto con pila normal solo pasa a la perezosa al superar `lazyAbove * hardFactor` filas (CH035).
+    static let hardFactor = 4
 }
 
 struct ChatStack<Content: View>: View {

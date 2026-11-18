@@ -5,7 +5,8 @@ private enum ChatItem: Identifiable, Equatable, Sendable {
     case day(String, Date)
     case message(MessageDTO, showAuthor: Bool)
     case system(MessageDTO)
-    case pending(PendingMessage)
+    /// `startsRun`: igual que `showAuthor` del mensaje ya enviado (primera burbuja de una racha mía).
+    case pending(PendingMessage, startsRun: Bool)
     /// Línea «N mensajes nuevos» antes del primer no leído (1.6.4).
     case newDivider(Int)
 
@@ -14,7 +15,7 @@ private enum ChatItem: Identifiable, Equatable, Sendable {
         case .newDivider: return ChatNavIds.divider
         case .day(let k, _): return "day-\(k)"
         case .message(let m, _), .system(let m): return SentRows.rowId(m)
-        case .pending(let p): return SentRows.pendingId(p.clientMessageId)
+        case .pending(let p, _): return SentRows.pendingId(p.clientMessageId)
         }
     }
 }
@@ -910,7 +911,12 @@ struct ConversationView: View {
         }
         // Un pendiente cuyo mensaje ya llegó no se repite (comparten id de fila, SentRows).
         let confirmed = pending.isEmpty ? [] : Set(state.messages.suffix(60).compactMap(\.clientMessageId))
-        items += pending.filter { (filter == nil || $0.topicId == filter) && !confirmed.contains($0.clientMessageId) }.map(ChatItem.pending)
+        // El margen de arriba de un pendiente es el que tendrá al confirmarse (misma racha o no): la burbuja no se mueve.
+        var mineBefore = prev.map { $0.authorId == store.me?.id && Date().timeIntervalSince(prevDate ?? .distantPast) < ChatGrouping.window } ?? false
+        for p in pending where (filter == nil || p.topicId == filter) && !confirmed.contains(p.clientMessageId) {
+            items.append(.pending(p, startsRun: !(mineBefore && p.replyTo == nil && p.forwarded == nil)))
+            mineBefore = true
+        }
         return items
     }
 
@@ -1551,7 +1557,7 @@ struct ConversationView: View {
         switch item {
         case .day: k.today = s.today
         case .newDivider, .system: break
-        case .pending(let p): k.forwarded = p.forwarded.map { forwardedLabel(d, $0) }
+        case .pending(let p, _): k.forwarded = p.forwarded.map { forwardedLabel(d, $0) }
         case .message(let m, _):
             let mine = m.authorId == d.me.id
             k.quoted = m.replyTo.flatMap { s.byId[$0] }
@@ -1576,6 +1582,8 @@ struct ConversationView: View {
 
     @ViewBuilder
     private func row(_ d: BootstrapDTO, _ c: ConversationDTO, _ k: ChatRowKey) -> some View {
+        // Un mensaje mío en camino y el mismo ya confirmado pasan por la MISMA rama (`bubbleRow`): al confirmarse la
+        // fila se actualiza en su sitio, sin destruirse ni volver a cargar sus adjuntos (CH035).
         if let b = BubbleItem(k.item) {
             bubbleRow(d, c, b, k)
         } else {
@@ -1612,26 +1620,12 @@ struct ConversationView: View {
                             .accessibilityIdentifier("card.reactions.\(m.id)")
                     }
                 }
-            case .pending(let p):
-                MessageBubble(text: p.body, time: "", mine: true, author: nil, status: p.status == .failed ? .failed : .sending, italic: false,
-                              forwardedLabel: k.forwarded, attachments: p.attachments ?? [], mentions: p.mentions ?? [])
-                    .padding(.top, 4)
-                    .onTapGesture { if p.status == .failed { store.retry(p.clientMessageId) } }
-                    .contextMenu {
-                        if p.status == .failed {
-                            Button(L("chat.retry")) { store.retry(p.clientMessageId) }
-                            Button(L("chat.discard"), role: .destructive) { store.discard(p.clientMessageId) }
-                        }
-                    }
-                    .accessibilityAction(named: Text(L("chat.retry"))) { store.retry(p.clientMessageId) }
-                    .accessibilityAction(named: Text(L("chat.discard"))) { store.discard(p.clientMessageId) }
-                    .accessibilityIdentifier("pending.\(p.clientMessageId)")
-            case .message: EmptyView()
+            case .message, .pending: EmptyView()
             }
         }
     }
 
-    /// Una burbuja del chat (un mensaje enviado; lo que aún se está enviando se dibuja aparte).
+    /// Una burbuja: un mensaje del chat o uno mío que aún se está enviando.
     private struct BubbleItem {
         var message: MessageDTO?
         var pending: PendingMessage?
@@ -1639,6 +1633,7 @@ struct ConversationView: View {
         init?(_ item: ChatItem) {
             switch item {
             case .message(let m, let showAuthor): message = m; self.showAuthor = showAuthor
+            case .pending(let p, let startsRun): pending = p; showAuthor = startsRun
             default: return nil
             }
         }

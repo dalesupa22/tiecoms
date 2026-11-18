@@ -28,6 +28,7 @@ import {
 } from './modules/wa-sync.ts';
 
 import { installSignalLogGuard } from './modules/wa-quiet-signal.ts';
+import { isTransientDbError, retryTransientDb } from './modules/wa-retry.ts';
 
 // Antes de abrir cualquier sesión: libsignal imprime las llaves de cifrado por consola.
 installSignalLogGuard();
@@ -258,12 +259,13 @@ async function connect(s: Session) {
     // Preserve provider ordering, including an unlock immediately after a lock.
     lockWork=lockWork.then(async()=>{
       if(s.stopping || s.sock!==sock) return;
-      await applyWaLocks(s.id,s.userId,[{jid:jidNormalizedUser(id)||id,locked}],false,BRIDGE_ID);
-      await resolveLockedAliases(s);
+      const gone=()=>s.stopping || s.sock!==sock;
+      await retryTransientDb(()=>applyWaLocks(s.id,s.userId,[{jid:jidNormalizedUser(id)||id,locked}],false,BRIDGE_ID),{shouldStop:gone});
+      await retryTransientDb(()=>resolveLockedAliases(s),{shouldStop:gone});
       notifyOwner(s);
     }).catch(async(error)=>{
       hydration.recordFailure();
-      console.error(JSON.stringify({event:'wa.privacy.lock_failed',accountId:s.id,phase:privacyPhase,...privacyExceptionDetails(error)}));
+      console.error(JSON.stringify({event:'wa.privacy.lock_failed',accountId:s.id,phase:privacyPhase,transientDb:isTransientDbError(error),...privacyExceptionDetails(error)}));
       await quarantineSession(s).catch(()=>{});
     });
   });

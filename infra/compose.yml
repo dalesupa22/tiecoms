@@ -72,7 +72,9 @@ services:
     command: ["node", "--enable-source-maps", "wa-bridge.js"]
     environment:
       INSTANCE_ID: wa-1
-      DB_POOL_MAX: "4"
+      # 4 no alcanzaba: el historial de un WhatsApp grande ocupaba todas y el guardado de chats
+      # ocultos esperaba >5 s, fallaba y dejaba la cuenta en cuarentena (invisible). 18-nov-2026.
+      DB_POOL_MAX: "10"
       # Heap explícito (antes ~256 MB por defecto con 512M): el 18-nov se cayó por heap out of memory
       # al volver a vincular un WhatsApp personal grande (historial completo de ~1300 chats).
       NODE_OPTIONS: "--max-old-space-size=768"

@@ -500,11 +500,16 @@ struct ConversationView: View {
             guard await store.openConversationRecovering(conversationId), !Task.isCancelled, stamp == store.sessionStamp else { return }
             // Sugerencias de la hoja de compartir: abrir una conversación también cuenta (como mucho una vez por hora).
             Donations.donate(store, conversationId: conversationId, minInterval: 3600)
-            _ = try? await store.loadPins(conversationId)
+            // Fijados, tareas y eventos (CH035): cuando ya terminó la transición de entrada (sus respuestas no caen en
+            // plena animación) y los tres a la vez, no uno detrás de otro.
+            await settleAfterOpen()
             guard !Task.isCancelled, stamp == store.sessionStamp else { return }
-            _ = try? await store.loadIssues(conversationId: conversationId)
-            guard !Task.isCancelled, stamp == store.sessionStamp else { return }
-            _ = try? await store.loadEvents(from: Date().addingTimeInterval(-30 * 86400), to: Date().addingTimeInterval(90 * 86400), conversationId: conversationId)
+            let app = store
+            await withTaskGroup(of: Void.self) { group in
+                group.addTask { _ = try? await app.loadPins(id) }
+                group.addTask { _ = try? await app.loadIssues(conversationId: id) }
+                group.addTask { _ = try? await app.loadEvents(from: Date().addingTimeInterval(-30 * 86400), to: Date().addingTimeInterval(90 * 86400), conversationId: id) }
+            }
         }
         .sheet(item: bind.sheet) { s in sheetView(s) }
         .modifier(GgChatSheets(gg: bind.gg, source: ggSource, conversationId: conversationId, chatTitle: store.data.flatMap { d in store.meta(conversationId).map { Naming.title(d, $0) } } ?? "",
@@ -512,6 +517,8 @@ struct ConversationView: View {
         // El número del botón gg (y saber que el servidor tiene gg). Se había perdido en 1.7.8 y el botón no salía (2-oct-2026).
         .task(id: conversationId) {
             guard !embedded else { return }
+            await settleAfterOpen()
+            guard !Task.isCancelled else { return }
             await store.ggSidePending([ggSource])
             // Mensajes nuevos de otra persona: el API recalcula el número (con tope por fuente).
             if let d = store.data, lastIsFromOther(d) { await store.ggSideRefreshPending(ggSource) }
@@ -596,6 +603,12 @@ struct ConversationView: View {
             Button(L("ai.voice.without")) { uploadVoice(voice, aiConsent: false) }
             Button(L("common.cancel"), role: .cancel) {}
         } message: { _ in Text(L("ai.voice.message")) }
+    }
+
+    /// Lo que no hace falta para pintar el chat espera a que termine la transición de entrada (≈0,35 s desde abrir).
+    private func settleAfterOpen() async {
+        let left = ChatOpenRule.settle - Date().timeIntervalSince(openedAt)
+        if left > 0 { try? await Task.sleep(nanoseconds: UInt64(left * 1_000_000_000)) }
     }
 
     /// Quitar un tema: pide confirmación; sus mensajes quedan sin tema y no se borra ningún mensaje.
@@ -1127,7 +1140,7 @@ struct ConversationView: View {
             .onChange(of: composerFocused) { _, focused in
                 if focused && atBottom && readPauseID == nil { DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { if readPauseID == nil && atBottom { proxy.scrollTo("bottom", anchor: .bottom) } } }
             }
-            .onAppear { markReadIfVisible() }
+            .onAppear { positionFromMemory(); markReadIfVisible() }
             .onChange(of: store.meta(conversationId)?.lastReadSeq) { old, new in
                 if let old, let new, new < old {
                     track.seenSeqs = []; unreadSnap = .init(lastReadSeq: new, unread: store.meta(conversationId)?.unread ?? 0)
@@ -1373,6 +1386,29 @@ struct ConversationView: View {
         // The unread divider is now measured in the viewport (or there were no unread rows).
         markReadIfVisible()
         Perf.mark("chat.positioned", "\(Int(Date().timeIntervalSince(openedAt) * 1000)) ms desde abrir")
+    }
+
+    /// Colocación inmediata (CH035): si el chat ya está en memoria (copia local o precarga), el primer no leído, el tema
+    /// y el ancla se resuelven aquí, al aparecer la lista, sin esperar a ninguna respuesta. Antes el chat se pintaba al
+    /// final y saltaba al divisor cuando llegaban los temas. Si falta algo (historial, temas), sigue el camino de siempre.
+    private func positionFromMemory() {
+        guard !positioned, !positioning, !positioningFailed, initialLayoutAnchor == nil else { return }
+        guard let state = store.conversations[conversationId], state.loaded, !state.loading else { return }
+        snapshotUnread()
+        guard let snap = unreadSnap, let c = store.meta(conversationId),
+              let found = ChatNav.firstUnreadInMemory(state.messages, snapshot: snap, historyFromSeq: c.historyFromSeq, lastMessageSeq: c.lastMessageSeq,
+                                                      me: store.me?.id, blocked: store.blockedUserIds) else { return }
+        if let first = found {
+            let jumping = jumped || store.jumpTo[conversationId] != nil || store.jumpToMessage[conversationId] != nil
+            if !embedded, !jumping, topicFilter == nil, let me = store.me?.id {
+                guard let want = ChatNav.openFilterInMemory(state.messages, after: max(snap.lastReadSeq, c.historyFromSeq), me: me, topics: store.topics[conversationId]) else { return }
+                if let want { autoFiltered = true; topicFilter = want }
+            }
+            dividerId = first.id
+            mentionQueue = ChatNav.mentionIds(state.messages, after: first.seq - 1, me: store.me?.id ?? "")
+        }
+        positioning = true; track.seenSeqs = []
+        initialLayoutAnchor = found == nil ? ChatNavIds.bottom : ChatNavIds.divider
     }
 
     private func positionAtFirstUnread(_ proxy: ScrollViewProxy) async {
@@ -2749,6 +2785,11 @@ enum LongText {
         for c in s.utf16 where c == 10 { lines += 1; if lines > 18 { return true } }
         return false
     }
+}
+
+/// Apertura de un chat (CH035): las cargas que no hacen falta para pintarlo esperan a que acabe la transición.
+enum ChatOpenRule {
+    static let settle: TimeInterval = 0.45
 }
 
 enum ChatStackRule {

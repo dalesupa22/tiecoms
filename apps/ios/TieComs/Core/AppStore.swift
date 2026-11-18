@@ -121,6 +121,24 @@ final class AppStore {
     /// Últimos comentarios de cada tarjeta de tarea del chat (y con cuántos comentarios se pidieron). Vive en el store:
     /// la LazyVStack recrea la tarjeta al volver a verla y, con @State, su alto cambiaba y la lista no dejaba de reubicarse.
     var taskCardComments: [String: TaskCardComments] = [:]
+    /// Comentarios de tarjetas que llegan casi a la vez (al abrir un chat con varias tareas): se aplican juntos, en un
+    /// solo cambio (CH035). Antes cada respuesta cambiaba el alto de su tarjeta por separado y la lista se reubicaba N veces.
+    @ObservationIgnored private var taskCardBuffer: [String: TaskCardComments] = [:]
+    @ObservationIgnored private var taskCardFlush: Task<Void, Never>?
+    func putTaskCardComments(_ issueId: String, _ value: TaskCardComments) {
+        taskCardBuffer[issueId] = value
+        guard taskCardFlush == nil else { return }
+        let stamp = sessionStamp
+        taskCardFlush = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 80_000_000)
+            guard let self else { return }
+            let batch = self.taskCardBuffer
+            self.taskCardBuffer = [:]; self.taskCardFlush = nil
+            guard stamp == self.sessionStamp else { return }
+            let next = self.taskCardComments.merging(batch) { _, new in new }
+            if next != self.taskCardComments { self.taskCardComments = next }
+        }
+    }
     var reminders: [ReminderDTO] = []
     var events: [String: CalendarEventDTO] = [:]
     /// Mis mensajes programados pendientes, enviándose o fallidos (docs/PROGRAMADOS.md), por hora de salida.

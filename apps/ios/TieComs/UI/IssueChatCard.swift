@@ -77,9 +77,12 @@ struct IssueChatCard: View {
         if count == 0 { if store.taskCardComments[issueId] != nil { store.taskCardComments[issueId] = nil }; return }
         if !force, let count, store.taskCardComments[issueId]?.count == count { return }
         do {
+            // La tarea ya se ve y solo faltan sus comentarios (CH035): se piden pasada la transición de entrada al chat,
+            // y lo que llegue de varias tarjetas se aplica junto (`putTaskCardComments`).
+            if !force, store.issues[issueId] != nil { try await Task.sleep(nanoseconds: UInt64(ChatOpenRule.settle * 1_000_000_000)) }
             let r = try await store.issueDetail(issueId)
             let next = TaskCardComments(count: r.issue.commentCount, items: TaskCard.lastComments(r.events))
-            if store.taskCardComments[issueId] != next { store.taskCardComments[issueId] = next }
+            if store.taskCardComments[issueId] != next { store.putTaskCardComments(issueId, next) }
         } catch is CancellationError {
         } catch { if store.issues[issueId] == nil { missing = true } }
     }

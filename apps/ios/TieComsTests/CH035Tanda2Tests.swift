@@ -2,7 +2,7 @@ import XCTest
 import Observation
 @testable import TieComs
 
-/// CH035 (fluidez, tanda 2): derivados memorizados y lo que del snapshot
+/// CH035 (fluidez, tanda 2): colocar el chat con lo que ya está en memoria, derivados memorizados, y lo que del snapshot
 /// casi no cambia separado de `data` para que un mensaje en otro chat no vuelva a evaluar media app.
 @MainActor
 final class CH035Tanda2Tests: XCTestCase {
@@ -36,6 +36,56 @@ final class CH035Tanda2Tests: XCTestCase {
     /// Un mensaje nuevo en `c2`, tal como llega por el socket.
     private func arrive(_ s: AppStore, seq: Int = 2) {
         s.socketEventForTesting("conv.event", #"{"type":"message.created","conversationId":"c2","eventSeq":\#(seq),"message":{"id":"x\#(seq)","conversationId":"c2","seq":\#(seq),"authorId":"bob","kind":"text","body":"nuevo","createdAt":"2026-11-18T10:05:00.000Z"}}"#)
+    }
+
+    // MARK: Colocar con lo que hay en memoria
+
+    func testFirstUnreadInMemoryFindsTheFirstFromSomeoneElse() {
+        let list = [message(1), message(2), message(3, author: "me"), message(4, kind: "system"), message(5, deleted: true), message(6), message(7)]
+        let found = ChatNav.firstUnreadInMemory(list, snapshot: .init(lastReadSeq: 2, unread: 3), historyFromSeq: 0, lastMessageSeq: 7, me: "me", blocked: [])
+        XCTAssertEqual(found??.id, "m6", "ni lo mío, ni avisos, ni borrados cuentan como primer no leído")
+    }
+
+    func testFirstUnreadInMemorySkipsBlockedAuthors() {
+        let list = [message(1), message(2, author: "eve"), message(3)]
+        let found = ChatNav.firstUnreadInMemory(list, snapshot: .init(lastReadSeq: 1, unread: 2), historyFromSeq: 0, lastMessageSeq: 3, me: "me", blocked: ["eve"])
+        XCTAssertEqual(found??.id, "m3")
+    }
+
+    func testFirstUnreadInMemoryNothingUnread() {
+        let none = ChatNav.firstUnreadInMemory([message(1)], snapshot: .init(lastReadSeq: 1, unread: 0), historyFromSeq: 0, lastMessageSeq: 1, me: "me", blocked: [])
+        XCTAssertNotNil(none, "sin no leídos se sabe ya: va al final")
+        XCTAssertNil(none!)
+        // Lo no leído era solo mío o avisos, y está todo cargado: tampoco hay divisor.
+        let mine = ChatNav.firstUnreadInMemory([message(1), message(2, author: "me")], snapshot: .init(lastReadSeq: 1, unread: 1), historyFromSeq: 0, lastMessageSeq: 2, me: "me", blocked: [])
+        XCTAssertNotNil(mine)
+        XCTAssertNil(mine!)
+    }
+
+    func testFirstUnreadInMemoryUndecidableWithoutHistory() {
+        // Lo leído quedó antes de lo cargado: hay que pedir páginas (camino de siempre).
+        XCTAssertNil(ChatNav.firstUnreadInMemory([message(8), message(9)], snapshot: .init(lastReadSeq: 3, unread: 6), historyFromSeq: 0, lastMessageSeq: 9, me: "me", blocked: []))
+        // Un hueco en lo cargado.
+        XCTAssertNil(ChatNav.firstUnreadInMemory([message(1), message(2, author: "me"), message(4)], snapshot: .init(lastReadSeq: 1, unread: 2), historyFromSeq: 0, lastMessageSeq: 4, me: "me", blocked: []))
+        // Lo cargado no llega al último mensaje y nada de ello cuenta.
+        XCTAssertNil(ChatNav.firstUnreadInMemory([message(1), message(2, author: "me")], snapshot: .init(lastReadSeq: 1, unread: 2), historyFromSeq: 0, lastMessageSeq: 5, me: "me", blocked: []))
+        // Entré tarde: el suelo es `historyFromSeq`.
+        let late = ChatNav.firstUnreadInMemory([message(6), message(7)], snapshot: .init(lastReadSeq: 0, unread: 2), historyFromSeq: 5, lastMessageSeq: 7, me: "me", blocked: [])
+        XCTAssertEqual(late??.id, "m6")
+    }
+
+    func testOpenFilterInMemory() throws {
+        let topics = try JSONDecoder().decode([TopicDTO].self, from: jsonData(#"[{"id":"t1","conversationId":"c1","name":"Obra","icon":"🚩","color":"orange","position":0},{"id":"t2","conversationId":"c1","name":"Viejo","icon":"🚩","color":"blue","position":1,"archivedAt":"2026-11-01T00:00:00Z"}]"#))
+        let plain = [message(1), message(2)]
+        let tagged = [message(1), message(2, topic: "t1")]
+        let archived = [message(1), message(2, topic: "t2")]
+        // Sin la lista de temas: se sabe solo si el primer no leído no trae tema.
+        XCTAssertEqual(ChatNav.openFilterInMemory(plain, after: 1, me: "me", topics: nil), .some(nil))
+        XCTAssertNil(ChatNav.openFilterInMemory(tagged, after: 1, me: "me", topics: nil), "trae tema y no se sabe si está activo: se espera")
+        // Con la lista: la misma regla que `TopicRules.openFilter`.
+        XCTAssertEqual(ChatNav.openFilterInMemory(tagged, after: 1, me: "me", topics: topics), .some("t1"))
+        XCTAssertEqual(ChatNav.openFilterInMemory(archived, after: 1, me: "me", topics: topics), .some(nil))
+        XCTAssertEqual(ChatNav.openFilterInMemory(plain, after: 1, me: "me", topics: topics), .some(nil))
     }
 
     // MARK: Derivados memorizados

@@ -52,6 +52,7 @@
     <string name="no_company">Sin empresa</string>
     <string name="you">(tú)</string>
     <string name="no_access">No tienes acceso a esta conversación</string>
+    <string name="call_back_not_found">No encontré el chat de «%1$s» para llamar</string>
     <string name="chat_not_found">Esta conversación no existe o está fuera de tu alcance.</string>
     <string name="late_join">Entraste aquí más tarde: ves los mensajes desde tu llegada.</string>
     <string name="loading_older">Cargando anteriores…</string>

@@ -22,6 +22,7 @@ import androidx.core.content.ContextCompat
 import com.tiecoms.app.R
 import com.tiecoms.app.container
 import com.tiecoms.app.core.Calls171
+import com.tiecoms.app.core.PhoneRecents
 import kotlinx.coroutines.launch
 import java.util.concurrent.ConcurrentHashMap
 
@@ -33,6 +34,8 @@ import java.util.concurrent.ConcurrentHashMap
  * La llamada sigue siendo de Chime y de [CallManager]: aquí solo se refleja su estado. Lo que pide el sistema
  * (contestar o colgar desde el reloj, el carro o un auricular Bluetooth) vuelve a [CallManager].
  * Telecom anota la llamada solo al terminar, con la duración desde que pasó a activa.
+ *
+ * CH038: tocar la llamada en el historial vuelve a llamar a ese chat ([com.tiecoms.app.core.PhoneRecents]).
  */
 object PhoneLog {
     private const val TAG = "PhoneLog"
@@ -40,6 +43,10 @@ object PhoneLog {
     const val EXTRA_CALL_ID = "com.tiecoms.app.CALL_ID"
     const val EXTRA_NAME = "com.tiecoms.app.CALL_NAME"
     const val EXTRA_INCOMING = "com.tiecoms.app.CALL_INCOMING"
+    /** CH038: MainActivity recibe el nombre tocado en el historial y si era videollamada. */
+    const val EXTRA_CALL_BACK = "com.tiecoms.app.CALL_BACK"
+    const val EXTRA_CALL_BACK_VIDEO = "com.tiecoms.app.CALL_BACK_VIDEO"
+    private const val RECENTS = "phone_log_recents"
 
     /** Lo que se sabe de cada llamada; la conexión llega después (Telecom la crea en [PhoneLogService]). */
     internal class Entry(val callId: String, val name: String, val video: Boolean, val incoming: Boolean) {
@@ -73,6 +80,22 @@ object PhoneLog {
     /** El nombre tal como se ve en el historial (sin «@», que separaría el dominio). */
     fun label(name: String): String = name.replace('@', ' ').trim().ifBlank { "Chaggu" }
 
+    private fun recents(ctx: Context) = ctx.applicationContext.getSharedPreferences(RECENTS, Context.MODE_PRIVATE)
+
+    /** CH038: a qué chat corresponde el nombre anotado (el último gana: es la llamada más reciente). */
+    fun remember(ctx: Context, name: String, conversationId: String?) {
+        if (conversationId.isNullOrBlank()) return
+        runCatching {
+            val entry = PhoneRecents.Entry(conversationId, System.currentTimeMillis())
+            val e = recents(ctx).edit().putString(label(name), PhoneRecents.encode(entry))
+            PhoneRecents.overflow(remembered(ctx) + (label(name) to entry)).forEach { e.remove(it) }
+            e.apply()
+        }
+    }
+
+    fun remembered(ctx: Context): Map<String, PhoneRecents.Entry> =
+        recents(ctx).all.mapNotNull { (k, v) -> PhoneRecents.decode(v as? String)?.let { k to it } }.toMap()
+
     private fun ensureAccount(ctx: Context): Boolean {
         if (registered) return true
         return runCatching {
@@ -90,7 +113,8 @@ object PhoneLog {
     // ---------- Lo que avisa CallManager ----------
 
     /** Me están llamando: queda sonando en Telecom (perdida si nadie contesta). */
-    fun incoming(ctx: Context, callId: String, name: String, video: Boolean) {
+    fun incoming(ctx: Context, callId: String, name: String, video: Boolean, conversationId: String? = null) {
+        if (supported(ctx)) remember(ctx, name, conversationId)
         if (!supported(ctx) || entries.containsKey(callId) || callId in rang || !ensureAccount(ctx)) return
         synchronized(rang) { rang += callId; while (rang.size > 50) rang.remove(rang.first()) }
         val tm = telecom(ctx)
@@ -117,7 +141,8 @@ object PhoneLog {
     }
 
     /** Llamo yo o entro a una en curso (franja «Unirse», historial): saliente. */
-    fun outgoing(ctx: Context, callId: String, name: String, video: Boolean) {
+    fun outgoing(ctx: Context, callId: String, name: String, video: Boolean, conversationId: String? = null) {
+        if (supported(ctx)) remember(ctx, name, conversationId)
         if (!supported(ctx) || entries.containsKey(callId) || !ensureAccount(ctx)) return
         val tm = telecom(ctx)
         val h = handle(ctx)
@@ -245,9 +270,15 @@ class PhoneLogService : ConnectionService() {
     private fun create(request: ConnectionRequest?, incoming: Boolean): Connection {
         val extras = if (incoming) request?.extras else request?.extras?.getBundle(TelecomManager.EXTRA_OUTGOING_CALL_EXTRAS) ?: request?.extras
         val callId = extras?.getString(PhoneLog.EXTRA_CALL_ID)
-            // Rellamar desde el historial del teléfono: no sabemos a qué chat; se cancela (cancelada no se anota) y se abre Chaggu.
+            // Rellamar desde el historial del teléfono: se cancela esta (cancelada no se anota) y Chaggu abre el chat de ese
+            // nombre y llama de verdad (CH038; esa llamada se anota como cualquier saliente).
             ?: return Connection.createCanceledConnection().also {
-                runCatching { startActivity(packageManager.getLaunchIntentForPackage(packageName)!!.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                val name = PhoneRecents.nameFromAddress(request?.address?.schemeSpecificPart)
+                val video = (request?.videoState ?: VideoProfile.STATE_AUDIO_ONLY) != VideoProfile.STATE_AUDIO_ONLY
+                runCatching {
+                    startActivity(packageManager.getLaunchIntentForPackage(packageName)!!.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                        .apply { if (name != null) { putExtra(PhoneLog.EXTRA_CALL_BACK, name); putExtra(PhoneLog.EXTRA_CALL_BACK_VIDEO, video) } })
+                }
             }
         val name = extras?.getString(PhoneLog.EXTRA_NAME).orEmpty()
         val c = ChagguConnection(applicationContext, callId, incoming)

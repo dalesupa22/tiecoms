@@ -183,7 +183,7 @@ class CallManager(private val app: Application, private val container: AppContai
         if (v != null && v.call.conversationId == conversationId) { patch { copy(expanded = true) }; return@withLock }
         if (v != null) hangUpLocked()
         val j = client.startCall(conversationId, kind)
-        PhoneLog.outgoing(app, j.call.id, container.conversationName(j.call.conversationId), j.call.isVideo)
+        PhoneLog.outgoing(app, j.call.id, container.conversationName(j.call.conversationId), j.call.isVideo, j.call.conversationId)
         connect(j, camera = kind == "video")
     }
 
@@ -197,7 +197,7 @@ class CallManager(private val app: Application, private val container: AppContai
         if (v?.call?.id == callId) { patch { copy(expanded = true) }; return@withLock }
         if (v != null) hangUpLocked()
         val j = try { client.joinCall(callId) } catch (e: Exception) { PhoneLog.ended(callId); throw e }
-        if (!wasRinging) PhoneLog.outgoing(app, j.call.id, container.conversationName(j.call.conversationId), j.call.isVideo)
+        if (!wasRinging) PhoneLog.outgoing(app, j.call.id, container.conversationName(j.call.conversationId), j.call.isVideo, j.call.conversationId)
         connect(j, camera)
     }
 
@@ -474,7 +474,7 @@ class CallManager(private val app: Application, private val container: AppContai
         ringJob?.cancel()
         // Deja de sonar a los 45 s si nadie contesta.
         ringJob = scope.launch { delay(Calls.RING_MS); dismissRing() }
-        PhoneLog.incoming(app, call.id, title ?: callerName, call.isVideo)
+        PhoneLog.incoming(app, call.id, title ?: callerName, call.isVideo, call.conversationId)
         if (container.foreground) startRingtone()
         else CallService.notifyIncoming(app, call, callerName, title)
     }

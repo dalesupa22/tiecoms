@@ -53,6 +53,7 @@
     <string name="no_company">No company</string>
     <string name="you">(you)</string>
     <string name="no_access">You don\'t have access to this conversation</string>
+    <string name="call_back_not_found">Could not find the chat for “%1$s” to call</string>
     <string name="chat_not_found">This conversation does not exist or is outside your scope.</string>
     <string name="late_join">You joined later: you see messages from when you arrived.</string>
     <string name="loading_older">Loading earlier messages…</string>

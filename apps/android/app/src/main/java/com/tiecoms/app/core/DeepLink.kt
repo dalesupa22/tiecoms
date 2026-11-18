@@ -24,6 +24,8 @@ sealed interface DeepLink {
     data class CallDetail(val id: String) : DeepLink
     /** Contestar una llamada desde su notificación (chaggu://call/<id>?camera=1): entra con /calls/:id/join. */
     data class CallJoin(val id: String, val camera: Boolean = false) : DeepLink
+    /** CH038: tocar una llamada de Chaggu en el historial del teléfono: volver a llamar al chat de ese nombre. */
+    data class CallBack(val name: String, val video: Boolean = false) : DeepLink
     /** Enlace de invitado a una llamada (https://app.chaggu.com/llamada/<token>, chaggu://llamada/<token>): con o sin sesión. */
     data class GuestCall(val token: String) : DeepLink
 }

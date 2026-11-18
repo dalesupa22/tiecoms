@@ -82,6 +82,12 @@ class MainActivity : ComponentActivity() {
                     "kind" to "audio", "title" to "Beto Prueba", "subtitle" to "Equipo comercial", "category" to "TC_CALL"))
             }, 4_000)
         }
+        // CH038: tocar una llamada de Chaggu en el historial del teléfono (platform/PhoneLog.kt): volver a llamar.
+        intent.getStringExtra(com.tiecoms.app.platform.PhoneLog.EXTRA_CALL_BACK)?.let { name ->
+            container.pendingLink.value = com.tiecoms.app.core.DeepLink.CallBack(name, intent.getBooleanExtra(com.tiecoms.app.platform.PhoneLog.EXTRA_CALL_BACK_VIDEO, false))
+            intent.removeExtra(com.tiecoms.app.platform.PhoneLog.EXTRA_CALL_BACK)
+            return
+        }
         // «Compartir» desde otras apps llega a ShareActivity (SPEC-v4 §B), no aquí.
         if (intent.action == Intent.ACTION_VIEW) {
             val data = intent.dataString

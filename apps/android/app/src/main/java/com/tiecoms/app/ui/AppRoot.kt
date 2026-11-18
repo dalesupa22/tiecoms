@@ -420,6 +420,16 @@ internal fun MainNav() {
                 if (container.calls.ringing.value?.call?.id == p.id) container.calls.dismissRing()
                 callLauncher.launch(p.camera) { cam -> container.calls.join(p.id, cam) }
             }
+            // CH038: rellamar desde el historial del teléfono: abre el chat de ese nombre y llama (pide el micrófono).
+            is DeepLink.CallBack -> {
+                val chats = data.conversations.map { it.id to container.conversationName(it.id) }
+                val id = com.tiecoms.app.core.PhoneRecents.resolve(p.name, com.tiecoms.app.platform.PhoneLog.remembered(ctx), chats)
+                if (id == null) uiScope.launch { container.toast(ctx.getString(R.string.call_back_not_found, p.name)) }
+                else {
+                    nav.popBackStack(nav.graph.findStartDestination().id, false); openConv(id)
+                    if (data.callsEnabled) callLauncher.launch(p.video) { cam -> container.calls.start(id, if (cam) "video" else "audio") }
+                }
+            }
             is DeepLink.Signup -> Unit
         }
     }

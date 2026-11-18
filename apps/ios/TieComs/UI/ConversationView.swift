@@ -237,6 +237,20 @@ private final class ChatDerived {
         return handler
     }
 
+    /// Pila perezosa o normal (CH035): se decide al abrir el chat y no se cambia en caliente — pasar de una a otra
+    /// destruye y vuelve a crear la lista entera (se perdía el estado de las filas y las fotos volvían a cargar, justo al
+    /// paginar hacia atrás). Única excepción: un historial enorme cargado en una pila normal pasa a la perezosa.
+    private var lazyDecided: Bool?
+    func lazy(count: Int) -> Bool {
+        if let v = lazyDecided {
+            if !v && count > ChatStackRule.lazyAbove * ChatStackRule.hardFactor { lazyDecided = true }
+            return lazyDecided ?? v
+        }
+        let v = count > ChatStackRule.lazyAbove
+        lazyDecided = v
+        return v
+    }
+
     /// Este chat sin lo que cambia con cada mensaje: lo que de él depende una fila (permisos, tipo, nombre, miembros).
     static func stable(_ c: ConversationDTO) -> ConversationDTO {
         var k = c
@@ -927,7 +941,8 @@ struct ConversationView: View {
         let _ = PerfCounters.bump("chat.list.body")
         let key = itemsKey(state)
         let items = derived.items(key) { buildItems(state, pending: key.pending) }
-        let lazyRows = items.count > ChatStackRule.lazyAbove
+        // Pila perezosa o normal: se decide una vez, al abrir, y no se cambia en caliente (cambiarla destruye la lista).
+        let lazyRows = derived.lazy(count: items.count)
         let shared = rowShared(d, c, state)
         ScrollViewReader { proxy in
             ScrollView {
@@ -2739,6 +2754,8 @@ enum LongText {
 enum ChatStackRule {
     /// `-TCLazyAbove <n>` (pruebas) fuerza la pila perezosa con menos filas.
     static let lazyAbove: Int = UserDefaults.standard.object(forKey: "TCLazyAbove") != nil ? UserDefaults.standard.integer(forKey: "TCLazyAbove") : 200
+    /// Un chat abierto con pila normal solo pasa a la perezosa al superar `lazyAbove * hardFactor` filas (CH035).
+    static let hardFactor = 4
 }
 
 struct ChatStack<Content: View>: View {

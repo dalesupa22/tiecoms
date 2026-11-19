@@ -434,6 +434,48 @@ enum CallRules {
         return call.startedBy == me ? "call.calling" : "call.waiting"
     }
 
+    // CH038: tono de «llamando» para quien llama (antes no oía nada: «pareciera que no estuviera llamando»).
+    static let ringbackHz = 425.0
+    static let ringbackOnSeconds = 1.0
+    /// Un ciclo: 1 s de tono y 4 s de silencio, en bucle.
+    static let ringbackCycleSeconds = 5.0
+    static let ringbackVolume: Float = 0.35
+    static let ringbackSampleRate = 16_000
+
+    /// Suena el tono de «llamando»: la empecé yo (no como invitado), sigue en curso, estoy sola (nadie más ni invitados)
+    /// y no han pasado los 45 s de «No contestó». Silenciarme no lo cambia.
+    static func shouldRingback(call: CallDTO, me: String, isGuest: Bool, elapsed: TimeInterval) -> Bool {
+        guard !isGuest, !me.isEmpty, call.endedAt == nil, call.startedBy == me,
+              elapsed >= 0, elapsed < TimeInterval(ringSeconds) else { return false }
+        return !people(call).contains { personId($0) != me }
+    }
+
+    /// WAV PCM 16 bits mono de un ciclo del tono (425 Hz con rampas de 10 ms y luego silencio), para AVAudioPlayer en bucle.
+    static func ringbackWAV(rate: Int = ringbackSampleRate, hz: Double = ringbackHz, on: Double = ringbackOnSeconds,
+                            cycle: Double = ringbackCycleSeconds, fade: Double = 0.01, amplitude: Double = 0.8) -> Data {
+        let total = Int((cycle * Double(rate)).rounded()), tone = min(total, Int((on * Double(rate)).rounded()))
+        let ramp = max(1, Int((fade * Double(rate)).rounded()))
+        var pcm = Data(capacity: total * 2)
+        for i in 0..<total {
+            var s = 0.0
+            if i < tone {
+                let g = min(1, Double(i) / Double(ramp), Double(tone - i) / Double(ramp))
+                s = amplitude * g * sin(2 * .pi * hz * Double(i) / Double(rate))
+            }
+            withUnsafeBytes(of: Int16((max(-1, min(1, s)) * 32767).rounded()).littleEndian) { pcm.append(contentsOf: $0) }
+        }
+        var out = Data(capacity: 44 + pcm.count)
+        func tag(_ t: String) { out.append(contentsOf: Array(t.utf8)) }
+        func u32(_ x: Int) { withUnsafeBytes(of: UInt32(x).littleEndian) { out.append(contentsOf: $0) } }
+        func u16(_ x: Int) { withUnsafeBytes(of: UInt16(x).littleEndian) { out.append(contentsOf: $0) } }
+        tag("RIFF"); u32(36 + pcm.count); tag("WAVE")
+        // fmt: PCM, 1 canal, frecuencia, bytes por segundo, bloque de 2 bytes, 16 bits.
+        tag("fmt "); u32(16); u16(1); u16(1); u32(rate); u32(rate * 2); u16(2); u16(16)
+        tag("data"); u32(pcm.count)
+        out.append(pcm)
+        return out
+    }
+
     /// Cada cuánto se pregunta si sigue la llamada que suena en el sistema (CH029).
     static let incomingCheckSeconds: UInt64 = 3
 
@@ -590,7 +632,7 @@ struct CallView: Equatable {
 @MainActor
 @Observable
 final class CallCenter: CallMediaDelegate {
-    private(set) var view: CallView? { didSet { syncRecorder() } }
+    private(set) var view: CallView? { didSet { syncRecorder(); syncRingback() } }
     private(set) var ringing: IncomingCall?
     /// Pantalla completa de la llamada (si no, la píldora de arriba).
     var expanded = false
@@ -645,6 +687,16 @@ final class CallCenter: CallMediaDelegate {
     enum SystemEndCause: Equatable { case local, remote, failed }
     /// Sentido de la llamada en Recientes.
     enum Direction: Equatable { case outgoing, incoming }
+
+    // CH038: tono de «llamando» para quien llama mientras está sola (CallRules.shouldRingback).
+    /// El tono suena ahora (o sonaría: con medios falsos no se reproduce).
+    @ObservationIgnored private(set) var ringbackOn = false
+    /// Llamada a la que corresponde el tono y desde cuándo espera (al conectar este dispositivo).
+    @ObservationIgnored private var ringbackCall: String?
+    @ObservationIgnored private var ringbackSince = Date()
+    /// Ya entró alguien, pasaron los 45 s o colgué: no vuelve a sonar en esta llamada aunque quede sola otra vez.
+    @ObservationIgnored private var ringbackOver = false
+    @ObservationIgnored private var ringbackTimer: Task<Void, Never>?
 
     func installSystemCalls(_ bridge: CallKitBridge) {
         systemCalls = bridge
@@ -901,6 +953,45 @@ final class CallCenter: CallMediaDelegate {
         }
     }
 
+    /// CH038: decide el tono de «llamando» con cada cambio de la llamada (quién entra, fase, fin). Suena cuando el
+    /// audio ya está activo (fase en vivo: la sesión playAndRecord de la llamada, sin tocar su categoría).
+    private func syncRingback(now: Date = Date()) {
+        guard let v = view, v.phase != .ended else {
+            ringbackTimer?.cancel(); ringbackTimer = nil
+            ringbackCall = nil
+            setRingback(false)
+            return
+        }
+        if ringbackCall != v.call.id {
+            ringbackCall = v.call.id
+            ringbackSince = now
+            ringbackOver = false
+            // A los 45 s se vuelve a decidir aunque nada cambie (sin respuesta: se calla).
+            ringbackTimer?.cancel()
+            let id = v.call.id
+            ringbackTimer = Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: (CallRules.ringSeconds * 1000 + 100) * 1_000_000)
+                guard !Task.isCancelled, let self, self.ringbackCall == id else { return }
+                self.syncRingback()
+            }
+        }
+        guard !ringbackOver else { setRingback(false); return }
+        // Desde lo más antiguo entre «conecté» y el inicio de la llamada en el servidor.
+        let since = min(ringbackSince, ISODate.parse(v.call.startedAt) ?? ringbackSince)
+        let want = CallRules.shouldRingback(call: v.call, me: store?.me?.id ?? "", isGuest: v.isGuest, elapsed: now.timeIntervalSince(since))
+        if !want {
+            ringbackOver = true
+            ringbackTimer?.cancel(); ringbackTimer = nil
+        }
+        setRingback(want && v.phase == .live)
+    }
+
+    private func setRingback(_ on: Bool) {
+        guard on != ringbackOn else { return }
+        ringbackOn = on
+        if on, !(media is NullCallMedia) { Ringback.shared.start() } else if !on { Ringback.shared.stop() }
+    }
+
     /// `call.processing` / `call.transcript` (por la cuenta): «⏳ Procesando…» con el nombre y luego las frases.
     func onTranscriptEvent(callId: String, userId: String, segId: String, segments: [CallTranscriptSegmentDTO]?) {
         guard var v = view, v.call.id == callId else { return }
@@ -936,6 +1027,8 @@ final class CallCenter: CallMediaDelegate {
 
     func hangUp(forAll: Bool = false) async {
         guard let v = view else { return }
+        // El tono se calla ya, sin esperar a mandar las frases pendientes.
+        ringbackOver = true; setRingback(false)
         let id = v.call.id, g = guest
         if g == nil { await flush() }
         await teardown(outcome: .left, cause: .local)
@@ -977,6 +1070,7 @@ final class CallCenter: CallMediaDelegate {
         beat?.cancel(); beat = nil
         flushTask?.cancel(); flushTask = nil
         ringTask?.cancel(); ringTask = nil
+        ringbackTimer?.cancel(); ringbackTimer = nil
         media?.stop(); media = nil
         if let sid = systemCallId { systemCallId = nil; systemCalls?.end(sid, cause: .local) }
         systemAudio = false
@@ -1198,7 +1292,11 @@ final class CallCenter: CallMediaDelegate {
         v.screens.removeAll { $0.tileId == tileId }
         if v != view { view = v }
     }
-    func mediaSpeaking(_ userIds: [String]) { if view?.speaking != userIds { view?.speaking = userIds } }
+    func mediaSpeaking(_ userIds: [String]) {
+        // CH038: si ya se oye a otra persona, el tono se calla aunque el socket aún no avise que entró.
+        if ringbackOn, let me = store?.me?.id, userIds.contains(where: { CallRules.personId($0) != me }) { ringbackOver = true; setRingback(false) }
+        if view?.speaking != userIds { view?.speaking = userIds }
+    }
     func mediaRemoteMute(_ userIds: [String], muted: Bool) {
         guard var v = view else { return }
         if muted { v.mutedUsers.formUnion(userIds) } else { v.mutedUsers.subtract(userIds) }
@@ -1257,6 +1355,29 @@ enum RingTone {
         AudioServicesPlaySystemSound(kSystemSoundID_Vibrate)
     }
     static func stop(_ ringtone: String?) { ChoiceSoundPlayer.shared.stop(ChatSounds.ringFile(ringtone)) }
+}
+
+/// CH038: tono de «llamando» (425 Hz, 1 s sí y 4 s no) en la sesión de audio de la llamada, ya activa.
+@MainActor
+final class Ringback {
+    static let shared = Ringback()
+    private var player: AVAudioPlayer?
+
+    func start() {
+        guard !AppConfig.isRunningUnitTests else { return }
+        if player == nil, let p = try? AVAudioPlayer(data: CallRules.ringbackWAV(), fileTypeHint: AVFileType.wav.rawValue) {
+            p.numberOfLoops = -1
+            p.volume = CallRules.ringbackVolume
+            p.prepareToPlay()
+            player = p
+        }
+        guard let p = player else { return }
+        // El primer pitido de una vez.
+        p.currentTime = 0
+        p.play()
+    }
+
+    func stop() { player?.stop() }
 }
 
 // MARK: - Red

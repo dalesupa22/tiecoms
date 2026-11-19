@@ -11,6 +11,8 @@ import math, os, struct, subprocess, tempfile, wave
 RATE = 44100
 # Volumen: la web suena por WebAudio a su nivel; en el teléfono se sube un poco (sin pasar de 0,95).
 GAIN = 2.2
+# CH038: los tonos de llamada se normalizan a este pico (antes quedaban en 0,26–0,44 y casi no se oían).
+RING_PEAK = 0.9
 
 MESSAGE = {
     'pop': [(659.3, 0, 0.09, 'sine', 0.16), (987.8, 0.085, 0.13, 'sine', 0.13)],
@@ -65,6 +67,11 @@ def render(notes, transpose=1.0):
     return [max(-0.95, min(0.95, s * GAIN)) for s in out]
 
 
+def normalize(samples, peak):
+    top = max(abs(s) for s in samples) or 1.0
+    return [s * peak / top for s in samples]
+
+
 def write_caf(samples, path):
     with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp:
         wav = tmp.name
@@ -82,7 +89,7 @@ def main():
         write_caf(render(notes), os.path.join(out, f'snd_{name}.caf'))
         write_caf(render(notes, 1.5), os.path.join(out, f'snd_{name}_m.caf'))
     for name, notes in RING.items():
-        write_caf(render(notes), os.path.join(out, f'ring_{name}.caf'))
+        write_caf(normalize(render(notes), RING_PEAK), os.path.join(out, f'ring_{name}.caf'))
     print('listo:', len(MESSAGE) * 2, 'sonidos y', len(RING), 'tonos en', os.path.normpath(out))
 
 

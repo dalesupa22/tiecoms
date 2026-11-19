@@ -177,6 +177,22 @@ object Calls {
     const val RING_MS = 45_000L
     const val MAX_CAPTIONS = 6
 
+    /** CH038: ¿hay alguien más dentro (persona o invitado por enlace) aparte de mí? Mis otros dispositivos no cuentan. */
+    fun othersIn(call: CallDTO, meId: String?): Boolean = GuestCalls.people(call).any { it != meId }
+
+    /**
+     * CH038: tono de «llamando» (ringback) para quien llama, como en el teléfono: «pareciera que no estuviera llamando».
+     * Suena solo si yo empecé la llamada con mi cuenta (no como invitado), el audio ya conectó ([live]), nadie más ha
+     * entrado nunca ([othersSeen] queda prendido aunque luego salga) y no han pasado los 45 s de «No contestó».
+     * Entrar a una llamada de otro, o a una que ya tenía gente, no suena.
+     */
+    fun shouldRingback(call: CallDTO?, meId: String?, isGuest: Boolean, live: Boolean, elapsedMs: Long, othersSeen: Boolean): Boolean {
+        if (call == null || meId.isNullOrEmpty() || isGuest || !live || call.ended) return false
+        if (call.startedBy != meId) return false
+        if (othersSeen || othersIn(call, meId)) return false
+        return elapsedMs in 0 until RING_MS
+    }
+
     /** «m:ss» (duración de la llamada, reloj en vivo y marcas de la transcripción). */
     fun clock(totalSec: Long): String { val s = maxOf(0L, totalSec); return "${s / 60}:${(s % 60).toString().padStart(2, '0')}" }
     fun stamp(ms: Long): String = clock(ms / 1000)

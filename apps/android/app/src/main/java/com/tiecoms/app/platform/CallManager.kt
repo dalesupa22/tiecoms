@@ -131,6 +131,11 @@ class CallManager(private val app: Application, private val container: AppContai
     private var flushJob: Job? = null
     private var ringJob: Job? = null
     private var ringtone: android.media.MediaPlayer? = null
+    /** CH038: tono de «llamando» para quien llama (ToneGenerator) y su corte a los 45 s. */
+    private var ringback: android.media.ToneGenerator? = null
+    private var ringbackTimer: Job? = null
+    /** Alguien más (no yo) entró a la reunión de Chime: corta el tono aunque el socket aún no lo haya dicho. */
+    @Volatile private var remoteJoined = false
     private val outbox = TranscriptOutbox()
     private val attendees = java.util.concurrent.ConcurrentHashMap<String, String>()
     @Volatile private var leaving = false
@@ -158,6 +163,23 @@ class CallManager(private val app: Application, private val container: AppContai
                 if (prev != null && prev != cur?.first) PhoneLog.ended(prev!!)
                 if (cur != null && cur.second) PhoneLog.live(cur.first)
                 prev = cur?.first
+            }
+        }
+        // CH038: tono de «llamando» mientras espero a que contesten (Calls.shouldRingback). Se vuelve a decidir con cada
+        // cambio de la vista (quién está, fase del audio); una vez que entró alguien no vuelve a sonar en esa llamada.
+        scope.launch {
+            var callId: String? = null
+            var since = 0L
+            var seen = false
+            _view.collect { v ->
+                if (v == null) { callId = null; stopRingback(); return@collect }
+                val now = System.currentTimeMillis()
+                if (v.call.id != callId) { callId = v.call.id; since = now; seen = false }
+                val me = v.meId(client.myId)
+                seen = seen || remoteJoined || Calls.othersIn(v.call, me)
+                val elapsed = now - since
+                if (Calls.shouldRingback(v.call, me, v.guest != null, v.phase == Phase.LIVE, elapsed, seen)) startRingback(Calls.RING_MS - elapsed)
+                else stopRingback()
             }
         }
         // Estado que llega por el socket (quién está, si transcribe) sin tocar la conexión; terminada → se cierra.
@@ -258,7 +280,7 @@ class CallManager(private val app: Application, private val container: AppContai
     private fun hasPermission(p: String) = ContextCompat.checkSelfPermission(app, p) == PackageManager.PERMISSION_GRANTED
 
     private fun connect(j: CallJoinDTO, camera: Boolean, guest: Guest? = null) {
-        leaving = false; userLeft = false
+        leaving = false; userLeft = false; remoteJoined = false
         outbox.clear(); attendees.clear()
         val info = ChimeJoin.parse(j.meeting, j.attendee)
         myAttendeeId = info?.attendeeId
@@ -449,6 +471,7 @@ class CallManager(private val app: Application, private val container: AppContai
 
     private fun teardown() {
         leaving = true
+        stopRingback()
         _view.value?.guest?.let { g -> _guestOutcome.value = GuestOutcome(g.token, if (userLeft) GuestEnd.LEFT else GuestEnd.ENDED) }
         userLeft = false
         myAttendeeId = null
@@ -507,6 +530,34 @@ class CallManager(private val app: Application, private val container: AppContai
     }
     private fun stopRingtone() { runCatching { ringtone?.stop(); ringtone?.release() }; ringtone = null }
 
+    /**
+     * CH038: el «tuuu… tuuu…» clásico para quien llama, por el canal de voz (sale por donde va la llamada: auricular,
+     * altavoz o Bluetooth). TONE_SUP_RINGTONE se repite solo (1 s sonando, 4 s callado; 425 Hz o el del país).
+     * [remainingMs]: lo que falta para los 45 s; al cumplirse se corta aunque nadie conteste.
+     */
+    @Synchronized private fun startRingback(remainingMs: Long) {
+        if (ringback != null) return
+        ringback = try {
+            android.media.ToneGenerator(android.media.AudioManager.STREAM_VOICE_CALL, 80).also {
+                if (!it.startTone(android.media.ToneGenerator.TONE_SUP_RINGTONE)) Log.w("CallManager", "Tono de llamando no arrancó")
+            }
+        } catch (e: RuntimeException) {
+            // Sin recursos de audio (el constructor lanza RuntimeException): la llamada sigue sin el tono.
+            Log.w("CallManager", "Sin tono de llamando", e); null
+        }
+        if (ringback == null) return
+        ringbackTimer?.cancel()
+        ringbackTimer = scope.launch { delay(remainingMs.coerceAtLeast(0)); stopRingback() }
+    }
+
+    @Synchronized private fun stopRingback() {
+        ringbackTimer?.cancel(); ringbackTimer = null
+        val t = ringback ?: return
+        ringback = null
+        runCatching { t.stopTone() }
+        runCatching { t.release() }
+    }
+
     // ---------- Observadores del SDK ----------
     private val avObserver = object : AudioVideoObserver {
         override fun onAudioSessionStartedConnecting(reconnecting: Boolean) {}
@@ -539,6 +590,9 @@ class CallManager(private val app: Application, private val container: AppContai
         override fun onSignalStrengthChanged(signalUpdates: Array<SignalUpdate>) {}
         override fun onAttendeesJoined(attendeeInfo: Array<AttendeeInfo>) {
             attendeeInfo.forEach { attendees[it.attendeeId] = Calls171.personOf(it.externalUserId) ?: it.externalUserId }
+            // CH038: entró alguien que no soy yo (ni otro dispositivo mío): se corta el tono de «llamando» ya mismo.
+            val me = _view.value?.meId(client.myId)
+            if (me != null && attendeeInfo.any { (Calls171.personOf(it.externalUserId) ?: it.externalUserId) != me }) { remoteJoined = true; stopRingback() }
             // Un recuadro (video o pantalla) que llegó antes que su attendee queda sin nombre: se completa aquí.
             fun named(t: Tile) = if (t.userId == null && !t.local && t.attendeeId != null) t.copy(userId = userOf(t.attendeeId)) else t
             patch { if (tiles.none { it.userId == null } && screens.none { it.userId == null }) this else copy(tiles = tiles.map(::named), screens = screens.map(::named)) }

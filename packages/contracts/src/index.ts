@@ -1289,6 +1289,10 @@ export const IncomingWebhookInput = z.object({
   attachments: z.array(z.any()).max(20).optional(),
   username: z.string().max(80).optional(),
   mrkdwn: z.boolean().optional(),
+  /** Tema del chat donde cae el mensaje: su id o su nombre. Sin tema (o si no existe / está archivado) va a General. */
+  topic: z.string().trim().max(80).optional(),
+  topic_id: z.string().trim().max(80).optional(),
+  topicId: z.string().trim().max(80).optional(),
 }).passthrough();
 
 /**

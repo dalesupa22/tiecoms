@@ -262,3 +262,41 @@ describe('integration topics', () => {
     }
   });
 });
+
+describe('incoming webhook topic routing', () => {
+  const hook = (body: Record<string, unknown>, query = '', key?: string) => request(`/api/hooks/${integration}${query}`, token, body, 'POST', key);
+  const topicOf = async (id: string) => (await pool.query('SELECT topic_id FROM messages WHERE id=$1', [id])).rows[0]?.topic_id ?? null;
+
+  it('without a topic the message stays in General', async () => {
+    const sent = await hook({ text: `plain ${run}` });
+    expect(sent.status).toBe(200);
+    expect(sent.json).toMatchObject({ ok: true, topicId: null });
+    expect(await topicOf(sent.json.messageId)).toBeNull();
+  });
+  it('routes by topic name (case-insensitive) or id, from the body or the URL; the body wins', async () => {
+    const byName = await hook({ text: `by name ${run}`, topic: 'iSSUES' });
+    const byId = await hook({ text: `by id ${run}`, topic_id: topic });
+    const byQuery = await hook({ text: `by query ${run}` }, `?topic=${encodeURIComponent('Other')}`);
+    const both = await hook({ text: `both ${run}`, topic: 'Issues' }, '?topic=Other');
+    const viaApi = await request('/api/integration/v1/messages', token, { text: `api ${run}`, topicId: alternateTopic });
+    expect([byName, byId, byQuery, both, viaApi].map((r) => r.status)).toEqual([200, 200, 200, 200, 200]);
+    expect([byName, byId, byQuery, both, viaApi].map((r) => r.json.topicId)).toEqual([topic, topic, alternateTopic, topic, alternateTopic]);
+    expect(await topicOf(byQuery.json.messageId)).toBe(alternateTopic);
+  });
+  it('falls back to General for unknown, archived or foreign topics instead of dropping the message', async () => {
+    for (const wanted of ['No existe', 'Archived', archivedTopic, foreignTopic]) {
+      const sent = await hook({ text: `fallback ${wanted} ${run}`, topic: wanted });
+      expect(sent.status).toBe(200);
+      expect(sent.json.topicId).toBeNull();
+      expect(await topicOf(sent.json.messageId)).toBeNull();
+    }
+  });
+  it('binds an idempotency key to the topic as well as the text', async () => {
+    const key = randomUUID();
+    const first = await hook({ text: `idem ${run}`, topic: 'Issues' }, '', key);
+    const replay = await hook({ text: `idem ${run}`, topic: 'Issues' }, '', key);
+    const moved = await hook({ text: `idem ${run}`, topic: 'Other' }, '', key);
+    expect(replay.json.messageId).toBe(first.json.messageId);
+    expect(moved.status).toBe(409);
+  });
+});

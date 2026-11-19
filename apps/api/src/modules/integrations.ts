@@ -256,13 +256,32 @@ export function slackPayloadText(p: z.infer<typeof IncomingWebhookInput>): strin
   return parts.filter(Boolean).join('\n\n').slice(0, 12_000);
 }
 
-export async function postMessage(integ: IntegrationAuth, input: z.infer<typeof IncomingWebhookInput>, key?: string) {
+/**
+ * Tema que pide un webhook, por id o por nombre (sin distinguir mayúsculas). Si no viene, no existe en este chat o está
+ * archivado, devuelve null y el mensaje cae en General: un aviso no se pierde por un tema mal escrito o borrado.
+ */
+export async function resolveHookTopic(c: Db, conversationId: string, wanted: string | null | undefined): Promise<string | null> {
+  const w = wanted?.trim();
+  if (!w) return null;
+  const byId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(w);
+  const { rows } = await c.query(
+    `SELECT id FROM conversation_topics WHERE conversation_id = $1 AND archived_at IS NULL AND ${byId ? 'id = $2::uuid' : 'lower(name) = lower($2)'} LIMIT 1`,
+    [conversationId, w],
+  );
+  return rows[0]?.id ?? null;
+}
+
+/** `topic` puede venir en la URL (?topic=) o en el cuerpo (topic, topic_id, topicId); gana el del cuerpo. */
+export async function postMessage(integ: IntegrationAuth, input: z.infer<typeof IncomingWebhookInput>, key?: string, queryTopic?: string) {
   const body = slackPayloadText(input);
   if (!body) throw badRequest('El mensaje está vacío (manda text o blocks)');
-  return idempotent(integ, key, 'message', { body }, async (c) => {
+  const topic = (input.topic || input.topic_id || input.topicId || queryTopic || '').trim().slice(0, 80);
+  // Sin tema la huella queda igual que antes, para que los reintentos con llaves viejas sigan valiendo.
+  return idempotent(integ, key, 'message', topic ? { body, topic } : { body }, async (c) => {
     await conversationAccess(c, integ.botUserId, integ.conversationId, 'post', true);
-    const m = await appendMessage(c, { conversationId: integ.conversationId, authorId: integ.botUserId, body, clientMessageId: key ?? null });
-    return { ok: true, messageId: m.id };
+    const topicId = await resolveHookTopic(c, integ.conversationId, topic);
+    const m = await appendMessage(c, { conversationId: integ.conversationId, authorId: integ.botUserId, body, topicId, clientMessageId: key ?? null });
+    return { ok: true, messageId: m.id, topicId };
   });
 }
 

@@ -245,11 +245,13 @@ export async function buildHttp() {
   const hookLimit = { config: { rateLimit: { max: 120, timeWindow: '1 minute', keyGenerator: (r: FastifyRequest) => `hook:${(r.params as any)?.id ?? r.ip}` } } };
   const bearer = (req: FastifyRequest) => { const h = req.headers.authorization; return h?.startsWith('Bearer ') ? h.slice(7).trim() : undefined; };
   const idemKey = (req: FastifyRequest) => { const k = req.headers['idempotency-key']; return typeof k === 'string' && k ? k : undefined; };
+  // Tema del chat en la URL (?topic=nombre o id), para sistemas donde solo se puede cambiar la URL del webhook.
+  const queryTopic = (req: FastifyRequest) => { const q = req.query as Record<string, unknown> | undefined; const t = q?.topic ?? q?.topic_id ?? q?.topicId; return typeof t === 'string' && t.trim() ? t.trim().slice(0, 80) : undefined; };
   const hook = async (req: FastifyRequest<{ Params: { id: string; token?: string } }>) => {
     const id = z.uuid().safeParse(req.params.id);
     if (!id.success) throw unauthorized('Token de integración inválido');
     const integ = await integrations.authenticate(req.params.token ?? bearer(req), id.data);
-    return integrations.postMessage(integ, IncomingWebhookInput.parse(req.body ?? {}), idemKey(req));
+    return integrations.postMessage(integ, IncomingWebhookInput.parse(req.body ?? {}), idemKey(req), queryTopic(req));
   };
   app.post<{ Params: { id: string } }>('/api/hooks/:id', hookLimit, hook);
   app.post<{ Params: { id: string; token: string } }>('/api/hooks/:id/:token', hookLimit, hook);
@@ -268,7 +270,7 @@ export async function buildHttp() {
     const integ = (req: FastifyRequest) => (req as any).integration as integrations.IntegrationAuth;
     const limit = { config: { rateLimit: { max: 300, timeWindow: '1 minute', keyGenerator: (r: FastifyRequest) => `integ:${bearer(r)?.slice(-12) ?? r.ip}` } } };
     api.get('/api/integration/v1/me', limit, async (req) => integrations.describe(integ(req)));
-    api.post('/api/integration/v1/messages', limit, async (req) => integrations.postMessage(integ(req), IncomingWebhookInput.parse(req.body ?? {}), idemKey(req)));
+    api.post('/api/integration/v1/messages', limit, async (req) => integrations.postMessage(integ(req), IncomingWebhookInput.parse(req.body ?? {}), idemKey(req), queryTopic(req)));
     api.post('/api/integration/v1/issues', limit, async (req) => integrations.createIssue(integ(req), IntegrationCreateIssueInput.parse(req.body)));
     api.post('/api/integration/v1/tasks', limit, async (req) => integrations.createTaskFromHook(integ(req), WebhookTaskInput.parse(req.body ?? {}), idemKey(req)));
     api.get<{ Querystring: { externalId?: string } }>('/api/integration/v1/issues', limit, async (req) =>

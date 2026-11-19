@@ -6,6 +6,7 @@ import { Suspense, lazy, useEffect, useRef } from 'react';
 import { notices, useClient } from './app-client.ts';
 import { handleNotice } from './notices.ts';
 import { installSoundUnlock } from './sound.ts';
+import { installRingback } from './ringback.ts';
 import { t, useLang } from './i18n.ts';
 import { asset, navigate, parse, usePath } from './router.ts';
 import { AuthScreen, ConfirmSignupScreen, SsoReturnScreen } from './screens/Auth.tsx';
@@ -50,6 +51,7 @@ function nextParam() {
 notices.handler = handleNotice;
 // El audio del sonido de mensajes se desbloquea con el primer clic o tecla (sound.ts).
 installSoundUnlock();
+installRingback();
 
 import { markOnce } from './perf.ts';
 

@@ -129,7 +129,8 @@ export function handleNotice(n: ClientNotice) {
     // El aviso en pantalla siempre (el cliente ya filtra «No molestar»); notificación del sistema si la pestaña está oculta.
     // Suena el tono de llamada (distinto de los mensajes) hasta contestar, rechazar o que termine.
     showIncomingCall(n.call, n.callerName, n.conversationTitle);
-    if (document.visibilityState !== 'visible' && canNotify) {
+    // También con la ventana visible pero detrás de otras (escritorio): que se entere aunque no esté mirando.
+    if ((document.visibilityState !== 'visible' || !document.hasFocus()) && canNotify) {
       const note = new Notification(`${n.call.kind === 'video' ? '🎥' : '📞'} ${t('call.incomingFrom', { name: n.callerName })}`, { body: n.conversationTitle ?? '', tag: `call-${n.call.id}`, requireInteraction: true, icon: `${BASE}/icon-192.png` });
       note.onclick = () => { window.focus(); navigate(`/c/${n.call.conversationId}`); note.close(); };
       callNotes.set(n.call.id, note);

@@ -7,6 +7,7 @@ import { createRoot } from 'react-dom/client';
 import type { BootstrapDTO, ConversationDTO, IssueDTO, MessageDTO, TopicDTO } from '@tiecoms/contracts';
 import { showMessageBubble } from './bubbles.tsx';
 import { App } from './App.tsx';
+import { showIncomingCall } from './screens/Call.tsx';
 import { openDialog } from './actions.tsx';
 import { IssueDrawer } from './screens/Issues.tsx';
 import { client } from './app-client.ts';
@@ -367,3 +368,6 @@ if (q.has('nightly')) {
 Object.assign(window, { __client: client, __bubble: showMessageBubble });
 history.replaceState(null, '', q.get('to') ?? '/');
 createRoot(document.getElementById('root')!).render(<StrictMode><App /></StrictMode>);
+// ?ring=audio|video: el aviso de llamada entrante (CH038).
+const ring = q.get('ring');
+if (ring === 'audio' || ring === 'video') setTimeout(() => showIncomingCall({ id: 'k1', conversationId: 'general', kind: ring, startedBy: 'laura', startedAt: new Date().toISOString(), activeUserIds: ['laura'], guests: [] } as any, 'Laura Gómez', ring === 'video' ? 'Estudio Norte - General' : null), 300);

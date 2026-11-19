@@ -66,6 +66,8 @@ export function showIncomingCall(call: CallDTO, callerName: string, title: strin
   void client.ringingCall(call.id).catch(() => {});
   startRingtone(client.getState().data?.me.ringtone);
   flashTitle(`${call.kind === 'video' ? '🎥' : '📞'} ${t('call.incomingFrom', { name: callerName })}`);
+  // Escritorio: la ventana sale al frente y parpadea en la barra de tareas / el Dock rebota (CH038).
+  if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) void import('../desktop.ts').then((m) => m.callAttention()).catch(() => {});
   if (ringTimer) clearTimeout(ringTimer);
   // Deja de sonar a los 45 s si nadie contesta.
   ringTimer = setTimeout(dismissRing, 45_000);
@@ -77,21 +79,38 @@ export function dismissIncomingCall(callId: string) { if (ringing?.call.id === c
 export function IncomingCallHost() {
   const r = useSyncExternalStore((l) => { ringListeners.add(l); return () => ringListeners.delete(l); }, () => ringing);
   const live = useClient((s) => (r ? s.calls[r.call.conversationId] : undefined));
+  const d = useClient((s) => s.data);
   // Si la llamada terminó o ya entré desde otro lado, el aviso se va.
   useEffect(() => { if (r && live === null) dismissRing(); }, [r, live]);
   if (!r) return null;
   const answer = (camera: boolean) => { dismissRing(); void joinCall(r.call.id, camera).catch(fail); };
+  const decline = () => { const id = r.call.id; dismissRing(); void client.declineCall(id).catch(() => {}); };
+  const video = r.call.kind === 'video';
+  const caller = d ? personById(d, r.call.startedBy) : null;
+  // CH038: aviso grande en el centro (antes era una franja arriba que se perdía en escritorio), con la foto de quien
+  // llama, anillos que laten y botones redondos como en el teléfono.
   return (
-    <div className="call-ring" role="alertdialog" aria-label={t('call.incoming')}>
-      <div className="call-ring-pulse" aria-hidden>{r.call.kind === 'video' ? '🎥' : '📞'}</div>
-      <div className="grow" style={{ minWidth: 0 }}>
-        <strong className="ellipsis">{r.callerName}</strong>
-        <div className="small muted ellipsis">{r.title ? t('call.incomingIn', { title: r.title }) : t('call.incoming')}</div>
+    <div className="call-ring-veil">
+      <div className="call-ring" role="alertdialog" aria-label={t('call.incomingFrom', { name: r.callerName })}>
+        <div className="small call-ring-kind">{video ? `🎥 ${t('call.incomingVideo')}` : `📞 ${t('call.incomingAudio')}`}</div>
+        <div className="call-ring-avatar" aria-hidden>
+          <span className="call-ring-wave" /><span className="call-ring-wave w2" />
+          <Avatar person={caller ?? ({ id: r.call.startedBy, name: r.callerName } as any)} size={96} />
+        </div>
+        <strong className="call-ring-name ellipsis">{r.callerName}</strong>
+        {r.title && <div className="small muted ellipsis call-ring-where">{t('call.incomingIn', { title: r.title })}</div>}
+        <div className="call-ring-actions">
+          <button className="call-ring-btn is-decline" onClick={decline} aria-label={t('call.decline')}>
+            <span className="call-ring-ico" aria-hidden>✕</span><span className="small">{t('call.decline')}</span>
+          </button>
+          {video && <button className="call-ring-btn is-answer is-soft" onClick={() => answer(false)} aria-label={t('call.answerAudio')}>
+            <span className="call-ring-ico" aria-hidden>📞</span><span className="small">{t('call.answerAudioShort')}</span>
+          </button>}
+          <button className="call-ring-btn is-answer" autoFocus onClick={() => answer(video)} aria-label={video ? t('call.answerVideo') : t('call.answer')}>
+            <span className="call-ring-ico" aria-hidden>{video ? '🎥' : '📞'}</span><span className="small">{t('call.answer')}</span>
+          </button>
+        </div>
       </div>
-      <button className="btn small" onClick={() => { const id = r.call.id; dismissRing(); void client.declineCall(id).catch(() => {}); }}>{t('call.decline')}</button>
-      <button className="btn small" onClick={() => answer(false)} title={t('call.answerAudio')}>📞</button>
-      {r.call.kind === 'video' && <button className="btn accent small" onClick={() => answer(true)} title={t('call.answerVideo')}>🎥</button>}
-      {r.call.kind !== 'video' && <button className="btn accent small" onClick={() => answer(false)}>{t('call.answer')}</button>}
     </div>
   );
 }

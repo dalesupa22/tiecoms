@@ -15,6 +15,16 @@ function go(path: string) {
   if (path.startsWith('/') && !path.startsWith('//')) navigate(path);
 }
 
+/** Llamada entrante (CH038): la ventana vuelve aunque esté minimizada y pide atención hasta que la miren. */
+export async function callAttention() {
+  const win = getCurrentWindow();
+  try { if (await win.isMinimized()) await win.unminimize(); } catch { /* sin permiso o sin ventana */ }
+  await win.show().catch(() => {});
+  await win.setFocus().catch(() => {});
+  // 1 = Critical: en Windows la barra de tareas parpadea hasta que la tocan; en macOS el Dock rebota.
+  await win.requestUserAttention(1).catch(() => {});
+}
+
 export async function initDesktop() {
   await listen<string>('chaggu:navigate', (e) => { void invoke('take_pending_path'); go(e.payload); });
   // Enlace con el que se abrió la app antes de que la interfaz escuchara.

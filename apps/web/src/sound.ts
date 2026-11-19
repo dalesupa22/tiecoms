@@ -118,16 +118,19 @@ export const RING_EVERY_MS = 2200;
 export const DEFAULT_SOUND: MessageSound = 'pop';
 export const DEFAULT_RINGTONE: Ringtone = 'clasico';
 
-function playNotes(ac: AudioContext, notes: Note[], transpose = 1): boolean {
+function playNotes(ac: AudioContext, notes: Note[], transpose = 1, gain = 1): boolean {
   try {
     const t0 = ac.currentTime + 0.005;
+    const vol = gain;
     for (const [f, at, dur, wave, peak] of notes) {
       const osc = ac.createOscillator();
       const gain = ac.createGain();
       osc.type = wave;
       osc.frequency.setValueAtTime(f * transpose, t0 + at);
       gain.gain.setValueAtTime(0.0001, t0 + at);
-      gain.gain.exponentialRampToValueAtTime(peak, t0 + at + 0.012);
+      gain.gain.exponentialRampToValueAtTime(Math.min(0.5, peak * vol), t0 + at + 0.012);
+      // Una nota larga (el «tuuu» de llamando) se sostiene y cae al final; las cortas caen enseguida.
+      if (dur >= 0.6) gain.gain.setValueAtTime(Math.min(0.5, peak * vol), t0 + at + dur - 0.05);
       gain.gain.exponentialRampToValueAtTime(0.0001, t0 + at + dur);
       osc.connect(gain).connect(ac.destination);
       osc.start(t0 + at);
@@ -163,15 +166,46 @@ export function playMessageSound(choice: SoundChoice | null | undefined, mention
   return ok;
 }
 
+/**
+ * Un timbre que tiene que oírse (CH038): si el audio está suspendido (pestaña o ventana en segundo plano, WebKit lo
+ * interrumpe) se intenta reanudar en cada vuelta; el navegador lo permite si la página ya tuvo un clic alguna vez.
+ */
+function ringOnce(notes: Note[], gain: number) {
+  if (!ctx) unlock();
+  if (!ctx) return;
+  const play = (ac: AudioContext) => playNotes(ac, notes, 1, gain);
+  if (ctx.state === 'running') { play(ctx); return; }
+  void ctx.resume().then(() => { if (ctx?.state === 'running') play(ctx); }).catch(() => {});
+}
+
+/** Los tonos de llamada suenan más fuerte que los de mensaje (que se oigan desde lejos). */
+export const RING_GAIN = 2.2;
+
 let ringTimer: ReturnType<typeof setInterval> | null = null;
 /** Tono de llamada entrante: se repite hasta stopRingtone(). No depende del ajuste de sonido de mensajes. */
 export function startRingtone(name: Ringtone | null | undefined) {
   stopRingtone();
   const notes = RINGTONE_RECIPES[name ?? DEFAULT_RINGTONE] ?? RINGTONE_RECIPES.clasico;
-  const ring = () => withContext(false, (ac) => playNotes(ac, notes));
+  const ring = () => ringOnce(notes, RING_GAIN);
   ring();
   ringTimer = setInterval(ring, RING_EVERY_MS);
 }
 export function stopRingtone() { if (ringTimer) clearInterval(ringTimer); ringTimer = null; }
+
+/**
+ * Tono de «llamando» para quien llama (CH038, como el teléfono): 425 Hz, 1 s sí y 4 s no, hasta que alguien entra.
+ * Quien llama acaba de hacer clic, así que el audio ya está desbloqueado.
+ */
+export const RINGBACK: Note[] = [[425, 0, 1, 'sine', 0.12]];
+export const RINGBACK_EVERY_MS = 5000;
+let ringbackTimer: ReturnType<typeof setInterval> | null = null;
+export function startRingback() {
+  if (ringbackTimer) return;
+  const ring = () => ringOnce(RINGBACK, 1);
+  ring();
+  ringbackTimer = setInterval(ring, RINGBACK_EVERY_MS);
+}
+export function stopRingback() { if (ringbackTimer) clearInterval(ringbackTimer); ringbackTimer = null; }
+export const ringbackPlaying = () => ringbackTimer !== null;
 /** Vista previa de un tono (un ciclo). */
 export function previewRingtone(name: Ringtone) { withContext(true, (ac) => playNotes(ac, RINGTONE_RECIPES[name])); }
